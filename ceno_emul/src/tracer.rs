@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{collections::BTreeMap, fmt, sync::Arc};
+use strum::EnumCount;
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -77,9 +78,183 @@ pub type StepIndex = usize;
 pub trait StepCellExtractor {
     fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64;
 
+    fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
+        None
+    }
+
     #[inline(always)]
     fn extract_cells(&self, step: &StepRecord) -> u64 {
         self.cells_for_kind(step.insn().kind, step.rs1().map(|op| op.value))
+    }
+}
+
+pub const SHARD_COST_BUCKETS: usize = u64::BITS as usize + 2;
+const NO_CHIP: u32 = u32::MAX;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChipCostSpec {
+    pub rotation: u8,
+    pub trace_cells_per_row: u64,
+    pub tower_peak_cells_per_row: u64,
+    /// Optional scheduler-derived tower peak for every padded-size bucket.
+    /// When absent, tests and compatibility callers use the linear per-row
+    /// estimate above.
+    pub tower_peak_cells_by_bucket: Option<Vec<u64>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct ChipCost {
+    pub trace_cells: u64,
+    pub main_peak: u64,
+    pub tower_peak: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardCostModel {
+    opcode_chips: Vec<Vec<u32>>,
+    ecall_chips: BTreeMap<Word, Vec<u32>>,
+    chip_specs: Vec<ChipCostSpec>,
+    trace_cost_table: Vec<u64>,
+    main_cost_table: Vec<u64>,
+    tower_cost_table: Vec<u64>,
+    extension_field_degree: u64,
+}
+
+impl ShardCostModel {
+    pub fn new(
+        opcode_chips: Vec<Vec<usize>>,
+        ecall_chips: BTreeMap<Word, Vec<usize>>,
+        chip_specs: Vec<ChipCostSpec>,
+        extension_field_degree: usize,
+    ) -> Self {
+        assert_eq!(opcode_chips.len(), InsnKind::COUNT);
+        assert!(extension_field_degree > 0);
+        assert!(chip_specs.len() < NO_CHIP as usize);
+        assert!(
+            opcode_chips
+                .iter()
+                .flatten()
+                .chain(ecall_chips.values().flatten())
+                .all(|&chip| chip < chip_specs.len()),
+            "shard cost mapping references an unknown chip"
+        );
+        let opcode_chips = opcode_chips
+            .into_iter()
+            .map(|chips| chips.into_iter().map(|chip| chip as u32).collect())
+            .collect();
+        let ecall_chips = ecall_chips
+            .into_iter()
+            .map(|(code, chips)| (code, chips.into_iter().map(|chip| chip as u32).collect()))
+            .collect();
+        let extension_field_degree = extension_field_degree as u64;
+        let table_len = chip_specs.len() * SHARD_COST_BUCKETS;
+        let mut trace_cost_table = Vec::with_capacity(table_len);
+        let mut main_cost_table = Vec::with_capacity(table_len);
+        let mut tower_cost_table = Vec::with_capacity(table_len);
+        for spec in &chip_specs {
+            if let Some(tower_costs) = &spec.tower_peak_cells_by_bucket {
+                assert_eq!(tower_costs.len(), SHARD_COST_BUCKETS);
+            }
+            for bucket in 0..SHARD_COST_BUCKETS {
+                let padded_instances = match bucket {
+                    0 => 0,
+                    bucket if bucket == SHARD_COST_BUCKETS - 1 => u64::MAX,
+                    bucket => 1u64 << (bucket - 1),
+                };
+                let rotation_size = 1u64.checked_shl(spec.rotation.into()).unwrap_or(u64::MAX);
+                let domain_rows = padded_instances.saturating_mul(rotation_size);
+                let trace_cells = domain_rows.saturating_mul(spec.trace_cells_per_row);
+                // Batched main sumcheck keeps one half-domain extension-field
+                // fold buffer for every witness, structural-witness, and fixed
+                // MLE. `trace_cells_per_row` is exactly that MLE count.
+                let main_peak = (domain_rows / 2)
+                    .saturating_mul(spec.trace_cells_per_row)
+                    .saturating_mul(extension_field_degree);
+                let tower_peak = spec.tower_peak_cells_by_bucket.as_ref().map_or_else(
+                    || domain_rows.saturating_mul(spec.tower_peak_cells_per_row),
+                    |tower_costs| tower_costs[bucket],
+                );
+                trace_cost_table.push(trace_cells);
+                main_cost_table.push(main_peak);
+                tower_cost_table.push(tower_peak);
+            }
+        }
+        Self {
+            opcode_chips,
+            ecall_chips,
+            chip_specs,
+            trace_cost_table,
+            main_cost_table,
+            tower_cost_table,
+            extension_field_degree,
+        }
+    }
+
+    pub fn chip_count(&self) -> usize {
+        self.chip_specs.len()
+    }
+
+    pub fn chips_for_step(&self, kind: InsnKind, ecall_code: Option<Word>) -> &[u32] {
+        if kind == InsnKind::ECALL {
+            ecall_code
+                .and_then(|code| self.ecall_chips.get(&code))
+                .map_or(&[], Vec::as_slice)
+        } else {
+            self.opcode_chips
+                .get(kind as usize)
+                .map_or(&[], Vec::as_slice)
+        }
+    }
+
+    pub fn chip_cost(&self, chip: usize, num_instances: u64) -> ChipCost {
+        let index = chip * SHARD_COST_BUCKETS + padded_size_bucket(num_instances);
+        ChipCost {
+            trace_cells: self.trace_cost_table[index],
+            main_peak: self.main_cost_table[index],
+            tower_peak: self.tower_cost_table[index],
+        }
+    }
+
+    pub fn trace_cost_table(&self) -> &[u64] {
+        &self.trace_cost_table
+    }
+
+    pub fn main_cost_table(&self) -> &[u64] {
+        &self.main_cost_table
+    }
+
+    pub fn tower_cost_table(&self) -> &[u64] {
+        &self.tower_cost_table
+    }
+
+    pub fn shard_cost(&self, num_instances: &[u64]) -> u64 {
+        assert_eq!(num_instances.len(), self.chip_count());
+        let (trace_total, main_total, tower_peak) = num_instances.iter().enumerate().fold(
+            (0u64, 0u64, 0u64),
+            |(trace, main, tower), (chip, &count)| {
+                let cost = self.chip_cost(chip, count);
+                (
+                    trace.saturating_add(cost.trace_cells),
+                    main.saturating_add(cost.main_peak),
+                    tower.max(cost.tower_peak),
+                )
+            },
+        );
+        trace_total.saturating_add(main_total.max(tower_peak))
+    }
+
+    pub fn extension_field_degree(&self) -> u64 {
+        self.extension_field_degree
+    }
+}
+
+#[inline(always)]
+fn padded_size_bucket(num_instances: u64) -> usize {
+    if num_instances == 0 {
+        0
+    } else {
+        (u64::BITS - num_instances.saturating_sub(1).leading_zeros() + 1) as usize
     }
 }
 
@@ -314,11 +489,17 @@ impl LatestAccesses {
 #[derive(Clone, Debug)]
 pub struct ShardPlanBuilder {
     shard_cycle_boundaries: Vec<Cycle>,
+    predicted_shard_costs: Vec<u64>,
     max_cell_per_shard: u64,
     target_cell_first_shard: u64,
     max_cycle_per_shard: Cycle,
     current_shard_start_cycle: Cycle,
     cur_cells: u64,
+    cur_trace_cells: u64,
+    cur_main_peak: u64,
+    cur_tower_peak: u64,
+    cost_model: Option<Arc<ShardCostModel>>,
+    num_instances: Vec<u64>,
     cur_ecall_counts: BTreeMap<Word, u64>,
     cur_ecall_peak_cells: BTreeMap<Word, u64>,
     cur_cycle_in_shard: Cycle,
@@ -330,14 +511,29 @@ pub struct ShardPlanBuilder {
 
 impl ShardPlanBuilder {
     pub fn new(max_cell_per_shard: u64, max_cycle_per_shard: Cycle) -> Self {
+        Self::new_with_cost_model(max_cell_per_shard, max_cycle_per_shard, None)
+    }
+
+    pub fn new_with_cost_model(
+        max_cell_per_shard: u64,
+        max_cycle_per_shard: Cycle,
+        cost_model: Option<Arc<ShardCostModel>>,
+    ) -> Self {
         let initial_cycle = FullTracer::SUBCYCLES_PER_INSN;
+        let num_instances = vec![0; cost_model.as_ref().map_or(0, |model| model.chip_count())];
         ShardPlanBuilder {
             shard_cycle_boundaries: vec![initial_cycle],
+            predicted_shard_costs: Vec::new(),
             max_cell_per_shard,
             target_cell_first_shard: max_cell_per_shard,
             max_cycle_per_shard,
             current_shard_start_cycle: initial_cycle,
             cur_cells: 0,
+            cur_trace_cells: 0,
+            cur_main_peak: 0,
+            cur_tower_peak: 0,
+            cost_model,
+            num_instances,
             cur_ecall_counts: BTreeMap::new(),
             cur_ecall_peak_cells: BTreeMap::new(),
             cur_cycle_in_shard: 0,
@@ -368,6 +564,10 @@ impl ShardPlanBuilder {
         self.max_step_shard
     }
 
+    pub fn predicted_shard_costs(&self) -> &[u64] {
+        &self.predicted_shard_costs
+    }
+
     pub fn into_cycle_boundaries(self) -> Vec<Cycle> {
         assert!(self.finalized, "shard plan not finalized yet");
         self.shard_cycle_boundaries
@@ -385,6 +585,64 @@ impl ShardPlanBuilder {
             self.ecall_step_delta(ecall_code, base_cells),
             |planner| planner.add_ecall_step(ecall_code, base_cells),
         );
+    }
+
+    fn observe_modeled_step(
+        &mut self,
+        step_cycle: Cycle,
+        kind: InsnKind,
+        ecall_code: Option<Word>,
+    ) {
+        let chips = self
+            .cost_model
+            .as_ref()
+            .map(|model| {
+                model
+                    .chips_for_step(kind, ecall_code)
+                    .iter()
+                    .map(|&chip| chip as usize)
+                    .collect::<SmallVec<[_; 2]>>()
+            })
+            .unwrap_or_default();
+        assert!(
+            !self.finalized,
+            "shard plan cannot be extended after finalization"
+        );
+        let mut candidate = self.preview_modeled_chips(&chips);
+        if self.cur_step_count > 0 && self.candidate_would_exceed_shard(candidate.3) {
+            self.finish_current_shard(step_cycle);
+            candidate = self.preview_modeled_chips(&chips);
+        }
+        for chip in chips {
+            self.num_instances[chip] = self.num_instances[chip].saturating_add(1);
+        }
+        (
+            self.cur_trace_cells,
+            self.cur_main_peak,
+            self.cur_tower_peak,
+            self.cur_cells,
+        ) = candidate;
+        self.cur_cycle_in_shard = self
+            .cur_cycle_in_shard
+            .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
+        self.cur_step_count = self.cur_step_count.saturating_add(1);
+        self.debug_assert_cost_invariant();
+    }
+
+    fn preview_modeled_chips(&self, chips: &[usize]) -> (u64, u64, u64, u64) {
+        let model = self.cost_model.as_ref().expect("cost model missing");
+        let mut trace = self.cur_trace_cells;
+        let mut main = self.cur_main_peak;
+        let mut tower = self.cur_tower_peak;
+        for &chip in chips {
+            let old = model.chip_cost(chip, self.num_instances[chip]);
+            let new = model.chip_cost(chip, self.num_instances[chip].saturating_add(1));
+            trace = trace.saturating_add(new.trace_cells.saturating_sub(old.trace_cells));
+            main = main.saturating_add(new.main_peak.saturating_sub(old.main_peak));
+            tower = tower.max(new.tower_peak);
+        }
+        let total = trace.saturating_add(main.max(tower));
+        (trace, main, tower, total)
     }
 
     fn observe_step_with_delta(
@@ -409,12 +667,16 @@ impl ShardPlanBuilder {
     }
 
     fn step_would_exceed_shard(&self, step_delta: u64) -> bool {
+        self.candidate_would_exceed_shard(self.cur_cells.saturating_add(step_delta))
+    }
+
+    fn candidate_would_exceed_shard(&self, candidate_cost: u64) -> bool {
         let target = if self.shard_id == 0 {
             self.target_cell_first_shard
         } else {
             self.max_cell_per_shard
         };
-        self.cur_cells.saturating_add(step_delta) > target
+        candidate_cost > target
             || self
                 .cur_cycle_in_shard
                 .saturating_add(FullTracer::SUBCYCLES_PER_INSN)
@@ -426,10 +688,15 @@ impl ShardPlanBuilder {
             self.cur_cells > 0 || self.cur_cycle_in_shard > 0,
             "shard split before accumulating any steps"
         );
+        self.record_predicted_shard_cost();
         self.push_boundary(next_shard_cycle);
         self.shard_id += 1;
         self.current_shard_start_cycle = next_shard_cycle;
         self.cur_cells = 0;
+        self.cur_trace_cells = 0;
+        self.cur_main_peak = 0;
+        self.cur_tower_peak = 0;
+        self.num_instances.fill(0);
         self.cur_ecall_counts.clear();
         self.cur_ecall_peak_cells.clear();
         self.cur_cycle_in_shard = 0;
@@ -509,8 +776,48 @@ impl ShardPlanBuilder {
     }
 
     fn reset_after_native_shard_split(&mut self) {
+        self.num_instances.fill(0);
+        self.cur_trace_cells = 0;
+        self.cur_main_peak = 0;
+        self.cur_tower_peak = 0;
         self.cur_ecall_counts.clear();
         self.cur_ecall_peak_cells.clear();
+    }
+
+    #[cfg(any(test, debug_assertions))]
+    fn debug_assert_cost_invariant(&self) {
+        if let Some(model) = &self.cost_model {
+            let (trace, main, tower) = self.num_instances.iter().enumerate().fold(
+                (0u64, 0u64, 0u64),
+                |(trace, main, tower), (chip, &count)| {
+                    let cost = model.chip_cost(chip, count);
+                    (
+                        trace.saturating_add(cost.trace_cells),
+                        main.saturating_add(cost.main_peak),
+                        tower.max(cost.tower_peak),
+                    )
+                },
+            );
+            let recomputed = trace.saturating_add(main.max(tower));
+            debug_assert_eq!(self.cur_trace_cells, trace, "trace cost accounting drift");
+            debug_assert_eq!(self.cur_main_peak, main, "main peak accounting drift");
+            debug_assert_eq!(self.cur_tower_peak, tower, "tower peak accounting drift");
+            debug_assert_eq!(self.cur_cells, recomputed, "shard cost accounting drift");
+        }
+    }
+
+    #[cfg(not(any(test, debug_assertions)))]
+    #[inline(always)]
+    fn debug_assert_cost_invariant(&self) {}
+
+    fn record_predicted_shard_cost(&mut self) {
+        self.debug_assert_cost_invariant();
+        tracing::debug!(
+            shard_id = self.shard_id,
+            predicted_cost = self.cur_cells,
+            "finalized adaptive shard cost"
+        );
+        self.predicted_shard_costs.push(self.cur_cells);
     }
 
     fn padded_ecall_count(count: u64) -> u64 {
@@ -527,6 +834,7 @@ impl ShardPlanBuilder {
             "shard plan cannot be finalized multiple times"
         );
         self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
+        self.record_predicted_shard_cost();
         self.cur_step_count = 0;
         self.push_boundary(max_cycle);
         self.finalized = true;
@@ -1265,6 +1573,9 @@ pub(crate) struct PreflightNativeTraceState {
     pub last_kind: *mut InsnKind,
     pub current_shard_start_cycle: *const Cycle,
     pub planner_cur_cells: *mut u64,
+    pub planner_cur_trace_cells: *mut u64,
+    pub planner_cur_main_peak: *mut u64,
+    pub planner_cur_tower_peak: *mut u64,
     pub planner_cur_cycle_in_shard: *mut Cycle,
     pub planner_cur_step_count: *mut usize,
     pub planner_max_step_shard: *mut usize,
@@ -1272,6 +1583,8 @@ pub(crate) struct PreflightNativeTraceState {
     pub planner_max_cell_per_shard: u64,
     pub planner_target_cell_first_shard: u64,
     pub planner_max_cycle_per_shard: Cycle,
+    pub planner_num_instances: *mut u64,
+    pub planner_num_chips: usize,
 }
 
 #[derive(Clone)]
@@ -1381,6 +1694,10 @@ impl PreflightTracer {
             planner_cycle_limit = planner_cycle_limit.saturating_sub(Self::SUBCYCLES_PER_INSN);
         }
         let max_cell_per_shard = config.max_cell_per_shard();
+        let cost_model = config
+            .step_cell_extractor
+            .as_ref()
+            .and_then(|extractor| extractor.shard_cost_model());
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             pc: Default::default(),
@@ -1390,9 +1707,10 @@ impl PreflightTracer {
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: FxHashMap::default(),
             register_reads_tracked: 0,
-            planner: Some(ShardPlanBuilder::new(
+            planner: Some(ShardPlanBuilder::new_with_cost_model(
                 max_cell_per_shard,
                 planner_cycle_limit,
+                cost_model,
             )),
             current_shard_start_cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             config,
@@ -1426,6 +1744,10 @@ impl PreflightTracer {
     pub(crate) fn native_trace_state(&mut self) -> PreflightNativeTraceState {
         debug_assert!(self.supports_direct_native_trace());
         let planner = self.planner.as_mut().expect("shard planner missing");
+        let planner_num_chips = planner
+            .cost_model
+            .as_ref()
+            .map_or(0, |model| model.chip_count());
         PreflightNativeTraceState {
             latest_cells: self.latest_accesses.cells_mut_ptr(),
             latest_base: self.latest_accesses.base(),
@@ -1435,6 +1757,9 @@ impl PreflightTracer {
             last_kind: &mut self.last_kind,
             current_shard_start_cycle: &self.current_shard_start_cycle,
             planner_cur_cells: &mut planner.cur_cells,
+            planner_cur_trace_cells: &mut planner.cur_trace_cells,
+            planner_cur_main_peak: &mut planner.cur_main_peak,
+            planner_cur_tower_peak: &mut planner.cur_tower_peak,
             planner_cur_cycle_in_shard: &mut planner.cur_cycle_in_shard,
             planner_cur_step_count: &mut planner.cur_step_count,
             planner_max_step_shard: &mut planner.max_step_shard,
@@ -1442,6 +1767,8 @@ impl PreflightTracer {
             planner_max_cell_per_shard: planner.max_cell_per_shard,
             planner_target_cell_first_shard: planner.target_cell_first_shard,
             planner_max_cycle_per_shard: planner.max_cycle_per_shard,
+            planner_num_instances: planner.num_instances.as_mut_ptr(),
+            planner_num_chips,
         }
     }
 
@@ -1457,9 +1784,24 @@ impl PreflightTracer {
             .unwrap_or(0)
     }
 
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
+        self.planner
+            .as_ref()
+            .and_then(|planner| planner.cost_model.clone())
+    }
+
     #[inline(always)]
     fn observe_current_step(&mut self, ecall_code: Option<Word>) {
         if let Some(planner) = self.planner.as_mut() {
+            if planner.cost_model.is_some() {
+                planner.observe_modeled_step(self.cycle, self.last_kind, ecall_code);
+                self.current_shard_start_cycle = planner.current_shard_start_cycle();
+                return;
+            }
             let step_cells = self
                 .config
                 .step_cell_extractor
@@ -1530,6 +1872,7 @@ impl PreflightTracer {
     pub(crate) fn record_native_shard_split(&mut self) {
         let planner = self.planner.as_mut().expect("shard planner missing");
         let next_shard_cycle = self.cycle;
+        planner.record_predicted_shard_cost();
         planner.push_boundary(next_shard_cycle);
         planner.shard_id += 1;
         planner.current_shard_start_cycle = next_shard_cycle;
@@ -1852,6 +2195,121 @@ impl<T: fmt::Debug> fmt::Debug for Change<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cost_model(specs: Vec<ChipCostSpec>) -> Arc<ShardCostModel> {
+        let mut opcodes = vec![Vec::new(); InsnKind::COUNT];
+        opcodes[InsnKind::ADD as usize] = vec![0];
+        let mut ecalls = BTreeMap::new();
+        ecalls.insert(7, vec![0]);
+        Arc::new(ShardCostModel::new(opcodes, ecalls, specs, 4))
+    }
+
+    #[test]
+    fn shard_cost_model_padding_rotation_and_extension_degree() {
+        let model = cost_model(vec![ChipCostSpec {
+            rotation: 1,
+            trace_cells_per_row: 2,
+            tower_peak_cells_per_row: 3,
+            tower_peak_cells_by_bucket: None,
+        }]);
+        assert_eq!(model.extension_field_degree(), 4);
+        assert_eq!(model.chip_cost(0, 0), ChipCost::default());
+        assert_eq!(model.shard_cost(&[1]), 12);
+        assert_eq!(model.shard_cost(&[2]), 24);
+        assert_eq!(model.shard_cost(&[3]), 48);
+        assert_eq!(model.shard_cost(&[4]), 48);
+        assert_eq!(model.shard_cost(&[5]), 96);
+    }
+
+    #[test]
+    fn shard_cost_model_counts_every_batched_main_fold_mle() {
+        let model = cost_model(vec![ChipCostSpec {
+            rotation: 0,
+            trace_cells_per_row: 9,
+            tower_peak_cells_per_row: 0,
+            tower_peak_cells_by_bucket: None,
+        }]);
+
+        assert_eq!(model.chip_cost(0, 0).main_peak, 0);
+        assert_eq!(model.chip_cost(0, 1).main_peak, 0);
+        // Nine MLEs each allocate a half-domain Ext4 fold buffer.
+        assert_eq!(model.chip_cost(0, 2).main_peak, 9 * 4);
+        assert_eq!(model.chip_cost(0, 3).main_peak, 9 * 2 * 4);
+        assert_eq!(model.chip_cost(0, 4).main_peak, 9 * 2 * 4);
+        assert_eq!(model.chip_cost(0, 5).main_peak, 9 * 4 * 4);
+    }
+
+    #[test]
+    fn shard_cost_model_selects_tower_or_main_peak() {
+        let model = cost_model(vec![
+            ChipCostSpec {
+                rotation: 0,
+                trace_cells_per_row: 2,
+                tower_peak_cells_per_row: 9,
+                tower_peak_cells_by_bucket: None,
+            },
+            ChipCostSpec {
+                rotation: 0,
+                trace_cells_per_row: 2,
+                tower_peak_cells_per_row: 1,
+                tower_peak_cells_by_bucket: None,
+            },
+        ]);
+        assert_eq!(model.shard_cost(&[2, 0]), 22);
+        assert_eq!(model.shard_cost(&[0, 2]), 12);
+        // Trace and main coexist across chips, while tower is the dominant
+        // single-chip task rather than the sum of both tower peaks.
+        assert_eq!(model.shard_cost(&[2, 2]), 26);
+
+        let main_dominant = cost_model(vec![
+            ChipCostSpec {
+                rotation: 0,
+                trace_cells_per_row: 2,
+                tower_peak_cells_per_row: 5,
+                tower_peak_cells_by_bucket: None,
+            },
+            ChipCostSpec {
+                rotation: 0,
+                trace_cells_per_row: 2,
+                tower_peak_cells_per_row: 5,
+                tower_peak_cells_by_bucket: None,
+            },
+        ]);
+        assert_eq!(main_dominant.shard_cost(&[2, 2]), 24);
+    }
+
+    #[test]
+    fn shard_cost_model_uses_scheduler_tower_bucket_table() {
+        let mut tower = vec![0; SHARD_COST_BUCKETS];
+        tower[1] = 7;
+        tower[2] = 11;
+        tower[3] = 29;
+        let model = cost_model(vec![ChipCostSpec {
+            rotation: 0,
+            trace_cells_per_row: 0,
+            tower_peak_cells_per_row: u64::MAX,
+            tower_peak_cells_by_bucket: Some(tower),
+        }]);
+        assert_eq!(model.shard_cost(&[1]), 7);
+        assert_eq!(model.shard_cost(&[2]), 11);
+        assert_eq!(model.shard_cost(&[3]), 29);
+        assert_eq!(model.shard_cost(&[4]), 29);
+    }
+
+    #[test]
+    fn modeled_native_and_ecall_steps_share_chip_counts() {
+        let model = cost_model(vec![ChipCostSpec {
+            rotation: 0,
+            trace_cells_per_row: 1,
+            tower_peak_cells_per_row: 1,
+            tower_peak_cells_by_bucket: None,
+        }]);
+        let mut planner = ShardPlanBuilder::new_with_cost_model(100, Cycle::MAX, Some(model));
+        planner.observe_modeled_step(4, InsnKind::ADD, None);
+        planner.observe_modeled_step(8, InsnKind::ECALL, Some(7));
+        assert_eq!(planner.num_instances, vec![2]);
+        assert_eq!(planner.cur_cells(), 6);
+    }
 
     #[derive(Debug)]
     struct OneCellPerStep;

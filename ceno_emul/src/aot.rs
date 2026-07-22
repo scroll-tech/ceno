@@ -9,7 +9,7 @@
 
 use crate::{
     Change, EmuContext, InsnKind, Instruction, PC_STEP_SIZE, Platform, PreflightTracer,
-    PreflightTracerConfig, Program, Tracer, VMState,
+    PreflightTracerConfig, Program, SHARD_COST_BUCKETS, ShardCostModel, Tracer, VMState,
     addr::{ByteAddr, Cycle, RegIdx, WORD_SIZE, Word, WordAddr},
     rv32im::TrapCause,
     tracer::{
@@ -134,7 +134,19 @@ const AOT_CTX_PREFLIGHT_STACK_MAX_OFFSET: usize = 352;
 const AOT_CTX_PREFLIGHT_HINTS_MIN_OFFSET: usize = 360;
 const AOT_CTX_PREFLIGHT_HINTS_MAX_OFFSET: usize = 368;
 const AOT_CTX_FALLBACK_STEPS_OFFSET: usize = 376;
+#[cfg(test)]
 const AOT_CTX_PREFLIGHT_BLOCK_CELLS_TABLE_OFFSET: usize = 384;
+const AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET: usize = 392;
+const AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET: usize = 400;
+const AOT_CTX_PREFLIGHT_COST_TABLE_OFFSET: usize = 408;
+const AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET: usize = 416;
+#[allow(dead_code)]
+const AOT_CTX_PREFLIGHT_NUM_CHIPS_OFFSET: usize = 424;
+const AOT_CTX_PREFLIGHT_PENDING_BLOCK_OFFSET: usize = 432;
+const AOT_CTX_PREFLIGHT_PLANNER_CUR_TRACE_OFFSET: usize = 440;
+const AOT_CTX_PREFLIGHT_PLANNER_CUR_MAIN_OFFSET: usize = 448;
+const AOT_CTX_PREFLIGHT_PLANNER_CUR_TOWER_OFFSET: usize = 456;
+const AOT_CTX_PREFLIGHT_TOWER_COST_TABLE_OFFSET: usize = 464;
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
 const AOT_TRACE_MODE_CALLBACK: u32 = 1;
@@ -222,6 +234,41 @@ struct AotRuntimeContext {
     preflight_hints_max: *mut WordAddr,
     fallback_steps: u64,
     preflight_block_cells_table: *const u64,
+    preflight_block_cost_descriptors: *const AotBlockCostDescriptor,
+    preflight_chip_contributions: *const AotChipContribution,
+    preflight_cost_table: *const AotAdditiveCost,
+    preflight_num_instances: *mut u64,
+    preflight_num_chips: usize,
+    preflight_pending_block: usize,
+    preflight_planner_cur_trace_cells: *mut u64,
+    preflight_planner_cur_main_peak: *mut u64,
+    preflight_planner_cur_tower_peak: *mut u64,
+    preflight_tower_cost_table: *const u64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+struct AotBlockCostDescriptor {
+    contribution_offset: u32,
+    contribution_count: u32,
+    standalone_trace_cells: u64,
+    standalone_main_peak: u64,
+    standalone_tower_peak: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+struct AotChipContribution {
+    chip_index: u32,
+    cost_row_byte_offset: u32,
+    instance_delta: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+struct AotAdditiveCost {
+    trace_cells: u64,
+    main_peak: u64,
 }
 
 #[derive(Debug)]
@@ -409,6 +456,27 @@ impl AotProgram {
         }
 
         let started = Instant::now();
+        // Generic callback tracing cannot move a shard boundary ahead of a
+        // native step after that step has already mutated access state. Keep
+        // generic Preflight execution on the exact Rust path; production AOT
+        // preflight uses the dedicated direct/block-planned style below.
+        if trace_native_steps
+            && TypeId::of::<T>() == TypeId::of::<PreflightTracer>()
+            && self.trace_style == AssemblyTraceStyle::Generic
+        {
+            let mut executed_steps = 0;
+            while executed_steps < max_steps && !vm.halted() {
+                if vm.next_step_record()?.is_none() {
+                    break;
+                }
+                executed_steps += 1;
+            }
+            return Ok(AotRunReport {
+                executed_steps,
+                fallback_steps: executed_steps,
+                execute_time: started.elapsed(),
+            });
+        }
         LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = None);
         let mut executed_steps = 0u64;
         let memory_base_word = vm.memory_base_word().0;
@@ -434,10 +502,15 @@ impl AotProgram {
         let mut preflight_last_kind = std::ptr::null_mut();
         let mut preflight_current_shard_start = std::ptr::null();
         let mut preflight_planner_cur_cells = std::ptr::null_mut();
+        let mut preflight_planner_cur_trace_cells = std::ptr::null_mut();
+        let mut preflight_planner_cur_main_peak = std::ptr::null_mut();
+        let mut preflight_planner_cur_tower_peak = std::ptr::null_mut();
         let mut preflight_planner_cur_cycle_in_shard = std::ptr::null_mut();
         let mut preflight_planner_cur_step_count = std::ptr::null_mut();
         let mut preflight_planner_max_step_shard = std::ptr::null_mut();
         let mut preflight_planner_shard_id = std::ptr::null_mut();
+        let mut preflight_planner_num_instances = std::ptr::null_mut();
+        let mut preflight_planner_num_chips = 0;
         let mut preflight_max_cell_per_shard = u64::MAX;
         let mut preflight_target_cell_first_shard = u64::MAX;
         let mut preflight_max_cycle_per_shard = Cycle::MAX;
@@ -448,29 +521,27 @@ impl AotProgram {
         let mut preflight_stack_max = std::ptr::null_mut();
         let mut preflight_hints_min = std::ptr::null_mut();
         let mut preflight_hints_max = std::ptr::null_mut();
-        let mut preflight_block_cells = Vec::new();
+        let mut preflight_block_cost_descriptors = Vec::new();
+        let mut preflight_chip_contributions = Vec::new();
+        let mut preflight_cost_model = None;
         if trace_native_steps && TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
             if preflight_vm.tracer().supports_direct_native_trace() {
-                preflight_step_cells = self
-                    .program
-                    .instructions
-                    .iter()
-                    .map(|insn| preflight_vm.tracer().native_step_cells_for_kind(insn.kind))
-                    .collect();
                 if self.trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
-                    preflight_block_cells = self
-                        .blocks
+                    let model = preflight_vm.tracer().shard_cost_model().ok_or_else(|| {
+                        anyhow!("preflight block AOT requires a shard cost model")
+                    })?;
+                    (
+                        preflight_block_cost_descriptors,
+                        preflight_chip_contributions,
+                    ) = build_aot_block_cost_descriptors(&self.program, &self.blocks, &model)?;
+                    preflight_cost_model = Some(model);
+                } else {
+                    preflight_step_cells = self
+                        .program
+                        .instructions
                         .iter()
-                        .map(|block| {
-                            let start = ((block.start_pc - self.program.base_address)
-                                / PC_STEP_SIZE as u32)
-                                as usize;
-                            let end = ((block.end_pc - self.program.base_address)
-                                / PC_STEP_SIZE as u32)
-                                as usize;
-                            preflight_step_cells[start..end].iter().copied().sum()
-                        })
+                        .map(|insn| preflight_vm.tracer().native_step_cells_for_kind(insn.kind))
                         .collect();
                 }
                 (preflight_heap_min, preflight_heap_max) = preflight_vm
@@ -492,10 +563,15 @@ impl AotProgram {
                 preflight_last_kind = state.last_kind;
                 preflight_current_shard_start = state.current_shard_start_cycle;
                 preflight_planner_cur_cells = state.planner_cur_cells;
+                preflight_planner_cur_trace_cells = state.planner_cur_trace_cells;
+                preflight_planner_cur_main_peak = state.planner_cur_main_peak;
+                preflight_planner_cur_tower_peak = state.planner_cur_tower_peak;
                 preflight_planner_cur_cycle_in_shard = state.planner_cur_cycle_in_shard;
                 preflight_planner_cur_step_count = state.planner_cur_step_count;
                 preflight_planner_max_step_shard = state.planner_max_step_shard;
                 preflight_planner_shard_id = state.planner_shard_id;
+                preflight_planner_num_instances = state.planner_num_instances;
+                preflight_planner_num_chips = state.planner_num_chips;
                 preflight_max_cell_per_shard = state.planner_max_cell_per_shard;
                 preflight_target_cell_first_shard = state.planner_target_cell_first_shard;
                 preflight_max_cycle_per_shard = state.planner_max_cycle_per_shard;
@@ -506,13 +582,28 @@ impl AotProgram {
         } else {
             std::ptr::null()
         };
-        let preflight_block_cells_table = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT
-            && self.trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan
-        {
-            preflight_block_cells.as_ptr()
-        } else {
-            std::ptr::null()
-        };
+        let preflight_block_cells_table = std::ptr::null();
+        let preflight_block_cost_descriptors_table =
+            if self.trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
+                preflight_block_cost_descriptors.as_ptr()
+            } else {
+                std::ptr::null()
+            };
+        let preflight_additive_cost_table = preflight_cost_model
+            .as_ref()
+            .map(|model| {
+                model
+                    .trace_cost_table()
+                    .iter()
+                    .copied()
+                    .zip(model.main_cost_table().iter().copied())
+                    .map(|(trace_cells, main_peak)| AotAdditiveCost {
+                        trace_cells,
+                        main_peak,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let mut context = AotRuntimeContext {
             vm: vm_ptr,
             registers,
@@ -578,6 +669,18 @@ impl AotProgram {
             preflight_hints_max,
             fallback_steps: 0,
             preflight_block_cells_table,
+            preflight_block_cost_descriptors: preflight_block_cost_descriptors_table,
+            preflight_chip_contributions: preflight_chip_contributions.as_ptr(),
+            preflight_cost_table: preflight_additive_cost_table.as_ptr(),
+            preflight_num_instances: preflight_planner_num_instances,
+            preflight_num_chips: preflight_planner_num_chips,
+            preflight_pending_block: usize::MAX,
+            preflight_planner_cur_trace_cells,
+            preflight_planner_cur_main_peak,
+            preflight_planner_cur_tower_peak,
+            preflight_tower_cost_table: preflight_cost_model
+                .as_ref()
+                .map_or(std::ptr::null(), |model| model.tower_cost_table().as_ptr()),
         };
         let trace_fn = if trace_native_steps {
             if TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
@@ -853,7 +956,7 @@ fn write_assembly(
     writeln!(file, "    pushq %r14")?;
     writeln!(file, "    pushq %r15")?;
     writeln!(file, "    pushq %rbp")?;
-    writeln!(file, "    subq $24, %rsp")?;
+    writeln!(file, "    subq $56, %rsp")?;
     writeln!(file, "    movq %rdi, %r12")?;
     writeln!(file, "    movq %rsi, %r13")?;
     writeln!(file, "    movq %rdx, %r14")?;
@@ -875,12 +978,25 @@ fn write_assembly(
         } else {
             None
         };
+        let adaptive_exact_access_plan = block_plan.is_none()
+            && trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan
+            && block_supports_adaptive_cost_plan(program, block)?;
+        if block_plan.is_none()
+            && !adaptive_exact_access_plan
+            && trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan
+        {
+            writeln!(file, "    jmp L_dynamic")?;
+        }
+        if adaptive_exact_access_plan {
+            emit_preflight_direct_block_budget_guard(&mut file, block)?;
+            emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
+        }
         if block_plan.is_some() {
             emit_preflight_direct_block_budget_guard(&mut file, block)?;
             if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
                 emit_preflight_direct_block_memory_fast_path_guard(&mut file, program, block)?;
             }
-            emit_preflight_direct_block_plan_entry(&mut file, block_idx, block)?;
+            emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
             if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
                 emit_preflight_direct_block_access_entry(&mut file, program, block_idx, block)?;
             }
@@ -891,7 +1007,9 @@ fn write_assembly(
             let step_trace_style =
                 if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
                     AssemblyTraceStyle::PreflightDirectBlockPlan
-                } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
+                } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess))
+                    || adaptive_exact_access_plan
+                {
                     AssemblyTraceStyle::PreflightDirectBlockPlanExactAccess
                 } else if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
                     AssemblyTraceStyle::PreflightDirect
@@ -904,7 +1022,10 @@ fn write_assembly(
         if let Some(prev_pc) = pc.checked_sub(PC_STEP_SIZE as u32) {
             let insn = instruction_at(program, prev_pc)?;
             if block_plan.is_some() {
-                emit_preflight_direct_block_plan_exit(&mut file, block_idx, block)?;
+                emit_preflight_direct_block_plan_exit(&mut file, block)?;
+                emit_preflight_direct_busy_loop_guard(&mut file, prev_pc)?;
+            } else if adaptive_exact_access_plan {
+                emit_preflight_adaptive_exact_access_plan_exit(&mut file, block)?;
                 emit_preflight_direct_busy_loop_guard(&mut file, prev_pc)?;
             }
             emit_successor_jump(&mut file, program, &labels, prev_pc, insn)?;
@@ -928,7 +1049,7 @@ fn write_assembly(
     writeln!(file, "    movq %rax, (%rbx)")?;
     writeln!(file, "    movl ${AOT_STATUS_ERROR}, %eax")?;
     writeln!(file, "L_return:")?;
-    writeln!(file, "    addq $24, %rsp")?;
+    writeln!(file, "    addq $56, %rsp")?;
     writeln!(file, "    popq %rbp")?;
     writeln!(file, "    popq %r15")?;
     writeln!(file, "    popq %r14")?;
@@ -1025,9 +1146,7 @@ fn emit_after_native_step(
         emit_preflight_direct_step_static(
             &mut file,
             pc,
-            program,
             insn,
-            trace_style == AssemblyTraceStyle::PreflightDirect,
             preflight_memory_bounds_updated,
             if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
                 PreflightAccessMode::BlockAtomic
@@ -1066,9 +1185,7 @@ fn emit_after_native_step(
     emit_preflight_direct_step_static(
         &mut file,
         pc,
-        program,
         insn,
-        true,
         false,
         PreflightAccessMode::Exact,
         true,
@@ -1167,6 +1284,23 @@ fn preflight_block_plan_kind(
     }))
 }
 
+/// Adaptive costing depends only on the statically known opcode mix. Blocks
+/// whose memory address is computed inside the block can therefore retain
+/// exact per-step access tracking while still using a block-entry cost guard.
+/// Truly dynamic control flow and unsupported instructions stay on the Rust
+/// fallback path.
+fn block_supports_adaptive_cost_plan(program: &Program, block: &BasicBlock) -> Result<bool> {
+    let mut pc = block.start_pc;
+    while pc < block.end_pc {
+        let insn = instruction_at(program, pc)?;
+        if native_opcode_family(insn.kind).is_none() {
+            return Ok(false);
+        }
+        pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+    }
+    Ok(true)
+}
+
 fn preflight_static_register_accesses(insn: Instruction) -> Vec<(u32, PreflightSubcycle)> {
     let mut accesses = Vec::new();
     if native_step_reads_rs1(insn.kind) {
@@ -1202,6 +1336,57 @@ fn preflight_block_first_accesses(
         .into_iter()
         .map(|(addr, cycle_offset)| PreflightBlockAccess { addr, cycle_offset })
         .collect())
+}
+
+fn build_aot_block_cost_descriptors(
+    program: &Program,
+    blocks: &[BasicBlock],
+    model: &ShardCostModel,
+) -> Result<(Vec<AotBlockCostDescriptor>, Vec<AotChipContribution>)> {
+    let mut descriptors = Vec::with_capacity(blocks.len());
+    let mut contributions = Vec::new();
+    let mut counts = vec![0u64; model.chip_count()];
+    for block in blocks {
+        let offset = contributions.len();
+        // Compilation/setup only: a dense chip-indexed array avoids sorting
+        // and guarantees stable descriptor order. Execution touches only the
+        // resulting sparse descriptor, never a map.
+        counts.fill(0);
+        let mut pc = block.start_pc;
+        while pc < block.end_pc {
+            let insn = instruction_at(program, pc)?;
+            for &chip in model.chips_for_step(insn.kind, None) {
+                let chip = chip as usize;
+                counts[chip] = counts[chip].saturating_add(1);
+            }
+            pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+        }
+        let mut standalone_trace_cells = 0u64;
+        let mut standalone_main_peak = 0u64;
+        let mut standalone_tower_peak = 0u64;
+        for (chip, &count) in counts.iter().enumerate().filter(|(_, count)| **count != 0) {
+            let cost = model.chip_cost(chip, count);
+            standalone_trace_cells = standalone_trace_cells.saturating_add(cost.trace_cells);
+            standalone_main_peak = standalone_main_peak.saturating_add(cost.main_peak);
+            standalone_tower_peak = standalone_tower_peak.max(cost.tower_peak);
+            contributions.push(AotChipContribution {
+                chip_index: chip as u32,
+                cost_row_byte_offset: (chip
+                    * SHARD_COST_BUCKETS
+                    * std::mem::size_of::<AotAdditiveCost>())
+                    as u32,
+                instance_delta: count,
+            });
+        }
+        descriptors.push(AotBlockCostDescriptor {
+            contribution_offset: offset as u32,
+            contribution_count: (contributions.len() - offset) as u32,
+            standalone_trace_cells,
+            standalone_main_peak,
+            standalone_tower_peak,
+        });
+    }
+    Ok((descriptors, contributions))
 }
 
 fn emit_preflight_direct_block_budget_guard(
@@ -1365,51 +1550,162 @@ fn emit_preflight_direct_block_access_entry(
     Ok(())
 }
 
-fn emit_load_preflight_block_cells(
-    mut file: impl Write,
-    block_idx: usize,
-    label_suffix: &str,
-    dst_reg: &str,
-) -> Result<()> {
-    let zero_label = format!(".L_preflight_block_cells_zero_{block_idx}_{label_suffix}");
-    let done_label = format!(".L_preflight_block_cells_done_{block_idx}_{label_suffix}");
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_BLOCK_CELLS_TABLE_OFFSET}(%r12), {dst_reg}"
-    )?;
-    writeln!(file, "    testq {dst_reg}, {dst_reg}")?;
-    writeln!(file, "    je {zero_label}")?;
-    writeln!(file, "    movq {}({dst_reg}), {dst_reg}", block_idx * 8)?;
-    writeln!(file, "    jmp {done_label}")?;
-    writeln!(file, "{zero_label}:")?;
-    writeln!(file, "    xorq {dst_reg}, {dst_reg}")?;
-    writeln!(file, "{done_label}:")?;
-    Ok(())
-}
-
-fn emit_preflight_direct_block_plan_entry(
+fn emit_preflight_adaptive_block_plan_entry(
     mut file: impl Write,
     block_idx: usize,
     block: &BasicBlock,
 ) -> Result<()> {
-    let no_split_label = format!(".L_preflight_block_no_split_{block_idx}");
-    let first_shard_label = format!(".L_preflight_block_first_shard_{block_idx}");
-    let target_done_label = format!(".L_preflight_block_target_done_{block_idx}");
-    let split_label = format!(".L_preflight_block_split_{block_idx}");
+    let loop_label = format!(".L_preflight_cost_loop_{block_idx}");
+    let loop_done_label = format!(".L_preflight_cost_loop_done_{block_idx}");
+    let accept_label = format!(".L_preflight_cost_accept_{block_idx}");
+    let first_shard_label = format!(".L_preflight_cost_first_shard_{block_idx}");
+    let target_done_label = format!(".L_preflight_cost_target_done_{block_idx}");
+    let split_label = format!(".L_preflight_cost_split_{block_idx}");
+    let done_label = format!(".L_preflight_cost_done_{block_idx}");
     let block_cycles = block_instruction_count(block) * PC_STEP_SIZE as u64;
+    let descriptor_offset = block_idx * std::mem::size_of::<AotBlockCostDescriptor>();
+    let has_lzcnt = std::is_x86_feature_detected!("lzcnt");
 
-    emit_load_preflight_block_cells(&mut file, block_idx, "entry", "%r8")?;
+    // Speculatively update all affected chip counts while accumulating trace
+    // and main deltas and the largest absolute tower peak. The only loop
+    // branch depends on descriptor size; bucket selection and max use cmov.
+    writeln!(file, "    pxor %xmm0, %xmm0")?;
     writeln!(
         file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET}(%r12), %rax"
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_TOWER_OFFSET}(%r12), %rax"
     )?;
-    writeln!(file, "    cmpq $0, (%rax)")?;
-    writeln!(file, "    je {no_split_label}")?;
+    writeln!(file, "    movq (%rax), %rax")?;
+    writeln!(file, "    movq %rax, 32(%rsp)")?;
     writeln!(
         file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_SHARD_ID_OFFSET}(%r12), %rax"
+        "    movq {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12), %r10"
     )?;
-    writeln!(file, "    cmpq $0, (%rax)")?;
+    writeln!(file, "    movl {descriptor_offset}(%r10), %eax")?;
+    writeln!(file, "    movl {}(%r10), %ecx", descriptor_offset + 4)?;
+    writeln!(file, "    shlq $4, %rax")?;
+    writeln!(
+        file,
+        "    addq {AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq %rax, %r10")?;
+    writeln!(file, "    testl %ecx, %ecx")?;
+    writeln!(file, "    je {loop_done_label}")?;
+    writeln!(file, "{loop_label}:")?;
+    writeln!(file, "    movl (%r10), %eax")?;
+    writeln!(file, "    movl 4(%r10), %edx")?;
+    writeln!(file, "    movq %rdx, 40(%rsp)")?;
+    writeln!(file, "    movq 8(%r10), %r11")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+    )?;
+    writeln!(file, "    leaq (%rdi,%rax,8), %rsi")?;
+    writeln!(file, "    movq (%rsi), %r9")?;
+    writeln!(file, "    addq %r9, %r11")?;
+    writeln!(file, "    movq %r11, (%rsi)")?;
+    // Point at this chip's precomputed cost-table row. Keeping the row
+    // offset in the descriptor avoids two serialized multiplies per chip.
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_COST_TABLE_OFFSET}(%r12), %rdi"
+    )?;
+    writeln!(file, "    addq %rdx, %rdi")?;
+    if has_lzcnt {
+        // bucket(n) = 0 for n=0, otherwise 65-lzcnt(n-1). The zero
+        // correction is a cmov, so chip costing remains branch-free.
+        writeln!(file, "    leaq -1(%r9), %rdx")?;
+        writeln!(file, "    lzcntq %rdx, %rdx")?;
+        writeln!(file, "    movq $65, %r8")?;
+        writeln!(file, "    subq %rdx, %r8")?;
+        writeln!(file, "    testq %r9, %r9")?;
+        writeln!(file, "    cmovz %r9, %r8")?;
+        writeln!(file, "    movq %r8, %rdx")?;
+        // The candidate count is always nonzero.
+        writeln!(file, "    leaq -1(%r11), %r9")?;
+        writeln!(file, "    lzcntq %r9, %r9")?;
+        writeln!(file, "    negq %r9")?;
+        writeln!(file, "    addq $65, %r9")?;
+    } else {
+        // Portable x86-64 fallback for hosts without LZCNT.
+        writeln!(file, "    movq %r9, %rdx")?;
+        writeln!(file, "    decq %rdx")?;
+        writeln!(file, "    orq $1, %rdx")?;
+        writeln!(file, "    bsrq %rdx, %rdx")?;
+        writeln!(file, "    addq $2, %rdx")?;
+        writeln!(file, "    movq $1, %r8")?;
+        writeln!(file, "    cmpq $1, %r9")?;
+        writeln!(file, "    cmovbe %r8, %rdx")?;
+        writeln!(file, "    xorq %r8, %r8")?;
+        writeln!(file, "    testq %r9, %r9")?;
+        writeln!(file, "    cmovz %r8, %rdx")?;
+        writeln!(file, "    movq %r11, %r9")?;
+        writeln!(file, "    decq %r9")?;
+        writeln!(file, "    orq $1, %r9")?;
+        writeln!(file, "    bsrq %r9, %r9")?;
+        writeln!(file, "    addq $2, %r9")?;
+        writeln!(file, "    cmpq $1, %r11")?;
+        writeln!(file, "    movq $1, %r8")?;
+        writeln!(file, "    cmovbe %r8, %r9")?;
+    }
+    // Trace and main are adjacent table lanes. Accumulate both deltas in one
+    // SIMD register, avoiding four scalar loads and stack updates per chip.
+    writeln!(file, "    movq %rdx, %r8")?;
+    writeln!(file, "    shlq $4, %r8")?;
+    writeln!(file, "    movq %r9, %rax")?;
+    writeln!(file, "    shlq $4, %rax")?;
+    writeln!(file, "    movdqu (%rdi,%r8), %xmm1")?;
+    writeln!(file, "    movdqu (%rdi,%rax), %xmm2")?;
+    writeln!(file, "    psubq %xmm1, %xmm2")?;
+    writeln!(file, "    paddq %xmm2, %xmm0")?;
+    // Tower tasks do not coexist across chips: retain only the largest new
+    // absolute per-chip peak, rather than summing tower deltas.
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_TOWER_COST_TABLE_OFFSET}(%r12), %rdi"
+    )?;
+    writeln!(file, "    movq 40(%rsp), %r8")?;
+    writeln!(file, "    shrq $1, %r8")?;
+    writeln!(file, "    addq %r8, %rdi")?;
+    writeln!(file, "    movq (%rdi,%r9,8), %rax")?;
+    writeln!(file, "    movq 32(%rsp), %r8")?;
+    writeln!(file, "    cmpq %r8, %rax")?;
+    writeln!(file, "    cmovaq %rax, %r8")?;
+    writeln!(file, "    movq %r8, 32(%rsp)")?;
+    writeln!(file, "    addq $16, %r10")?;
+    writeln!(file, "    decl %ecx")?;
+    writeln!(file, "    jne {loop_label}")?;
+    writeln!(file, "{loop_done_label}:")?;
+    writeln!(file, "    movdqu %xmm0, 16(%rsp)")?;
+    // candidate = trace_total + max(main_total, tower_peak)
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_TRACE_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq (%rax), %r9")?;
+    writeln!(file, "    addq 16(%rsp), %r9")?;
+    writeln!(file, "    movq %r9, 16(%rsp)")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_MAIN_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq (%rax), %r11")?;
+    writeln!(file, "    addq 24(%rsp), %r11")?;
+    writeln!(file, "    movq %r11, 24(%rsp)")?;
+    writeln!(file, "    movq 32(%rsp), %r8")?;
+    writeln!(file, "    cmpq %r8, %r11")?;
+    writeln!(file, "    cmovbq %r8, %r11")?;
+    writeln!(file, "    addq %r11, %r9")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET}(%r12), %r10"
+    )?;
+    writeln!(file, "    cmpq $0, (%r10)")?;
+    writeln!(file, "    je {accept_label}")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_SHARD_ID_OFFSET}(%r12), %r10"
+    )?;
+    writeln!(file, "    cmpq $0, (%r10)")?;
     writeln!(file, "    je {first_shard_label}")?;
     writeln!(
         file,
@@ -1422,27 +1718,49 @@ fn emit_preflight_direct_block_plan_entry(
         "    movq {AOT_CTX_PREFLIGHT_TARGET_CELL_FIRST_SHARD_OFFSET}(%r12), %r10"
     )?;
     writeln!(file, "{target_done_label}:")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CELLS_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    movq (%rax), %r9")?;
-    writeln!(file, "    addq %r8, %r9")?;
     writeln!(file, "    cmpq %r10, %r9")?;
     writeln!(file, "    ja {split_label}")?;
     writeln!(
         file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %r10"
     )?;
-    writeln!(file, "    movq (%rax), %r9")?;
-    writeln!(file, "    addq ${block_cycles}, %r9")?;
+    writeln!(file, "    movq (%r10), %r11")?;
+    writeln!(file, "    addq ${block_cycles}, %r11")?;
     writeln!(
         file,
-        "    movq {AOT_CTX_PREFLIGHT_MAX_CYCLE_PER_SHARD_OFFSET}(%r12), %r10"
+        "    cmpq {AOT_CTX_PREFLIGHT_MAX_CYCLE_PER_SHARD_OFFSET}(%r12), %r11"
     )?;
-    writeln!(file, "    cmpq %r10, %r9")?;
-    writeln!(file, "    jb {no_split_label}")?;
+    writeln!(file, "    jae {split_label}")?;
+    writeln!(file, "{accept_label}:")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CELLS_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq %r9, (%rax)")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_TRACE_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq 16(%rsp), %r8")?;
+    writeln!(file, "    movq %r8, (%rax)")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_MAIN_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq 24(%rsp), %r8")?;
+    writeln!(file, "    movq %r8, (%rax)")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_TOWER_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq 32(%rsp), %r8")?;
+    writeln!(file, "    movq %r8, (%rax)")?;
+    writeln!(file, "    jmp {done_label}")?;
     writeln!(file, "{split_label}:")?;
+    writeln!(
+        file,
+        "    movq ${block_idx}, {AOT_CTX_PREFLIGHT_PENDING_BLOCK_OFFSET}(%r12)"
+    )?;
     writeln!(
         file,
         "    movl ${AOT_PREFLIGHT_HELPER_SHARD_SPLIT}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
@@ -1451,23 +1769,32 @@ fn emit_preflight_direct_block_plan_entry(
     writeln!(file, "    call *%r14")?;
     writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
     writeln!(file, "    je L_error")?;
-    writeln!(file, "{no_split_label}:")?;
+    writeln!(file, "{done_label}:")?;
     Ok(())
 }
 
-fn emit_preflight_direct_block_plan_exit(
+fn emit_preflight_direct_block_plan_exit(mut file: impl Write, block: &BasicBlock) -> Result<()> {
+    let block_steps = block_instruction_count(block);
+    let block_cycles = block_steps * PC_STEP_SIZE as u64;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    addq ${block_cycles}, (%rax)")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    addq ${block_steps}, (%rax)")?;
+    Ok(())
+}
+
+fn emit_preflight_adaptive_exact_access_plan_exit(
     mut file: impl Write,
-    block_idx: usize,
     block: &BasicBlock,
 ) -> Result<()> {
     let block_steps = block_instruction_count(block);
     let block_cycles = block_steps * PC_STEP_SIZE as u64;
-    emit_load_preflight_block_cells(&mut file, block_idx, "exit", "%r8")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CELLS_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    addq %r8, (%rax)")?;
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
@@ -1484,9 +1811,7 @@ fn emit_preflight_direct_block_plan_exit(
 fn emit_preflight_direct_step_static(
     mut file: impl Write,
     pc: u32,
-    program: &Program,
     insn: Instruction,
-    update_planner: bool,
     preflight_memory_bounds_updated: bool,
     access_mode: PreflightAccessMode,
     check_busy_loop: bool,
@@ -1570,9 +1895,6 @@ fn emit_preflight_direct_step_static(
         file,
         "    incq {AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET}(%r12)"
     )?;
-    if update_planner {
-        emit_preflight_direct_planner_step_static(&mut file, program, pc)?;
-    }
     if check_busy_loop {
         emit_preflight_direct_busy_loop_guard(&mut file, pc)?;
     }
@@ -1681,93 +2003,6 @@ fn emit_preflight_direct_memory_bound_known_region(
     writeln!(file, "    leal 1({addr_reg}), %ecx")?;
     writeln!(file, "    movl %ecx, (%rax)")?;
     writeln!(file, "2:")?;
-    Ok(())
-}
-
-fn emit_preflight_direct_planner_step_static(
-    mut file: impl Write,
-    program: &Program,
-    pc: u32,
-) -> Result<()> {
-    let insn_idx = (pc.wrapping_sub(program.base_address) / PC_STEP_SIZE as u32) as usize;
-    let no_step_cells_label = format!(".L_preflight_no_step_cells_{pc:x}");
-    let step_cells_done_label = format!(".L_preflight_step_cells_done_{pc:x}");
-    let no_split_label = format!(".L_preflight_no_split_{pc:x}");
-    let split_done_label = format!(".L_preflight_split_done_{pc:x}");
-
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_STEP_CELLS_TABLE_OFFSET}(%r12), %rcx"
-    )?;
-    writeln!(file, "    testq %rcx, %rcx")?;
-    writeln!(file, "    je {no_step_cells_label}")?;
-    writeln!(file, "    movq {}(%rcx), %rcx", insn_idx * 8)?;
-    writeln!(file, "    jmp {step_cells_done_label}")?;
-    writeln!(file, "{no_step_cells_label}:")?;
-    writeln!(file, "    xorq %rcx, %rcx")?;
-    writeln!(file, "{step_cells_done_label}:")?;
-
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CELLS_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    addq %rcx, (%rax)")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    addq $4, (%rax)")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    incq (%rax)")?;
-
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_SHARD_ID_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    cmpq $0, (%rax)")?;
-    writeln!(file, "    jne 1f")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_TARGET_CELL_FIRST_SHARD_OFFSET}(%r12), %rcx"
-    )?;
-    writeln!(file, "    jmp 2f")?;
-    writeln!(file, "1:")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_MAX_CELL_PER_SHARD_OFFSET}(%r12), %rcx"
-    )?;
-    writeln!(file, "2:")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CELLS_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    cmpq %rcx, (%rax)")?;
-    writeln!(file, "    jae 3f")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_MAX_CYCLE_PER_SHARD_OFFSET}(%r12), %rcx"
-    )?;
-    writeln!(file, "    cmpq %rcx, (%rax)")?;
-    writeln!(file, "    jb {no_split_label}")?;
-    writeln!(file, "3:")?;
-    writeln!(
-        file,
-        "    movl ${AOT_PREFLIGHT_HELPER_SHARD_SPLIT}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
-    )?;
-    writeln!(file, "    movq %r12, %rdi")?;
-    writeln!(file, "    call *%r14")?;
-    writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "    je L_error")?;
-    writeln!(file, "    jmp {split_done_label}")?;
-    writeln!(file, "{no_split_label}:")?;
-    writeln!(file, "{split_done_label}:")?;
     Ok(())
 }
 
@@ -3012,7 +3247,68 @@ unsafe extern "C" fn aot_preflight_direct_helper(context: *mut AotRuntimeContext
             unsafe { aot_trace_native_preflight(context as *mut AotRuntimeContext) }
         }
         AOT_PREFLIGHT_HELPER_SHARD_SPLIT => {
+            let adaptive_descriptor = (!context.preflight_block_cost_descriptors.is_null()
+                && context.preflight_pending_block != usize::MAX)
+                .then(|| unsafe {
+                    *context
+                        .preflight_block_cost_descriptors
+                        .add(context.preflight_pending_block)
+                });
+            if let Some(descriptor) = adaptive_descriptor {
+                // Restore the accepted shard's counts before finalizing it;
+                // the native entry speculatively stored this block's candidate.
+                let counts = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        context.preflight_num_instances,
+                        context.preflight_num_chips,
+                    )
+                };
+                let contributions = unsafe {
+                    std::slice::from_raw_parts(
+                        context
+                            .preflight_chip_contributions
+                            .add(descriptor.contribution_offset as usize),
+                        descriptor.contribution_count as usize,
+                    )
+                };
+                for contribution in contributions {
+                    counts[contribution.chip_index as usize] = counts
+                        [contribution.chip_index as usize]
+                        .saturating_sub(contribution.instance_delta);
+                }
+            }
             vm.tracer_mut().record_native_shard_split();
+            if let Some(descriptor) = adaptive_descriptor {
+                let counts = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        context.preflight_num_instances,
+                        context.preflight_num_chips,
+                    )
+                };
+                let contributions = unsafe {
+                    std::slice::from_raw_parts(
+                        context
+                            .preflight_chip_contributions
+                            .add(descriptor.contribution_offset as usize),
+                        descriptor.contribution_count as usize,
+                    )
+                };
+                for contribution in contributions {
+                    counts[contribution.chip_index as usize] = contribution.instance_delta;
+                }
+                unsafe {
+                    *context.preflight_planner_cur_trace_cells = descriptor.standalone_trace_cells;
+                    *context.preflight_planner_cur_main_peak = descriptor.standalone_main_peak;
+                    *context.preflight_planner_cur_tower_peak = descriptor.standalone_tower_peak;
+                    *context.preflight_planner_cur_cells =
+                        descriptor.standalone_trace_cells.saturating_add(
+                            descriptor
+                                .standalone_main_peak
+                                .max(descriptor.standalone_tower_peak),
+                        );
+                }
+                context.preflight_pending_block = usize::MAX;
+            }
             AOT_STATUS_CONTINUE
         }
         other => {
@@ -3027,8 +3323,9 @@ unsafe extern "C" fn aot_preflight_direct_helper(context: *mut AotRuntimeContext
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CENO_PLATFORM, EmuContext, encode_rv32};
+    use crate::{CENO_PLATFORM, ChipCostSpec, EmuContext, ShardCostModel, encode_rv32};
     use std::sync::Arc;
+    use strum::EnumCount;
 
     fn program(instructions: Vec<Instruction>) -> Program {
         Program::new(
@@ -3161,6 +3458,46 @@ mod tests {
             std::mem::offset_of!(AotRuntimeContext, preflight_block_cells_table),
             AOT_CTX_PREFLIGHT_BLOCK_CELLS_TABLE_OFFSET
         );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_block_cost_descriptors),
+            AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_chip_contributions),
+            AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_cost_table),
+            AOT_CTX_PREFLIGHT_COST_TABLE_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_num_instances),
+            AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_num_chips),
+            AOT_CTX_PREFLIGHT_NUM_CHIPS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_pending_block),
+            AOT_CTX_PREFLIGHT_PENDING_BLOCK_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_planner_cur_trace_cells),
+            AOT_CTX_PREFLIGHT_PLANNER_CUR_TRACE_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_planner_cur_main_peak),
+            AOT_CTX_PREFLIGHT_PLANNER_CUR_MAIN_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_planner_cur_tower_peak),
+            AOT_CTX_PREFLIGHT_PLANNER_CUR_TOWER_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_tower_cost_table),
+            AOT_CTX_PREFLIGHT_TOWER_COST_TABLE_OFFSET
+        );
     }
 
     #[test]
@@ -3277,6 +3614,144 @@ mod tests {
                 0
             }
         }
+
+        fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
+            let mut opcodes = vec![vec![0]; InsnKind::COUNT];
+            opcodes[InsnKind::ECALL as usize].clear();
+            let mut ecalls = BTreeMap::new();
+            ecalls.insert(Platform::ecall_halt(), vec![0]);
+            Some(Arc::new(ShardCostModel::new(
+                opcodes,
+                ecalls,
+                vec![ChipCostSpec {
+                    rotation: 0,
+                    trace_cells_per_row: 1,
+                    tower_peak_cells_per_row: 0,
+                    tower_peak_cells_by_bucket: None,
+                }],
+                1,
+            )))
+        }
+    }
+
+    #[derive(Debug)]
+    struct AdaptiveTestCost(Arc<ShardCostModel>);
+
+    impl AdaptiveTestCost {
+        fn new() -> Self {
+            let mut opcodes = vec![Vec::new(); InsnKind::COUNT];
+            opcodes[InsnKind::ADDI as usize] = vec![0];
+            opcodes[InsnKind::ADD as usize] = vec![1];
+            opcodes[InsnKind::JAL as usize] = vec![2];
+            let mut ecalls = BTreeMap::new();
+            ecalls.insert(Platform::ecall_halt(), vec![3]);
+            Self(Arc::new(ShardCostModel::new(
+                opcodes,
+                ecalls,
+                vec![
+                    ChipCostSpec {
+                        rotation: 0,
+                        trace_cells_per_row: 1,
+                        tower_peak_cells_per_row: 0,
+                        tower_peak_cells_by_bucket: None,
+                    },
+                    ChipCostSpec {
+                        rotation: 0,
+                        trace_cells_per_row: 1,
+                        tower_peak_cells_per_row: 8,
+                        tower_peak_cells_by_bucket: None,
+                    },
+                    ChipCostSpec {
+                        rotation: 0,
+                        trace_cells_per_row: 1,
+                        tower_peak_cells_per_row: 0,
+                        tower_peak_cells_by_bucket: None,
+                    },
+                    ChipCostSpec {
+                        rotation: 0,
+                        trace_cells_per_row: 1,
+                        tower_peak_cells_per_row: 0,
+                        tower_peak_cells_by_bucket: None,
+                    },
+                ],
+                4,
+            )))
+        }
+    }
+
+    impl crate::StepCellExtractor for AdaptiveTestCost {
+        fn cells_for_kind(&self, _kind: InsnKind, _rs1_value: Option<Word>) -> u64 {
+            0
+        }
+
+        fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
+            Some(self.0.clone())
+        }
+    }
+
+    fn adaptive_test_program() -> Arc<Program> {
+        Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 1),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 2),
+            encode_rv32(InsnKind::JAL, 0, 0, 0, 4),
+            encode_rv32(InsnKind::ADD, 1, 2, 3, 0),
+            encode_rv32(InsnKind::ADD, 2, 3, 4, 0),
+            encode_rv32(InsnKind::JAL, 0, 0, 0, 4),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]))
+    }
+
+    #[test]
+    fn aot_adaptive_cost_splits_before_blocks_and_reinitializes_rejected_block() {
+        let program = adaptive_test_program();
+        // The first block exactly fills the limit and must be accepted. The
+        // second block is oversized on an empty shard and must also run once.
+        let config = crate::PreflightTracerConfig::new(true, 7, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(AdaptiveTestCost::new()));
+        let aot =
+            AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                .unwrap();
+        let mut vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
+        aot.run_to_halt(&mut vm, 100).unwrap();
+        let (plan, _) = vm.take_tracer().into_shard_plan();
+        assert_eq!(plan.shard_cycle_boundaries(), &[4, 16, 28, 32]);
+        assert_eq!(plan.predicted_shard_costs(), &[7, 19, 1]);
+    }
+
+    #[test]
+    fn aot_adaptive_cost_honors_cycle_limit_at_block_boundaries() {
+        let program = adaptive_test_program();
+        let config = crate::PreflightTracerConfig::new(true, u64::MAX, 16)
+            .with_step_cell_extractor(Arc::new(AdaptiveTestCost::new()));
+        let aot =
+            AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                .unwrap();
+        let mut vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
+        aot.run_to_halt(&mut vm, 100).unwrap();
+        let (plan, _) = vm.take_tracer().into_shard_plan();
+        assert_eq!(plan.shard_cycle_boundaries(), &[4, 16, 28, 32]);
+        assert_eq!(plan.predicted_shard_costs(), &[7, 19, 1]);
+    }
+
+    #[test]
+    fn preflight_block_aot_requires_shard_cost_model() {
+        let program = Arc::new(program(vec![encode_rv32(InsnKind::ADDI, 0, 0, 1, 1)]));
+        let aot =
+            AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                .unwrap();
+        let mut vm =
+            VMState::<crate::PreflightTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
+
+        let err = aot.run_to_halt(&mut vm, 10).unwrap_err().to_string();
+        assert!(err.contains("preflight block AOT requires a shard cost model"));
     }
 
     #[test]
@@ -3457,8 +3932,13 @@ mod tests {
         let aot =
             AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
                 .unwrap();
-        let mut aot_vm =
-            VMState::<crate::PreflightTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
+        let config = crate::PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
+        let mut aot_vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
         aot_vm.init_register_unsafe(20, base);
 
         let err = aot.run_to_halt(&mut aot_vm, 10).unwrap_err().to_string();

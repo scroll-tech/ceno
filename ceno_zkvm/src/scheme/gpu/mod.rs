@@ -177,7 +177,8 @@ mod util;
 pub(crate) use memory::{
     check_gpu_mem_estimation, check_gpu_mem_estimation_with_context,
     check_gpu_tower_prove_mem_estimation_with_context, estimate_chip_proof_memory,
-    estimate_main_witness_bytes, estimate_tower_bytes, init_gpu_mem_tracker,
+    estimate_main_witness_bytes, estimate_tower_bytes, estimate_tower_peak_cells_for_rows,
+    init_gpu_mem_tracker,
 };
 use memory::{
     estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
