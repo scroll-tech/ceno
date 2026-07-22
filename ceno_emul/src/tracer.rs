@@ -163,9 +163,7 @@ impl ShardCostModel {
                     bucket => 1u64 << (bucket - 1),
                 };
                 let rotation_size = 1u64.checked_shl(spec.rotation.into()).unwrap_or(u64::MAX);
-                let domain_rows = padded_instances
-                    .checked_mul(rotation_size)
-                    .unwrap_or(u64::MAX);
+                let domain_rows = padded_instances.saturating_mul(rotation_size);
                 let trace_cells = domain_rows.saturating_mul(spec.trace_cells_per_row);
                 // Batched main sumcheck keeps one half-domain extension-field
                 // fold buffer for every witness, structural-witness, and fixed
@@ -2235,7 +2233,7 @@ mod tests {
         assert_eq!(model.chip_cost(0, 0).main_peak, 0);
         assert_eq!(model.chip_cost(0, 1).main_peak, 0);
         // Nine MLEs each allocate a half-domain Ext4 fold buffer.
-        assert_eq!(model.chip_cost(0, 2).main_peak, 9 * 1 * 4);
+        assert_eq!(model.chip_cost(0, 2).main_peak, 9 * 4);
         assert_eq!(model.chip_cost(0, 3).main_peak, 9 * 2 * 4);
         assert_eq!(model.chip_cost(0, 4).main_peak, 9 * 2 * 4);
         assert_eq!(model.chip_cost(0, 5).main_peak, 9 * 4 * 4);
