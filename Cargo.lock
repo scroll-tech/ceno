@@ -1035,7 +1035,7 @@ dependencies = [
 [[package]]
 name = "ceno_crypto_primitives"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#6e90bc85bceefe09003f84ca5cc1afbe2911a2db"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#48f82923063a75af9a8adb65949fe3ec6463e705"
 dependencies = [
  "ceno_syscall",
  "elliptic-curve",
@@ -1182,7 +1182,7 @@ dependencies = [
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#6e90bc85bceefe09003f84ca5cc1afbe2911a2db"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#48f82923063a75af9a8adb65949fe3ec6463e705"
 
 [[package]]
 name = "ceno_zkvm"
@@ -2926,7 +2926,7 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#17adc274db2fb10510449026ec785ae4fc234540"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#1f165141f9e6aee785381ec592447aeffcd2d666"
 dependencies = [
  "ceno_crypto_primitives",
  "ceno_syscall",
@@ -3891,7 +3891,7 @@ dependencies = [
 [[package]]
 name = "p256"
 version = "0.13.2"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#17adc274db2fb10510449026ec785ae4fc234540"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#1f165141f9e6aee785381ec592447aeffcd2d666"
 dependencies = [
  "ceno_crypto_primitives",
  "ceno_syscall",
@@ -4497,7 +4497,7 @@ dependencies = [
 [[package]]
 name = "primeorder"
 version = "0.13.6"
-source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#17adc274db2fb10510449026ec785ae4fc234540"
+source = "git+https://github.com/scroll-tech/elliptic-curves?branch=ceno%2Fk256-13.4#1f165141f9e6aee785381ec592447aeffcd2d666"
 dependencies = [
  "elliptic-curve",
 ]

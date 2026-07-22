@@ -21,9 +21,9 @@ use crate::{
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             ecall::{
                 Fp2AddInstruction, Fp2MulInstruction, FpAddInstruction, FpMulInstruction,
-                KeccakCoreInstruction, KeccakEcallInstruction, PubIoCommitInstruction,
-                Secp256k1InvInstruction, Secp256r1InvInstruction, ShaExtendInstruction,
-                Uint256MulInstruction, WeierstrassAddAssignInstruction,
+                KeccakCoreInstruction, KeccakEcallInstruction, KeccakXorinInstruction,
+                PubIoCommitInstruction, Secp256k1InvInstruction, Secp256r1InvInstruction,
+                ShaExtendInstruction, Uint256MulInstruction, WeierstrassAddAssignInstruction,
                 WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
@@ -47,10 +47,10 @@ use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
     Bn254FpMulSpec, ChipCostSpec,
     InsnKind::{self, *},
-    KeccakSpec, LogPcCycleSpec, Platform, PubIoCommitSpec, STATE_CONTINUATION, Secp256k1AddSpec,
-    Secp256k1DecompressSpec, Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec,
-    Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec, Sha256ExtendSpec, ShardCostModel,
-    StepCellExtractor, StepIndex, StepRecord, SyscallSpec, Uint256MulSpec, Word,
+    KeccakSpec, KeccakXorinSpec, LogPcCycleSpec, Platform, PubIoCommitSpec, STATE_CONTINUATION,
+    Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec,
+    Secp256r1AddSpec, Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec, Sha256ExtendSpec,
+    ShardCostModel, StepCellExtractor, StepIndex, StepRecord, SyscallSpec, Uint256MulSpec, Word,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;
@@ -185,6 +185,8 @@ pub struct Rv32imConfig<E: ExtensionField> {
         <KeccakEcallInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_core_config:
         <KeccakCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub keccak_xorin_config:
+        <KeccakXorinInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sha_extend_config: <ShaExtendInstruction<E> as Instruction<E>>::InstructionConfig,
     pub bn254_add_config:
         <WeierstrassAddAssignInstruction<E, SwCurve<Bn254>> as Instruction<E>>::InstructionConfig,
@@ -474,6 +476,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             chip_specs.push(chip_cost_spec(circuit_cs));
         }
         ecall_name_to_chips.insert(<KeccakCoreInstruction<E>>::name(), keccak_chips);
+        let keccak_xorin_config =
+            register_ecall_circuit!(KeccakXorinInstruction<E>, ecall_cells_map);
         let bn254_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
         let sha_extend_config = register_ecall_circuit!(ShaExtendInstruction<E>, ecall_cells_map);
         let bn254_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
@@ -507,6 +511,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         map_ecall(ECALL_PUB_IO_COMMIT, PubIoCommitInstruction::<E>::name());
         map_ecall(STATE_CONTINUATION, GlobalState::<E>::name());
         map_ecall(KeccakSpec::CODE, KeccakCoreInstruction::<E>::name());
+        map_ecall(KeccakXorinSpec::CODE, KeccakXorinInstruction::<E>::name());
         map_ecall(
             Bn254AddSpec::CODE,
             WeierstrassAddAssignInstruction::<E, SwCurve<Bn254>>::name(),
@@ -638,6 +643,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             state_continuation_config,
             keccak_ecall_config,
             keccak_core_config,
+            keccak_xorin_config,
             sha_extend_config,
             bn254_add_config,
             bn254_double_config,
@@ -736,6 +742,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<GlobalState<E>>(cs, &self.state_continuation_config);
         fixed.register_opcode_circuit::<KeccakEcallInstruction<E>>(cs, &self.keccak_ecall_config);
         fixed.register_opcode_circuit::<KeccakCoreInstruction<E>>(cs, &self.keccak_core_config);
+        fixed.register_opcode_circuit::<KeccakXorinInstruction<E>>(cs, &self.keccak_xorin_config);
         fixed.register_opcode_circuit::<ShaExtendInstruction<E>>(cs, &self.sha_extend_config);
         fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
             cs,
@@ -826,6 +833,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         log_ecall!("PUB_IO_COMMIT", ECALL_PUB_IO_COMMIT);
         log_ecall!("STATE_CONTINUATION", STATE_CONTINUATION);
         log_ecall!("KECCAK", KeccakSpec::CODE);
+        log_ecall!("KECCAK_XORIN", KeccakXorinSpec::CODE);
         log_ecall!("bn254_add_records", Bn254AddSpec::CODE);
         log_ecall!("bn254_double_records", Bn254DoubleSpec::CODE);
         log_ecall!("bn254_fp_add_records", Bn254FpAddSpec::CODE);
@@ -963,6 +971,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             KeccakCoreInstruction<E>,
             keccak_core_config,
             KeccakSpec::CODE
+        );
+        assign_ecall!(
+            KeccakXorinInstruction<E>,
+            keccak_xorin_config,
+            KeccakXorinSpec::CODE
         );
         assign_ecall!(
             WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>,
@@ -1257,6 +1270,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             KeccakSpec::CODE => *self
                 .ecall_cells_map
                 .get(&KeccakCoreInstruction::<E>::name())
+                .expect("unable to find name"),
+            KeccakXorinSpec::CODE => *self
+                .ecall_cells_map
+                .get(&KeccakXorinInstruction::<E>::name())
                 .expect("unable to find name"),
             Bn254AddSpec::CODE => *self
                 .ecall_cells_map
