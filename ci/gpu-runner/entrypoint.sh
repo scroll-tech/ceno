@@ -3,47 +3,40 @@
 #
 # Differs from the ceno-reth-benchmark reference entrypoint in one way: instead
 # of taking a hard-coded RUNNER_TOKEN (which GitHub expires after ~1h and would
-# make an auto-restart fail), it mints a FRESH registration token from the
-# GitHub API on every start using a stored PAT. That is what lets the cron
-# watchdog restart this container indefinitely. It also runs an EPHEMERAL runner
-# (exits cleanly after one job) so no state leaks between CI runs.
+# make an auto-restart fail), start-runner.sh mints a FRESH registration token
+# from the GitHub API on every start. The long-lived PAT stays on the host; this
+# container receives only the short-lived registration token. That is what lets
+# the cron watchdog restart this container indefinitely. It also runs an
+# EPHEMERAL runner (exits cleanly after one job) so no state leaks between CI
+# runs.
 #
 # Required env:
-#   GITHUB_PAT   - classic PAT with `repo` scope, or fine-grained token with
-#                  "Administration: read/write" on the repo. Used only to mint a
-#                  runner registration token, then removed from the job env.
 #   REPO_URL     - e.g. https://github.com/scroll-tech/ceno
 # Optional env:
 #   RUNNER_NAME  - defaults to gpu-<short-hostname>
 #   RUNNER_LABELS- defaults to "self-hosted,Linux,X64,gpu"
 set -euo pipefail
 
-: "${GITHUB_PAT:?set GITHUB_PAT}"
 : "${REPO_URL:?set REPO_URL, e.g. https://github.com/scroll-tech/ceno}"
 
 RUNNER_NAME="${RUNNER_NAME:-gpu-$(hostname | cut -c1-12)}"
 RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,Linux,X64,gpu}"
+TOKEN_FILE="/run/runner-registration-token/token"
 RUNNER_DIR="/home/docker/actions-runner"
 cd "${RUNNER_DIR}"
 
-# REPO_URL -> owner/repo
-REPO_PATH="$(echo "${REPO_URL}" | sed -E 's#https?://[^/]+/##; s#\.git$##')"
-API="https://api.github.com/repos/${REPO_PATH}/actions/runners"
-
-echo "[entrypoint] requesting registration token for ${REPO_PATH} ..."
-REG_TOKEN="$(curl -fsSL -X POST \
-    -H "Authorization: Bearer ${GITHUB_PAT}" \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "${API}/registration-token" | jq -r .token)"
-
-if [[ -z "${REG_TOKEN}" || "${REG_TOKEN}" == "null" ]]; then
-    echo "[entrypoint] ERROR: could not obtain registration token (check PAT scope/REPO_URL)" >&2
+if [[ ! -f "${TOKEN_FILE}" ]]; then
+    echo "[entrypoint] ERROR: registration token file not found at ${TOKEN_FILE}" >&2
     exit 1
 fi
 
-# Do not pass the long-lived PAT into the Actions runner or any job steps.
-unset GITHUB_PAT
+REG_TOKEN="$(<"${TOKEN_FILE}")"
+rm -f "${TOKEN_FILE}" || true
+
+if [[ -z "${REG_TOKEN}" || "${REG_TOKEN}" == "null" ]]; then
+    echo "[entrypoint] ERROR: registration token file was empty" >&2
+    exit 1
+fi
 
 cleanup() {
     echo "[entrypoint] de-registering runner ..."
