@@ -78,16 +78,16 @@ macro_rules! ceno_crypto {
         }
 
         #[allow(dead_code)]
-        fn __map_err(e: $crate::CenoCryptoError) -> __rp::PrecompileError {
+        fn __map_err(e: $crate::CenoCryptoError) -> __rp::PrecompileHalt {
             match e {
                 $crate::CenoCryptoError::Bn254FieldPointNotAMember => {
-                    __rp::PrecompileError::Bn254FieldPointNotAMember
+                    __rp::PrecompileHalt::Bn254FieldPointNotAMember
                 }
                 $crate::CenoCryptoError::Bn254AffineGFailedToCreate => {
-                    __rp::PrecompileError::Bn254AffineGFailedToCreate
+                    __rp::PrecompileHalt::Bn254AffineGFailedToCreate
                 }
-                $crate::CenoCryptoError::Bn254PairLength => __rp::PrecompileError::Bn254PairLength,
-                _ => __rp::PrecompileError::Other(e.to_string()),
+                $crate::CenoCryptoError::Bn254PairLength => __rp::PrecompileHalt::Bn254PairLength,
+                _ => __rp::PrecompileHalt::other(e.to_string()),
             }
         }
 
@@ -103,7 +103,7 @@ macro_rules! ceno_crypto {
                 &self,
                 p1: &[u8],
                 p2: &[u8],
-            ) -> Result<[u8; 64], __rp::PrecompileError> {
+            ) -> Result<[u8; 64], __rp::PrecompileHalt> {
                 $crate::bn254::g1_point_add(p1, p2).map_err(__map_err)
             }
             #[inline]
@@ -111,14 +111,14 @@ macro_rules! ceno_crypto {
                 &self,
                 point: &[u8],
                 scalar: &[u8],
-            ) -> Result<[u8; 64], __rp::PrecompileError> {
+            ) -> Result<[u8; 64], __rp::PrecompileHalt> {
                 $crate::bn254::g1_point_mul(point, scalar).map_err(__map_err)
             }
             #[inline]
             fn bn254_pairing_check(
                 &self,
                 pairs: &[(&[u8], &[u8])],
-            ) -> Result<bool, __rp::PrecompileError> {
+            ) -> Result<bool, __rp::PrecompileHalt> {
                 $crate::bn254::pairing_check(pairs).map_err(__map_err)
             }
             #[inline]
@@ -127,7 +127,7 @@ macro_rules! ceno_crypto {
                 sig: &[u8; 64],
                 recid: u8,
                 msg: &[u8; 32],
-            ) -> Result<[u8; 32], __rp::PrecompileError> {
+            ) -> Result<[u8; 32], __rp::PrecompileHalt> {
                 $crate::secp256k1::secp256k1_ecrecover(sig, recid, msg).map_err(__map_err)
             }
             #[inline]
@@ -156,6 +156,19 @@ macro_rules! ceno_crypto {
                 )
                 .map(|res| Address::from_slice(&res[12..]))
                 .map_err(__ac::crypto::RecoveryError::from_source)
+            }
+
+            #[inline]
+            fn verify_and_compute_signer_unchecked(
+                &self,
+                pubkey: &[u8; 65],
+                sig: &[u8; 64],
+                msg: &[u8; 32],
+            ) -> Result<$addr, __ac::crypto::RecoveryError> {
+                use $addr as Address;
+                $crate::secp256k1::verify_and_compute_signer_unchecked(pubkey, sig, msg)
+                    .map(|res| Address::from_slice(&res[12..]))
+                    .map_err(__ac::crypto::RecoveryError::from_source)
             }
         }
     };
