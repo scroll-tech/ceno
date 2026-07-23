@@ -1,8 +1,8 @@
 use std::{array, marker::PhantomData};
 
 use ceno_emul::{
-    ByteAddr, Change, InsnKind, KECCAK_RATE_WORDS, KECCAK_XORIN, Platform, StepRecord, WORD_SIZE,
-    WriteOp,
+    ByteAddr, Change, FullTracer as Tracer, InsnKind, KECCAK_RATE_WORDS, KECCAK_XORIN, Platform,
+    StepRecord, WORD_SIZE, WriteOp,
 };
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::Itertools;
@@ -23,7 +23,7 @@ use crate::{
             insn_base::{MemAddr, StateInOut, WriteMEM},
         },
     },
-    structs::ProgramParams,
+    structs::{ProgramParams, RAMType},
     tables::InsnRecord,
     uint::Value,
     witness::LkMultiplicity,
@@ -297,6 +297,56 @@ impl<E: ExtensionField> Instruction<E> for KeccakXorinInstruction<E> {
             writer.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)?;
         }
         lk_multiplicity.fetch(step.pc().before.0);
+        Ok(())
+    }
+
+    fn collect_lk_and_shardram(
+        _config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        _lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let syscall_witnesses = shard_ctx.syscall_witnesses.clone();
+        let ops = step
+            .syscall(&syscall_witnesses)
+            .expect("Keccak XOR-in syscall step");
+        assert_eq!(ops.reg_ops.len(), 2);
+        assert_eq!(ops.mem_ops.len(), KECCAK_RATE_WORDS * 2);
+
+        shard_ctx.send(
+            RAMType::Register,
+            Platform::register_vma(Platform::reg_ecall()).into(),
+            Platform::reg_ecall() as u64,
+            step.cycle() + Tracer::SUBCYCLE_RS1,
+            step.rs1().unwrap().previous_cycle,
+            KECCAK_XORIN,
+            None,
+        );
+        for (reg_id, op) in [Platform::reg_arg0(), Platform::reg_arg1()]
+            .into_iter()
+            .zip_eq(&ops.reg_ops)
+        {
+            shard_ctx.send(
+                RAMType::Register,
+                op.addr,
+                reg_id as u64,
+                step.cycle() + Tracer::SUBCYCLE_RD,
+                op.previous_cycle,
+                op.value.after,
+                None,
+            );
+        }
+        for op in &ops.mem_ops {
+            shard_ctx.send(
+                RAMType::Memory,
+                op.addr,
+                op.addr.baddr().0 as u64,
+                step.cycle() + Tracer::SUBCYCLE_MEM,
+                op.previous_cycle,
+                op.value.after,
+                Some(op.value.before),
+            );
+        }
         Ok(())
     }
 }

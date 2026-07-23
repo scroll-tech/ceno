@@ -37,7 +37,9 @@ use crate::{
     },
     scheme::constants::DYNAMIC_RANGE_MAX_BITS,
     state::GlobalState,
-    structs::{ComposedConstrainSystem, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    structs::{
+        ComposedConstrainSystem, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses,
+    },
     tables::{
         AndTableCircuit, DoubleU8TableCircuit, DynamicRangeTableCircuit, LtuTableCircuit,
         OrTableCircuit, TableCircuit, XorTableCircuit,
@@ -45,7 +47,7 @@ use crate::{
 };
 use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
-    Bn254FpMulSpec, ChipCostSpec,
+    Bn254FpMulSpec, ChipCostSpec, FullTracer as Tracer,
     InsnKind::{self, *},
     KeccakSpec, KeccakXorinSpec, LogPcCycleSpec, Platform, PubIoCommitSpec, STATE_CONTINUATION,
     Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec,
@@ -1077,6 +1079,213 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_table!(PowTableCircuit<E>, &self.pow_config);
 
         Ok(())
+    }
+
+    pub fn collect_step_shardram(
+        &self,
+        shard_ctx: &mut ShardContext,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let mut lk_multiplicity = crate::witness::LkMultiplicity::default();
+
+        macro_rules! collect {
+            ($instruction:ty, $config:ident) => {{
+                <$instruction>::collect_lk_and_shardram(
+                    &self.$config,
+                    shard_ctx,
+                    &mut lk_multiplicity,
+                    step,
+                )?;
+            }};
+        }
+
+        macro_rules! collect_ecall {
+            ($instruction:ty, $config:ident) => {{
+                if let Err(err) = <$instruction>::collect_lk_and_shardram(
+                    &self.$config,
+                    shard_ctx,
+                    &mut lk_multiplicity,
+                    step,
+                ) {
+                    if is_missing_lightweight_collector(&err) {
+                        collect_generic_ecall_shardram(shard_ctx, step);
+                    } else {
+                        return Err(err);
+                    }
+                }
+            }};
+        }
+
+        match step.insn.kind {
+            ADD => collect!(AddInstruction<E>, add_config),
+            SUB => collect!(SubInstruction<E>, sub_config),
+            AND => collect!(AndInstruction<E>, and_config),
+            OR => collect!(OrInstruction<E>, or_config),
+            XOR => collect!(XorInstruction<E>, xor_config),
+            SLL => collect!(SllInstruction<E>, sll_config),
+            SRL => collect!(SrlInstruction<E>, srl_config),
+            SRA => collect!(SraInstruction<E>, sra_config),
+            SLT => collect!(SltInstruction<E>, slt_config),
+            SLTU => collect!(SltuInstruction<E>, sltu_config),
+            MUL => collect!(MulInstruction<E>, mul_config),
+            MULH => collect!(MulhInstruction<E>, mulh_config),
+            MULHSU => collect!(MulhsuInstruction<E>, mulhsu_config),
+            MULHU => collect!(MulhuInstruction<E>, mulhu_config),
+            DIVU => collect!(DivuInstruction<E>, divu_config),
+            REMU => collect!(RemuInstruction<E>, remu_config),
+            DIV => collect!(DivInstruction<E>, div_config),
+            REM => collect!(RemInstruction<E>, rem_config),
+            ADDI => collect!(AddiInstruction<E>, addi_config),
+            ANDI => collect!(AndiInstruction<E>, andi_config),
+            ORI => collect!(OriInstruction<E>, ori_config),
+            XORI => collect!(XoriInstruction<E>, xori_config),
+            SLLI => collect!(SlliInstruction<E>, slli_config),
+            SRLI => collect!(SrliInstruction<E>, srli_config),
+            SRAI => collect!(SraiInstruction<E>, srai_config),
+            SLTI => collect!(SltiInstruction<E>, slti_config),
+            SLTIU => collect!(SltiuInstruction<E>, sltiu_config),
+            #[cfg(feature = "u16limb_circuit")]
+            LUI => collect!(LuiInstruction<E>, lui_config),
+            #[cfg(feature = "u16limb_circuit")]
+            AUIPC => collect!(AuipcInstruction<E>, auipc_config),
+            BEQ => collect!(BeqInstruction<E>, beq_config),
+            BNE => collect!(BneInstruction<E>, bne_config),
+            BLT => collect!(BltInstruction<E>, blt_config),
+            BLTU => collect!(BltuInstruction<E>, bltu_config),
+            BGE => collect!(BgeInstruction<E>, bge_config),
+            BGEU => collect!(BgeuInstruction<E>, bgeu_config),
+            JAL => collect!(JalInstruction<E>, jal_config),
+            JALR => collect!(JalrInstruction<E>, jalr_config),
+            LW => collect!(LwInstruction<E>, lw_config),
+            LB => collect!(LbInstruction<E>, lb_config),
+            LBU => collect!(LbuInstruction<E>, lbu_config),
+            LH => collect!(LhInstruction<E>, lh_config),
+            LHU => collect!(LhuInstruction<E>, lhu_config),
+            SW => collect!(SwInstruction<E>, sw_config),
+            SH => collect!(ShInstruction<E>, sh_config),
+            SB => collect!(SbInstruction<E>, sb_config),
+            ECALL => {
+                let code = step
+                    .rs1()
+                    .expect("ecall requires rs1 to determine syscall code")
+                    .value;
+                match code {
+                    ECALL_HALT => collect_ecall!(HaltInstruction<E>, halt_config),
+                    ECALL_PUB_IO_COMMIT => {
+                        collect_ecall!(PubIoCommitInstruction<E>, pubio_commit_config)
+                    }
+                    STATE_CONTINUATION => collect_ecall!(GlobalState<E>, state_continuation_config),
+                    KeccakSpec::CODE => {
+                        collect_ecall!(KeccakEcallInstruction<E>, keccak_ecall_config);
+                    }
+                    KeccakXorinSpec::CODE => {
+                        collect_ecall!(KeccakXorinInstruction<E>, keccak_xorin_config)
+                    }
+                    Bn254AddSpec::CODE => collect_ecall!(
+                        WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>,
+                        bn254_add_config
+                    ),
+                    Bn254DoubleSpec::CODE => collect_ecall!(
+                        WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>,
+                        bn254_double_config
+                    ),
+                    Bn254FpAddSpec::CODE => {
+                        collect_ecall!(FpAddInstruction<E, Bn254BaseField>, bn254_fp_add_config)
+                    }
+                    Bn254FpMulSpec::CODE => {
+                        collect_ecall!(FpMulInstruction<E, Bn254BaseField>, bn254_fp_mul_config)
+                    }
+                    Bn254Fp2AddSpec::CODE => {
+                        collect_ecall!(Fp2AddInstruction<E, Bn254BaseField>, bn254_fp2_add_config)
+                    }
+                    Bn254Fp2MulSpec::CODE => {
+                        collect_ecall!(Fp2MulInstruction<E, Bn254BaseField>, bn254_fp2_mul_config)
+                    }
+                    Secp256k1AddSpec::CODE => collect_ecall!(
+                        WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>,
+                        secp256k1_add_config
+                    ),
+                    Secp256k1DoubleSpec::CODE => collect_ecall!(
+                        WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>,
+                        secp256k1_double_config
+                    ),
+                    Secp256k1ScalarInvertSpec::CODE => {
+                        collect_ecall!(Secp256k1InvInstruction<E>, secp256k1_scalar_invert)
+                    }
+                    Secp256k1DecompressSpec::CODE => collect_ecall!(
+                        WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>,
+                        secp256k1_decompress_config
+                    ),
+                    Secp256r1AddSpec::CODE => collect_ecall!(
+                        WeierstrassAddAssignInstruction<E, SwCurve<Secp256r1>>,
+                        secp256r1_add_config
+                    ),
+                    Secp256r1DoubleSpec::CODE => collect_ecall!(
+                        WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256r1>>,
+                        secp256r1_double_config
+                    ),
+                    Secp256r1ScalarInvertSpec::CODE => {
+                        collect_ecall!(Secp256r1InvInstruction<E>, secp256r1_scalar_invert)
+                    }
+                    Uint256MulSpec::CODE => {
+                        collect_ecall!(Uint256MulInstruction<E>, uint256_mul_config)
+                    }
+                    Sha256ExtendSpec::CODE => {
+                        collect_ecall!(ShaExtendInstruction<E>, sha_extend_config)
+                    }
+                    _ => collect_generic_ecall_shardram(shard_ctx, step),
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+}
+
+fn is_missing_lightweight_collector(err: &ZKVMError) -> bool {
+    matches!(err, ZKVMError::InvalidWitness(message) if message.contains("does not implement"))
+}
+
+fn collect_generic_ecall_shardram(shard_ctx: &mut ShardContext, step: &StepRecord) {
+    let Some(rs1) = step.rs1() else {
+        return;
+    };
+    shard_ctx.send(
+        RAMType::Register,
+        Platform::register_vma(Platform::reg_ecall()).into(),
+        Platform::reg_ecall() as u64,
+        step.cycle() + Tracer::SUBCYCLE_RS1,
+        rs1.previous_cycle,
+        rs1.value,
+        None,
+    );
+
+    let syscall_witnesses = shard_ctx.syscall_witnesses.clone();
+    let Some(syscall) = step.syscall(&syscall_witnesses) else {
+        return;
+    };
+    for op in &syscall.reg_ops {
+        shard_ctx.send(
+            RAMType::Register,
+            op.addr,
+            op.register_index() as u64,
+            step.cycle() + Tracer::SUBCYCLE_RD,
+            op.previous_cycle,
+            op.value.after,
+            None,
+        );
+    }
+    for op in &syscall.mem_ops {
+        shard_ctx.send(
+            RAMType::Memory,
+            op.addr,
+            op.addr.baddr().0 as u64,
+            step.cycle() + Tracer::SUBCYCLE_MEM,
+            op.previous_cycle,
+            op.value.after,
+            Some(op.value.before),
+        );
     }
 }
 
