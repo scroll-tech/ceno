@@ -2,7 +2,7 @@ use crate::CenoCryptoError;
 use ceno_keccak::{Hasher, Keccak};
 #[cfg(feature = "profiling")]
 use ceno_syscall::syscall_phantom_log_pc_cycle;
-use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
+use k256::ecdsa::{RecoveryId, Signature, VerifyingKey, signature::hazmat::PrehashVerifier};
 
 /// secp256k1 ECDSA signature recovery.
 #[inline]
@@ -44,5 +44,27 @@ pub fn secp256k1_ecrecover(
     hash[..12].fill(0);
     #[cfg(feature = "profiling")]
     syscall_phantom_log_pc_cycle("secp256k1_ecrecover end");
+    Ok(hash)
+}
+
+/// Verify a signature against an uncompressed public key and return its Ethereum address.
+#[inline]
+pub fn verify_and_compute_signer_unchecked(
+    pubkey: &[u8; 65],
+    sig: &[u8; 64],
+    msg: &[u8; 32],
+) -> Result<[u8; 32], CenoCryptoError> {
+    let verifying_key = VerifyingKey::from_sec1_bytes(pubkey)?;
+    let mut signature = Signature::from_slice(sig)?;
+    if let Some(normalized) = signature.normalize_s() {
+        signature = normalized;
+    }
+    verifying_key.verify_prehash(msg, &signature)?;
+
+    let mut hasher = Keccak::v256();
+    let mut hash = [0u8; 32];
+    hasher.update(&pubkey[1..]);
+    hasher.finalize(&mut hash);
+    hash[..12].fill(0);
     Ok(hash)
 }
