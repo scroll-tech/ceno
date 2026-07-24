@@ -19,8 +19,8 @@ p256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/
 thiserror.workspace = true
 
 [dev-dependencies]
-alloy-consensus = { version = "1.0", features = ["crypto-backend"] }
-alloy-primitives = "1.4"
+alloy-consensus = { version = "=2.0.5", features = ["crypto-backend"] }
+alloy-primitives = "=1.6.0"
 revm-precompile.workspace = true
 
 [features]

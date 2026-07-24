@@ -301,6 +301,50 @@ impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
             lk_multiplicity.into_finalize_result(),
         ))
     }
+
+    fn collect_lk_and_shardram(
+        _config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        _lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let syscall_witnesses = shard_ctx.syscall_witnesses.clone();
+        let ops = step
+            .syscall(&syscall_witnesses)
+            .expect("keccak syscall step");
+
+        shard_ctx.send(
+            RAMType::Register,
+            Platform::register_vma(Platform::reg_ecall()).into(),
+            Platform::reg_ecall() as u64,
+            step.cycle() + ceno_emul::FullTracer::SUBCYCLE_RS1,
+            step.rs1().unwrap().previous_cycle,
+            KECCAK_PERMUTE,
+            None,
+        );
+        shard_ctx.send(
+            RAMType::Register,
+            ops.reg_ops[0].addr,
+            Platform::reg_arg0() as u64,
+            step.cycle() + ceno_emul::FullTracer::SUBCYCLE_RD,
+            ops.reg_ops[0].previous_cycle,
+            ops.reg_ops[0].value.after,
+            None,
+        );
+        for op in &ops.mem_ops {
+            shard_ctx.send(
+                RAMType::Memory,
+                op.addr,
+                op.addr.baddr().0 as u64,
+                step.cycle() + ceno_emul::FullTracer::SUBCYCLE_MEM,
+                op.previous_cycle,
+                op.value.after,
+                Some(op.value.before),
+            );
+        }
+
+        Ok(())
+    }
 }
 
 impl<E: ExtensionField> Instruction<E> for KeccakCoreInstruction<E> {
