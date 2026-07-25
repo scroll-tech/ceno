@@ -3,6 +3,7 @@ use anyhow::Result;
 
 pub mod bn254;
 pub mod keccak_permute;
+pub mod keccak_xorin;
 pub mod phantom;
 pub mod pubio_commit;
 pub mod secp256k1;
@@ -14,7 +15,7 @@ pub mod uint256;
 
 pub use ceno_syscall::{
     BLS12381_ADD, BLS12381_DECOMPRESS, BLS12381_DOUBLE, BN254_ADD, BN254_DOUBLE, BN254_FP_ADD,
-    BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL, KECCAK_PERMUTE, PHANTOM_LOG_PC_CYCLE,
+    BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL, KECCAK_PERMUTE, KECCAK_XORIN, PHANTOM_LOG_PC_CYCLE,
     PUB_IO_COMMIT, SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SECP256K1_SCALAR_INVERT,
     SECP256R1_ADD, SECP256R1_DECOMPRESS, SECP256R1_DOUBLE, SECP256R1_SCALAR_INVERT, SHA_EXTEND,
     STATE_CONTINUATION, UINT256_MUL,
@@ -37,6 +38,7 @@ pub trait SyscallSpec {
 pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<SyscallEffects> {
     match function_code {
         KECCAK_PERMUTE => Ok(keccak_permute::keccak_permute(vm)),
+        KECCAK_XORIN => Ok(keccak_xorin::keccak_xorin(vm)),
         SECP256K1_ADD => Ok(secp256k1::secp256k1_add(vm)),
         SECP256K1_DOUBLE => Ok(secp256k1::secp256k1_double(vm)),
         SECP256K1_DECOMPRESS => Ok(secp256k1::secp256k1_decompress(vm)),

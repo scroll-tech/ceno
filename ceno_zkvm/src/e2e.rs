@@ -23,7 +23,7 @@ use crate::{
 };
 use ceno_emul::{
     Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, EmulatorBackend, FullTracer,
-    FullTracerConfig, IterAddresses, NextCycleAccess, Platform, PreflightTracer,
+    FullTracerConfig, InsnKind, IterAddresses, NextCycleAccess, Platform, PreflightTracer,
     PreflightTracerConfig, Program, RegIdx, StepCellExtractor, StepIndex, StepRecord,
     SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
     host_utils::read_all_messages,
@@ -42,9 +42,9 @@ use multilinear_extensions::util::max_usable_threads;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 #[cfg(debug_assertions)]
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     io::Write,
     marker::PhantomData,
     ops::Range,
@@ -358,6 +358,14 @@ impl<'a> ShardContext<'a> {
         }
     }
 
+    pub fn read_record_count(&self) -> usize {
+        self.read_records().iter().map(BTreeMap::len).sum()
+    }
+
+    pub fn write_record_count(&self) -> usize {
+        self.write_records().iter().map(BTreeMap::len).sum()
+    }
+
     #[inline(always)]
     pub fn is_first_shard(&self) -> bool {
         self.shard_id == 0
@@ -448,32 +456,47 @@ impl<'a> ShardContext<'a> {
 
     #[inline(always)]
     pub fn insert_read_record(&mut self, addr: WordAddr, record: RAMRecord) {
-        let ram_record = self
-            .read_records_tbs
-            .as_mut()
-            .right()
-            .expect("illegal type");
-        ram_record.insert(addr, record);
+        match &mut self.read_records_tbs {
+            Either::Left(records) => {
+                records
+                    .first_mut()
+                    .expect("read record storage must have at least one slot")
+                    .insert(addr, record);
+            }
+            Either::Right(records) => {
+                records.insert(addr, record);
+            }
+        }
     }
 
     #[inline(always)]
     pub fn insert_write_record(&mut self, addr: WordAddr, record: RAMRecord) {
-        let ram_record = self
-            .write_records_tbs
-            .as_mut()
-            .right()
-            .expect("illegal type");
-        ram_record.insert(addr, record);
+        match &mut self.write_records_tbs {
+            Either::Left(records) => {
+                records
+                    .first_mut()
+                    .expect("write record storage must have at least one slot")
+                    .insert(addr, record);
+            }
+            Either::Right(records) => {
+                records.insert(addr, record);
+            }
+        }
     }
 
     #[inline(always)]
     pub fn push_addr_accessed(&mut self, addr: WordAddr) {
-        let addr_accessed = self
-            .addr_accessed_tbs
-            .as_mut()
-            .right()
-            .expect("illegal type");
-        addr_accessed.push(addr);
+        match &mut self.addr_accessed_tbs {
+            Either::Left(addrs) => {
+                addrs
+                    .first_mut()
+                    .expect("address access storage must have at least one slot")
+                    .push(addr);
+            }
+            Either::Right(addrs) => {
+                addrs.push(addr);
+            }
+        }
     }
 
     #[inline(always)]
@@ -1789,6 +1812,522 @@ pub fn generate_witness<'a, E: ExtensionField>(
             Some((zkvm_witness, shard_ctx, pi, witgen_mem_baseline))
         })
     })
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ShardRamLightPcStat {
+    pub pc: Addr,
+    pub kind: String,
+    pub read_records: usize,
+    pub write_records: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ShardRamLightReport {
+    pub shard_id: usize,
+    pub step_count: usize,
+    pub cycle_range: Range<usize>,
+    pub heap_addr_range: Range<Addr>,
+    pub hint_addr_range: Range<Addr>,
+    pub read_records: usize,
+    pub write_records: usize,
+    pub first_shard_access_later_records: usize,
+    pub current_shard_access_later_records: usize,
+    pub total_records: usize,
+    pub final_mem_by_source: BTreeMap<&'static str, usize>,
+    pub top_pcs: Vec<ShardRamLightPcStat>,
+    pub top_memcpy_callers: Vec<ShardRamLightMemcpyCallerStat>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct PcShardRamDelta {
+    kind: String,
+    read_records: usize,
+    write_records: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ShardRamLightMemcpyCallerStat {
+    pub caller_pc: Addr,
+    pub calls: usize,
+    pub copied_bytes: u64,
+    pub read_records: usize,
+    pub write_records: usize,
+    pub old_source_loads: usize,
+    pub current_destination_stores: usize,
+    pub destination_access_later_words: usize,
+    pub max_len: u32,
+    pub sample_dst: Addr,
+    pub sample_src: Addr,
+}
+
+#[derive(Clone, Debug, Default)]
+struct MemcpyCallerDelta {
+    calls: usize,
+    copied_bytes: u64,
+    read_records: usize,
+    write_records: usize,
+    old_source_loads: usize,
+    current_destination_stores: usize,
+    dst_store_words: FxHashSet<WordAddr>,
+    destination_access_later_words: usize,
+    max_len: u32,
+    sample_dst: Addr,
+    sample_src: Addr,
+}
+
+#[derive(Clone, Debug)]
+struct ActiveMemcpyCall {
+    caller_pc: Addr,
+    dst: Addr,
+    src: Addr,
+    len: u32,
+    read_records: usize,
+    write_records: usize,
+    old_source_loads: usize,
+    current_destination_stores: usize,
+    dst_store_words: FxHashSet<WordAddr>,
+}
+
+impl ActiveMemcpyCall {
+    fn new(caller_pc: Addr, dst: Addr, src: Addr, len: u32) -> Self {
+        Self {
+            caller_pc,
+            dst,
+            src,
+            len,
+            read_records: 0,
+            write_records: 0,
+            old_source_loads: 0,
+            current_destination_stores: 0,
+            dst_store_words: FxHashSet::default(),
+        }
+    }
+}
+
+impl ShardRamLightReport {
+    fn log(&self) {
+        tracing::info!(
+            "[ceno] shard_ram_light shard_id={} steps={} cycles={:?} heap={:x}-{:x} hints={:x}-{:x} read={} write={} first_access_later={} current_access_later={} total={}",
+            self.shard_id,
+            self.step_count,
+            self.cycle_range,
+            self.heap_addr_range.start,
+            self.heap_addr_range.end,
+            self.hint_addr_range.start,
+            self.hint_addr_range.end,
+            self.read_records,
+            self.write_records,
+            self.first_shard_access_later_records,
+            self.current_shard_access_later_records,
+            self.total_records,
+        );
+        for (source, count) in &self.final_mem_by_source {
+            tracing::info!(
+                "[ceno] shard_ram_light_final_mem shard_id={} source={} count={}",
+                self.shard_id,
+                source,
+                count
+            );
+        }
+        for (rank, stat) in self.top_pcs.iter().enumerate() {
+            tracing::info!(
+                "[ceno] shard_ram_light_top_pc shard_id={} rank={} pc=0x{:08x} kind={} read={} write={} total={}",
+                self.shard_id,
+                rank + 1,
+                stat.pc,
+                stat.kind,
+                stat.read_records,
+                stat.write_records,
+                stat.read_records + stat.write_records,
+            );
+        }
+        for (rank, stat) in self.top_memcpy_callers.iter().enumerate() {
+            tracing::info!(
+                "[ceno] shard_ram_light_memcpy_caller shard_id={} rank={} caller_pc=0x{:08x} calls={} bytes={} read={} write={} total={} old_source_loads={} current_destination_stores={} destination_access_later_words={} max_len={} sample_dst=0x{:08x} sample_src=0x{:08x}",
+                self.shard_id,
+                rank + 1,
+                stat.caller_pc,
+                stat.calls,
+                stat.copied_bytes,
+                stat.read_records,
+                stat.write_records,
+                stat.read_records + stat.write_records,
+                stat.old_source_loads,
+                stat.current_destination_stores,
+                stat.destination_access_later_words,
+                stat.max_len,
+                stat.sample_dst,
+                stat.sample_src,
+            );
+        }
+    }
+}
+
+const MEMCPY_START_PC: Addr = 0x0800_0028;
+const MEMCPY_END_PC: Addr = MEMCPY_START_PC + 1036;
+const REG_RA: usize = 1;
+const REG_A0: usize = 10;
+const REG_A1: usize = 11;
+const REG_A2: usize = 12;
+
+#[allow(clippy::too_many_arguments)]
+pub fn analyze_shard_ram_light<E: ExtensionField>(
+    program_ctx: &E2EProgramCtx<E>,
+    init_mem_state: &InitMemState,
+    public_io_digest: [u32; 8],
+    max_steps: usize,
+    target_shard_id: Option<usize>,
+    top_pc_limit: usize,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    precompiled_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
+) -> Vec<ShardRamLightReport> {
+    let raw_step_cell_extractor = Arc::clone(&program_ctx.system_config.config);
+    let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
+    let mut emul_result = emulate_program(
+        program_ctx.program.clone(),
+        max_steps,
+        init_mem_state,
+        public_io_digest,
+        &program_ctx.platform,
+        &program_ctx.multi_prover,
+        step_cell_extractor,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        precompiled_aot,
+    );
+
+    assert!(
+        emul_result.executed_steps > 0,
+        "execution trace must contain at least one step"
+    );
+
+    let mut shard_ctx_builder = std::mem::take(&mut emul_result.shard_ctx_builder);
+    let mut step_iter = StepReplay::new(
+        program_ctx.platform.clone(),
+        program_ctx.program.clone(),
+        init_mem_state,
+        emul_result.executed_steps,
+        emul_result.max_step_shard,
+    );
+    let mut reports = Vec::new();
+
+    while let Some((mut shard_ctx, shard_summary)) =
+        shard_ctx_builder.position_next_shard(&mut step_iter, |_, _| {})
+    {
+        let shard_id = shard_ctx.shard_id;
+        shard_ctx.syscall_witnesses = Arc::new(step_iter.take_syscall_witnesses());
+        let shard_steps = step_iter.shard_steps();
+
+        if let Some(target) = target_shard_id {
+            if shard_id < target {
+                continue;
+            }
+            if shard_id > target {
+                break;
+            }
+        }
+
+        let mut pc_deltas: HashMap<Addr, PcShardRamDelta> = HashMap::new();
+        let mut memcpy_callers: HashMap<Addr, MemcpyCallerDelta> = HashMap::new();
+        let mut active_memcpy: Option<ActiveMemcpyCall> = None;
+        let mut regs = [0u32; VM_REG_COUNT];
+        for step in shard_steps {
+            let pc = step.pc().before.0;
+            if active_memcpy.is_some() && !is_memcpy_pc(pc) {
+                flush_memcpy_call(&mut memcpy_callers, active_memcpy.take().unwrap());
+            }
+            if pc == MEMCPY_START_PC {
+                active_memcpy = Some(ActiveMemcpyCall::new(
+                    regs[REG_RA].saturating_sub(WORD_SIZE as u32),
+                    regs[REG_A0],
+                    regs[REG_A1],
+                    regs[REG_A2],
+                ));
+            }
+
+            let before_reads = shard_ctx.read_record_count();
+            let before_writes = shard_ctx.write_record_count();
+            program_ctx
+                .system_config
+                .config
+                .collect_step_shardram(&mut shard_ctx, step)
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "lightweight shardram collection failed at shard {shard_id}, pc=0x{pc:08x}: {err:?}"
+                    )
+                });
+            let read_delta = shard_ctx.read_record_count().saturating_sub(before_reads);
+            let write_delta = shard_ctx.write_record_count().saturating_sub(before_writes);
+            if read_delta != 0 || write_delta != 0 {
+                let entry = pc_deltas.entry(pc).or_insert_with(|| PcShardRamDelta {
+                    kind: step.insn.kind.to_string(),
+                    ..Default::default()
+                });
+                entry.read_records += read_delta;
+                entry.write_records += write_delta;
+            }
+            if let Some(call) = active_memcpy.as_mut() {
+                call.read_records += read_delta;
+                call.write_records += write_delta;
+                collect_memcpy_memory_evidence(
+                    call,
+                    step,
+                    shard_ctx.cur_shard_cycle_range.start as Cycle,
+                    &shard_ctx.shard_heap_addr_range,
+                );
+            }
+            if let Some(rd) = step.rd() {
+                let reg_idx = rd.register_index() as usize;
+                if reg_idx < regs.len() {
+                    regs[reg_idx] = rd.value.after;
+                }
+            }
+        }
+        if let Some(call) = active_memcpy.take() {
+            flush_memcpy_call(&mut memcpy_callers, call);
+        }
+
+        let read_records = shard_ctx.read_record_count();
+        let write_records = shard_ctx.write_record_count();
+        let (
+            first_shard_access_later_records,
+            current_shard_access_later_records,
+            final_mem_by_source,
+        ) = count_final_mem_access_later(&shard_ctx, &emul_result.final_mem_state);
+
+        mark_memcpy_destination_access_later(
+            &mut memcpy_callers,
+            shard_ctx.cur_shard_cycle_range.end as Cycle,
+            &emul_result.final_mem_state,
+        );
+
+        let mut top_pcs = pc_deltas
+            .into_iter()
+            .map(|(pc, delta)| ShardRamLightPcStat {
+                pc,
+                kind: delta.kind,
+                read_records: delta.read_records,
+                write_records: delta.write_records,
+            })
+            .collect::<Vec<_>>();
+        top_pcs.sort_by(|a, b| {
+            (b.read_records + b.write_records)
+                .cmp(&(a.read_records + a.write_records))
+                .then_with(|| b.read_records.cmp(&a.read_records))
+                .then_with(|| a.pc.cmp(&b.pc))
+        });
+        top_pcs.truncate(top_pc_limit);
+        let mut top_memcpy_callers = memcpy_callers
+            .into_iter()
+            .map(|(caller_pc, delta)| ShardRamLightMemcpyCallerStat {
+                caller_pc,
+                calls: delta.calls,
+                copied_bytes: delta.copied_bytes,
+                read_records: delta.read_records,
+                write_records: delta.write_records,
+                old_source_loads: delta.old_source_loads,
+                current_destination_stores: delta.current_destination_stores,
+                destination_access_later_words: delta.destination_access_later_words,
+                max_len: delta.max_len,
+                sample_dst: delta.sample_dst,
+                sample_src: delta.sample_src,
+            })
+            .collect::<Vec<_>>();
+        top_memcpy_callers.sort_by(|a, b| {
+            (b.read_records + b.write_records)
+                .cmp(&(a.read_records + a.write_records))
+                .then_with(|| {
+                    b.destination_access_later_words
+                        .cmp(&a.destination_access_later_words)
+                })
+                .then_with(|| b.copied_bytes.cmp(&a.copied_bytes))
+                .then_with(|| a.caller_pc.cmp(&b.caller_pc))
+        });
+        top_memcpy_callers.truncate(top_pc_limit);
+
+        let report = ShardRamLightReport {
+            shard_id,
+            step_count: shard_summary.step_count,
+            cycle_range: shard_ctx.cur_shard_cycle_range.clone(),
+            heap_addr_range: shard_ctx.shard_heap_addr_range.clone(),
+            hint_addr_range: shard_ctx.shard_hint_addr_range.clone(),
+            read_records,
+            write_records,
+            first_shard_access_later_records,
+            current_shard_access_later_records,
+            total_records: read_records
+                + write_records
+                + first_shard_access_later_records
+                + current_shard_access_later_records,
+            final_mem_by_source,
+            top_pcs,
+            top_memcpy_callers,
+        };
+        report.log();
+        reports.push(report);
+
+        if target_shard_id == Some(shard_id) {
+            break;
+        }
+    }
+
+    reports
+}
+
+fn is_memcpy_pc(pc: Addr) -> bool {
+    (MEMCPY_START_PC..MEMCPY_END_PC).contains(&pc)
+}
+
+fn is_load_kind(kind: InsnKind) -> bool {
+    matches!(
+        kind,
+        InsnKind::LB | InsnKind::LH | InsnKind::LW | InsnKind::LBU | InsnKind::LHU
+    )
+}
+
+fn is_store_kind(kind: InsnKind) -> bool {
+    matches!(kind, InsnKind::SB | InsnKind::SH | InsnKind::SW)
+}
+
+fn word_addr_in_byte_range(addr: WordAddr, start: Addr, len: u32) -> bool {
+    let byte_addr = u32::from(addr);
+    byte_addr >= start && byte_addr < start.saturating_add(len)
+}
+
+fn collect_memcpy_memory_evidence(
+    call: &mut ActiveMemcpyCall,
+    step: &StepRecord,
+    shard_start_cycle: Cycle,
+    shard_heap_addr_range: &Range<Addr>,
+) {
+    let Some(memory_op) = step.memory_op() else {
+        return;
+    };
+
+    if is_load_kind(step.insn.kind)
+        && memory_op.previous_cycle < shard_start_cycle
+        && word_addr_in_byte_range(memory_op.addr, call.src, call.len)
+    {
+        call.old_source_loads += 1;
+    }
+
+    if is_store_kind(step.insn.kind) && word_addr_in_byte_range(memory_op.addr, call.dst, call.len)
+    {
+        let byte_addr = u32::from(memory_op.addr);
+        if shard_heap_addr_range.contains(&byte_addr) {
+            call.current_destination_stores += 1;
+        }
+        call.dst_store_words.insert(memory_op.addr);
+    }
+}
+
+fn flush_memcpy_call(
+    memcpy_callers: &mut HashMap<Addr, MemcpyCallerDelta>,
+    call: ActiveMemcpyCall,
+) {
+    let entry = memcpy_callers.entry(call.caller_pc).or_default();
+    entry.calls += 1;
+    entry.copied_bytes += call.len as u64;
+    entry.read_records += call.read_records;
+    entry.write_records += call.write_records;
+    entry.old_source_loads += call.old_source_loads;
+    entry.current_destination_stores += call.current_destination_stores;
+    entry.max_len = entry.max_len.max(call.len);
+    if entry.sample_dst == 0 {
+        entry.sample_dst = call.dst;
+        entry.sample_src = call.src;
+    }
+    entry.dst_store_words.extend(call.dst_store_words);
+}
+
+fn mark_memcpy_destination_access_later(
+    memcpy_callers: &mut HashMap<Addr, MemcpyCallerDelta>,
+    shard_end_cycle: Cycle,
+    final_mem_state: &FinalMemState,
+) {
+    let access_later_words = final_mem_state
+        .heap
+        .iter()
+        .filter(|record| record.cycle >= shard_end_cycle)
+        .map(|record| WordAddr::from(record.addr))
+        .collect::<FxHashSet<_>>();
+
+    for delta in memcpy_callers.values_mut() {
+        delta.destination_access_later_words = delta
+            .dst_store_words
+            .iter()
+            .filter(|addr| access_later_words.contains(addr))
+            .count();
+    }
+}
+
+fn count_final_mem_access_later(
+    shard_ctx: &ShardContext,
+    final_mem_state: &FinalMemState,
+) -> (usize, usize, BTreeMap<&'static str, usize>) {
+    let addr_accessed = shard_ctx.get_addr_accessed();
+    let mut by_source = BTreeMap::new();
+    let first = if shard_ctx.is_first_shard() {
+        [
+            ("reg", None, final_mem_state.reg.as_slice()),
+            ("mem", None, final_mem_state.mem.as_slice()),
+            ("stack", None, final_mem_state.stack.as_slice()),
+        ]
+        .into_iter()
+        .map(|(name, range, records)| {
+            let count = count_final_mem_source(shard_ctx, &addr_accessed, range, records);
+            if count != 0 {
+                by_source.insert(name, count);
+            }
+            count
+        })
+        .sum()
+    } else {
+        0
+    };
+
+    let heap_range = shard_ctx.shard_heap_addr_range.clone();
+    let hint_range = shard_ctx.shard_hint_addr_range.clone();
+    let current = [
+        ("heap", Some(heap_range), final_mem_state.heap.as_slice()),
+        ("hints", Some(hint_range), final_mem_state.hints.as_slice()),
+    ]
+    .into_iter()
+    .map(|(name, range, records)| {
+        let count = count_final_mem_source(shard_ctx, &addr_accessed, range, records);
+        if count != 0 {
+            *by_source.entry(name).or_default() += count;
+        }
+        count
+    })
+    .sum();
+
+    (first, current, by_source)
+}
+
+fn count_final_mem_source(
+    shard_ctx: &ShardContext,
+    addr_accessed: &FxHashSet<WordAddr>,
+    range: Option<Range<Addr>>,
+    records: &[MemFinalRecord],
+) -> usize {
+    records
+        .iter()
+        .filter(|record| {
+            let (waddr, addr) = match record.ram_type {
+                RAMType::Register => (
+                    Platform::register_vma(record.addr as RegIdx).into(),
+                    record.addr,
+                ),
+                RAMType::Memory => (record.addr.into(), record.addr),
+                _ => unimplemented!(),
+            };
+            if range.as_ref().is_some_and(|range| !range.contains(&addr)) {
+                return false;
+            }
+            !addr_accessed.contains(&waddr) && shard_ctx.after_current_shard_cycle(record.cycle)
+        })
+        .count()
 }
 
 #[cfg(feature = "gpu")]

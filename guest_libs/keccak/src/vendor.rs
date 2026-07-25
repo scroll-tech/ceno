@@ -1,6 +1,6 @@
 //! Private types and traits copied from the `tiny-keccak`.
 
-use ceno_syscall::KECCAK_STATE_WORDS;
+use ceno_syscall::{KECCAK_RATE_WORDS, KECCAK_STATE_WORDS, syscall_keccak_xorin};
 
 pub mod keccak;
 
@@ -25,6 +25,27 @@ impl Buffer {
     }
 
     pub fn xorin(&mut self, src: &[u8], offset: usize, len: usize) {
+        if len == 0 {
+            return;
+        }
+
+        // The accelerated syscall covers Keccak's 136-byte rate. Keep the
+        // generic path for the 144-byte Keccak-224 rate.
+        if offset + len <= KECCAK_RATE_WORDS * 4 {
+            let mut block = [0u32; KECCAK_RATE_WORDS];
+            // SAFETY: `block` is contiguous, aligned storage with exactly the
+            // byte length represented by this slice.
+            let block_bytes = unsafe {
+                core::slice::from_raw_parts_mut(
+                    block.as_mut_ptr().cast::<u8>(),
+                    KECCAK_RATE_WORDS * 4,
+                )
+            };
+            block_bytes[offset..offset + len].copy_from_slice(&src[..len]);
+            syscall_keccak_xorin(&mut self.0, &block);
+            return;
+        }
+
         self.execute(offset, len, |dst| {
             assert!(dst.len() <= src.len());
             let len = dst.len();

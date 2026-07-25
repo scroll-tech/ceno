@@ -160,6 +160,11 @@ _start:
     ",
 );
 
+// Provide a strong, universally linked RV32IM memcpy implementation so guest programs do not
+// fall back to compiler-builtins' byte-oriented wrapper.
+#[cfg(target_arch = "riscv32")]
+global_asm!(include_str!("memcpy.s"));
+
 unsafe extern "C" {
     // The address of this variable is the start of the stack (growing downwards).
     static _stack_start: u8;

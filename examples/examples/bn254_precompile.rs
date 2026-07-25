@@ -6,7 +6,7 @@ extern crate ceno_rt;
 use alloy_primitives::hex;
 use ceno_crypto::ceno_crypto;
 use revm_precompile::{
-    PrecompileError,
+    PrecompileHalt,
     bn254::{add::*, mul::*, pair::*, *},
 };
 
@@ -70,7 +70,7 @@ fn test_bn254_add() {
 
     let res = run_add(&input, BYZANTIUM_ADD_GAS_COST, 499);
 
-    assert!(matches!(res, Err(PrecompileError::OutOfGas)));
+    assert!(matches!(res, Err(PrecompileHalt::OutOfGas)));
 
     // No input test
     let input = [0u8; 0];
@@ -97,7 +97,7 @@ fn test_bn254_add() {
     let res = run_add(&input, BYZANTIUM_ADD_GAS_COST, 500);
     assert!(matches!(
         res,
-        Err(PrecompileError::Bn254AffineGFailedToCreate)
+        Err(PrecompileHalt::Bn254AffineGFailedToCreate)
     ));
 }
 
@@ -129,7 +129,7 @@ fn test_bn254_mul() {
     .unwrap();
 
     let res = run_mul(&input, BYZANTIUM_MUL_GAS_COST, 39_999);
-    assert!(matches!(res, Err(PrecompileError::OutOfGas)));
+    assert!(matches!(res, Err(PrecompileHalt::OutOfGas)));
 
     // Zero multiplication test
     let input = hex::decode(
@@ -173,7 +173,7 @@ fn test_bn254_mul() {
     let res = run_mul(&input, BYZANTIUM_MUL_GAS_COST, 40_000);
     assert!(matches!(
         res,
-        Err(PrecompileError::Bn254AffineGFailedToCreate)
+        Err(PrecompileHalt::Bn254AffineGFailedToCreate)
     ));
 }
 
@@ -230,7 +230,7 @@ fn test_bn254_pair() {
         BYZANTIUM_PAIR_BASE,
         259_999,
     );
-    assert!(matches!(res, Err(PrecompileError::OutOfGas)));
+    assert!(matches!(res, Err(PrecompileHalt::OutOfGas)));
 
     // No input test
     let input = [0u8; 0];
@@ -266,7 +266,7 @@ fn test_bn254_pair() {
     );
     assert!(matches!(
         res,
-        Err(PrecompileError::Bn254AffineGFailedToCreate)
+        Err(PrecompileHalt::Bn254AffineGFailedToCreate)
     ));
 
     // Invalid input length
@@ -285,7 +285,7 @@ fn test_bn254_pair() {
         BYZANTIUM_PAIR_BASE,
         260_000,
     );
-    assert!(matches!(res, Err(PrecompileError::Bn254PairLength)));
+    assert!(matches!(res, Err(PrecompileHalt::Bn254PairLength)));
 
     // Test with point at infinity - should return true (identity element)
     // G1 point at infinity (0,0) followed by a valid G2 point
