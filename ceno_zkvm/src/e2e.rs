@@ -968,8 +968,6 @@ pub fn emulate_program<'a>(
         multi_prover.max_cycle_per_shard,
     )
     .with_step_cell_extractor(step_cell_extractor);
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    let profile_tracer_config = tracer_config.clone();
     let preflight_program = program.clone();
     let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
         .in_scope(move || {
@@ -990,19 +988,12 @@ pub fn emulate_program<'a>(
         EmulatorBackend::Aot => match precompiled_aot {
             Some(aot) => Some(aot),
             None => {
-                // Preflight AOT compiles static blocks plus hot dynamic roots sampled
-                // from an interpreter pass over the same initial hint memory.
-                let roots = ceno_emul::aot::sample_preflight_roots(
+                let aot = ceno_emul::aot::AotProgram::load_or_train_preflight(
                     platform,
                     program.clone(),
                     hints_init
                         .iter()
                         .map(|record| (record.addr.into(), record.value)),
-                    profile_tracer_config,
-                );
-                let aot = ceno_emul::aot::AotProgram::compile_preflight_direct_with_extra_roots(
-                    program.clone(),
-                    roots,
                 )
                 .unwrap_or_else(|err| panic!("AOT compile failed during preflight: {err}"));
                 let report = aot.report();
@@ -1047,11 +1038,15 @@ pub fn emulate_program<'a>(
                         .run_to_halt(&mut vm, max_steps)
                         .unwrap_or_else(|err| panic!("AOT emulator trapped before halt: {err}"));
                     tracing::info!(
-                        "AOT preflight executed {} instructions in {:?}; fallback_steps={} ({:.2}%)",
+                        "AOT preflight executed {} instructions in {:?}; fallback_steps={} ({:.2}%); dynamic_pc={} memory_guard={} ecall_by_code={:?} exceptional={}",
                         report.executed_steps,
                         report.execute_time,
                         report.fallback_steps,
-                        report.fallback_steps as f64 * 100.0 / report.executed_steps.max(1) as f64
+                        report.fallback_steps as f64 * 100.0 / report.executed_steps.max(1) as f64,
+                        report.fallback.dynamic_pc_miss,
+                        report.fallback.memory_guard,
+                        report.fallback.ecall_by_code,
+                        report.fallback.exceptional_jump_or_trap,
                     );
                 }
                 #[cfg(not(all(
@@ -2370,29 +2365,21 @@ fn assert_witgen_mem_released(shard_id: usize, baseline: u64) {
 pub fn prepare_preflight_aot_program(
     program: Arc<Program>,
     platform: &Platform,
-    multi_prover: &MultiProver,
-    step_cell_extractor: Arc<dyn StepCellExtractor>,
+    _multi_prover: &MultiProver,
+    _step_cell_extractor: Arc<dyn StepCellExtractor>,
     init_mem_state: &InitMemState,
 ) -> Arc<ceno_emul::aot::AotProgram> {
     let InitMemState {
         hints: hints_init, ..
     } = init_mem_state;
-    let tracer_config = PreflightTracerConfig::new(
-        true,
-        multi_prover.max_cell_per_shard,
-        multi_prover.max_cycle_per_shard,
-    )
-    .with_step_cell_extractor(step_cell_extractor);
-    let roots = ceno_emul::aot::sample_preflight_roots(
+    let aot = ceno_emul::aot::AotProgram::load_or_train_preflight(
         platform,
         program.clone(),
         hints_init
             .iter()
             .map(|record| (record.addr.into(), record.value)),
-        tracer_config,
-    );
-    let aot = ceno_emul::aot::AotProgram::compile_preflight_direct_with_extra_roots(program, roots)
-        .unwrap_or_else(|err| panic!("AOT compile failed during preflight preparation: {err}"));
+    )
+    .unwrap_or_else(|err| panic!("AOT compile failed during preflight preparation: {err}"));
     let report = aot.report();
     tracing::info!(
         "AOT compile/load completed in {:?}; blocks={}, reachable_instructions={}",
