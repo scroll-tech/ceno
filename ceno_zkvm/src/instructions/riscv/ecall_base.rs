@@ -68,6 +68,7 @@ impl<E: ExtensionField, const REG_ID: u8, const RW: bool> OpFixedRS<E, REG_ID, R
         lk_multiplicity: &mut LkMultiplicity,
         cycle: Cycle,
         op: &WriteOp,
+        has_future_access: bool,
     ) -> Result<(), ZKVMError> {
         let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
         let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
@@ -105,6 +106,7 @@ impl<E: ExtensionField, const REG_ID: u8, const RW: bool> OpFixedRS<E, REG_ID, R
             op.previous_cycle,
             op.value.after,
             None,
+            has_future_access,
         );
 
         Ok(())

@@ -11,7 +11,6 @@ use ceno_gpu::{
 };
 use rayon::prelude::*;
 use std::cell::RefCell;
-use tracing::info_span;
 
 use crate::{e2e::ShardContext, error::ZKVMError};
 
@@ -28,63 +27,6 @@ impl GpuShardSession {
     #[inline]
     pub fn shard_id(self) -> usize {
         self.shard_id
-    }
-}
-
-/// Packed next-access entry (16 bytes, u128-aligned).
-/// Stores (cycle, addr, next_cycle) with 40-bit cycles for GPU bulk H2D upload.
-/// Must be layout-compatible with CUDA `PackedNextAccessEntry` in shard_helpers.cuh.
-#[repr(C, align(16))]
-#[derive(Debug, Clone, Copy, Default)]
-struct PackedNextAccessEntry {
-    cycles_lo: u32,
-    addr: u32,
-    nexts_lo: u32,
-    cycles_hi: u8,
-    nexts_hi: u8,
-    _reserved: u16,
-}
-
-impl PackedNextAccessEntry {
-    #[inline]
-    fn new(cycle: u64, addr: u32, next_cycle: u64) -> Self {
-        Self {
-            cycles_lo: cycle as u32,
-            addr,
-            nexts_lo: next_cycle as u32,
-            cycles_hi: (cycle >> 32) as u8,
-            nexts_hi: (next_cycle >> 32) as u8,
-            _reserved: 0,
-        }
-    }
-}
-
-impl Eq for PackedNextAccessEntry {}
-
-impl PartialEq for PackedNextAccessEntry {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.cycles_hi == other.cycles_hi
-            && self.cycles_lo == other.cycles_lo
-            && self.addr == other.addr
-    }
-}
-
-impl Ord for PackedNextAccessEntry {
-    #[inline]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.cycles_hi, self.cycles_lo, self.addr).cmp(&(
-            other.cycles_hi,
-            other.cycles_lo,
-            other.addr,
-        ))
-    }
-}
-
-impl PartialOrd for PackedNextAccessEntry {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
     }
 }
 
@@ -357,31 +299,6 @@ fn convert_compact_shard_records<E: ff_ext::ExtensionField>(
         .partition(|input| input.record.is_to_write_set)
 }
 
-/// Build sorted packed next-access entries from the cross-shard HashMap.
-/// Called once on the first shard; the result is uploaded to GPU and reused.
-fn build_sorted_next_accesses(shard_ctx: &ShardContext) -> Vec<PackedNextAccessEntry> {
-    info_span!("next_access_presort").in_scope(|| {
-        let next_accesses = &shard_ctx.addr_future_accesses;
-        let total: usize = next_accesses.values().map(|pairs| pairs.len()).sum();
-        let mut entries = Vec::with_capacity(total);
-        for (cycle, pairs) in next_accesses.iter() {
-            for &(addr, next_cycle) in pairs.iter() {
-                entries.push(PackedNextAccessEntry::new(*cycle, addr.0, next_cycle));
-            }
-        }
-        let len = entries.len();
-        info_span!("next_access_par_sort", n = len).in_scope(|| {
-            entries.par_sort_unstable();
-        });
-        tracing::info!(
-            "[GPU] sorted {} next-access entries ({:.2} MB)",
-            len,
-            len * 16 / (1024 * 1024)
-        );
-        entries
-    })
-}
-
 /// Build and cache shard metadata device buffers. Must be cleared between
 /// shards via [`invalidate_shard_meta_cache`] so no witgen state leaks into prove.
 pub(crate) fn ensure_shard_metadata_cached(
@@ -403,38 +320,6 @@ pub(crate) fn ensure_shard_metadata_cached(
                 c.shard_id, shard_id,
             );
         }
-        // Build sorted packed next-access entries from HashMap and H2D upload.
-        let sorted = build_sorted_next_accesses(shard_ctx);
-        let next_access_count = sorted.len() as u32;
-        let next_access_packed_device =
-            info_span!("next_access_h2d").in_scope(|| -> Result<_, ZKVMError> {
-                let packed_bytes: &[u8] = if sorted.is_empty() {
-                    &[0u8; 16] // sentinel for empty
-                } else {
-                    unsafe {
-                        std::slice::from_raw_parts(
-                            sorted.as_ptr() as *const u8,
-                            sorted.len() * std::mem::size_of::<PackedNextAccessEntry>(),
-                        )
-                    }
-                };
-                let buf = hal
-                    .inner
-                    .htod_copy_stream(None, packed_bytes)
-                    .map_err(|e| {
-                        ZKVMError::InvalidWitness(format!("next_access_packed H2D: {e}").into())
-                    })?;
-                let next_access_device = ceno_gpu::common::buffer::BufferImpl::new(buf);
-                let mb = packed_bytes.len() as f64 / (1024.0 * 1024.0);
-                tracing::info!(
-                    "[GPU shard] next-access uploaded for shard_id={}: {} entries, {:.2} MB (packed)",
-                    shard_id,
-                    sorted.len(),
-                    mb,
-                );
-                Ok(next_access_device)
-            })?;
-
         // Per-shard: always re-upload scalars + prev_shard_ranges
         let scalars = GpuShardScalars {
             shard_cycle_start: shard_ctx.cur_shard_cycle_range.start as u64,
@@ -449,7 +334,7 @@ pub(crate) fn ensure_shard_metadata_cached(
             shard_heap_end: shard_ctx.shard_heap_addr_range.end,
             shard_hint_start: shard_ctx.shard_hint_addr_range.start,
             shard_hint_end: shard_ctx.shard_hint_addr_range.end,
-            next_access_count,
+            _reserved: 0,
             num_prev_shards: shard_ctx.prev_shard_cycle_range.len() as u32,
             num_prev_heap_ranges: shard_ctx.prev_shard_heap_range.len() as u32,
             num_prev_hint_ranges: shard_ctx.prev_shard_hint_range.len() as u32,
@@ -545,7 +430,6 @@ pub(crate) fn ensure_shard_metadata_cached(
             shard_id,
             device_bufs: ShardDeviceBuffers {
                 scalars: scalars_device,
-                next_access_packed: next_access_packed_device,
                 prev_shard_cycle_range: pscr_device,
                 prev_shard_heap_range: pshr_device,
                 prev_shard_hint_range: pshi_device,

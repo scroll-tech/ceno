@@ -1259,13 +1259,14 @@ fn collect_generic_ecall_shardram(shard_ctx: &mut ShardContext, step: &StepRecor
         rs1.previous_cycle,
         rs1.value,
         None,
+        step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
     );
 
     let syscall_witnesses = shard_ctx.syscall_witnesses.clone();
     let Some(syscall) = step.syscall(&syscall_witnesses) else {
         return;
     };
-    for op in &syscall.reg_ops {
+    for (index, op) in syscall.reg_ops.iter().enumerate() {
         shard_ctx.send(
             RAMType::Register,
             op.addr,
@@ -1274,9 +1275,10 @@ fn collect_generic_ecall_shardram(shard_ctx: &mut ShardContext, step: &StepRecor
             op.previous_cycle,
             op.value.after,
             None,
+            syscall.reg_future_access[index] != 0,
         );
     }
-    for op in &syscall.mem_ops {
+    for (index, op) in syscall.mem_ops.iter().enumerate() {
         shard_ctx.send(
             RAMType::Memory,
             op.addr,
@@ -1285,6 +1287,7 @@ fn collect_generic_ecall_shardram(shard_ctx: &mut ShardContext, step: &StepRecor
             op.previous_cycle,
             op.value.after,
             Some(op.value.before),
+            syscall.mem_future_access[index] != 0,
         );
     }
 }

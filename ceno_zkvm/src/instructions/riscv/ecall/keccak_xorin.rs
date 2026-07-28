@@ -245,6 +245,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakXorinInstruction<E> {
                 Change::new(KECCAK_XORIN, KECCAK_XORIN),
                 step.rs1().unwrap().previous_cycle,
             ),
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
         )?;
 
         config.state_ptr.1.assign_instance(
@@ -258,6 +259,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakXorinInstruction<E> {
             lk_multiplicity,
             step.cycle(),
             &ops.reg_ops[0],
+            ops.reg_future_access[0] != 0,
         )?;
         config.block_ptr.1.assign_instance(
             instance,
@@ -270,6 +272,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakXorinInstruction<E> {
             lk_multiplicity,
             step.cycle(),
             &ops.reg_ops[1],
+            ops.reg_future_access[1] != 0,
         )?;
 
         for word in 0..KECCAK_RATE_WORDS {
@@ -293,8 +296,15 @@ impl<E: ExtensionField> Instruction<E> for KeccakXorinInstruction<E> {
             }
         }
 
-        for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
-            writer.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)?;
+        for (index, (writer, op)) in config.mem_rw.iter().zip_eq(&ops.mem_ops).enumerate() {
+            writer.assign_op(
+                instance,
+                shard_ctx,
+                lk_multiplicity,
+                step.cycle(),
+                op,
+                ops.mem_future_access[index] != 0,
+            )?;
         }
         lk_multiplicity.fetch(step.pc().before.0);
         Ok(())
@@ -321,10 +331,12 @@ impl<E: ExtensionField> Instruction<E> for KeccakXorinInstruction<E> {
             step.rs1().unwrap().previous_cycle,
             KECCAK_XORIN,
             None,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
         );
-        for (reg_id, op) in [Platform::reg_arg0(), Platform::reg_arg1()]
+        for (index, (reg_id, op)) in [Platform::reg_arg0(), Platform::reg_arg1()]
             .into_iter()
             .zip_eq(&ops.reg_ops)
+            .enumerate()
         {
             shard_ctx.send(
                 RAMType::Register,
@@ -334,9 +346,10 @@ impl<E: ExtensionField> Instruction<E> for KeccakXorinInstruction<E> {
                 op.previous_cycle,
                 op.value.after,
                 None,
+                ops.reg_future_access[index] != 0,
             );
         }
-        for op in &ops.mem_ops {
+        for (index, op) in ops.mem_ops.iter().enumerate() {
             shard_ctx.send(
                 RAMType::Memory,
                 op.addr,
@@ -345,6 +358,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakXorinInstruction<E> {
                 op.previous_cycle,
                 op.value.after,
                 Some(op.value.before),
+                ops.mem_future_access[index] != 0,
             );
         }
         Ok(())

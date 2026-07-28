@@ -794,6 +794,7 @@ pub fn run_weierstrass_decompress<
                                     addr: ByteAddr::from(0).waddr(),
                                     value: Default::default(),
                                 },
+                                false,
                             )
                             .expect("assign error");
                     });

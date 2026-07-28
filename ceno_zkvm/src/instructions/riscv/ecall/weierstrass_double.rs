@@ -256,6 +256,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                                 Change::new(syscall_code, syscall_code),
                                 step.rs1().unwrap().previous_cycle,
                             ),
+                            step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
                         )?;
                         // assign point_ptr_0
                         config.point_ptr.1.assign_instance(
@@ -269,14 +270,18 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                             &mut lk_multiplicity,
                             step.cycle(),
                             &ops.reg_ops[0],
+                            ops.reg_future_access[0] != 0,
                         )?;
-                        for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
+                        for (index, (writer, op)) in
+                            config.mem_rw.iter().zip_eq(&ops.mem_ops).enumerate()
+                        {
                             writer.assign_op(
                                 instance,
                                 &mut shard_ctx,
                                 &mut lk_multiplicity,
                                 step.cycle(),
                                 op,
+                                ops.mem_future_access[index] != 0,
                             )?;
                         }
                         // fetch

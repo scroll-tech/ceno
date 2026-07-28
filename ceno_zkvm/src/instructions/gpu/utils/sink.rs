@@ -75,6 +75,7 @@ impl LkShardramSink for CpuLkShardramSink<'_, '_, '_> {
             event.prev_cycle,
             event.value,
             event.prev_value,
+            event.has_future_access,
         );
     }
 

@@ -116,13 +116,24 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
         }
 
         // Assign registers.
-        for ((value, writer), op) in config.reg_writes.iter().zip_eq(&ops.reg_ops) {
+        for (index, ((value, writer), op)) in
+            config.reg_writes.iter().zip_eq(&ops.reg_ops).enumerate()
+        {
             value.assign_value(instance, Value::new_unchecked(op.value.after));
-            writer.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)?;
+            writer.assign_op(
+                instance,
+                shard_ctx,
+                lk_multiplicity,
+                step.cycle(),
+                op,
+                ops.reg_future_access[index] != 0,
+            )?;
         }
 
         // Assign memory.
-        for ((addr, value, writer), op) in config.mem_writes.iter().zip_eq(&ops.mem_ops) {
+        for (index, ((addr, value, writer), op)) in
+            config.mem_writes.iter().zip_eq(&ops.mem_ops).enumerate()
+        {
             value
                 .before
                 .assign_value(instance, Value::new_unchecked(op.value.before));
@@ -130,7 +141,14 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
                 .after
                 .assign_value(instance, Value::new(op.value.after, lk_multiplicity));
             set_val!(instance, addr, u64::from(op.addr));
-            writer.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)?;
+            writer.assign_op(
+                instance,
+                shard_ctx,
+                lk_multiplicity,
+                step.cycle(),
+                op,
+                ops.mem_future_access[index] != 0,
+            )?;
         }
 
         Ok(())

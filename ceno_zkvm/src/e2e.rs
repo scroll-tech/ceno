@@ -211,7 +211,6 @@ pub struct ShardContext<'a> {
     pub shard_id: usize,
     num_shards: usize,
     max_cycle: Cycle,
-    pub addr_future_accesses: Arc<NextCycleAccess>,
     addr_accessed_tbs: Either<Vec<Vec<WordAddr>>, &'a mut Vec<WordAddr>>,
     read_records_tbs:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
@@ -239,7 +238,6 @@ impl<'a> Default for ShardContext<'a> {
             shard_id: 0,
             num_shards: 1,
             max_cycle: Cycle::MAX,
-            addr_future_accesses: Arc::new(Default::default()),
             addr_accessed_tbs: Either::Left(vec![Vec::new(); max_threads]),
             read_records_tbs: Either::Left(
                 (0..max_threads)
@@ -283,7 +281,6 @@ impl<'a> ShardContext<'a> {
             shard_id: self.shard_id,
             num_shards: self.num_shards,
             max_cycle: self.max_cycle,
-            addr_future_accesses: self.addr_future_accesses.clone(),
             addr_accessed_tbs: Either::Left(vec![Vec::new(); max_threads]),
             read_records_tbs: Either::Left(
                 (0..max_threads)
@@ -325,7 +322,6 @@ impl<'a> ShardContext<'a> {
                     shard_id: self.shard_id,
                     num_shards: self.num_shards,
                     max_cycle: self.max_cycle,
-                    addr_future_accesses: self.addr_future_accesses.clone(),
                     addr_accessed_tbs: Either::Right(addr_accessed_tbs),
                     read_records_tbs: Either::Right(read),
                     write_records_tbs: Either::Right(write),
@@ -431,29 +427,6 @@ impl<'a> ShardContext<'a> {
         (self.cur_shard_cycle_range.start as Cycle) - FullTracer::SUBCYCLES_PER_INSN
     }
 
-    /// Finds the **next** future access cycle for the given address, starting from
-    /// the specified current cycle.
-    ///
-    /// Note that the returned cycle is simply the *next* access, not necessarily
-    /// the final (last) access of the address.
-    ///
-    /// For example, if address `0xabc` is accessed at cycles `4` and `8`,
-    /// then `find_future_next_access(0xabc, 4)` returns `8`.
-    #[inline(always)]
-    pub fn find_future_next_access(&self, cycle: Cycle, addr: WordAddr) -> Option<Cycle> {
-        self.addr_future_accesses.get(&cycle).and_then(|res| {
-            if res.len() == 1 && res[0].0 == addr {
-                Some(res[0].1)
-            } else if res.len() > 1 {
-                res.iter()
-                    .find(|(m_addr, _)| *m_addr == addr)
-                    .map(|(_, cycle)| *cycle)
-            } else {
-                None
-            }
-        })
-    }
-
     #[inline(always)]
     pub fn insert_read_record(&mut self, addr: WordAddr, record: RAMRecord) {
         match &mut self.read_records_tbs {
@@ -510,6 +483,7 @@ impl<'a> ShardContext<'a> {
         prev_cycle: Cycle,
         value: Word,
         prev_value: Option<Word>,
+        has_future_access: bool,
     ) {
         if !self.is_first_shard()
             && self.is_in_current_shard(cycle)
@@ -565,10 +539,7 @@ impl<'a> ShardContext<'a> {
             }
         }
 
-        if let Some(future_touch_cycle) = self.find_future_next_access(cycle, addr)
-            && self.after_current_shard_cycle(future_touch_cycle)
-            && self.is_in_current_shard(cycle)
-        {
+        if has_future_access && self.is_in_current_shard(cycle) {
             let shard_cycle = self.aligned_current_ts(cycle);
             self.insert_write_record(
                 addr,
@@ -598,8 +569,18 @@ impl<'a> ShardContext<'a> {
         prev_cycle: Cycle,
         value: Word,
         prev_value: Option<Word>,
+        has_future_access: bool,
     ) {
-        self.record_send_without_touch(ram_type, addr, id, cycle, prev_cycle, value, prev_value);
+        self.record_send_without_touch(
+            ram_type,
+            addr,
+            id,
+            cycle,
+            prev_cycle,
+            value,
+            prev_value,
+            has_future_access,
+        );
         self.push_addr_accessed(addr);
     }
 
@@ -706,7 +687,7 @@ impl ShardStepSummary {
 
 pub struct ShardContextBuilder {
     pub cur_shard_id: usize,
-    addr_future_accesses: Arc<NextCycleAccess>,
+    next_accesses: Arc<NextCycleAccess>,
     prev_shard_cycle_range: Vec<Cycle>,
     prev_shard_heap_range: Vec<Addr>,
     prev_shard_hint_range: Vec<Addr>,
@@ -719,7 +700,7 @@ impl Default for ShardContextBuilder {
     fn default() -> Self {
         ShardContextBuilder {
             cur_shard_id: 0,
-            addr_future_accesses: Arc::new(Default::default()),
+            next_accesses: Arc::new(Default::default()),
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
             prev_shard_hint_range: vec![],
@@ -736,14 +717,14 @@ impl ShardContextBuilder {
         platform: Platform,
         shard_cycle_boundaries: Arc<Vec<Cycle>>,
         max_cycle: Cycle,
-        addr_future_accesses: NextCycleAccess,
+        next_accesses: NextCycleAccess,
     ) -> Self {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
 
         ShardContextBuilder {
             cur_shard_id: 0,
-            addr_future_accesses: Arc::new(addr_future_accesses),
+            next_accesses: Arc::new(next_accesses),
             prev_shard_cycle_range: vec![0],
             prev_shard_heap_range: vec![0],
             prev_shard_hint_range: vec![0],
@@ -755,6 +736,10 @@ impl ShardContextBuilder {
 
     pub fn shard_cycle_boundaries(&self) -> Arc<Vec<Cycle>> {
         self.shard_cycle_boundaries.clone()
+    }
+
+    pub fn next_accesses(&self) -> Arc<NextCycleAccess> {
+        self.next_accesses.clone()
     }
 
     pub fn total_shards(&self) -> usize {
@@ -829,7 +814,6 @@ impl ShardContextBuilder {
             max_cycle: self.max_cycle,
             cur_shard_cycle_range: summary.first_cycle as usize
                 ..(summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN) as usize,
-            addr_future_accesses: self.addr_future_accesses.clone(),
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
             prev_shard_heap_range: self.prev_shard_heap_range.clone(),
             prev_shard_hint_range: self.prev_shard_hint_range.clone(),
@@ -874,9 +858,14 @@ impl StepReplay {
         init_mem_state: &InitMemState,
         remaining_steps: usize,
         max_step_shard: usize,
+        next_accesses: Arc<NextCycleAccess>,
     ) -> Self {
-        let mut vm =
-            VMState::new_with_tracer_config(platform, program, FullTracerConfig { max_step_shard });
+        let mut vm = VMState::new_with_tracer_config_and_next_accesses(
+            platform,
+            program,
+            FullTracerConfig { max_step_shard },
+            Some(next_accesses),
+        );
         for record in init_mem_state.hints.iter() {
             vm.init_memory(record.addr.into(), record.value);
         }
@@ -903,11 +892,15 @@ impl Iterator for StepReplay {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining_steps == 0 {
+            self.vm.tracer().assert_next_accesses_consumed();
             return None;
         }
         match self.vm.next_step_record() {
             Ok(Some(step)) => {
                 self.remaining_steps -= 1;
+                if self.remaining_steps == 0 {
+                    self.vm.tracer().assert_next_accesses_consumed();
+                }
                 Some(step)
             }
             Ok(None) => {
@@ -1437,6 +1430,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
         init_mem_state,
         emul_result.executed_steps,
         emul_result.max_step_shard,
+        shard_ctx_builder.next_accesses(),
     );
     std::iter::from_fn(move || {
         info_span!(
@@ -2003,6 +1997,7 @@ pub fn analyze_shard_ram_light<E: ExtensionField>(
         init_mem_state,
         emul_result.executed_steps,
         emul_result.max_step_shard,
+        shard_ctx_builder.next_accesses(),
     );
     let mut reports = Vec::new();
 
@@ -2365,27 +2360,35 @@ fn assert_witgen_mem_released(shard_id: usize, baseline: u64) {
 pub fn prepare_preflight_aot_program(
     program: Arc<Program>,
     platform: &Platform,
-    _multi_prover: &MultiProver,
-    _step_cell_extractor: Arc<dyn StepCellExtractor>,
+    multi_prover: &MultiProver,
+    step_cell_extractor: Arc<dyn StepCellExtractor>,
     init_mem_state: &InitMemState,
 ) -> Arc<ceno_emul::aot::AotProgram> {
     let InitMemState {
         hints: hints_init, ..
     } = init_mem_state;
-    let aot = ceno_emul::aot::AotProgram::load_or_train_preflight(
+    let tracer_config = PreflightTracerConfig::new(
+        true,
+        multi_prover.max_cell_per_shard,
+        multi_prover.max_cycle_per_shard,
+    )
+    .with_step_cell_extractor(step_cell_extractor);
+    let aot = ceno_emul::aot::AotProgram::load_or_train_preflight_with_config(
         platform,
         program.clone(),
         hints_init
             .iter()
             .map(|record| (record.addr.into(), record.value)),
+        tracer_config,
     )
     .unwrap_or_else(|err| panic!("AOT compile failed during preflight preparation: {err}"));
     let report = aot.report();
     tracing::info!(
-        "AOT compile/load completed in {:?}; blocks={}, reachable_instructions={}",
+        "AOT compile/load completed in {:?}; blocks={}, reachable_instructions={}, next_access_capacity={}",
         report.compile_load_time,
         report.block_count,
-        report.reachable_instruction_count
+        report.reachable_instruction_count,
+        report.next_access_capacity,
     );
     Arc::new(aot)
 }

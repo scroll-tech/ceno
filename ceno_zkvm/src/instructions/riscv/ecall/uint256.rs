@@ -272,6 +272,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
                                 Change::new(syscall_code, syscall_code),
                                 step.rs1().unwrap().previous_cycle,
                             ),
+                            step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
                         )?;
                         // assign word_ptr_0
                         config.word_ptr_0.1.assign_instance(
@@ -285,6 +286,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
                             &mut lk_multiplicity,
                             step.cycle(),
                             &ops.reg_ops[0],
+                            ops.reg_future_access[0] != 0,
                         )?;
                         // assign word_ptr_1
                         config.word_ptr_1.1.assign_instance(
@@ -298,14 +300,18 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
                             &mut lk_multiplicity,
                             step.cycle(),
                             &ops.reg_ops[1],
+                            ops.reg_future_access[1] != 0,
                         )?;
-                        for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
+                        for (index, (writer, op)) in
+                            config.mem_rw.iter().zip_eq(&ops.mem_ops).enumerate()
+                        {
                             writer.assign_op(
                                 instance,
                                 &mut shard_ctx,
                                 &mut lk_multiplicity,
                                 step.cycle(),
                                 op,
+                                ops.mem_future_access[index] != 0,
                             )?;
                         }
                         // fetch
@@ -590,6 +596,7 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
                                 Change::new(syscall_code, syscall_code),
                                 step.rs1().unwrap().previous_cycle,
                             ),
+                            step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
                         )?;
                         // assign word_ptr_0
                         config.word_ptr_0.1.assign_instance(
@@ -603,14 +610,18 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
                             &mut lk_multiplicity,
                             step.cycle(),
                             &ops.reg_ops[0],
+                            ops.reg_future_access[0] != 0,
                         )?;
-                        for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
+                        for (index, (writer, op)) in
+                            config.mem_rw.iter().zip_eq(&ops.mem_ops).enumerate()
+                        {
                             writer.assign_op(
                                 instance,
                                 &mut shard_ctx,
                                 &mut lk_multiplicity,
                                 step.cycle(),
                                 op,
+                                ops.mem_future_access[index] != 0,
                             )?;
                         }
                         // fetch
