@@ -60,6 +60,8 @@ enum AssemblyTraceStyle {
     /// Block planner mode for simple memory blocks where the native code can
     /// update exact latest-access state without falling back per instruction.
     PreflightDirectBlockPlanExactAccess,
+    /// Exact dynamic-memory tracking with block-atomic static registers.
+    PreflightDirectBlockPlanMemoryAtomicRegisters,
 }
 
 impl AssemblyTraceStyle {
@@ -73,6 +75,7 @@ impl AssemblyTraceStyle {
             Self::PreflightDirect
                 | Self::PreflightDirectBlockPlan
                 | Self::PreflightDirectBlockPlanExactAccess
+                | Self::PreflightDirectBlockPlanMemoryAtomicRegisters
         )
     }
 
@@ -82,6 +85,9 @@ impl AssemblyTraceStyle {
             Self::PreflightDirect => "preflight-direct",
             Self::PreflightDirectBlockPlan => "preflight-block-plan",
             Self::PreflightDirectBlockPlanExactAccess => "preflight-block-exact",
+            Self::PreflightDirectBlockPlanMemoryAtomicRegisters => {
+                "preflight-block-memory-atomic-registers"
+            }
         }
     }
 }
@@ -180,7 +186,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 5;
+const AOT_ABI_VERSION: u32 = 6;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v2";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -962,14 +968,13 @@ impl AotProgram {
         if native_status != AOT_STATUS_HALTED {
             bail!("AOT native entry returned invalid status {native_status}");
         }
-        let (next_access_events, next_access_capacity) = if trace_mode
-            == AOT_TRACE_MODE_PREFLIGHT_DIRECT
-        {
-            let preflight_vm = unsafe { &*(vm_ptr as *const VMState<PreflightTracer>) };
-            preflight_vm.tracer().next_access_tape_usage()
-        } else {
-            (0, 0)
-        };
+        let (next_access_events, next_access_capacity) =
+            if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+                let preflight_vm = unsafe { &*(vm_ptr as *const VMState<PreflightTracer>) };
+                preflight_vm.tracer().next_access_tape_usage()
+            } else {
+                (0, 0)
+            };
         tracing::info!(
             "AOT next-access tape usage={next_access_events} capacity={next_access_capacity} overflow=0 normal_access_callbacks=0"
         );
@@ -1504,7 +1509,7 @@ fn write_assembly(
                 emit_preflight_direct_block_memory_fast_path_guard(&mut file, program, block)?;
             }
             emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
-            if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
+            if block_plan.is_some() {
                 emit_preflight_direct_block_access_entry(&mut file, program, block_idx, block)?;
             }
         }
@@ -1514,9 +1519,9 @@ fn write_assembly(
             let step_trace_style =
                 if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
                     AssemblyTraceStyle::PreflightDirectBlockPlan
-                } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess))
-                    || adaptive_exact_access_plan
-                {
+                } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
+                    AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
+                } else if adaptive_exact_access_plan {
                     AssemblyTraceStyle::PreflightDirectBlockPlanExactAccess
                 } else if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
                     AssemblyTraceStyle::PreflightDirect
@@ -1529,6 +1534,7 @@ fn write_assembly(
         if let Some(prev_pc) = pc.checked_sub(PC_STEP_SIZE as u32) {
             let insn = instruction_at(program, prev_pc)?;
             if block_plan.is_some() {
+                emit_preflight_direct_block_register_access_exit(&mut file, program, block)?;
                 emit_preflight_direct_block_plan_exit(&mut file, block)?;
                 emit_preflight_direct_busy_loop_guard(&mut file, prev_pc)?;
             } else if adaptive_exact_access_plan {
@@ -1667,7 +1673,11 @@ fn emit_after_native_step(
             pc,
             insn,
             preflight_memory_bounds_updated,
-            if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
+            if matches!(
+                trace_style,
+                AssemblyTraceStyle::PreflightDirectBlockPlan
+                    | AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
+            ) {
                 PreflightAccessMode::BlockAtomic
             } else {
                 PreflightAccessMode::Exact
@@ -1852,6 +1862,26 @@ fn preflight_block_first_accesses(
         pc = pc.wrapping_add(PC_STEP_SIZE as u32);
     }
     Ok(first_accesses
+        .into_iter()
+        .map(|(addr, cycle_offset)| PreflightBlockAccess { addr, cycle_offset })
+        .collect())
+}
+
+fn preflight_block_last_accesses(
+    program: &Program,
+    block: &BasicBlock,
+) -> Result<Vec<PreflightBlockAccess>> {
+    let mut last_accesses = BTreeMap::new();
+    let mut pc = block.start_pc;
+    while pc < block.end_pc {
+        let insn = instruction_at(program, pc)?;
+        let insn_cycle_offset = (pc - block.start_pc) as u64;
+        for (reg_idx, subcycle) in preflight_static_register_accesses(insn) {
+            last_accesses.insert(reg_idx << 6, insn_cycle_offset + subcycle.value());
+        }
+        pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+    }
+    Ok(last_accesses
         .into_iter()
         .map(|(addr, cycle_offset)| PreflightBlockAccess { addr, cycle_offset })
         .collect())
@@ -2077,6 +2107,34 @@ fn emit_preflight_direct_block_access_entry(
         )?;
         writeln!(file, "    movq (%rax), %r8")?;
         writeln!(file, "{done_label}:")?;
+    }
+    Ok(())
+}
+
+fn emit_preflight_direct_block_register_access_exit(
+    mut file: impl Write,
+    program: &Program,
+    block: &BasicBlock,
+) -> Result<()> {
+    let accesses = preflight_block_last_accesses(program, block)?;
+    if accesses.is_empty() {
+        return Ok(());
+    }
+    let block_cycles = block_instruction_count(block) * PC_STEP_SIZE as u64;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_LATEST_CELLS_OFFSET}(%r12), %rdx"
+    )?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_CYCLE_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq (%rax), %r8")?;
+    for access in accesses {
+        let offset = access.addr as u64 * std::mem::size_of::<Cycle>() as u64;
+        let from_end = block_cycles - access.cycle_offset;
+        writeln!(file, "    leaq -{from_end}(%r8), %rax")?;
+        writeln!(file, "    movq %rax, {offset}(%rdx)")?;
     }
     Ok(())
 }
@@ -2392,27 +2450,10 @@ fn emit_preflight_direct_step_static(
             }
         }
         PreflightAccessMode::BlockAtomic => {
-            debug_assert!(!has_memory_access);
-            if native_step_reads_rs1(insn.kind)
-                || native_step_reads_rs2(insn.kind)
-                || native_step_writes_rd(insn.kind)
-            {
-                writeln!(
-                    file,
-                    "    movq {AOT_CTX_PREFLIGHT_LATEST_CELLS_OFFSET}(%r12), %rdx"
-                )?;
-                writeln!(
-                    file,
-                    "    movq {AOT_CTX_PREFLIGHT_CYCLE_OFFSET}(%r12), %rax"
-                )?;
-                writeln!(file, "    movq (%rax), %r8")?;
-            }
-            for (reg_idx, subcycle) in preflight_static_register_accesses(insn) {
-                emit_preflight_direct_register_access_store_only(
-                    &mut file,
-                    reg_idx,
-                    subcycle.value(),
-                )?;
+            if has_memory_access {
+                emit_preflight_direct_access_cache_load(&mut file)?;
+                writeln!(file, "    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %eax")?;
+                emit_preflight_direct_access_cached(&mut file, "%eax", PreflightSubcycle::Mem)?;
             }
         }
     }
@@ -2675,19 +2716,6 @@ fn emit_preflight_direct_register_access_cached(
     )?;
     emit_preflight_direct_event_append(&mut file, "%r11", "%rax", &format!("${addr}"))?;
     writeln!(file, "2:")?;
-    Ok(())
-}
-
-fn emit_preflight_direct_register_access_store_only(
-    mut file: impl Write,
-    reg_idx: u32,
-    cycle_offset: u64,
-) -> Result<()> {
-    let addr = reg_idx << 6;
-    let offset = addr as u64 * std::mem::size_of::<Cycle>() as u64;
-    writeln!(file, "    movq %r8, %rax")?;
-    writeln!(file, "    addq ${cycle_offset}, %rax")?;
-    writeln!(file, "    movq %rax, {offset}(%rdx)")?;
     Ok(())
 }
 
