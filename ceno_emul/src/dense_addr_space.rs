@@ -63,6 +63,14 @@ impl<T: Copy + Default> DenseAddrSpace<T> {
         not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
         allow(dead_code)
     )]
+    pub(crate) fn end(&self) -> WordAddr {
+        self.end
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn cells_mut_ptr(&mut self) -> *mut T {
         self.cells.as_mut_ptr()
     }

@@ -174,12 +174,13 @@ const AOT_CTX_FALLBACK_RECOVERY_REASON_OFFSET: usize = 520;
 const AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET: usize = 528;
 const AOT_CTX_PREFLIGHT_EVENT_END_OFFSET: usize = 536;
 const AOT_CTX_PREFLIGHT_LATEST_LEN_OFFSET: usize = 544;
+const AOT_CTX_MEMORY_END_WORD_OFFSET: usize = 552;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 4;
+const AOT_ABI_VERSION: u32 = 5;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v2";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -291,6 +292,8 @@ struct AotRuntimeContext {
     preflight_event_cursor: *mut NextAccessEvent,
     preflight_event_end: *mut NextAccessEvent,
     preflight_latest_len: *mut usize,
+    memory_end_word: u32,
+    _memory_end_padding: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -687,6 +690,7 @@ impl AotProgram {
         LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = None);
         let mut executed_steps = 0u64;
         let memory_base_word = vm.memory_base_word().0;
+        let memory_end_word = vm.memory_end_word().0;
         let heap = vm.platform().heap.clone();
         let stack = vm.platform().stack.clone();
         let hints = vm.platform().hints.clone();
@@ -915,6 +919,8 @@ impl AotProgram {
             preflight_event_cursor,
             preflight_event_end,
             preflight_latest_len,
+            memory_end_word,
+            _memory_end_padding: 0,
         };
         let trace_fn = if trace_native_steps {
             if TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
@@ -1975,6 +1981,18 @@ fn emit_preflight_direct_memory_fast_path_guard(
         AOT_CTX_HINTS_END_OFFSET,
         &hints_ok_label,
     )?;
+    writeln!(file, "    movl %edx, %eax")?;
+    writeln!(file, "    shrl $2, %eax")?;
+    writeln!(
+        file,
+        "    cmpl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %eax"
+    )?;
+    writeln!(file, "    jb L_memory_guard")?;
+    writeln!(
+        file,
+        "    cmpl {AOT_CTX_MEMORY_END_WORD_OFFSET}(%r12), %eax"
+    )?;
+    writeln!(file, "    jb {done_label}")?;
     writeln!(file, "    jmp L_memory_guard")?;
     writeln!(file, "{heap_ok_label}:")?;
     writeln!(file, "    jmp {done_label}")?;
@@ -3352,6 +3370,7 @@ fn emit_native_memory(
     let heap_ok_label = format!(".L_memory_heap_ok_{pc:x}");
     let stack_ok_label = format!(".L_memory_stack_ok_{pc:x}");
     let hints_ok_label = format!(".L_memory_hints_ok_{pc:x}");
+    let dense_ok_label = format!(".L_memory_dense_ok_{pc:x}");
     let body_label = format!(".L_memory_body_{pc:x}");
     let rd = insn.rd_internal();
 
@@ -3410,6 +3429,18 @@ fn emit_native_memory(
         AOT_CTX_HINTS_END_OFFSET,
         &hints_ok_label,
     )?;
+    writeln!(file, "    movl %edx, %eax")?;
+    writeln!(file, "    shrl $2, %eax")?;
+    writeln!(
+        file,
+        "    cmpl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %eax"
+    )?;
+    writeln!(file, "    jb {slow_label}")?;
+    writeln!(
+        file,
+        "    cmpl {AOT_CTX_MEMORY_END_WORD_OFFSET}(%r12), %eax"
+    )?;
+    writeln!(file, "    jb {dense_ok_label}")?;
     writeln!(file, "    jmp {slow_label}")?;
 
     emit_native_memory_region_entry(
@@ -3436,6 +3467,14 @@ fn emit_native_memory(
         AOT_CTX_PREFLIGHT_HINTS_MIN_OFFSET,
         AOT_CTX_PREFLIGHT_HINTS_MAX_OFFSET,
     )?;
+
+    writeln!(file, "{dense_ok_label}:")?;
+    writeln!(file, "    movl %edx, %r8d")?;
+    writeln!(file, "    andl $3, %r8d")?;
+    writeln!(file, "    shll $3, %r8d")?;
+    writeln!(file, "    shrl $2, %edx")?;
+    writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
+    writeln!(file, "    jmp {body_label}")?;
 
     writeln!(file, "{body_label}:")?;
     writeln!(
@@ -4194,6 +4233,10 @@ mod tests {
             std::mem::offset_of!(AotRuntimeContext, preflight_latest_len),
             AOT_CTX_PREFLIGHT_LATEST_LEN_OFFSET
         );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, memory_end_word),
+            AOT_CTX_MEMORY_END_WORD_OFFSET
+        );
     }
 
     #[test]
@@ -4787,7 +4830,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_guard_recovery_does_not_count_compiled_interior_as_dynamic() {
+    fn dense_non_mmio_memory_stays_native() {
         let data_addr = CENO_PLATFORM.heap.end;
         let mut platform = CENO_PLATFORM.clone();
         platform.prog_data = Arc::new(BTreeSet::from([data_addr]));
@@ -4810,7 +4853,7 @@ mod tests {
 
         assert_eq!(vm.peek_register(2), 42);
         assert_eq!(report.fallback.dynamic_pc_miss, 0);
-        assert_eq!(report.fallback.memory_guard, 2);
+        assert_eq!(report.fallback.memory_guard, 0);
     }
 
     fn assert_preflight_aot_matches_interpreter(

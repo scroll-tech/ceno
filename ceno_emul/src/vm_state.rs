@@ -225,6 +225,14 @@ impl<T: Tracer> VMState<T> {
         not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
         allow(dead_code)
     )]
+    pub(crate) fn memory_end_word(&self) -> WordAddr {
+        self.memory.end()
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn trace_fetch_known(&mut self, pc: WordAddr, insn: Instruction) {
         self.tracer.fetch(pc, insn);
         self.tracer.track_mmu_maxtouch_before();
