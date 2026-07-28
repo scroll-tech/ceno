@@ -5,6 +5,8 @@ pub use addr::*;
 
 mod dense_addr_space;
 
+pub mod cpu_profile;
+
 mod platform;
 pub use platform::{CENO_PLATFORM, Platform};
 

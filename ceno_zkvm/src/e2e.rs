@@ -1441,6 +1441,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
             instrunction_dispatch_ctx.begin_shard();
             let (mut shard_ctx, shard_summary) =
                 match info_span!("position_next_shard").in_scope(|| {
+                    let _profile_phase =
+                        ceno_emul::cpu_profile::CpuProfileGuard::fulltracer_replay();
                     shard_ctx_builder.position_next_shard(
                         &mut step_iter,
                         |idx, record| instrunction_dispatch_ctx.ingest_step(idx, record),
@@ -1502,6 +1504,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     return None;
                 }
             }
+
+            let _profile_phase = ceno_emul::cpu_profile::CpuProfileGuard::witness_assignment();
 
             let debug_shard_ctx_for_gpu = {
                 #[cfg(feature = "gpu")]

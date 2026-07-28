@@ -931,7 +931,7 @@ impl AotProgram {
         let trace_fn = if trace_native_steps {
             if TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
                 if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
-                    (aot_preflight_direct_helper as AotTraceFn) as *const c_void
+                    (ceno_aot_preflight_direct_callback as AotTraceFn) as *const c_void
                 } else {
                     (aot_trace_native_preflight as AotTraceFn) as *const c_void
                 }
@@ -941,15 +941,23 @@ impl AotProgram {
         } else {
             std::ptr::null()
         };
-        let native_status = unsafe {
-            (self.entry)(
-                &mut context,
-                aot_exec_one::<T>,
-                trace_fn,
-                max_steps as u64,
-                &mut executed_steps,
-                vm.get_pc().0,
-            )
+        let exec_fn = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+            ceno_aot_preflight_fallback_callback as AotInsnFn
+        } else {
+            aot_exec_one::<T>
+        };
+        let native_status = {
+            let _profile_phase = crate::cpu_profile::CpuProfileGuard::aot_execute();
+            unsafe {
+                (self.entry)(
+                    &mut context,
+                    exec_fn,
+                    trace_fn,
+                    max_steps as u64,
+                    &mut executed_steps,
+                    vm.get_pc().0,
+                )
+            }
         };
         if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
@@ -1275,13 +1283,19 @@ fn program_digest(program: &Program) -> [u8; 32] {
 }
 
 fn aot_cache_key(program: &Program, trace_style: AssemblyTraceStyle) -> String {
+    let profile_suffix = if crate::cpu_profile::enabled() {
+        "-cpu-profile"
+    } else {
+        ""
+    };
     format!(
-        "{}-abi{}-{}-{}-{}",
+        "{}-abi{}-{}-{}-{}{}",
         hex_digest(&program_digest(program)),
         AOT_ABI_VERSION,
         trace_style.cache_name(),
         std::env::consts::ARCH,
         std::env::consts::OS,
+        profile_suffix,
     )
 }
 
@@ -1465,6 +1479,7 @@ fn write_assembly(
     writeln!(file, "    movl %r9d, %r15d")?;
     writeln!(file, "    movq $0, 0(%rsp)")?;
     writeln!(file, "    movl %r15d, 8(%rsp)")?;
+    emit_assembly_profile_symbol(&mut file, "ceno_aot_dispatch")?;
     writeln!(file, "L_dispatch:")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
     writeln!(file, "    cmpq %rbp, %rax")?;
@@ -1472,6 +1487,10 @@ fn write_assembly(
     emit_dispatch_tree(&mut file, blocks, &labels, 0, blocks.len())?;
     for (block_idx, block) in blocks.iter().enumerate() {
         let label = labels.get(&block.start_pc).expect("block label must exist");
+        emit_assembly_profile_symbol(
+            &mut file,
+            &format!("ceno_aot_bb_{:08x}_guards", block.start_pc),
+        )?;
         writeln!(file, "{label}:")?;
         // Reaching a native block leader ends any Rust fallback recovery run.
         writeln!(
@@ -1501,6 +1520,10 @@ fn write_assembly(
         }
         if adaptive_exact_access_plan {
             emit_preflight_direct_block_budget_guard(&mut file, block)?;
+            emit_assembly_profile_symbol(
+                &mut file,
+                &format!("ceno_aot_bb_{:08x}_accounting", block.start_pc),
+            )?;
             emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
         }
         if block_plan.is_some() {
@@ -1508,12 +1531,17 @@ fn write_assembly(
             if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
                 emit_preflight_direct_block_memory_fast_path_guard(&mut file, program, block)?;
             }
+            emit_assembly_profile_symbol(
+                &mut file,
+                &format!("ceno_aot_bb_{:08x}_accounting", block.start_pc),
+            )?;
             emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
             if block_plan.is_some() {
                 emit_preflight_direct_block_access_entry(&mut file, program, block_idx, block)?;
             }
         }
         let mut pc = block.start_pc;
+        let mut last_profile_region = None;
         while pc < block.end_pc {
             let insn = instruction_at(program, pc)?;
             let step_trace_style =
@@ -1528,12 +1556,28 @@ fn write_assembly(
                 } else {
                     trace_style
                 };
+            let region = if native_opcode_family(insn.kind) == Some(NativeOpcodeFamily::Memory) {
+                "memory"
+            } else {
+                "guest"
+            };
+            if last_profile_region != Some(region) {
+                emit_assembly_profile_symbol(
+                    &mut file,
+                    &format!("ceno_aot_bb_{:08x}_{region}_{pc:08x}", block.start_pc),
+                )?;
+                last_profile_region = Some(region);
+            }
             emit_instruction_body(&mut file, program, pc, insn, step_trace_style)?;
             pc = pc.wrapping_add(PC_STEP_SIZE as u32);
         }
         if let Some(prev_pc) = pc.checked_sub(PC_STEP_SIZE as u32) {
             let insn = instruction_at(program, prev_pc)?;
             if block_plan.is_some() {
+                emit_assembly_profile_symbol(
+                    &mut file,
+                    &format!("ceno_aot_bb_{:08x}_commit", block.start_pc),
+                )?;
                 emit_preflight_direct_block_register_access_exit(&mut file, program, block)?;
                 emit_preflight_direct_block_plan_exit(&mut file, block)?;
                 emit_preflight_direct_busy_loop_guard(&mut file, prev_pc)?;
@@ -1544,6 +1588,7 @@ fn write_assembly(
             emit_successor_jump(&mut file, program, &labels, prev_pc, insn)?;
         }
     }
+    emit_assembly_profile_symbol(&mut file, "ceno_aot_dynamic_fallback")?;
     writeln!(file, "L_dynamic:")?;
     emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC)?;
     writeln!(file, "    jmp L_dispatch")?;
@@ -1577,6 +1622,12 @@ fn write_assembly(
     writeln!(file, "    popq %rbx")?;
     writeln!(file, "    ret")?;
     writeln!(file, ".section .note.GNU-stack,\"\",@progbits")?;
+    Ok(())
+}
+
+fn emit_assembly_profile_symbol(mut file: impl Write, name: &str) -> Result<()> {
+    writeln!(file, ".type {name}, @function")?;
+    writeln!(file, "{name}:")?;
     Ok(())
 }
 
@@ -3670,6 +3721,7 @@ fn emit_successor_jump(
     Ok(())
 }
 
+#[inline(always)]
 unsafe extern "C" fn aot_exec_one<T: Tracer>(
     context: *mut c_void,
     pc: u32,
@@ -3756,6 +3808,17 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
             AOT_STATUS_ERROR
         }
     }
+}
+
+/// Stable symbol covering the Rust fallback path, including syscall bodies.
+#[unsafe(no_mangle)]
+#[inline(never)]
+unsafe extern "C" fn ceno_aot_preflight_fallback_callback(
+    context: *mut c_void,
+    pc: u32,
+    next_pc: *mut u32,
+) -> u32 {
+    unsafe { aot_exec_one::<PreflightTracer>(context, pc, next_pc) }
 }
 
 unsafe extern "C" fn aot_trace_native_compute<T: Tracer>(context: *mut AotRuntimeContext) -> u32 {
@@ -3863,7 +3926,9 @@ unsafe extern "C" fn aot_trace_native_preflight(context: *mut AotRuntimeContext)
     }
 }
 
-unsafe extern "C" fn aot_preflight_direct_helper(context: *mut AotRuntimeContext) -> u32 {
+#[unsafe(no_mangle)]
+#[inline(never)]
+unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntimeContext) -> u32 {
     let context = unsafe { &mut *context };
     let vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
     if !context.preflight_event_cursor.is_null() {
