@@ -296,11 +296,7 @@ fn radix_sort_next_access_events(events: &mut Vec<NextAccessEvent>) {
     let mut counts = vec![0usize; 1 << 16];
     let max_address = events.iter().map(|event| event.address.0).max().unwrap();
     let address_passes = (u32::BITS - max_address.leading_zeros()).div_ceil(16);
-    let max_source = events
-        .iter()
-        .map(|event| event.source_cycle)
-        .max()
-        .unwrap();
+    let max_source = events.iter().map(|event| event.source_cycle).max().unwrap();
     let source_passes = (Cycle::BITS - max_source.leading_zeros()).div_ceil(16);
 
     let mut pass = |digit: &dyn Fn(&NextAccessEvent) -> usize| {
@@ -2208,7 +2204,10 @@ impl PreflightTracer {
     }
 
     pub(crate) fn next_access_tape_usage(&self) -> (usize, usize) {
-        (self.next_access_events.len(), self.next_access_events.capacity())
+        (
+            self.next_access_events.len(),
+            self.next_access_events.capacity(),
+        )
     }
 
     #[cfg_attr(
