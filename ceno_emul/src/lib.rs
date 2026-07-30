@@ -14,8 +14,8 @@ mod tracer;
 pub use tracer::{
     Change, ChipCostSpec, FullTracer, FullTracerConfig, LatestAccesses, MemOp, NextAccessEvent,
     NextAccessPair, NextAccessTape, NextCycleAccess, PreflightTracer, PreflightTracerConfig,
-    ReadOp, SHARD_COST_BUCKETS, ShardCostModel, ShardPlanBuilder, StepCellExtractor, StepIndex,
-    StepRecord, Tracer, WriteOp,
+    ReadOp, ReplayChunk, ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel,
+    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
 };
 
 mod vm_state;

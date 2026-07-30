@@ -87,6 +87,31 @@ impl Default for StepRecord {
 
 pub type StepIndex = usize;
 
+/// Why a replay engine returned control to its Rust consumer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReplayStopReason {
+    ShardBoundary,
+    BufferFull,
+    Halt,
+    Syscall,
+    DynamicFallback,
+    Trap,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReplayChunk {
+    pub records: usize,
+    pub stop_reason: ReplayStopReason,
+}
+
+/// Common lifecycle for interpreter and native witness replay engines.
+pub trait ReplayEngine {
+    fn begin_shard(&mut self, expected_steps: usize);
+    fn replay_chunk(&mut self) -> ReplayChunk;
+    fn finish_shard(&mut self);
+}
+
 pub trait StepCellExtractor {
     fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64;
 
@@ -1389,6 +1414,19 @@ pub struct FullTracer {
     next_access_cursor: usize,
 }
 
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub(crate) struct FullTracerNativeTraceState {
+    pub records: *mut StepRecord,
+    pub len: *mut usize,
+    pub pending_index: *mut usize,
+    pub pending_cycle: *mut Cycle,
+    pub latest_cells: *mut Cycle,
+    pub latest_base: WordAddr,
+    pub latest_len: *mut usize,
+    pub max_heap_addr_access: *mut ByteAddr,
+    pub max_hint_addr_access: *mut ByteAddr,
+}
+
 impl FullTracer {
     pub const SUBCYCLE_RS1: Cycle = <Self as Tracer>::SUBCYCLE_RS1;
     pub const SUBCYCLE_RS2: Cycle = <Self as Tracer>::SUBCYCLE_RS2;
@@ -1465,6 +1503,25 @@ impl FullTracer {
         &self.records[..self.len]
     }
 
+    pub fn record_buffer_bytes(&self) -> usize {
+        self.records.capacity() * std::mem::size_of::<StepRecord>()
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn native_trace_state(&mut self) -> FullTracerNativeTraceState {
+        FullTracerNativeTraceState {
+            records: self.records.as_mut_ptr(),
+            len: &mut self.len,
+            pending_index: &mut self.pending_index,
+            pending_cycle: &mut self.pending_cycle,
+            latest_cells: self.latest_accesses.cells_mut_ptr(),
+            latest_base: self.latest_accesses.base(),
+            latest_len: &mut self.latest_accesses.len,
+            max_heap_addr_access: &mut self.max_heap_addr_access,
+            max_hint_addr_access: &mut self.max_hint_addr_access,
+        }
+    }
+
     /// Returns the syscall witness store. Pass this to `StepRecord::syscall()`.
     #[inline(always)]
     pub fn syscall_witnesses(&self) -> &[SyscallWitness] {
@@ -1490,7 +1547,6 @@ impl FullTracer {
     /// Return the completed step and advance to the next cycle.
     #[inline(always)]
     pub fn advance(&mut self) -> StepIndex {
-        self.annotate_pending_step();
         let idx = self.pending_index;
         let next_cycle = self.records[self.pending_index].cycle + Self::SUBCYCLES_PER_INSN;
         self.len = idx + 1;
@@ -1681,124 +1737,105 @@ impl FullTracer {
             })
     }
 
-    fn annotate_one(&mut self, cycle: Cycle, addr: WordAddr, mask: u8) {
-        let event = self.next_accesses.events().get(self.next_access_cursor);
-        #[cfg(debug_assertions)]
-        let oracle_decision = self.next_accesses.oracle_has(cycle, addr);
-        let Some(event) = event else {
-            #[cfg(debug_assertions)]
-            assert!(!oracle_decision, "cursor missed debug next-access oracle");
-            return;
-        };
-        assert!(
-            event.source_cycle >= cycle,
-            "FullTracer skipped next-access event {:?} before ({cycle}, {addr:?})",
-            event
-        );
-        if event.source_cycle == cycle {
-            assert_eq!(
-                event.address, addr,
-                "FullTracer access/tape address mismatch"
-            );
-            self.records[self.pending_index].future_access_mask |= mask;
-            self.next_access_cursor += 1;
-            #[cfg(debug_assertions)]
-            assert!(
-                oracle_decision,
-                "cursor disagrees with debug next-access oracle"
-            );
-        } else {
-            #[cfg(debug_assertions)]
-            assert!(
-                !oracle_decision,
-                "cursor disagrees with debug next-access oracle"
-            );
-        }
-    }
-
-    fn annotate_syscall_ops(&mut self, cycle: Cycle, register_ops: bool) {
-        let record = self.records[self.pending_index];
-        if record.syscall_index == StepRecord::NO_SYSCALL {
-            return;
-        }
-        let witness_index = record.syscall_index as usize;
+    fn annotate_syscall_event(
+        &mut self,
+        witness_index: usize,
+        address: WordAddr,
+        register_ops: bool,
+    ) {
         let ops = if register_ops {
             &self.syscall_witnesses[witness_index].reg_ops
         } else {
             &self.syscall_witnesses[witness_index].mem_ops
         };
-        if ops.is_empty() {
-            return;
-        }
-        let mut final_ops = BTreeMap::new();
-        for (index, op) in ops.iter().enumerate() {
-            final_ops.insert(op.addr, index);
-        }
-        for (addr, index) in final_ops {
-            let Some(event) = self.next_accesses.events().get(self.next_access_cursor) else {
-                break;
-            };
-            assert!(
-                event.source_cycle >= cycle,
-                "FullTracer skipped next-access event"
-            );
-            if event.source_cycle == cycle && event.address == addr {
-                let masks = if register_ops {
-                    &mut self.syscall_witnesses[witness_index].reg_future_access
-                } else {
-                    &mut self.syscall_witnesses[witness_index].mem_future_access
-                };
-                masks[index] = 1;
-                self.next_access_cursor += 1;
-                #[cfg(debug_assertions)]
-                assert!(self.next_accesses.oracle_has(cycle, addr));
-            } else {
-                #[cfg(debug_assertions)]
-                assert!(!self.next_accesses.oracle_has(cycle, addr));
-            }
-        }
-        assert_ne!(
-            self.next_accesses
-                .events()
-                .get(self.next_access_cursor)
-                .map(|event| event.source_cycle),
-            Some(cycle),
-            "FullTracer syscall replay skipped a next-access event"
-        );
+        let index = ops
+            .iter()
+            .rposition(|op| op.addr == address)
+            .unwrap_or_else(|| panic!("FullTracer syscall access/tape address mismatch"));
+        let masks = if register_ops {
+            &mut self.syscall_witnesses[witness_index].reg_future_access
+        } else {
+            &mut self.syscall_witnesses[witness_index].mem_future_access
+        };
+        masks[index] = 1;
     }
 
-    fn annotate_pending_step(&mut self) {
-        let record = self.records[self.pending_index];
-        if record.has_rs1 {
-            self.annotate_one(
-                record.cycle + Self::SUBCYCLE_RS1,
-                record.rs1.addr,
-                StepRecord::FUTURE_ACCESS_RS1,
-            );
+    fn annotate_event(&mut self, record_index: usize, event: NextAccessEvent) {
+        #[cfg(debug_assertions)]
+        assert!(
+            self.next_accesses
+                .oracle_has(event.source_cycle, event.address),
+            "cursor missed debug next-access oracle"
+        );
+        let record = self.records[record_index];
+        let subcycle = event
+            .source_cycle
+            .checked_sub(record.cycle)
+            .expect("next-access event precedes its replay record");
+        let mask = match subcycle {
+            Self::SUBCYCLE_RS1 if record.has_rs1 && record.rs1.addr == event.address => {
+                StepRecord::FUTURE_ACCESS_RS1
+            }
+            Self::SUBCYCLE_RS2 if record.has_rs2 && record.rs2.addr == event.address => {
+                StepRecord::FUTURE_ACCESS_RS2
+            }
+            Self::SUBCYCLE_RD if record.has_rd && record.rd.addr == event.address => {
+                StepRecord::FUTURE_ACCESS_RD
+            }
+            Self::SUBCYCLE_MEM
+                if record.has_memory_op && record.memory_op.addr == event.address =>
+            {
+                StepRecord::FUTURE_ACCESS_MEM
+            }
+            Self::SUBCYCLE_RD if record.syscall_index != StepRecord::NO_SYSCALL => {
+                self.annotate_syscall_event(record.syscall_index as usize, event.address, true);
+                0
+            }
+            Self::SUBCYCLE_MEM if record.syscall_index != StepRecord::NO_SYSCALL => {
+                self.annotate_syscall_event(record.syscall_index as usize, event.address, false);
+                0
+            }
+            _ => panic!(
+                "FullTracer access/tape mismatch at cycle {} for address {:?}",
+                event.source_cycle, event.address
+            ),
+        };
+        self.records[record_index].future_access_mask |= mask;
+    }
+
+    /// Apply the sorted next-access tape to a newly completed record range.
+    ///
+    /// Source cycles map directly to replay records, so this work is proportional
+    /// to the number of cross-shard events rather than the number of instructions.
+    pub fn annotate_recorded_steps(&mut self, start_index: usize) {
+        assert!(start_index <= self.len);
+        if start_index == self.len {
+            return;
         }
-        if record.has_rs2 {
-            self.annotate_one(
-                record.cycle + Self::SUBCYCLE_RS2,
-                record.rs2.addr,
-                StepRecord::FUTURE_ACCESS_RS2,
+        let chunk_start_cycle = self.records[start_index].cycle;
+        let chunk_end_cycle = self.records[self.len - 1].cycle + Self::SUBCYCLES_PER_INSN;
+        while let Some(event) = self
+            .next_accesses
+            .events()
+            .get(self.next_access_cursor)
+            .copied()
+        {
+            assert!(
+                event.source_cycle >= chunk_start_cycle,
+                "FullTracer skipped next-access event {:?} before replay chunk starting at {}",
+                event,
+                chunk_start_cycle
             );
+            if event.source_cycle >= chunk_end_cycle {
+                break;
+            }
+            let record_offset = usize::try_from(
+                (event.source_cycle - chunk_start_cycle) / Self::SUBCYCLES_PER_INSN,
+            )
+            .expect("next-access record offset does not fit usize");
+            self.annotate_event(start_index + record_offset, event);
+            self.next_access_cursor += 1;
         }
-        if record.has_rd {
-            self.annotate_one(
-                record.cycle + Self::SUBCYCLE_RD,
-                record.rd.addr,
-                StepRecord::FUTURE_ACCESS_RD,
-            );
-        }
-        self.annotate_syscall_ops(record.cycle + Self::SUBCYCLE_RD, true);
-        if record.has_memory_op {
-            self.annotate_one(
-                record.cycle + Self::SUBCYCLE_MEM,
-                record.memory_op.addr,
-                StepRecord::FUTURE_ACCESS_MEM,
-            );
-        }
-        self.annotate_syscall_ops(record.cycle + Self::SUBCYCLE_MEM, false);
     }
 
     pub fn assert_next_accesses_consumed(&self) {
@@ -1808,6 +1845,16 @@ impl FullTracer {
             "FullTracer consumed {} of {} non-initial next-access events",
             self.next_access_cursor,
             self.next_accesses.events().len()
+        );
+    }
+
+    pub fn assert_next_accesses_consumed_through(&self, end_cycle: Cycle) {
+        assert!(
+            self.next_accesses
+                .events()
+                .get(self.next_access_cursor)
+                .is_none_or(|event| event.source_cycle >= end_cycle),
+            "FullTracer left a next-access event before shard end cycle {end_cycle}"
         );
     }
 }
@@ -2710,6 +2757,62 @@ mod tests {
                 NextAccessEvent::new(1 << 40, (1 << 40) + 9, 7u32.into()),
             ]
         );
+    }
+
+    #[test]
+    fn full_tracer_defers_next_access_annotation_until_chunk_completion() {
+        let address: WordAddr = Platform::register_vma(1).into();
+        let source_cycle = FullTracer::SUBCYCLES_PER_INSN + FullTracer::SUBCYCLE_RS1;
+        let tape = NextAccessTape::from_unsorted(vec![NextAccessEvent::new(
+            source_cycle,
+            source_cycle + FullTracer::SUBCYCLES_PER_INSN,
+            address,
+        )]);
+        let mut tracer = FullTracer::new(&CENO_PLATFORM, FullTracerConfig { max_step_shard: 1 });
+        tracer.next_accesses = Arc::new(tape);
+
+        tracer.load_register(1, 7);
+        tracer.advance();
+        assert_eq!(tracer.records[0].future_access_mask(), 0);
+
+        tracer.annotate_recorded_steps(0);
+        assert!(tracer.records[0].has_future_access(StepRecord::FUTURE_ACCESS_RS1));
+        tracer.assert_next_accesses_consumed();
+    }
+
+    #[test]
+    fn chunk_annotation_marks_final_matching_syscall_op() {
+        let address = WordAddr::from(17);
+        let source_cycle = FullTracer::SUBCYCLES_PER_INSN + FullTracer::SUBCYCLE_RD;
+        let tape = NextAccessTape::from_unsorted(vec![NextAccessEvent::new(
+            source_cycle,
+            source_cycle + FullTracer::SUBCYCLES_PER_INSN,
+            address,
+        )]);
+        let mut tracer = FullTracer::new(&CENO_PLATFORM, FullTracerConfig { max_step_shard: 1 });
+        tracer.next_accesses = Arc::new(tape);
+        tracer.syscall_witnesses.push(SyscallWitness {
+            reg_ops: vec![
+                WriteOp {
+                    addr: address,
+                    value: Change::new(1, 2),
+                    previous_cycle: 0,
+                },
+                WriteOp {
+                    addr: address,
+                    value: Change::new(2, 3),
+                    previous_cycle: source_cycle,
+                },
+            ],
+            reg_future_access: vec![0; 2],
+            ..Default::default()
+        });
+        tracer.records[0].syscall_index = 0;
+        tracer.advance();
+
+        tracer.annotate_recorded_steps(0);
+        assert_eq!(tracer.syscall_witnesses[0].reg_future_access, vec![0, 1]);
+        tracer.assert_next_accesses_consumed();
     }
 
     #[test]

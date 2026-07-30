@@ -51,6 +51,9 @@ enum AssemblyTraceStyle {
     /// Generic AOT execution calls back into Rust after each native step so the
     /// active tracer can observe register and memory values.
     Generic,
+    /// Native code emits `StepRecord`s and maintains FullTracer access state
+    /// directly. Rust is entered only for fallback instructions and syscalls.
+    FullTracerDirect,
     /// Native code updates `PreflightTracer` state directly for per-step access
     /// accounting, avoiding the generic callback value path.
     PreflightDirect,
@@ -66,7 +69,7 @@ enum AssemblyTraceStyle {
 
 impl AssemblyTraceStyle {
     fn needs_callback_values(self) -> bool {
-        matches!(self, Self::Generic)
+        matches!(self, Self::Generic | Self::FullTracerDirect)
     }
 
     fn is_preflight_direct(self) -> bool {
@@ -82,6 +85,7 @@ impl AssemblyTraceStyle {
     fn cache_name(self) -> &'static str {
         match self {
             Self::Generic => "generic",
+            Self::FullTracerDirect => "fulltracer-direct",
             Self::PreflightDirect => "preflight-direct",
             Self::PreflightDirectBlockPlan => "preflight-block-plan",
             Self::PreflightDirectBlockPlanExactAccess => "preflight-block-exact",
@@ -115,6 +119,8 @@ const AOT_CTX_TRACE_MEM_ADDR_OFFSET: usize = 76;
 const AOT_CTX_TRACE_MEM_BEFORE_OFFSET: usize = 80;
 const AOT_CTX_TRACE_MEM_AFTER_OFFSET: usize = 84;
 const AOT_CTX_PC_OFFSET: usize = 88;
+const AOT_CTX_INSTRUCTIONS_OFFSET: usize = 96;
+const AOT_CTX_PROGRAM_BASE_OFFSET: usize = 104;
 const AOT_CTX_TRACE_FLAGS_OFFSET: usize = 108;
 const AOT_CTX_TRACE_RS1_IDX_OFFSET: usize = 112;
 const AOT_CTX_TRACE_RS2_IDX_OFFSET: usize = 116;
@@ -181,6 +187,15 @@ const AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET: usize = 528;
 const AOT_CTX_PREFLIGHT_EVENT_END_OFFSET: usize = 536;
 const AOT_CTX_PREFLIGHT_LATEST_LEN_OFFSET: usize = 544;
 const AOT_CTX_MEMORY_END_WORD_OFFSET: usize = 552;
+const AOT_CTX_FULLTRACER_RECORDS_OFFSET: usize = 560;
+const AOT_CTX_FULLTRACER_LEN_OFFSET: usize = 568;
+const AOT_CTX_FULLTRACER_PENDING_INDEX_OFFSET: usize = 576;
+const AOT_CTX_FULLTRACER_PENDING_CYCLE_OFFSET: usize = 584;
+const AOT_CTX_FULLTRACER_LATEST_CELLS_OFFSET: usize = 592;
+const AOT_CTX_FULLTRACER_LATEST_BASE_OFFSET: usize = 600;
+const AOT_CTX_FULLTRACER_LATEST_LEN_OFFSET: usize = 608;
+const AOT_CTX_FULLTRACER_MAX_HEAP_OFFSET: usize = 616;
+const AOT_CTX_FULLTRACER_MAX_HINT_OFFSET: usize = 624;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
@@ -192,6 +207,7 @@ const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v2";
 const AOT_TRACE_MODE_NONE: u32 = 0;
 const AOT_TRACE_MODE_CALLBACK: u32 = 1;
 const AOT_TRACE_MODE_PREFLIGHT_DIRECT: u32 = 2;
+const AOT_TRACE_MODE_FULLTRACER_DIRECT: u32 = 3;
 
 const AOT_PREFLIGHT_HELPER_ACCESS: u32 = 1;
 const AOT_PREFLIGHT_HELPER_SYNC: u32 = 2;
@@ -300,6 +316,16 @@ struct AotRuntimeContext {
     preflight_latest_len: *mut usize,
     memory_end_word: u32,
     _memory_end_padding: u32,
+    fulltracer_records: *mut crate::StepRecord,
+    fulltracer_len: *mut usize,
+    fulltracer_pending_index: *mut usize,
+    fulltracer_pending_cycle: *mut Cycle,
+    fulltracer_latest_cells: *mut Cycle,
+    fulltracer_latest_base: u32,
+    _fulltracer_latest_padding: u32,
+    fulltracer_latest_len: *mut usize,
+    fulltracer_max_heap: *mut ByteAddr,
+    fulltracer_max_hint: *mut ByteAddr,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -573,6 +599,38 @@ impl AotProgram {
         )
     }
 
+    /// Load or build the direct-record image used by `FullTracer` witness
+    /// replay. It reuses the trained preflight image's block leaders, so warm
+    /// replay does not repeat coverage training and has its own cache entry.
+    pub fn load_or_compile_fulltracer_replay(&self) -> Result<Self> {
+        let trace_style = AssemblyTraceStyle::FullTracerDirect;
+        let cache_dir = default_aot_cache_dir();
+        let key = format!(
+            "{}-fulltracer-replay",
+            aot_cache_key(&self.program, trace_style)
+        );
+        match load_cached_aot(self.program.clone(), trace_style, &cache_dir, &key) {
+            Ok(Some(aot)) => {
+                tracing::info!("FullTracer AOT replay artifact cache hit: {key}");
+                return Ok(aot);
+            }
+            Ok(None) => tracing::info!("FullTracer AOT replay artifact cache miss: {key}"),
+            Err(err) => {
+                tracing::warn!("FullTracer AOT replay artifact cache invalid, rebuilding: {err:#}")
+            }
+        }
+
+        let roots = self.blocks.iter().map(|block| block.start_pc).collect();
+        compile_cached_aot(
+            self.program.clone(),
+            roots,
+            trace_style,
+            &cache_dir,
+            &key,
+            0,
+        )
+    }
+
     fn load_or_train_preflight_in(
         platform: &Platform,
         program: Arc<Program>,
@@ -809,6 +867,33 @@ impl AotProgram {
                 preflight_max_cycle_per_shard = state.planner_max_cycle_per_shard;
             }
         }
+        let mut fulltracer_records = std::ptr::null_mut();
+        let mut fulltracer_len = std::ptr::null_mut();
+        let mut fulltracer_pending_index = std::ptr::null_mut();
+        let mut fulltracer_pending_cycle = std::ptr::null_mut();
+        let mut fulltracer_latest_cells = std::ptr::null_mut();
+        let mut fulltracer_latest_base = 0;
+        let mut fulltracer_latest_len = std::ptr::null_mut();
+        let mut fulltracer_max_heap = std::ptr::null_mut();
+        let mut fulltracer_max_hint = std::ptr::null_mut();
+        if trace_native_steps
+            && !cfg!(debug_assertions)
+            && TypeId::of::<T>() == TypeId::of::<crate::FullTracer>()
+            && self.trace_style == AssemblyTraceStyle::FullTracerDirect
+        {
+            let fulltracer_vm = unsafe { &mut *(vm_ptr as *mut VMState<crate::FullTracer>) };
+            let state = fulltracer_vm.tracer_mut().native_trace_state();
+            trace_mode = AOT_TRACE_MODE_FULLTRACER_DIRECT;
+            fulltracer_records = state.records;
+            fulltracer_len = state.len;
+            fulltracer_pending_index = state.pending_index;
+            fulltracer_pending_cycle = state.pending_cycle;
+            fulltracer_latest_cells = state.latest_cells;
+            fulltracer_latest_base = state.latest_base.0;
+            fulltracer_latest_len = state.latest_len;
+            fulltracer_max_heap = state.max_heap_addr_access;
+            fulltracer_max_hint = state.max_hint_addr_access;
+        }
         let preflight_step_cells_table = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             preflight_step_cells.as_ptr()
         } else {
@@ -927,8 +1012,20 @@ impl AotProgram {
             preflight_latest_len,
             memory_end_word,
             _memory_end_padding: 0,
+            fulltracer_records,
+            fulltracer_len,
+            fulltracer_pending_index,
+            fulltracer_pending_cycle,
+            fulltracer_latest_cells,
+            fulltracer_latest_base,
+            _fulltracer_latest_padding: 0,
+            fulltracer_latest_len,
+            fulltracer_max_heap,
+            fulltracer_max_hint,
         };
-        let trace_fn = if trace_native_steps {
+        let trace_fn = if trace_mode == AOT_TRACE_MODE_FULLTRACER_DIRECT {
+            std::ptr::null()
+        } else if trace_native_steps {
             if TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
                 if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
                     (ceno_aot_preflight_direct_callback as AotTraceFn) as *const c_void
@@ -1621,6 +1718,9 @@ fn write_assembly(
     writeln!(file, "    popq %r12")?;
     writeln!(file, "    popq %rbx")?;
     writeln!(file, "    ret")?;
+    if trace_style == AssemblyTraceStyle::FullTracerDirect {
+        emit_fulltracer_shared_recorder(&mut file)?;
+    }
     writeln!(file, ".section .note.GNU-stack,\"\",@progbits")?;
     Ok(())
 }
@@ -1708,6 +1808,152 @@ fn emit_after_step(mut file: impl Write) -> Result<()> {
     Ok(())
 }
 
+fn emit_fulltracer_shared_recorder(mut file: impl Write) -> Result<()> {
+    writeln!(
+        file,
+        r#"
+.macro FULLTRACER_ACCESS op_offset, previous_offset, subcycle, done_label
+    movl %edx, \op_offset(%r10)
+    movq {AOT_CTX_FULLTRACER_LATEST_CELLS_OFFSET}(%r12), %r8
+    movl %edx, %ecx
+    subl {AOT_CTX_FULLTRACER_LATEST_BASE_OFFSET}(%r12), %ecx
+    movq (%r8,%rcx,8), %r9
+    leaq \subcycle(%rax), %rsi
+    movq %rsi, (%r8,%rcx,8)
+    movq %r9, \previous_offset(%r10)
+    testq %r9, %r9
+    jne \done_label
+    movq {AOT_CTX_FULLTRACER_LATEST_LEN_OFFSET}(%r12), %r8
+    incq (%r8)
+\done_label:
+.endm
+
+.type L_fulltracer_emit_step, @function
+L_fulltracer_emit_step:
+    movq {AOT_CTX_FULLTRACER_RECORDS_OFFSET}(%r12), %r10
+    movq {AOT_CTX_FULLTRACER_PENDING_INDEX_OFFSET}(%r12), %r8
+    movq (%r8), %rcx
+    imulq $136, %rcx, %r9
+    addq %r9, %r10
+    movq {AOT_CTX_FULLTRACER_PENDING_CYCLE_OFFSET}(%r12), %r8
+    movq (%r8), %rax
+    movq %rax, 0(%r10)
+    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %ecx
+    movl %ecx, 8(%r10)
+    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %ecx
+    movl %ecx, 12(%r10)
+    movq {AOT_CTX_FULLTRACER_MAX_HEAP_OFFSET}(%r12), %r8
+    movl (%r8), %ecx
+    movl %ecx, 16(%r10)
+    movl %ecx, 20(%r10)
+    movq {AOT_CTX_FULLTRACER_MAX_HINT_OFFSET}(%r12), %r8
+    movl (%r8), %ecx
+    movl %ecx, 24(%r10)
+    movl %ecx, 28(%r10)
+
+    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %ecx
+    subl {AOT_CTX_PROGRAM_BASE_OFFSET}(%r12), %ecx
+    shrl $2, %ecx
+    imulq $12, %rcx, %rcx
+    movq {AOT_CTX_INSTRUCTIONS_OFFSET}(%r12), %r8
+    addq %rcx, %r8
+    movq 0(%r8), %rcx
+    movq %rcx, 32(%r10)
+    movl 8(%r8), %ecx
+    movl %ecx, 40(%r10)
+    movl $0, 44(%r10)
+    movl $-1, 128(%r10)
+    movl $0, 132(%r10)
+
+    movl {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12), %edi
+    testl ${NATIVE_TRACE_READ_RS1}, %edi
+    je .L_fulltracer_rs1_skip
+    movb $1, 44(%r10)
+    movl {AOT_CTX_TRACE_RS1_IDX_OFFSET}(%r12), %edx
+    shll $6, %edx
+    movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %ecx
+    movl %ecx, 52(%r10)
+    FULLTRACER_ACCESS 48, 56, 0, .L_fulltracer_rs1_done
+.L_fulltracer_rs1_skip:
+    testl ${NATIVE_TRACE_READ_RS2}, %edi
+    je .L_fulltracer_rs2_skip
+    movb $1, 45(%r10)
+    movl {AOT_CTX_TRACE_RS2_IDX_OFFSET}(%r12), %edx
+    shll $6, %edx
+    movl {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12), %ecx
+    movl %ecx, 68(%r10)
+    FULLTRACER_ACCESS 64, 72, 1, .L_fulltracer_rs2_done
+.L_fulltracer_rs2_skip:
+    testl ${NATIVE_TRACE_WRITE_RD}, %edi
+    je .L_fulltracer_rd_skip
+    movb $1, 46(%r10)
+    movl {AOT_CTX_TRACE_RD_IDX_OFFSET}(%r12), %edx
+    shll $6, %edx
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %ecx
+    movl %ecx, 84(%r10)
+    movl {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12), %ecx
+    movl %ecx, 88(%r10)
+    FULLTRACER_ACCESS 80, 96, 2, .L_fulltracer_rd_done
+.L_fulltracer_rd_skip:
+    testl $24, %edi
+    je .L_fulltracer_mem_skip
+    movb $1, 47(%r10)
+    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %edx
+    movl {AOT_CTX_TRACE_MEM_BEFORE_OFFSET}(%r12), %ecx
+    movl %ecx, 108(%r10)
+    movl {AOT_CTX_TRACE_MEM_AFTER_OFFSET}(%r12), %ecx
+    movl %ecx, 112(%r10)
+    FULLTRACER_ACCESS 104, 120, 3, .L_fulltracer_mem_done
+
+    leal (,%rdx,4), %esi
+    leal 4(%rsi), %ecx
+    cmpl {AOT_CTX_HEAP_START_OFFSET}(%r12), %esi
+    jb .L_fulltracer_heap_done
+    cmpl {AOT_CTX_HEAP_END_OFFSET}(%r12), %esi
+    jae .L_fulltracer_heap_done
+    movq {AOT_CTX_FULLTRACER_MAX_HEAP_OFFSET}(%r12), %r8
+    cmpl (%r8), %ecx
+    jbe .L_fulltracer_heap_done
+    movl %ecx, (%r8)
+.L_fulltracer_heap_done:
+    cmpl {AOT_CTX_HINTS_START_OFFSET}(%r12), %esi
+    jb .L_fulltracer_hint_done
+    cmpl {AOT_CTX_HINTS_END_OFFSET}(%r12), %esi
+    jae .L_fulltracer_hint_done
+    movq {AOT_CTX_FULLTRACER_MAX_HINT_OFFSET}(%r12), %r8
+    cmpl (%r8), %ecx
+    jbe .L_fulltracer_hint_done
+    movl %ecx, (%r8)
+.L_fulltracer_hint_done:
+    movq {AOT_CTX_FULLTRACER_MAX_HEAP_OFFSET}(%r12), %r8
+    movl (%r8), %ecx
+    movl %ecx, 20(%r10)
+    movq {AOT_CTX_FULLTRACER_MAX_HINT_OFFSET}(%r12), %r8
+    movl (%r8), %ecx
+    movl %ecx, 28(%r10)
+.L_fulltracer_mem_skip:
+    movq {AOT_CTX_FULLTRACER_PENDING_INDEX_OFFSET}(%r12), %r8
+    movq (%r8), %rcx
+    incq %rcx
+    movq %rcx, (%r8)
+    movq {AOT_CTX_FULLTRACER_LEN_OFFSET}(%r12), %r8
+    movq %rcx, (%r8)
+    movq {AOT_CTX_FULLTRACER_PENDING_CYCLE_OFFSET}(%r12), %r8
+    addq $4, (%r8)
+    movq {AOT_CTX_FULLTRACER_RECORDS_OFFSET}(%r12), %r10
+    imulq $136, %rcx, %r9
+    addq %r9, %r10
+    movq (%r8), %rax
+    movq %rax, 0(%r10)
+    movl $0, 44(%r10)
+    movl $-1, 128(%r10)
+    movl $0, 132(%r10)
+    ret
+"#
+    )?;
+    Ok(())
+}
+
 fn emit_after_native_step(
     mut file: impl Write,
     pc: u32,
@@ -1735,6 +1981,29 @@ fn emit_after_native_step(
             },
             matches!(trace_style, AssemblyTraceStyle::PreflightDirect),
         )?;
+        emit_after_step(&mut file)?;
+        return Ok(());
+    }
+
+    if trace_style == AssemblyTraceStyle::FullTracerDirect {
+        let callback_label = format!(".L_fulltracer_callback_{pc:x}");
+        let done_label = format!(".L_fulltracer_direct_done_{pc:x}");
+        writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
+        writeln!(file, "    movl %r15d, 8(%rsp)")?;
+        writeln!(
+            file,
+            "    cmpl ${AOT_TRACE_MODE_FULLTRACER_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
+        )?;
+        writeln!(file, "    jne {callback_label}")?;
+        emit_native_trace_metadata(&mut file, pc, program, insn)?;
+        writeln!(file, "    call L_fulltracer_emit_step")?;
+        writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
+        writeln!(file, "    jmp {done_label}")?;
+        writeln!(file, "{callback_label}:")?;
+        emit_native_trace_metadata(&mut file, pc, program, insn)?;
+        writeln!(file, "    movq %r12, %rdi")?;
+        writeln!(file, "    call *%r14")?;
+        writeln!(file, "{done_label}:")?;
         emit_after_step(&mut file)?;
         return Ok(());
     }
@@ -4330,6 +4599,42 @@ mod tests {
             std::mem::offset_of!(AotRuntimeContext, memory_end_word),
             AOT_CTX_MEMORY_END_WORD_OFFSET
         );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, fulltracer_records),
+            AOT_CTX_FULLTRACER_RECORDS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, fulltracer_len),
+            AOT_CTX_FULLTRACER_LEN_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, fulltracer_pending_index),
+            AOT_CTX_FULLTRACER_PENDING_INDEX_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, fulltracer_pending_cycle),
+            AOT_CTX_FULLTRACER_PENDING_CYCLE_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, fulltracer_latest_cells),
+            AOT_CTX_FULLTRACER_LATEST_CELLS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, fulltracer_latest_base),
+            AOT_CTX_FULLTRACER_LATEST_BASE_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, fulltracer_latest_len),
+            AOT_CTX_FULLTRACER_LATEST_LEN_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, fulltracer_max_heap),
+            AOT_CTX_FULLTRACER_MAX_HEAP_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, fulltracer_max_hint),
+            AOT_CTX_FULLTRACER_MAX_HINT_OFFSET
+        );
     }
 
     #[test]
@@ -5543,5 +5848,56 @@ mod tests {
         let err = aot.run_to_halt(&mut vm, 1).unwrap_err().to_string();
 
         assert!(err.contains("InstructionAddressMisaligned"));
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn fulltracer_direct_records_match_interpreter() {
+        let base = CENO_PLATFORM.stack.start + 64;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 5),
+            encode_rv32(InsnKind::ADD, 1, 1, 2, 0),
+            encode_rv32(InsnKind::SW, 20, 2, 0, 0),
+            encode_rv32(InsnKind::LW, 20, 0, 3, 0),
+            encode_rv32(InsnKind::BEQ, 2, 3, 0, 4),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let config = crate::FullTracerConfig { max_step_shard: 16 };
+
+        let mut interp = VMState::<crate::FullTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            config,
+        );
+        interp.init_register_unsafe(20, base);
+        interp.init_memory(ByteAddr(base).waddr(), 0);
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile_with_extra_roots_and_trace_style(
+            program.clone(),
+            Vec::new(),
+            AssemblyTraceStyle::FullTracerDirect,
+        )
+        .unwrap();
+        let mut direct = VMState::<crate::FullTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
+        direct.init_register_unsafe(20, base);
+        direct.init_memory(ByteAddr(base).waddr(), 0);
+        let report = aot.run_to_halt(&mut direct, 16).unwrap();
+
+        assert_eq!(report.fallback_steps, 1, "only the halt ecall falls back");
+        assert_eq!(direct.peek_register(3), interp.peek_register(3));
+        assert_eq!(direct.peek_memory(ByteAddr(base).waddr()), 10);
+        assert_eq!(
+            direct.tracer().recorded_steps(),
+            interp.tracer().recorded_steps()
+        );
+        assert_eq!(
+            direct.tracer().syscall_witnesses(),
+            interp.tracer().syscall_witnesses()
+        );
     }
 }

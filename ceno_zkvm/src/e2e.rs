@@ -24,9 +24,9 @@ use crate::{
 use ceno_emul::{
     Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, EmulatorBackend, FullTracer,
     FullTracerConfig, InsnKind, IterAddresses, NextCycleAccess, Platform, PreflightTracer,
-    PreflightTracerConfig, Program, RegIdx, StepCellExtractor, StepIndex, StepRecord,
-    SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
-    host_utils::read_all_messages,
+    PreflightTracerConfig, Program, RegIdx, ReplayChunk, ReplayEngine, ReplayStopReason,
+    StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
+    WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -149,6 +149,8 @@ pub struct EmulationResult<'a> {
     pub shard_cycle_boundaries: Arc<Vec<Cycle>>,
     pub executed_steps: usize,
     pub max_step_shard: usize,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub replay_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
     pub phantom: PhantomData<&'a ()>,
     // pub shard_ctxs: Vec<ShardContext<'a>>,
 }
@@ -784,6 +786,8 @@ impl ShardContextBuilder {
             self.cur_shard_id
         );
 
+        steps_iter.finish_shard();
+
         if self.cur_shard_id > 0 {
             assert_eq!(
                 summary.first_cycle,
@@ -836,6 +840,7 @@ impl ShardContextBuilder {
 
 pub trait StepSource: Iterator<Item = StepIndex> {
     fn start_new_shard(&mut self);
+    fn finish_shard(&mut self);
     fn shard_steps(&self) -> &[StepRecord];
     fn step_record(&self, idx: StepIndex) -> &StepRecord;
     fn syscall_witnesses(&self) -> &[SyscallWitness];
@@ -849,6 +854,13 @@ pub trait StepSource: Iterator<Item = StepIndex> {
 struct StepReplay {
     vm: VMState<FullTracer>,
     remaining_steps: usize,
+    shard_step_counts: Vec<usize>,
+    shard_id: usize,
+    next_buffered_step: usize,
+    shard_replayed: bool,
+    expected_shard_steps: usize,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    aot: Option<Arc<ceno_emul::aot::AotProgram>>,
 }
 
 impl StepReplay {
@@ -859,8 +871,11 @@ impl StepReplay {
         remaining_steps: usize,
         max_step_shard: usize,
         next_accesses: Arc<NextCycleAccess>,
+        shard_cycle_boundaries: Arc<Vec<Cycle>>,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        aot: Option<Arc<ceno_emul::aot::AotProgram>>,
     ) -> Self {
-        let mut vm = VMState::new_with_tracer_config_and_next_accesses(
+        let mut vm: VMState<FullTracer> = VMState::new_with_tracer_config_and_next_accesses(
             platform,
             program,
             FullTracerConfig { max_step_shard },
@@ -869,21 +884,133 @@ impl StepReplay {
         for record in init_mem_state.hints.iter() {
             vm.init_memory(record.addr.into(), record.value);
         }
-        // Witness replay is intentionally interpreter-backed. FullTracer records
-        // are the source for shard witnesses, so keep this path exact and stable
-        // even when preflight planning uses AOT.
+        tracing::info!(
+            "FullTracer record buffer records={} bytes={}",
+            max_step_shard.saturating_add(1),
+            vm.tracer().record_buffer_bytes(),
+        );
+        let shard_step_counts = shard_cycle_boundaries
+            .windows(2)
+            .map(|range| {
+                usize::try_from((range[1] - range[0]) / FullTracer::SUBCYCLES_PER_INSN)
+                    .expect("shard step count does not fit usize")
+            })
+            .collect();
         StepReplay {
             vm,
             remaining_steps,
+            shard_step_counts,
+            shard_id: 0,
+            next_buffered_step: 0,
+            shard_replayed: false,
+            expected_shard_steps: 0,
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            aot,
         }
     }
 
     fn reset_current_shard(&mut self) {
         self.vm.tracer_mut().reset_step_buffer();
+        self.next_buffered_step = 0;
+        self.shard_replayed = false;
     }
 
     fn current_shard_steps(&self) -> &[StepRecord] {
         self.vm.tracer().recorded_steps()
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    fn replay_current_shard_aot(&mut self) -> ReplayChunk {
+        let Some(aot) = self.aot.as_ref() else {
+            return ReplayChunk {
+                records: 0,
+                stop_reason: ReplayStopReason::DynamicFallback,
+            };
+        };
+        if self.shard_replayed {
+            return ReplayChunk {
+                records: 0,
+                stop_reason: ReplayStopReason::ShardBoundary,
+            };
+        }
+        let expected_steps = self.expected_shard_steps;
+        let report = aot
+            .run_to_halt(&mut self.vm, expected_steps)
+            .unwrap_or_else(|err| panic!("AOT VM exec failed during witness replay: {err:?}"));
+        assert_eq!(
+            report.executed_steps, expected_steps,
+            "AOT FullTracer replay stopped before the planned shard boundary"
+        );
+        self.vm.tracer_mut().annotate_recorded_steps(0);
+        self.shard_replayed = true;
+        tracing::info!(
+            "AOT FullTracer replay shard={} steps={} rust_transitions={} fallback_steps={} dynamic_pc={} memory_guard={} ecall_by_code={:?} exceptional={}",
+            self.shard_id,
+            report.executed_steps,
+            report.fallback_steps,
+            report.fallback_steps,
+            report.fallback.dynamic_pc_miss,
+            report.fallback.memory_guard,
+            report.fallback.ecall_by_code,
+            report.fallback.exceptional_jump_or_trap,
+        );
+        ReplayChunk {
+            records: report.executed_steps,
+            stop_reason: if self.vm.halted() {
+                ReplayStopReason::Halt
+            } else {
+                ReplayStopReason::ShardBoundary
+            },
+        }
+    }
+}
+
+impl ReplayEngine for StepReplay {
+    fn begin_shard(&mut self, expected_steps: usize) {
+        self.reset_current_shard();
+        self.expected_shard_steps = expected_steps;
+    }
+
+    fn replay_chunk(&mut self) -> ReplayChunk {
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if self.aot.is_some() {
+            return self.replay_current_shard_aot();
+        }
+
+        let start_index = self.vm.tracer().recorded_steps().len();
+        while self.vm.tracer().recorded_steps().len() < self.expected_shard_steps {
+            match self.vm.next_step_record() {
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                Err(err) => panic!("vm exec failed during witness replay: {err:?}"),
+            }
+        }
+        let records = self.vm.tracer().recorded_steps().len() - start_index;
+        self.vm.tracer_mut().annotate_recorded_steps(start_index);
+        ReplayChunk {
+            records,
+            stop_reason: if self.vm.halted() {
+                ReplayStopReason::Halt
+            } else {
+                ReplayStopReason::ShardBoundary
+            },
+        }
+    }
+
+    fn finish_shard(&mut self) {
+        assert_eq!(
+            self.next_buffered_step, self.expected_shard_steps,
+            "replay consumer did not drain the complete shard"
+        );
+        let end_cycle = self
+            .current_shard_steps()
+            .last()
+            .expect("cannot finish an empty replay shard")
+            .cycle()
+            + FullTracer::SUBCYCLES_PER_INSN;
+        self.vm
+            .tracer()
+            .assert_next_accesses_consumed_through(end_cycle);
     }
 }
 
@@ -895,26 +1022,35 @@ impl Iterator for StepReplay {
             self.vm.tracer().assert_next_accesses_consumed();
             return None;
         }
-        match self.vm.next_step_record() {
-            Ok(Some(step)) => {
-                self.remaining_steps -= 1;
-                if self.remaining_steps == 0 {
-                    self.vm.tracer().assert_next_accesses_consumed();
-                }
-                Some(step)
+        if self.next_buffered_step < self.vm.tracer().recorded_steps().len() {
+            let step = self.next_buffered_step;
+            self.next_buffered_step += 1;
+            self.remaining_steps -= 1;
+            if self.remaining_steps == 0 {
+                self.vm.tracer().assert_next_accesses_consumed();
             }
-            Ok(None) => {
-                self.remaining_steps = 0;
-                None
-            }
-            Err(err) => panic!("vm exec failed during witness replay: {err:?}"),
+            return Some(step);
         }
+        let chunk = self.replay_chunk();
+        if chunk.records == 0 {
+            self.remaining_steps = 0;
+            return None;
+        }
+        self.next()
     }
 }
 
 impl StepSource for StepReplay {
     fn start_new_shard(&mut self) {
-        self.reset_current_shard();
+        if !self.current_shard_steps().is_empty() {
+            self.shard_id += 1;
+        }
+        let expected_steps = self.shard_step_counts[self.shard_id];
+        self.begin_shard(expected_steps);
+    }
+
+    fn finish_shard(&mut self) {
+        ReplayEngine::finish_shard(self);
     }
 
     fn shard_steps(&self) -> &[StepRecord] {
@@ -1209,6 +1345,19 @@ pub fn emulate_program<'a>(
         );
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let replay_aot_program = match std::env::var("CENO_FULLTRACER_REPLAY_BACKEND") {
+        Ok(value) if value.eq_ignore_ascii_case("interp") => None,
+        Ok(value) if !value.eq_ignore_ascii_case("aot") => {
+            panic!("unsupported CENO_FULLTRACER_REPLAY_BACKEND={value:?}; expected interp or aot")
+        }
+        _ => aot_program.as_ref().map(|aot| {
+            Arc::new(
+                aot.load_or_compile_fulltracer_replay()
+                    .unwrap_or_else(|err| panic!("FullTracer AOT replay compile failed: {err}")),
+            )
+        }),
+    };
     let tracer = vm.take_tracer();
     let (plan_builder, next_accesses) = tracer.into_shard_plan();
     let max_step_shard = plan_builder.max_step_shard();
@@ -1234,6 +1383,8 @@ pub fn emulate_program<'a>(
         shard_cycle_boundaries: shard_cycle_boundaries.clone(),
         executed_steps: insts,
         max_step_shard,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        replay_aot_program,
         final_mem_state: FinalMemState {
             reg: reg_final,
             io: io_final,
@@ -1431,6 +1582,9 @@ pub fn generate_witness<'a, E: ExtensionField>(
         emul_result.executed_steps,
         emul_result.max_step_shard,
         shard_ctx_builder.next_accesses(),
+        emul_result.shard_cycle_boundaries.clone(),
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        emul_result.replay_aot_program.clone(),
     );
     std::iter::from_fn(move || {
         info_span!(
@@ -2002,6 +2156,9 @@ pub fn analyze_shard_ram_light<E: ExtensionField>(
         emul_result.executed_steps,
         emul_result.max_step_shard,
         shard_ctx_builder.next_accesses(),
+        emul_result.shard_cycle_boundaries.clone(),
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        emul_result.replay_aot_program.clone(),
     );
     let mut reports = Vec::new();
 
@@ -3261,6 +3418,8 @@ mod tests {
             fn start_new_shard(&mut self) {
                 self.shard_start = self.cursor;
             }
+
+            fn finish_shard(&mut self) {}
 
             fn shard_steps(&self) -> &[StepRecord] {
                 &self.steps[self.shard_start..self.cursor]
