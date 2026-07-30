@@ -2167,6 +2167,7 @@ impl PreflightTracer {
         }
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub(crate) fn record_native_first_touch(&mut self, addr: WordAddr) {
         self.latest_accesses.record_native_first_touch(addr);
     }
@@ -2181,6 +2182,7 @@ impl PreflightTracer {
         self.next_access_events.push(event);
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub(crate) fn prepare_native_next_access_tape(&mut self, capacity: usize) {
         assert!(capacity >= self.next_access_events.len());
         self.next_access_events
@@ -2188,6 +2190,7 @@ impl PreflightTracer {
         self.next_access_capacity = Some(self.next_access_events.capacity());
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub(crate) fn native_next_access_ptrs(
         &mut self,
     ) -> (*mut NextAccessEvent, *mut NextAccessEvent) {
@@ -2197,12 +2200,14 @@ impl PreflightTracer {
         (cursor, end)
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub(crate) unsafe fn sync_native_next_access_tape(&mut self, cursor: *mut NextAccessEvent) {
         let len = unsafe { cursor.offset_from(self.next_access_events.as_mut_ptr()) };
         assert!(len >= 0 && len as usize <= self.next_access_events.capacity());
         unsafe { self.next_access_events.set_len(len as usize) };
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub(crate) fn next_access_tape_usage(&self) -> (usize, usize) {
         (
             self.next_access_events.len(),

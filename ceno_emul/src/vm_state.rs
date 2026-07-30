@@ -135,10 +135,6 @@ impl<T: Tracer> VMState<T> {
         &mut self.tracer
     }
 
-    pub(crate) fn into_tracer(self) -> T {
-        self.tracer
-    }
-
     pub fn take_tracer(self) -> T {
         self.tracer
     }

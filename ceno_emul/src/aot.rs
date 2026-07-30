@@ -490,7 +490,7 @@ fn trace_preflight_event_count(
         vm.init_memory(addr, value);
     }
     while vm.next_step_record()?.is_some() {}
-    let event_count = vm.into_tracer().into_next_accesses().len();
+    let event_count = vm.take_tracer().into_next_accesses().len();
     tracing::info!(
         "AOT next-access training counted {} events in {:?}",
         event_count,
