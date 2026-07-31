@@ -199,7 +199,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 9;
+const AOT_ABI_VERSION: u32 = 10;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -2022,6 +2022,13 @@ fn write_assembly(
         }
         if adaptive_exact_access_plan {
             emit_preflight_direct_block_budget_guard(&mut file, block)?;
+            emit_preflight_direct_block_event_capacity_guard(
+                &mut file,
+                program,
+                block_idx,
+                block,
+                PreflightAccessMode::Exact,
+            )?;
             emit_assembly_profile_symbol(
                 &mut file,
                 &format!("ceno_aot_bb_{:08x}_accounting", block.start_pc),
@@ -2033,6 +2040,13 @@ fn write_assembly(
             if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
                 emit_preflight_direct_block_memory_fast_path_guard(&mut file, program, block)?;
             }
+            emit_preflight_direct_block_event_capacity_guard(
+                &mut file,
+                program,
+                block_idx,
+                block,
+                PreflightAccessMode::BlockAtomic,
+            )?;
             emit_assembly_profile_symbol(
                 &mut file,
                 &format!("ceno_aot_bb_{:08x}_accounting", block.start_pc),
@@ -2703,6 +2717,60 @@ fn emit_preflight_direct_block_budget_guard(
     Ok(())
 }
 
+fn preflight_block_event_capacity(
+    program: &Program,
+    block: &BasicBlock,
+    access_mode: PreflightAccessMode,
+) -> Result<usize> {
+    let mut memory_accesses = 0usize;
+    let mut exact_register_accesses = 0usize;
+    let mut pc = block.start_pc;
+    while pc < block.end_pc {
+        let insn = instruction_at(program, pc)?;
+        exact_register_accesses += preflight_static_register_accesses(insn).len();
+        memory_accesses += usize::from(
+            native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind),
+        );
+        pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+    }
+    Ok(memory_accesses
+        + match access_mode {
+            PreflightAccessMode::Exact => exact_register_accesses,
+            PreflightAccessMode::BlockAtomic => {
+                preflight_block_first_accesses(program, block)?.len()
+            }
+        })
+}
+
+fn emit_preflight_direct_block_event_capacity_guard(
+    mut file: impl Write,
+    program: &Program,
+    block_idx: usize,
+    block: &BasicBlock,
+    access_mode: PreflightAccessMode,
+) -> Result<()> {
+    let event_capacity = preflight_block_event_capacity(program, block, access_mode)?;
+    if event_capacity == 0 {
+        return Ok(());
+    }
+    writeln!(file, "    leaq {}(%rbx), %rax", event_capacity * 24)?;
+    writeln!(
+        file,
+        "    cmpq {AOT_CTX_PREFLIGHT_EVENT_END_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    jbe .L_preflight_block_capacity_ok_{block_idx}")?;
+    emit_flush_preflight_event_cursor(&mut file)?;
+    writeln!(
+        file,
+        "    movl $4294967295, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "    jmp L_error")?;
+    writeln!(file, ".L_preflight_block_capacity_ok_{block_idx}:")?;
+    Ok(())
+}
+
 fn emit_preflight_direct_block_memory_fast_path_guard(
     mut file: impl Write,
     program: &Program,
@@ -2811,25 +2879,6 @@ fn emit_preflight_direct_block_access_entry(
         "    movq {AOT_CTX_PREFLIGHT_CURRENT_SHARD_START_OFFSET}(%r12), %rax"
     )?;
     writeln!(file, "    movq (%rax), %r10")?;
-
-    // The trained tape has explicit headroom. Reserve the block's maximum
-    // static event count once, then append only qualifying events in one pass.
-    // A conservative failure asks the caller to retrain before any write.
-    writeln!(file, "    leaq {}(%rbx), %rax", accesses.len() * 24)?;
-    writeln!(
-        file,
-        "    cmpq {AOT_CTX_PREFLIGHT_EVENT_END_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    jbe .L_preflight_block_capacity_ok_{block_idx}")?;
-    emit_flush_preflight_event_cursor(&mut file)?;
-    writeln!(
-        file,
-        "    movl $4294967295, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
-    )?;
-    writeln!(file, "    movq %r12, %rdi")?;
-    writeln!(file, "    call *%r14")?;
-    writeln!(file, "    jmp L_error")?;
-    writeln!(file, ".L_preflight_block_capacity_ok_{block_idx}:")?;
 
     writeln!(file, "    xorq %rdi, %rdi")?;
     for (access_idx, access) in accesses.iter().enumerate() {
@@ -3393,21 +3442,6 @@ fn emit_preflight_direct_event_append(
     target_reg: &str,
     addr_reg: &str,
 ) -> Result<()> {
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_EVENT_END_OFFSET}(%r12), %rdi"
-    )?;
-    writeln!(file, "    cmpq %rdi, %rbx")?;
-    writeln!(file, "    jne 3f")?;
-    writeln!(
-        file,
-        "    movl $4294967295, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
-    )?;
-    emit_flush_preflight_event_cursor(&mut file)?;
-    writeln!(file, "    movq %r12, %rdi")?;
-    writeln!(file, "    call *%r14")?;
-    writeln!(file, "    jmp L_error")?;
-    writeln!(file, "3:")?;
     writeln!(file, "    movq {source_reg}, 0(%rbx)")?;
     writeln!(file, "    movq {target_reg}, 8(%rbx)")?;
     writeln!(file, "    movl {addr_reg}, 16(%rbx)")?;
