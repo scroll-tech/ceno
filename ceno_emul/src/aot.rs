@@ -130,8 +130,6 @@ const AOT_CTX_TRACE_MODE_OFFSET: usize = 128;
 const AOT_CTX_PREFLIGHT_LATEST_CELLS_OFFSET: usize = 136;
 const AOT_CTX_PREFLIGHT_CYCLE_OFFSET: usize = 152;
 const AOT_CTX_PREFLIGHT_CURRENT_SHARD_START_OFFSET: usize = 184;
-const AOT_CTX_PREFLIGHT_PREV_CYCLE_OFFSET: usize = 192;
-const AOT_CTX_PREFLIGHT_CUR_CYCLE_OFFSET: usize = 200;
 const AOT_CTX_PREFLIGHT_EVENT_ADDR_OFFSET: usize = 208;
 const AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET: usize = 212;
 const AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET: usize = 216;
@@ -201,20 +199,19 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 6;
-const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v2";
+const AOT_ABI_VERSION: u32 = 9;
+const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
 const AOT_TRACE_MODE_CALLBACK: u32 = 1;
 const AOT_TRACE_MODE_PREFLIGHT_DIRECT: u32 = 2;
 const AOT_TRACE_MODE_FULLTRACER_DIRECT: u32 = 3;
 
-const AOT_PREFLIGHT_HELPER_ACCESS: u32 = 1;
-const AOT_PREFLIGHT_HELPER_SYNC: u32 = 2;
-const AOT_PREFLIGHT_HELPER_BUSY_LOOP: u32 = 3;
-const AOT_PREFLIGHT_HELPER_CALLBACK: u32 = 4;
-const AOT_PREFLIGHT_HELPER_SHARD_SPLIT: u32 = 5;
-const AOT_PREFLIGHT_HELPER_FIRST_TOUCH: u32 = 6;
+const AOT_PREFLIGHT_HELPER_SYNC: u32 = 1;
+const AOT_PREFLIGHT_HELPER_BUSY_LOOP: u32 = 2;
+const AOT_PREFLIGHT_HELPER_CALLBACK: u32 = 3;
+const AOT_PREFLIGHT_HELPER_SHARD_SPLIT: u32 = 4;
+const AOT_PREFLIGHT_HELPER_FIRST_TOUCH: u32 = 5;
 
 thread_local! {
     static LAST_AOT_ERROR: RefCell<Option<anyhow::Error>> = const { RefCell::new(None) };
@@ -378,6 +375,7 @@ pub struct AotFallbackReport {
 pub struct AotProgram {
     program: Arc<Program>,
     blocks: Vec<BasicBlock>,
+    layout_profile: AotLayoutProfile,
     _library: Library,
     entry: NativeEntry,
     compile_load_time: Duration,
@@ -394,24 +392,71 @@ struct CoverageTracer {
     pc_after: ByteAddr,
     kind: InsnKind,
     roots: BTreeSet<u32>,
+    program_base: u32,
+    instruction_counts: Vec<u64>,
+    branch_counts: Vec<BranchCounts>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct BranchCounts {
+    taken: u64,
+    not_taken: u64,
+}
+
+#[derive(Clone, Debug)]
+struct CoverageTracerConfig {
+    entry: u32,
+    program_base: u32,
+    instruction_count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct AotTrainingProfile {
+    roots: Vec<u32>,
+    instruction_counts: Vec<u64>,
+    branch_counts: Vec<BranchCounts>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct AotLayoutProfile {
+    block_counts: Vec<u64>,
+    edge_counts: BTreeMap<(u32, u32), u64>,
+    emission_order: Vec<u32>,
+    digest: [u8; 32],
 }
 
 impl Tracer for CoverageTracer {
     type Record = (ByteAddr, ByteAddr, InsnKind);
-    type Config = u32;
+    type Config = CoverageTracerConfig;
 
-    fn new(_platform: &Platform, entry: u32) -> Self {
+    fn new(_platform: &Platform, config: CoverageTracerConfig) -> Self {
         Self {
             cycle: Self::SUBCYCLES_PER_INSN,
-            pc_before: entry.into(),
-            pc_after: entry.into(),
+            pc_before: config.entry.into(),
+            pc_after: config.entry.into(),
             kind: InsnKind::INVALID,
-            roots: BTreeSet::from([entry]),
+            roots: BTreeSet::from([config.entry]),
+            program_base: config.program_base,
+            instruction_counts: vec![0; config.instruction_count],
+            branch_counts: vec![BranchCounts::default(); config.instruction_count],
         }
     }
 
     fn advance(&mut self) -> Self::Record {
         let record = (self.pc_before, self.pc_after, self.kind);
+        let relative_pc = self.pc_before.0.wrapping_sub(self.program_base);
+        let index = (relative_pc / PC_STEP_SIZE as u32) as usize;
+        if let Some(count) = self.instruction_counts.get_mut(index) {
+            *count = count.saturating_add(1);
+            if is_static_conditional_branch(self.kind) {
+                let branch = &mut self.branch_counts[index];
+                if self.pc_after.0 == self.pc_before.0.wrapping_add(PC_STEP_SIZE as u32) {
+                    branch.not_taken = branch.not_taken.saturating_add(1);
+                } else {
+                    branch.taken = branch.taken.saturating_add(1);
+                }
+            }
+        }
         if self.kind == InsnKind::ECALL
             || self.pc_after.0 != self.pc_before.0.wrapping_add(PC_STEP_SIZE as u32)
         {
@@ -464,17 +509,29 @@ impl Tracer for CoverageTracer {
     }
 }
 
-/// Executes the complete training input while retaining only dynamic block roots.
+/// Executes the complete training input while retaining dynamic block roots.
 pub fn trace_preflight_roots(
     platform: &Platform,
     program: Arc<Program>,
     init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
 ) -> Result<Vec<u32>> {
+    Ok(trace_preflight_profile(platform, program, init_memory)?.roots)
+}
+
+fn trace_preflight_profile(
+    platform: &Platform,
+    program: Arc<Program>,
+    init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
+) -> Result<AotTrainingProfile> {
     let started = Instant::now();
     let mut vm = VMState::<CoverageTracer>::new_with_tracer_config(
         platform.clone(),
         program.clone(),
-        program.entry,
+        CoverageTracerConfig {
+            entry: program.entry,
+            program_base: program.base_address,
+            instruction_count: program.instructions.len(),
+        },
     );
     for (addr, value) in init_memory {
         vm.init_memory(addr, value);
@@ -485,8 +542,8 @@ pub fn trace_preflight_roots(
     while vm.next_step_record()?.is_some() {
         steps += 1;
     }
-    let roots = vm
-        .tracer()
+    let tracer = vm.tracer();
+    let roots = tracer
         .roots
         .iter()
         .copied()
@@ -500,7 +557,11 @@ pub fn trace_preflight_roots(
         started.elapsed(),
         roots.len()
     );
-    Ok(roots)
+    Ok(AotTrainingProfile {
+        roots,
+        instruction_counts: tracer.instruction_counts.clone(),
+        branch_counts: tracer.branch_counts.clone(),
+    })
 }
 
 fn trace_preflight_event_count(
@@ -603,11 +664,12 @@ impl AotProgram {
     /// replay. It reuses the trained preflight image's block leaders, so warm
     /// replay does not repeat coverage training and has its own cache entry.
     pub fn load_or_compile_fulltracer_replay(&self) -> Result<Self> {
-        let trace_style = AssemblyTraceStyle::FullTracerDirect;
         let cache_dir = default_aot_cache_dir();
+        let trace_style = AssemblyTraceStyle::FullTracerDirect;
         let key = format!(
-            "{}-fulltracer-replay",
-            aot_cache_key(&self.program, trace_style)
+            "{}-layout{}-fulltracer-replay",
+            aot_cache_key(&self.program, trace_style),
+            hex_digest(&self.layout_profile.digest),
         );
         match load_cached_aot(self.program.clone(), trace_style, &cache_dir, &key) {
             Ok(Some(aot)) => {
@@ -624,6 +686,7 @@ impl AotProgram {
         compile_cached_aot(
             self.program.clone(),
             roots,
+            Some(self.layout_profile.clone()),
             trace_style,
             &cache_dir,
             &key,
@@ -655,14 +718,25 @@ impl AotProgram {
         }
 
         let init_memory = init_memory.into_iter().collect::<Vec<_>>();
-        let roots = trace_preflight_roots(platform, program.clone(), init_memory.iter().copied())?;
+        let training =
+            trace_preflight_profile(platform, program.clone(), init_memory.iter().copied())?;
         let event_count = trace_preflight_event_count(
             platform,
             program.clone(),
             init_memory.iter().copied(),
             config,
         )?;
-        compile_cached_aot(program, roots, trace_style, cache_dir, &key, event_count)
+        let blocks = partition_basic_blocks_with_roots(&program, training.roots.clone())?;
+        let layout_profile = build_layout_profile(&program, &blocks, &training)?;
+        compile_cached_aot(
+            program,
+            training.roots.clone(),
+            Some(layout_profile),
+            trace_style,
+            cache_dir,
+            &key,
+            event_count,
+        )
     }
 
     fn compile_with_extra_roots_and_trace_style(
@@ -672,10 +746,17 @@ impl AotProgram {
     ) -> Result<Self> {
         let started = Instant::now();
         let blocks = partition_basic_blocks_with_roots(&program, extra_roots)?;
-        let (library, entry) = compile_and_load_native(&program, &blocks, trace_style)?;
+        let layout_profile = pc_order_layout(&blocks);
+        let (library, entry) = compile_and_load_native(
+            &program,
+            &blocks,
+            &layout_profile.emission_order,
+            trace_style,
+        )?;
         Ok(Self {
             program,
             blocks,
+            layout_profile,
             _library: library,
             entry,
             compile_load_time: started.elapsed(),
@@ -1222,6 +1303,231 @@ fn terminates_block(kind: InsnKind) -> bool {
     )
 }
 
+fn is_static_conditional_branch(kind: InsnKind) -> bool {
+    matches!(
+        kind,
+        InsnKind::BEQ
+            | InsnKind::BNE
+            | InsnKind::BLT
+            | InsnKind::BGE
+            | InsnKind::BLTU
+            | InsnKind::BGEU
+    )
+}
+
+fn pc_order_layout(blocks: &[BasicBlock]) -> AotLayoutProfile {
+    let emission_order = blocks
+        .iter()
+        .map(|block| block.start_pc)
+        .collect::<Vec<_>>();
+    let mut profile = AotLayoutProfile {
+        block_counts: vec![0; blocks.len()],
+        edge_counts: BTreeMap::new(),
+        emission_order,
+        digest: [0; 32],
+    };
+    profile.digest = layout_profile_digest(&profile);
+    profile
+}
+
+fn build_layout_profile(
+    program: &Program,
+    blocks: &[BasicBlock],
+    training: &AotTrainingProfile,
+) -> Result<AotLayoutProfile> {
+    let block_by_pc = blocks
+        .iter()
+        .enumerate()
+        .map(|(index, block)| (block.start_pc, index))
+        .collect::<BTreeMap<_, _>>();
+    let instruction_index =
+        |pc: u32| (pc.wrapping_sub(program.base_address) / PC_STEP_SIZE as u32) as usize;
+    let block_counts = blocks
+        .iter()
+        .map(|block| {
+            training
+                .instruction_counts
+                .get(instruction_index(block.start_pc))
+                .copied()
+                .unwrap_or(0)
+        })
+        .collect::<Vec<_>>();
+    let mut edge_counts = BTreeMap::new();
+    for block in blocks {
+        let terminal_pc = block.end_pc - PC_STEP_SIZE as u32;
+        let insn = instruction_at(program, terminal_pc)?;
+        let terminal_index = instruction_index(terminal_pc);
+        let execution_count = training
+            .instruction_counts
+            .get(terminal_index)
+            .copied()
+            .unwrap_or(0);
+        if is_static_conditional_branch(insn.kind) {
+            let counts = training
+                .branch_counts
+                .get(terminal_index)
+                .copied()
+                .unwrap_or_default();
+            let target = branch_target(terminal_pc, insn)?;
+            if block_by_pc.contains_key(&target) {
+                edge_counts
+                    .entry((block.start_pc, target))
+                    .and_modify(|count: &mut u64| *count = count.saturating_add(counts.taken))
+                    .or_insert(counts.taken);
+            }
+            if let Some(fallthrough) = fallthrough_pc(program, terminal_pc) {
+                if block_by_pc.contains_key(&fallthrough) {
+                    edge_counts
+                        .entry((block.start_pc, fallthrough))
+                        .and_modify(|count| *count = count.saturating_add(counts.not_taken))
+                        .or_insert(counts.not_taken);
+                }
+            }
+        } else {
+            for successor in static_successors(program, terminal_pc, insn)? {
+                if block_by_pc.contains_key(&successor) {
+                    edge_counts.insert((block.start_pc, successor), execution_count);
+                }
+            }
+        }
+    }
+
+    let emission_order = hot_chain_emission_order(blocks, &block_counts, &edge_counts);
+    let total_edge_frequency = edge_counts
+        .values()
+        .fold(0u64, |total, count| total.saturating_add(*count));
+    let adjacent_edge_frequency = emission_order.windows(2).fold(0u64, |total, pair| {
+        total.saturating_add(edge_counts.get(&(pair[0], pair[1])).copied().unwrap_or(0))
+    });
+    let observed_blocks = block_counts.iter().filter(|&&count| count > 0).count();
+    tracing::info!(
+        "AOT layout profile observed_blocks={}/{} static_edge_frequency={} adjacent_edge_frequency={} fallthrough_coverage={:.2}%",
+        observed_blocks,
+        blocks.len(),
+        total_edge_frequency,
+        adjacent_edge_frequency,
+        if total_edge_frequency == 0 {
+            0.0
+        } else {
+            100.0 * adjacent_edge_frequency as f64 / total_edge_frequency as f64
+        }
+    );
+    let mut profile = AotLayoutProfile {
+        block_counts,
+        edge_counts,
+        emission_order,
+        digest: [0; 32],
+    };
+    profile.digest = layout_profile_digest(&profile);
+    Ok(profile)
+}
+
+fn hot_chain_emission_order(
+    blocks: &[BasicBlock],
+    block_counts: &[u64],
+    edge_counts: &BTreeMap<(u32, u32), u64>,
+) -> Vec<u32> {
+    let block_by_pc = blocks
+        .iter()
+        .enumerate()
+        .map(|(index, block)| (block.start_pc, index))
+        .collect::<BTreeMap<_, _>>();
+    let mut chains = blocks
+        .iter()
+        .enumerate()
+        .map(|(index, _)| vec![index])
+        .collect::<Vec<_>>();
+    let mut chain_of = (0..blocks.len()).collect::<Vec<_>>();
+    let mut edges = edge_counts
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(|(&(from, to), &count)| (count, from, to))
+        .collect::<Vec<_>>();
+    edges.sort_unstable_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+
+    for (_, from_pc, to_pc) in edges {
+        let (Some(&from), Some(&to)) = (block_by_pc.get(&from_pc), block_by_pc.get(&to_pc)) else {
+            continue;
+        };
+        let from_chain = chain_of[from];
+        let to_chain = chain_of[to];
+        if from_chain == to_chain
+            || chains[from_chain].last() != Some(&from)
+            || chains[to_chain].first() != Some(&to)
+        {
+            continue;
+        }
+        let appended = std::mem::take(&mut chains[to_chain]);
+        for &index in &appended {
+            chain_of[index] = from_chain;
+        }
+        chains[from_chain].extend(appended);
+    }
+
+    let mut hot_chains = chains
+        .into_iter()
+        .filter(|chain| !chain.is_empty())
+        .filter_map(|chain| {
+            let count = chain.iter().fold(0u64, |count, &index| {
+                count.saturating_add(block_counts.get(index).copied().unwrap_or(0))
+            });
+            (count > 0).then_some((count, chain))
+        })
+        .collect::<Vec<_>>();
+    hot_chains.sort_unstable_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| blocks[a.1[0]].start_pc.cmp(&blocks[b.1[0]].start_pc))
+    });
+    let mut emission_order = hot_chains
+        .into_iter()
+        .flat_map(|(_, chain)| chain)
+        .map(|index| blocks[index].start_pc)
+        .collect::<Vec<_>>();
+    let emitted = emission_order.iter().copied().collect::<BTreeSet<_>>();
+    emission_order.extend(
+        blocks
+            .iter()
+            .filter(|block| !emitted.contains(&block.start_pc))
+            .map(|block| block.start_pc),
+    );
+    emission_order
+}
+
+fn layout_profile_digest(profile: &AotLayoutProfile) -> [u8; 32] {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&(profile.block_counts.len() as u64).to_le_bytes());
+    for &count in &profile.block_counts {
+        bytes.extend_from_slice(&count.to_le_bytes());
+    }
+    bytes.extend_from_slice(&(profile.edge_counts.len() as u64).to_le_bytes());
+    for (&(from, to), &count) in &profile.edge_counts {
+        bytes.extend_from_slice(&from.to_le_bytes());
+        bytes.extend_from_slice(&to.to_le_bytes());
+        bytes.extend_from_slice(&count.to_le_bytes());
+    }
+    bytes.extend_from_slice(&(profile.emission_order.len() as u64).to_le_bytes());
+    for &pc in &profile.emission_order {
+        bytes.extend_from_slice(&pc.to_le_bytes());
+    }
+    keccak256(&bytes)
+}
+
+fn validate_emission_order(blocks: &[BasicBlock], emission_order: &[u32]) -> Result<()> {
+    let canonical = blocks
+        .iter()
+        .map(|block| block.start_pc)
+        .collect::<BTreeSet<_>>();
+    let emitted = emission_order.iter().copied().collect::<BTreeSet<_>>();
+    if emission_order.len() != blocks.len() || emitted != canonical {
+        bail!("AOT emission order is not a permutation of canonical blocks");
+    }
+    Ok(())
+}
+
 fn instruction_at(program: &Program, pc: u32) -> Result<Instruction> {
     if !pc.is_multiple_of(PC_STEP_SIZE as u32) {
         bail!("instruction pc {pc:#010x} is misaligned");
@@ -1282,6 +1588,7 @@ fn static_successors(program: &Program, pc: u32, insn: Instruction) -> Result<Ve
 fn compile_and_load_native(
     program: &Program,
     blocks: &[BasicBlock],
+    emission_order: &[u32],
     trace_style: AssemblyTraceStyle,
 ) -> Result<(Library, NativeEntry)> {
     let dir = tempfile::Builder::new()
@@ -1290,18 +1597,26 @@ fn compile_and_load_native(
         .context("create AOT tempdir")?;
     let asm_path = dir.path().join("program.S");
     let so_path = dir.path().join("program.so");
-    compile_native_to(program, blocks, trace_style, &asm_path, &so_path)?;
+    compile_native_to(
+        program,
+        blocks,
+        emission_order,
+        trace_style,
+        &asm_path,
+        &so_path,
+    )?;
     load_native(&so_path)
 }
 
 fn compile_native_to(
     program: &Program,
     blocks: &[BasicBlock],
+    emission_order: &[u32],
     trace_style: AssemblyTraceStyle,
     asm_path: &Path,
     so_path: &Path,
 ) -> Result<()> {
-    write_assembly(asm_path, program, blocks, trace_style)?;
+    write_assembly(asm_path, program, blocks, emission_order, trace_style)?;
     let output = Command::new("cc")
         .arg("-shared")
         .arg("-fPIC")
@@ -1412,6 +1727,7 @@ fn encode_cache_metadata(
     key: &str,
     so_digest: &[u8; 32],
     roots: &[u32],
+    layout_profile: &AotLayoutProfile,
     event_count: usize,
     event_capacity: usize,
 ) -> String {
@@ -1420,16 +1736,23 @@ fn encode_cache_metadata(
         .map(|pc| format!("{pc:08x}"))
         .collect::<Vec<_>>()
         .join(",");
+    let emission_order = layout_profile
+        .emission_order
+        .iter()
+        .map(|pc| format!("{pc:08x}"))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{AOT_CACHE_MAGIC}\n{key}\n{}\n{event_count}\n{event_capacity}\n{roots}\n",
+        "{AOT_CACHE_MAGIC}\n{key}\n{}\n{event_count}\n{event_capacity}\n{roots}\n{}\n{emission_order}\n",
         hex_digest(so_digest),
+        hex_digest(&layout_profile.digest),
     )
 }
 
 fn decode_cache_metadata(
     metadata: &str,
     expected_key: &str,
-) -> Result<([u8; 32], Vec<u32>, usize)> {
+) -> Result<([u8; 32], Vec<u32>, usize, [u8; 32], Vec<u32>)> {
     let mut lines = metadata.lines();
     if lines.next() != Some(AOT_CACHE_MAGIC) || lines.next() != Some(expected_key) {
         bail!("AOT cache program/ABI identity mismatch");
@@ -1440,11 +1763,7 @@ fn decode_cache_metadata(
     if digest_hex.len() != 64 {
         bail!("AOT cache digest has invalid length");
     }
-    let mut digest = [0u8; 32];
-    for (index, byte) in digest.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&digest_hex[index * 2..index * 2 + 2], 16)
-            .context("parse AOT cache digest")?;
-    }
+    let digest = decode_hex_digest(digest_hex, "AOT cache digest")?;
     let event_count = lines
         .next()
         .ok_or_else(|| anyhow!("AOT cache event count missing"))?
@@ -1465,7 +1784,38 @@ fn decode_cache_metadata(
         .filter(|root| !root.is_empty())
         .map(|root| u32::from_str_radix(root, 16).context("parse AOT cache root"))
         .collect::<Result<Vec<_>>>()?;
-    Ok((digest, roots, event_capacity))
+    let profile_digest = decode_hex_digest(
+        lines
+            .next()
+            .ok_or_else(|| anyhow!("AOT cache profile digest missing"))?,
+        "AOT cache profile digest",
+    )?;
+    let emission_order = lines
+        .next()
+        .unwrap_or_default()
+        .split(',')
+        .filter(|pc| !pc.is_empty())
+        .map(|pc| u32::from_str_radix(pc, 16).context("parse AOT cache emission PC"))
+        .collect::<Result<Vec<_>>>()?;
+    Ok((
+        digest,
+        roots,
+        event_capacity,
+        profile_digest,
+        emission_order,
+    ))
+}
+
+fn decode_hex_digest(hex: &str, description: &str) -> Result<[u8; 32]> {
+    if hex.len() != 64 {
+        bail!("{description} has invalid length");
+    }
+    let mut digest = [0u8; 32];
+    for (index, byte) in digest.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16)
+            .with_context(|| format!("parse {description}"))?;
+    }
+    Ok(digest)
 }
 
 fn load_cached_aot(
@@ -1480,16 +1830,30 @@ fn load_cached_aot(
     }
     let metadata = fs::read_to_string(&metadata_path)
         .with_context(|| format!("read AOT metadata {}", metadata_path.display()))?;
-    let (expected_digest, roots, event_capacity) = decode_cache_metadata(&metadata, key)?;
+    let (expected_digest, roots, event_capacity, profile_digest, emission_order) =
+        decode_cache_metadata(&metadata, key)?;
     if artifact_digest(&so_path)? != expected_digest {
         bail!("AOT artifact checksum mismatch");
     }
+    tracing::info!(
+        "AOT cached artifact size={} profile_digest={}",
+        fs::metadata(&so_path)?.len(),
+        hex_digest(&profile_digest),
+    );
     let blocks = partition_basic_blocks_with_roots(&program, roots)?;
+    validate_emission_order(&blocks, &emission_order)?;
+    let layout_profile = AotLayoutProfile {
+        block_counts: Vec::new(),
+        edge_counts: BTreeMap::new(),
+        emission_order,
+        digest: profile_digest,
+    };
     let started = Instant::now();
     let (library, entry) = load_native(&so_path)?;
     Ok(Some(AotProgram {
         program,
         blocks,
+        layout_profile,
         _library: library,
         entry,
         compile_load_time: started.elapsed(),
@@ -1501,6 +1865,7 @@ fn load_cached_aot(
 fn compile_cached_aot(
     program: Arc<Program>,
     roots: Vec<u32>,
+    layout_profile: Option<AotLayoutProfile>,
     trace_style: AssemblyTraceStyle,
     cache_dir: &Path,
     key: &str,
@@ -1510,18 +1875,39 @@ fn compile_cached_aot(
     fs::create_dir_all(cache_dir)
         .with_context(|| format!("create AOT cache directory {}", cache_dir.display()))?;
     let blocks = partition_basic_blocks_with_roots(&program, roots.clone())?;
+    let layout_profile = layout_profile.unwrap_or_else(|| pc_order_layout(&blocks));
+    validate_emission_order(&blocks, &layout_profile.emission_order)?;
     let nonce = format!("{}.{}", std::process::id(), started.elapsed().as_nanos());
     let asm_tmp = cache_dir.join(format!(".{key}.{nonce}.S"));
     let so_tmp = cache_dir.join(format!(".{key}.{nonce}.so"));
     let meta_tmp = cache_dir.join(format!(".{key}.{nonce}.meta"));
     let (so_path, metadata_path) = cache_paths(cache_dir, key);
     let result = (|| -> Result<()> {
-        compile_native_to(&program, &blocks, trace_style, &asm_tmp, &so_tmp)?;
+        compile_native_to(
+            &program,
+            &blocks,
+            &layout_profile.emission_order,
+            trace_style,
+            &asm_tmp,
+            &so_tmp,
+        )?;
+        tracing::info!(
+            "AOT generated artifact size={} profile_digest={}",
+            fs::metadata(&so_tmp)?.len(),
+            hex_digest(&layout_profile.digest),
+        );
         let digest = artifact_digest(&so_tmp)?;
         let event_capacity = next_access_capacity(event_count);
         fs::write(
             &meta_tmp,
-            encode_cache_metadata(key, &digest, &roots, event_count, event_capacity),
+            encode_cache_metadata(
+                key,
+                &digest,
+                &roots,
+                &layout_profile,
+                event_count,
+                event_capacity,
+            ),
         )?;
         fs::rename(&so_tmp, &so_path)?;
         fs::rename(&meta_tmp, &metadata_path)?;
@@ -1537,6 +1923,7 @@ fn compile_cached_aot(
     Ok(AotProgram {
         program,
         blocks,
+        layout_profile,
         _library: library,
         entry,
         compile_load_time: started.elapsed(),
@@ -1549,8 +1936,10 @@ fn write_assembly(
     path: &Path,
     program: &Program,
     blocks: &[BasicBlock],
+    emission_order: &[u32],
     trace_style: AssemblyTraceStyle,
 ) -> Result<()> {
+    validate_emission_order(blocks, emission_order)?;
     let mut labels = BTreeMap::new();
     for (idx, block) in blocks.iter().enumerate() {
         labels.insert(block.start_pc, format!("L_bb_{idx}"));
@@ -1572,7 +1961,14 @@ fn write_assembly(
     writeln!(file, "    movq %rsi, %r13")?;
     writeln!(file, "    movq %rdx, %r14")?;
     writeln!(file, "    movq %rcx, %rbp")?;
-    writeln!(file, "    movq %r8, %rbx")?;
+    // Keep the preflight tape cursor in a callee-saved register. The executed
+    // step output pointer is cold and fits in the otherwise-unused final stack
+    // slot.
+    writeln!(file, "    movq %r8, 48(%rsp)")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12), %rbx"
+    )?;
     writeln!(file, "    movl %r9d, %r15d")?;
     writeln!(file, "    movq $0, 0(%rsp)")?;
     writeln!(file, "    movl %r15d, 8(%rsp)")?;
@@ -1582,7 +1978,16 @@ fn write_assembly(
     writeln!(file, "    cmpq %rbp, %rax")?;
     writeln!(file, "    jae L_done")?;
     emit_dispatch_tree(&mut file, blocks, &labels, 0, blocks.len())?;
-    for (block_idx, block) in blocks.iter().enumerate() {
+    let blocks_by_pc = blocks
+        .iter()
+        .enumerate()
+        .map(|(index, block)| (block.start_pc, (index, block)))
+        .collect::<BTreeMap<_, _>>();
+    for (emission_index, block_pc) in emission_order.iter().enumerate() {
+        let &(block_idx, block) = blocks_by_pc
+            .get(block_pc)
+            .expect("validated emission block must exist");
+        let next_block_pc = emission_order.get(emission_index + 1).copied();
         let label = labels.get(&block.start_pc).expect("block label must exist");
         emit_assembly_profile_symbol(
             &mut file,
@@ -1682,7 +2087,7 @@ fn write_assembly(
                 emit_preflight_adaptive_exact_access_plan_exit(&mut file, block)?;
                 emit_preflight_direct_busy_loop_guard(&mut file, prev_pc)?;
             }
-            emit_successor_jump(&mut file, program, &labels, prev_pc, insn)?;
+            emit_successor_jump(&mut file, program, &labels, next_block_pc, prev_pc, insn)?;
         }
     }
     emit_assembly_profile_symbol(&mut file, "ceno_aot_dynamic_fallback")?;
@@ -1697,17 +2102,21 @@ fn write_assembly(
     writeln!(file, "    jmp L_dispatch")?;
     writeln!(file, "L_done:")?;
     emit_sync_preflight_direct(&mut file)?;
+    emit_flush_preflight_event_cursor(&mut file)?;
     writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
     writeln!(file, "    movl %r15d, (%rdx)")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
-    writeln!(file, "    movq %rax, (%rbx)")?;
+    writeln!(file, "    movq 48(%rsp), %rdx")?;
+    writeln!(file, "    movq %rax, (%rdx)")?;
     writeln!(file, "    movl ${AOT_STATUS_HALTED}, %eax")?;
     writeln!(file, "    jmp L_return")?;
     writeln!(file, "L_error:")?;
+    emit_flush_preflight_event_cursor(&mut file)?;
     writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
     writeln!(file, "    movl %r15d, (%rdx)")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
-    writeln!(file, "    movq %rax, (%rbx)")?;
+    writeln!(file, "    movq 48(%rsp), %rdx")?;
+    writeln!(file, "    movq %rax, (%rdx)")?;
     writeln!(file, "    movl ${AOT_STATUS_ERROR}, %eax")?;
     writeln!(file, "L_return:")?;
     writeln!(file, "    addq $56, %rsp")?;
@@ -1769,6 +2178,7 @@ fn emit_dispatch_tree(
 
 fn emit_call_one(mut file: impl Write, pc: u32, reason: u32) -> Result<()> {
     emit_sync_preflight_direct(&mut file)?;
+    emit_flush_preflight_event_cursor(&mut file)?;
     writeln!(
         file,
         "    movl ${reason}, {AOT_CTX_FALLBACK_REASON_OFFSET}(%r12)"
@@ -1777,12 +2187,14 @@ fn emit_call_one(mut file: impl Write, pc: u32, reason: u32) -> Result<()> {
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    movl ${pc:#010x}, %esi")?;
     writeln!(file, "    call *%r13")?;
+    emit_reload_preflight_event_cursor(&mut file)?;
     emit_after_step(&mut file)?;
     Ok(())
 }
 
 fn emit_call_current_pc(mut file: impl Write, reason: u32) -> Result<()> {
     emit_sync_preflight_direct(&mut file)?;
+    emit_flush_preflight_event_cursor(&mut file)?;
     writeln!(
         file,
         "    movl ${reason}, {AOT_CTX_FALLBACK_REASON_OFFSET}(%r12)"
@@ -1791,6 +2203,7 @@ fn emit_call_current_pc(mut file: impl Write, reason: u32) -> Result<()> {
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    movl %r15d, %esi")?;
     writeln!(file, "    call *%r13")?;
+    emit_reload_preflight_event_cursor(&mut file)?;
     emit_after_step(&mut file)?;
     Ok(())
 }
@@ -2025,7 +2438,9 @@ fn emit_after_native_step(
     writeln!(file, "{callback_label}:")?;
     emit_native_trace_metadata(&mut file, pc, program, insn)?;
     writeln!(file, "    movq %r12, %rdi")?;
+    emit_flush_preflight_event_cursor(&mut file)?;
     writeln!(file, "    call *%r14")?;
+    emit_reload_preflight_event_cursor(&mut file)?;
     writeln!(file, "    jmp {done_label}")?;
     writeln!(file, "{no_trace_label}:")?;
     writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
@@ -2060,10 +2475,28 @@ fn emit_sync_preflight_direct(mut file: impl Write) -> Result<()> {
         "    movl ${AOT_PREFLIGHT_HELPER_SYNC}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
     )?;
     writeln!(file, "    movq %r12, %rdi")?;
+    emit_flush_preflight_event_cursor(&mut file)?;
     writeln!(file, "    call *%r14")?;
+    emit_reload_preflight_event_cursor(&mut file)?;
     writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
     writeln!(file, "    je L_error")?;
     writeln!(file, "1:")?;
+    Ok(())
+}
+
+fn emit_flush_preflight_event_cursor(mut file: impl Write) -> Result<()> {
+    writeln!(
+        file,
+        "    movq %rbx, {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12)"
+    )?;
+    Ok(())
+}
+
+fn emit_reload_preflight_event_cursor(mut file: impl Write) -> Result<()> {
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12), %rbx"
+    )?;
     Ok(())
 }
 
@@ -2379,6 +2812,26 @@ fn emit_preflight_direct_block_access_entry(
     )?;
     writeln!(file, "    movq (%rax), %r10")?;
 
+    // The trained tape has explicit headroom. Reserve the block's maximum
+    // static event count once, then append only qualifying events in one pass.
+    // A conservative failure asks the caller to retrain before any write.
+    writeln!(file, "    leaq {}(%rbx), %rax", accesses.len() * 24)?;
+    writeln!(
+        file,
+        "    cmpq {AOT_CTX_PREFLIGHT_EVENT_END_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    jbe .L_preflight_block_capacity_ok_{block_idx}")?;
+    emit_flush_preflight_event_cursor(&mut file)?;
+    writeln!(
+        file,
+        "    movl $4294967295, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "    jmp L_error")?;
+    writeln!(file, ".L_preflight_block_capacity_ok_{block_idx}:")?;
+
+    writeln!(file, "    xorq %rdi, %rdi")?;
     for (access_idx, access) in accesses.iter().enumerate() {
         let done_label = format!(".L_preflight_block_access_done_{block_idx}_{access_idx}");
         let event_label = format!(".L_preflight_block_access_event_{block_idx}_{access_idx}");
@@ -2389,44 +2842,43 @@ fn emit_preflight_direct_block_access_entry(
         writeln!(file, "    cmpq %r10, %r11")?;
         writeln!(file, "    jae {done_label}")?;
         writeln!(file, "{event_label}:")?;
-        writeln!(
-            file,
-            "    movl ${}, {AOT_CTX_PREFLIGHT_EVENT_ADDR_OFFSET}(%r12)",
-            access.addr
-        )?;
-        writeln!(
-            file,
-            "    movq %r11, {AOT_CTX_PREFLIGHT_PREV_CYCLE_OFFSET}(%r12)"
-        )?;
         writeln!(file, "    movq %r8, %rax")?;
         writeln!(file, "    addq ${}, %rax", access.cycle_offset)?;
-        writeln!(
-            file,
-            "    movq %rax, {AOT_CTX_PREFLIGHT_CUR_CYCLE_OFFSET}(%r12)"
-        )?;
-        writeln!(
-            file,
-            "    movl ${AOT_PREFLIGHT_HELPER_ACCESS}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
-        )?;
-        writeln!(file, "    movq %r12, %rdi")?;
-        writeln!(file, "    call *%r14")?;
-        writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-        writeln!(file, "    je L_error")?;
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_LATEST_CELLS_OFFSET}(%r12), %rdx"
-        )?;
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_CURRENT_SHARD_START_OFFSET}(%r12), %rax"
-        )?;
-        writeln!(file, "    movq (%rax), %r10")?;
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_CYCLE_OFFSET}(%r12), %rax"
-        )?;
-        writeln!(file, "    movq (%rax), %r8")?;
+        writeln!(file, "    movq %r11, 0(%rbx)")?;
+        writeln!(file, "    movq %rax, 8(%rbx)")?;
+        writeln!(file, "    movl ${}, 16(%rbx)", access.addr)?;
+        writeln!(file, "    addq $24, %rbx")?;
+        writeln!(file, "    testq %r11, %r11")?;
+        writeln!(file, "    jne {done_label}")?;
+        if cfg!(debug_assertions) {
+            writeln!(
+                file,
+                "    movl ${}, {AOT_CTX_PREFLIGHT_EVENT_ADDR_OFFSET}(%r12)",
+                access.addr
+            )?;
+            writeln!(
+                file,
+                "    movl ${AOT_PREFLIGHT_HELPER_FIRST_TOUCH}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+            )?;
+            emit_flush_preflight_event_cursor(&mut file)?;
+            writeln!(file, "    movq %r12, %rdi")?;
+            writeln!(file, "    call *%r14")?;
+            emit_reload_preflight_event_cursor(&mut file)?;
+            writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
+            writeln!(file, "    je L_error")?;
+            emit_preflight_direct_access_cache_load(&mut file)?;
+            writeln!(file, "    xorq %rdi, %rdi")?;
+        } else {
+            writeln!(file, "    incq %rdi")?;
+        }
         writeln!(file, "{done_label}:")?;
+    }
+    if !cfg!(debug_assertions) {
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_LATEST_LEN_OFFSET}(%r12), %rsi"
+        )?;
+        writeln!(file, "    addq %rdi, (%rsi)")?;
     }
     Ok(())
 }
@@ -2520,8 +2972,6 @@ fn emit_preflight_adaptive_block_plan_entry(
     )?;
     writeln!(file, "    addq %rdx, %rdi")?;
     if has_lzcnt {
-        // bucket(n) = 0 for n=0, otherwise 65-lzcnt(n-1). The zero
-        // correction is a cmov, so chip costing remains branch-free.
         writeln!(file, "    leaq -1(%r9), %rdx")?;
         writeln!(file, "    lzcntq %rdx, %rdx")?;
         writeln!(file, "    movq $65, %r8")?;
@@ -2529,13 +2979,11 @@ fn emit_preflight_adaptive_block_plan_entry(
         writeln!(file, "    testq %r9, %r9")?;
         writeln!(file, "    cmovz %r9, %r8")?;
         writeln!(file, "    movq %r8, %rdx")?;
-        // The candidate count is always nonzero.
         writeln!(file, "    leaq -1(%r11), %r9")?;
         writeln!(file, "    lzcntq %r9, %r9")?;
         writeln!(file, "    negq %r9")?;
         writeln!(file, "    addq $65, %r9")?;
     } else {
-        // Portable x86-64 fallback for hosts without LZCNT.
         writeln!(file, "    movq %r9, %rdx")?;
         writeln!(file, "    decq %rdx")?;
         writeln!(file, "    orq $1, %rdx")?;
@@ -2675,7 +3123,9 @@ fn emit_preflight_adaptive_block_plan_entry(
         "    movl ${AOT_PREFLIGHT_HELPER_SHARD_SPLIT}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
     )?;
     writeln!(file, "    movq %r12, %rdi")?;
+    emit_flush_preflight_event_cursor(&mut file)?;
     writeln!(file, "    call *%r14")?;
+    emit_reload_preflight_event_cursor(&mut file)?;
     writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
     writeln!(file, "    je L_error")?;
     writeln!(file, "{done_label}:")?;
@@ -2806,7 +3256,9 @@ fn emit_preflight_direct_busy_loop_guard(mut file: impl Write, pc: u32) -> Resul
         "    movl ${AOT_PREFLIGHT_HELPER_BUSY_LOOP}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
     )?;
     writeln!(file, "    movq %r12, %rdi")?;
+    emit_flush_preflight_event_cursor(&mut file)?;
     writeln!(file, "    call *%r14")?;
+    emit_reload_preflight_event_cursor(&mut file)?;
     writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
     writeln!(file, "    je L_error")?;
     writeln!(file, "    cmpl ${AOT_STATUS_HALTED}, %eax")?;
@@ -2943,30 +3395,23 @@ fn emit_preflight_direct_event_append(
 ) -> Result<()> {
     writeln!(
         file,
-        "    movq {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12), %rsi"
-    )?;
-    writeln!(
-        file,
         "    movq {AOT_CTX_PREFLIGHT_EVENT_END_OFFSET}(%r12), %rdi"
     )?;
-    writeln!(file, "    cmpq %rdi, %rsi")?;
+    writeln!(file, "    cmpq %rdi, %rbx")?;
     writeln!(file, "    jne 3f")?;
     writeln!(
         file,
         "    movl $4294967295, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
     )?;
+    emit_flush_preflight_event_cursor(&mut file)?;
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    call *%r14")?;
     writeln!(file, "    jmp L_error")?;
     writeln!(file, "3:")?;
-    writeln!(file, "    movq {source_reg}, 0(%rsi)")?;
-    writeln!(file, "    movq {target_reg}, 8(%rsi)")?;
-    writeln!(file, "    movl {addr_reg}, 16(%rsi)")?;
-    writeln!(file, "    addq $24, %rsi")?;
-    writeln!(
-        file,
-        "    movq %rsi, {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12)"
-    )?;
+    writeln!(file, "    movq {source_reg}, 0(%rbx)")?;
+    writeln!(file, "    movq {target_reg}, 8(%rbx)")?;
+    writeln!(file, "    movl {addr_reg}, 16(%rbx)")?;
+    writeln!(file, "    addq $24, %rbx")?;
     writeln!(file, "    testq {source_reg}, {source_reg}")?;
     writeln!(file, "    jne 4f")?;
     if cfg!(debug_assertions) {
@@ -2975,7 +3420,9 @@ fn emit_preflight_direct_event_append(
             "    movl ${AOT_PREFLIGHT_HELPER_FIRST_TOUCH}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
         )?;
         writeln!(file, "    movq %r12, %rdi")?;
+        emit_flush_preflight_event_cursor(&mut file)?;
         writeln!(file, "    call *%r14")?;
+        emit_reload_preflight_event_cursor(&mut file)?;
         writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
         writeln!(file, "    je L_error")?;
         emit_preflight_direct_access_cache_load(&mut file)?;
@@ -3975,16 +4422,27 @@ fn emit_successor_jump(
     mut file: impl Write,
     program: &Program,
     labels: &BTreeMap<u32, String>,
+    next_block_pc: Option<u32>,
     pc: u32,
     insn: Instruction,
 ) -> Result<()> {
-    let mut successors = Vec::new();
-    successors.extend(static_successors(program, pc, insn)?);
-    for successor in successors {
+    let successors = static_successors(program, pc, insn)?;
+    let adjacent = next_block_pc.filter(|next| successors.contains(next));
+    for &successor in successors
+        .iter()
+        .filter(|successor| Some(**successor) != adjacent)
+    {
         if let Some(label) = labels.get(&successor) {
             writeln!(file, "    cmpl ${successor:#010x}, %r15d")?;
             writeln!(file, "    je {label}")?;
         }
+    }
+    if let Some(adjacent) = adjacent {
+        if is_static_conditional_branch(insn.kind) {
+            writeln!(file, "    cmpl ${adjacent:#010x}, %r15d")?;
+            writeln!(file, "    jne L_dispatch")?;
+        }
+        return Ok(());
     }
     writeln!(file, "    jmp L_dispatch")?;
     Ok(())
@@ -4212,14 +4670,6 @@ unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntime
     }
 
     let status = match context.preflight_helper_kind {
-        AOT_PREFLIGHT_HELPER_ACCESS => {
-            vm.tracer_mut().record_native_access_side_effects(
-                WordAddr(context.preflight_event_addr),
-                context.preflight_prev_cycle,
-                context.preflight_cur_cycle,
-            );
-            AOT_STATUS_CONTINUE
-        }
         AOT_PREFLIGHT_HELPER_SYNC => {
             vm.tracer_mut()
                 .observe_native_steps(context.preflight_pending_steps);
@@ -4364,6 +4814,125 @@ mod tests {
     }
 
     #[test]
+    fn coverage_training_counts_instructions_and_branch_directions() {
+        let base = CENO_PLATFORM.pc_base();
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 3),
+            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
+            encode_rv32(InsnKind::BNE, 1, 0, 0, -4),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let training = trace_preflight_profile(&CENO_PLATFORM, program.clone(), []).unwrap();
+        assert_eq!(training.instruction_counts, vec![1, 3, 3, 1]);
+        assert_eq!(
+            training.branch_counts[2],
+            BranchCounts {
+                taken: 2,
+                not_taken: 1,
+            }
+        );
+
+        let blocks = partition_basic_blocks_with_roots(&program, training.roots.clone()).unwrap();
+        let layout = build_layout_profile(&program, &blocks, &training).unwrap();
+        assert_eq!(layout.block_counts, vec![1, 3, 1]);
+        assert_eq!(layout.edge_counts[&(base, base + 4)], 1);
+        assert_eq!(layout.edge_counts[&(base + 4, base + 4)], 2);
+        assert_eq!(layout.edge_counts[&(base + 4, base + 12)], 1);
+    }
+
+    #[test]
+    fn hot_chains_are_deterministic_and_do_not_form_cycles() {
+        let blocks = (0..4)
+            .map(|index| BasicBlock {
+                start_pc: 0x1000 + index * 4,
+                end_pc: 0x1004 + index * 4,
+            })
+            .collect::<Vec<_>>();
+        let edges = BTreeMap::from([
+            ((0x1000, 0x1004), 30),
+            ((0x1004, 0x1008), 20),
+            ((0x1008, 0x1000), 10),
+        ]);
+
+        let first = hot_chain_emission_order(&blocks, &[30, 20, 10, 0], &edges);
+        let second = hot_chain_emission_order(&blocks, &[30, 20, 10, 0], &edges);
+        assert_eq!(first, second);
+        assert_eq!(first, vec![0x1000, 0x1004, 0x1008, 0x100c]);
+        assert_eq!(first.iter().copied().collect::<BTreeSet<_>>().len(), 4);
+    }
+
+    #[test]
+    fn cache_metadata_round_trips_layout_digest_and_emission_order() {
+        let profile = AotLayoutProfile {
+            block_counts: vec![9, 4, 0],
+            edge_counts: BTreeMap::from([((0x1000, 0x1008), 7)]),
+            emission_order: vec![0x1000, 0x1008, 0x1004],
+            digest: [0x5a; 32],
+        };
+        let artifact_digest = [0xa5; 32];
+        let event_count = 17;
+        let event_capacity = next_access_capacity(event_count);
+        let encoded = encode_cache_metadata(
+            "test-key",
+            &artifact_digest,
+            &[0x1000, 0x1008],
+            &profile,
+            event_count,
+            event_capacity,
+        );
+
+        let (decoded_artifact, roots, capacity, profile_digest, emission_order) =
+            decode_cache_metadata(&encoded, "test-key").unwrap();
+        assert_eq!(decoded_artifact, artifact_digest);
+        assert_eq!(roots, vec![0x1000, 0x1008]);
+        assert_eq!(capacity, event_capacity);
+        assert_eq!(profile_digest, profile.digest);
+        assert_eq!(emission_order, profile.emission_order);
+    }
+
+    #[test]
+    fn successor_emission_falls_through_to_adjacent_hot_edge() {
+        let base = CENO_PLATFORM.pc_base();
+        let program = program(vec![
+            encode_rv32(InsnKind::BNE, 1, 0, 0, 8),
+            encode_rv32(InsnKind::ADDI, 0, 0, 0, 0),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]);
+        let labels = BTreeMap::from([
+            (base + 4, "L_cold".to_owned()),
+            (base + 8, "L_hot".to_owned()),
+        ]);
+        let mut conditional = Vec::new();
+        emit_successor_jump(
+            &mut conditional,
+            &program,
+            &labels,
+            Some(base + 8),
+            base,
+            program.instructions[0],
+        )
+        .unwrap();
+        let conditional = String::from_utf8(conditional).unwrap();
+        assert!(conditional.contains("je L_cold"));
+        assert!(!conditional.contains("je L_hot"));
+        assert!(conditional.contains("jne L_dispatch"));
+
+        let jump = encode_rv32(InsnKind::JAL, 0, 0, 0, 8);
+        let mut unconditional = Vec::new();
+        emit_successor_jump(
+            &mut unconditional,
+            &program,
+            &labels,
+            Some(base + 8),
+            base,
+            jump,
+        )
+        .unwrap();
+        assert!(unconditional.is_empty());
+    }
+
+    #[test]
     fn coverage_roots_include_late_indirect_target_and_post_ecall_continuation() {
         let base = CENO_PLATFORM.pc_base();
         let indirect = Arc::new(program(vec![
@@ -4375,8 +4944,12 @@ mod tests {
         ]));
         let mut vm = VMState::<CoverageTracer>::new_with_tracer_config(
             CENO_PLATFORM.clone(),
-            indirect,
-            base,
+            indirect.clone(),
+            CoverageTracerConfig {
+                entry: base,
+                program_base: indirect.base_address,
+                instruction_count: indirect.instructions.len(),
+            },
         );
         vm.init_register_unsafe(1, base + 16);
         while vm.next_step_record().unwrap().is_some() {}

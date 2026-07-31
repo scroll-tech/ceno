@@ -2196,24 +2196,6 @@ impl PreflightTracer {
         (min_addr as *mut WordAddr, max_addr as *mut WordAddr)
     }
 
-    #[cfg_attr(
-        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
-        allow(dead_code)
-    )]
-    pub(crate) fn record_native_access_side_effects(
-        &mut self,
-        addr: WordAddr,
-        prev_cycle: Cycle,
-        cur_cycle: Cycle,
-    ) {
-        if prev_cycle == Cycle::default() {
-            self.latest_accesses.record_native_first_touch(addr);
-        }
-        if self.config.record_next_accesses && prev_cycle < self.current_shard_start_cycle {
-            self.push_next_access_event(NextAccessEvent::new(prev_cycle, cur_cycle, addr));
-        }
-    }
-
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub(crate) fn record_native_first_touch(&mut self, addr: WordAddr) {
         self.latest_accesses.record_native_first_touch(addr);
