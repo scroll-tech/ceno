@@ -194,12 +194,15 @@ const AOT_CTX_FULLTRACER_LATEST_BASE_OFFSET: usize = 600;
 const AOT_CTX_FULLTRACER_LATEST_LEN_OFFSET: usize = 608;
 const AOT_CTX_FULLTRACER_MAX_HEAP_OFFSET: usize = 616;
 const AOT_CTX_FULLTRACER_MAX_HINT_OFFSET: usize = 624;
+const AOT_CTX_PREFLIGHT_REGISTER_TOUCHED_MASK_OFFSET: usize = 632;
+#[cfg(test)]
+const AOT_CTX_PREFLIGHT_REGISTER_SHARD_START_OFFSET: usize = 640;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 10;
+const AOT_ABI_VERSION: u32 = 11;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -323,6 +326,8 @@ struct AotRuntimeContext {
     fulltracer_latest_len: *mut usize,
     fulltracer_max_heap: *mut ByteAddr,
     fulltracer_max_hint: *mut ByteAddr,
+    preflight_register_touched_mask: u64,
+    preflight_register_shard_start: Cycle,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1002,6 +1007,11 @@ impl AotProgram {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let (preflight_register_touched_mask, preflight_register_shard_start) =
+            initial_preflight_register_touched_mask(
+                preflight_latest_cells,
+                preflight_current_shard_start,
+            );
         let mut context = AotRuntimeContext {
             vm: vm_ptr,
             registers,
@@ -1103,6 +1113,8 @@ impl AotProgram {
             fulltracer_latest_len,
             fulltracer_max_heap,
             fulltracer_max_hint,
+            preflight_register_touched_mask,
+            preflight_register_shard_start,
         };
         let trace_fn = if trace_mode == AOT_TRACE_MODE_FULLTRACER_DIRECT {
             std::ptr::null()
@@ -1956,7 +1968,7 @@ fn write_assembly(
     writeln!(file, "    pushq %r14")?;
     writeln!(file, "    pushq %r15")?;
     writeln!(file, "    pushq %rbp")?;
-    writeln!(file, "    subq $56, %rsp")?;
+    writeln!(file, "    subq $72, %rsp")?;
     writeln!(file, "    movq %rdi, %r12")?;
     writeln!(file, "    movq %rsi, %r13")?;
     writeln!(file, "    movq %rdx, %r14")?;
@@ -1972,6 +1984,11 @@ fn write_assembly(
     writeln!(file, "    movl %r9d, %r15d")?;
     writeln!(file, "    movq $0, 0(%rsp)")?;
     writeln!(file, "    movl %r15d, 8(%rsp)")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_REGISTER_TOUCHED_MASK_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq %rax, 56(%rsp)")?;
     emit_assembly_profile_symbol(&mut file, "ceno_aot_dispatch")?;
     writeln!(file, "L_dispatch:")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
@@ -2133,7 +2150,7 @@ fn write_assembly(
     writeln!(file, "    movq %rax, (%rdx)")?;
     writeln!(file, "    movl ${AOT_STATUS_ERROR}, %eax")?;
     writeln!(file, "L_return:")?;
-    writeln!(file, "    addq $56, %rsp")?;
+    writeln!(file, "    addq $72, %rsp")?;
     writeln!(file, "    popq %rbp")?;
     writeln!(file, "    popq %r15")?;
     writeln!(file, "    popq %r14")?;
@@ -2503,6 +2520,10 @@ fn emit_flush_preflight_event_cursor(mut file: impl Write) -> Result<()> {
         file,
         "    movq %rbx, {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12)"
     )?;
+    writeln!(
+        file,
+        "    movq 56(%rsp), %rax\n    movq %rax, {AOT_CTX_PREFLIGHT_REGISTER_TOUCHED_MASK_OFFSET}(%r12)"
+    )?;
     Ok(())
 }
 
@@ -2510,6 +2531,10 @@ fn emit_reload_preflight_event_cursor(mut file: impl Write) -> Result<()> {
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12), %rbx"
+    )?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_REGISTER_TOUCHED_MASK_OFFSET}(%r12), %rcx\n    movq %rcx, 56(%rsp)"
     )?;
     Ok(())
 }
@@ -2609,6 +2634,29 @@ fn preflight_static_register_accesses(insn: Instruction) -> Vec<(u32, PreflightS
         accesses.push((insn.rd_internal(), PreflightSubcycle::Rd));
     }
     accesses
+}
+
+fn preflight_register_bit(reg_idx: u32) -> u64 {
+    1u64 << reg_idx
+}
+
+fn initial_preflight_register_touched_mask(
+    latest_cells: *const Cycle,
+    current_shard_start: *const Cycle,
+) -> (u64, Cycle) {
+    if latest_cells.is_null() || current_shard_start.is_null() {
+        return (0, 0);
+    }
+    let shard_start = unsafe { *current_shard_start };
+    let mut mask = 0u64;
+    for reg_idx in 0..VMState::<PreflightTracer>::REG_COUNT as u32 {
+        let addr = reg_idx << 6;
+        let cycle = unsafe { *latest_cells.add(addr as usize) };
+        if cycle != 0 && cycle >= shard_start {
+            mask |= preflight_register_bit(reg_idx);
+        }
+    }
+    (mask, shard_start)
 }
 
 fn preflight_block_first_accesses(
@@ -2864,7 +2912,16 @@ fn emit_preflight_direct_block_access_entry(
     if accesses.is_empty() {
         return Ok(());
     }
+    let register_mask = accesses.iter().fold(0u64, |mask, access| {
+        mask | preflight_register_bit(access.addr >> 6)
+    });
+    let all_touched_label = format!(".L_preflight_block_access_all_touched_{block_idx}");
 
+    writeln!(file, "    movq 56(%rsp), %rax")?;
+    writeln!(file, "    movabsq ${register_mask:#018x}, %rcx")?;
+    writeln!(file, "    andq %rcx, %rax")?;
+    writeln!(file, "    cmpq %rcx, %rax")?;
+    writeln!(file, "    je {all_touched_label}")?;
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_LATEST_CELLS_OFFSET}(%r12), %rdx"
@@ -2929,6 +2986,9 @@ fn emit_preflight_direct_block_access_entry(
         )?;
         writeln!(file, "    addq %rdi, (%rsi)")?;
     }
+    writeln!(file, "    movabsq ${register_mask:#018x}, %rax")?;
+    writeln!(file, "    orq %rax, 56(%rsp)")?;
+    writeln!(file, "{all_touched_label}:")?;
     Ok(())
 }
 
@@ -4548,6 +4608,11 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
         let preflight_vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
         (context.preflight_event_cursor, context.preflight_event_end) =
             preflight_vm.tracer_mut().native_next_access_ptrs();
+        let shard_start = unsafe { *context.preflight_current_shard_start };
+        if shard_start != context.preflight_register_shard_start {
+            context.preflight_register_touched_mask = 0;
+            context.preflight_register_shard_start = shard_start;
+        }
     }
 
     match result {
@@ -4804,6 +4869,11 @@ unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntime
     };
     (context.preflight_event_cursor, context.preflight_event_end) =
         vm.tracer_mut().native_next_access_ptrs();
+    let shard_start = unsafe { *context.preflight_current_shard_start };
+    if shard_start != context.preflight_register_shard_start {
+        context.preflight_register_touched_mask = 0;
+        context.preflight_register_shard_start = shard_start;
+    }
     status
 }
 
@@ -5241,6 +5311,14 @@ mod tests {
         assert_eq!(
             std::mem::offset_of!(AotRuntimeContext, fulltracer_max_hint),
             AOT_CTX_FULLTRACER_MAX_HINT_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_register_touched_mask),
+            AOT_CTX_PREFLIGHT_REGISTER_TOUCHED_MASK_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_register_shard_start),
+            AOT_CTX_PREFLIGHT_REGISTER_SHARD_START_OFFSET
         );
     }
 
@@ -5749,6 +5827,26 @@ mod tests {
             end_pc: ecall.base_address + 4,
         };
         assert!(!block_supports_preflight_block_plan(&ecall, &block).unwrap());
+    }
+
+    #[test]
+    fn preflight_register_mask_covers_internal_x0_sink() {
+        assert_eq!(preflight_register_bit(32), 1u64 << 32);
+    }
+
+    #[test]
+    fn initial_register_touched_mask_is_shard_local() {
+        let mut latest = vec![0; (VMState::<PreflightTracer>::REG_COUNT - 1) * 64 + 1];
+        latest[1 << 6] = 9;
+        latest[2 << 6] = 10;
+        latest[32 << 6] = 12;
+        let shard_start = 10;
+
+        let (mask, observed_start) =
+            initial_preflight_register_touched_mask(latest.as_ptr(), &shard_start);
+
+        assert_eq!(observed_start, shard_start);
+        assert_eq!(mask, (1u64 << 2) | (1u64 << 32));
     }
 
     #[test]
