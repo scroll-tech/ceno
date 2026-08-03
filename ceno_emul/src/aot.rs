@@ -202,7 +202,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 13;
+const AOT_ABI_VERSION: u32 = 12;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -2162,7 +2162,6 @@ fn write_assembly(
     if trace_style == AssemblyTraceStyle::FullTracerDirect {
         emit_fulltracer_shared_recorder(&mut file)?;
     }
-    emit_resident_register_helpers(&mut file)?;
     writeln!(file, ".section .note.GNU-stack,\"\",@progbits")?;
     Ok(())
 }
@@ -2546,28 +2545,18 @@ fn emit_reload_preflight_event_cursor(mut file: impl Write) -> Result<()> {
 }
 
 fn emit_reload_resident_registers(mut file: impl Write) -> Result<()> {
-    writeln!(file, "    call L_reload_resident_registers")?;
-    Ok(())
-}
-
-fn emit_flush_resident_registers(mut file: impl Write) -> Result<()> {
-    writeln!(file, "    call L_flush_resident_registers")?;
-    Ok(())
-}
-
-fn emit_resident_register_helpers(mut file: impl Write) -> Result<()> {
-    writeln!(file, "L_reload_resident_registers:")?;
     writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
     for (index, xmm) in (4..=11).enumerate() {
         writeln!(file, "    movdqu {}(%r10), %xmm{xmm}", index * 16)?;
     }
-    writeln!(file, "    ret")?;
-    writeln!(file, "L_flush_resident_registers:")?;
+    Ok(())
+}
+
+fn emit_flush_resident_registers(mut file: impl Write) -> Result<()> {
     writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
     for (index, xmm) in (4..=11).enumerate() {
         writeln!(file, "    movdqu %xmm{xmm}, {}(%r10)", index * 16)?;
     }
-    writeln!(file, "    ret")?;
     Ok(())
 }
 
