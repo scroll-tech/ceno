@@ -202,7 +202,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 12;
+const AOT_ABI_VERSION: u32 = 11;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -1989,7 +1989,6 @@ fn write_assembly(
         "    movq {AOT_CTX_PREFLIGHT_REGISTER_TOUCHED_MASK_OFFSET}(%r12), %rax"
     )?;
     writeln!(file, "    movq %rax, 56(%rsp)")?;
-    emit_reload_resident_registers(&mut file)?;
     emit_assembly_profile_symbol(&mut file, "ceno_aot_dispatch")?;
     writeln!(file, "L_dispatch:")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
@@ -2447,9 +2446,7 @@ fn emit_after_native_step(
         writeln!(file, "{callback_label}:")?;
         emit_native_trace_metadata(&mut file, pc, program, insn)?;
         writeln!(file, "    movq %r12, %rdi")?;
-        emit_flush_preflight_event_cursor(&mut file)?;
         writeln!(file, "    call *%r14")?;
-        emit_reload_preflight_event_cursor(&mut file)?;
         writeln!(file, "{done_label}:")?;
         emit_after_step(&mut file)?;
         return Ok(());
@@ -2519,7 +2516,6 @@ fn emit_sync_preflight_direct(mut file: impl Write) -> Result<()> {
 }
 
 fn emit_flush_preflight_event_cursor(mut file: impl Write) -> Result<()> {
-    emit_flush_resident_registers(&mut file)?;
     writeln!(
         file,
         "    movq %rbx, {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12)"
@@ -2532,7 +2528,6 @@ fn emit_flush_preflight_event_cursor(mut file: impl Write) -> Result<()> {
 }
 
 fn emit_reload_preflight_event_cursor(mut file: impl Write) -> Result<()> {
-    emit_reload_resident_registers(&mut file)?;
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12), %rbx"
@@ -2541,56 +2536,6 @@ fn emit_reload_preflight_event_cursor(mut file: impl Write) -> Result<()> {
         file,
         "    movq {AOT_CTX_PREFLIGHT_REGISTER_TOUCHED_MASK_OFFSET}(%r12), %rcx\n    movq %rcx, 56(%rsp)"
     )?;
-    Ok(())
-}
-
-fn emit_reload_resident_registers(mut file: impl Write) -> Result<()> {
-    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
-    for (index, xmm) in (4..=11).enumerate() {
-        writeln!(file, "    movdqu {}(%r10), %xmm{xmm}", index * 16)?;
-    }
-    Ok(())
-}
-
-fn emit_flush_resident_registers(mut file: impl Write) -> Result<()> {
-    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
-    for (index, xmm) in (4..=11).enumerate() {
-        writeln!(file, "    movdqu %xmm{xmm}, {}(%r10)", index * 16)?;
-    }
-    Ok(())
-}
-
-fn emit_load_resident_register(
-    mut file: impl Write,
-    register: u32,
-    destination: &str,
-) -> Result<()> {
-    if register < 32 {
-        let xmm = 4 + register / 4;
-        let lane = register % 4;
-        writeln!(file, "    pextrd ${lane}, %xmm{xmm}, {destination}")?;
-    } else {
-        debug_assert_eq!(register, Instruction::RD_NULL);
-        writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
-        writeln!(file, "    movl {}(%r10), {destination}", register * 4)?;
-    }
-    Ok(())
-}
-
-fn emit_store_resident_register(mut file: impl Write, register: u32, source: &str) -> Result<()> {
-    if register < 32 {
-        debug_assert_ne!(
-            register, 0,
-            "architectural x0 must never be a native write target"
-        );
-        let xmm = 4 + register / 4;
-        let lane = register % 4;
-        writeln!(file, "    pinsrd ${lane}, {source}, %xmm{xmm}")?;
-    } else {
-        debug_assert_eq!(register, Instruction::RD_NULL);
-        writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
-        writeln!(file, "    movl {source}, {}(%r10)", register * 4)?;
-    }
     Ok(())
 }
 
@@ -2869,7 +2814,6 @@ fn emit_preflight_direct_block_event_capacity_guard(
     )?;
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    call *%r14")?;
-    emit_reload_preflight_event_cursor(&mut file)?;
     writeln!(file, "    jmp L_error")?;
     writeln!(file, ".L_preflight_block_capacity_ok_{block_idx}:")?;
     Ok(())
@@ -2880,6 +2824,7 @@ fn emit_preflight_direct_block_memory_fast_path_guard(
     program: &Program,
     block: &BasicBlock,
 ) -> Result<()> {
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
     let mut pc = block.start_pc;
     while pc < block.end_pc {
         let insn = instruction_at(program, pc)?;
@@ -2904,7 +2849,7 @@ fn emit_preflight_direct_memory_fast_path_guard(
     let hints_ok_label = format!(".L_block_memory_hints_ok_{pc:x}");
     let done_label = format!(".L_block_memory_guard_done_{pc:x}");
 
-    emit_load_resident_register(&mut file, insn.rs1 as u32, "%eax")?;
+    writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
     writeln!(file, "    leal {}(%rax), %edx", insn.imm)?;
     match insn.kind {
         InsnKind::LH | InsnKind::LHU | InsnKind::SH => {
@@ -4001,7 +3946,8 @@ fn emit_native_compute(
     trace_style: AssemblyTraceStyle,
 ) -> Result<()> {
     let rd = insn.rd_internal();
-    emit_load_resident_register(&mut file, insn.rs1 as u32, "%eax")?;
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
+    writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
     if trace_style.needs_callback_values() {
         writeln!(
             file,
@@ -4009,7 +3955,7 @@ fn emit_native_compute(
         )?;
     }
     if native_compute_reads_rs2(insn.kind) {
-        emit_load_resident_register(&mut file, insn.rs2 as u32, "%ecx")?;
+        writeln!(file, "    movl {}(%r10), %ecx", insn.rs2 as usize * 4)?;
         if trace_style.needs_callback_values() {
             writeln!(
                 file,
@@ -4020,7 +3966,7 @@ fn emit_native_compute(
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12)")?;
     }
     if trace_style.needs_callback_values() {
-        emit_load_resident_register(&mut file, rd, "%edx")?;
+        writeln!(file, "    movl {}(%r10), %edx", rd as usize * 4)?;
         writeln!(
             file,
             "    movl %edx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
@@ -4091,7 +4037,7 @@ fn emit_native_compute(
         )?,
         _ => unreachable!("unsupported native compute instruction: {:?}", insn.kind),
     }
-    emit_store_resident_register(&mut file, rd, "%eax")?;
+    writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
     if trace_style.needs_callback_values() {
         writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
         writeln!(
@@ -4179,6 +4125,7 @@ fn emit_native_control_flow(
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
 ) -> Result<()> {
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
     if trace_style.needs_callback_values() {
         writeln!(
             file,
@@ -4193,7 +4140,7 @@ fn emit_native_control_flow(
     if insn.kind == InsnKind::JAL {
         let rd = insn.rd_internal();
         if trace_style.needs_callback_values() {
-            emit_load_resident_register(&mut file, rd, "%edx")?;
+            writeln!(file, "    movl {}(%r10), %edx", rd as usize * 4)?;
             writeln!(
                 file,
                 "    movl %edx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
@@ -4204,7 +4151,7 @@ fn emit_native_control_flow(
             "    movl ${:#010x}, %eax",
             pc.wrapping_add(PC_STEP_SIZE as u32)
         )?;
-        emit_store_resident_register(&mut file, rd, "%eax")?;
+        writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
         if trace_style.needs_callback_values() {
             writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
         }
@@ -4217,7 +4164,7 @@ fn emit_native_control_flow(
         let slow_label = format!(".L_jalr_slow_{pc:x}");
         let done_label = format!(".L_jalr_done_{pc:x}");
         let rd = insn.rd_internal();
-        emit_load_resident_register(&mut file, insn.rs1 as u32, "%eax")?;
+        writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
         if trace_style.needs_callback_values() {
             writeln!(
                 file,
@@ -4230,7 +4177,7 @@ fn emit_native_control_flow(
         writeln!(file, "    jne {slow_label}")?;
         writeln!(file, "    movl %edx, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)")?;
         if trace_style.needs_callback_values() {
-            emit_load_resident_register(&mut file, rd, "%edx")?;
+            writeln!(file, "    movl {}(%r10), %edx", rd as usize * 4)?;
             writeln!(
                 file,
                 "    movl %edx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
@@ -4241,7 +4188,7 @@ fn emit_native_control_flow(
             "    movl ${:#010x}, %eax",
             pc.wrapping_add(PC_STEP_SIZE as u32)
         )?;
-        emit_store_resident_register(&mut file, rd, "%eax")?;
+        writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
         if trace_style.needs_callback_values() {
             writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
         }
@@ -4256,14 +4203,14 @@ fn emit_native_control_flow(
         let fallthrough_pc = pc.wrapping_add(PC_STEP_SIZE as u32);
         let taken_label = format!(".L_branch_taken_{pc:x}");
         let done_label = format!(".L_branch_done_{pc:x}");
-        emit_load_resident_register(&mut file, insn.rs1 as u32, "%eax")?;
+        writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
         if trace_style.needs_callback_values() {
             writeln!(
                 file,
                 "    movl %eax, {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12)"
             )?;
         }
-        emit_load_resident_register(&mut file, insn.rs2 as u32, "%ecx")?;
+        writeln!(file, "    movl {}(%r10), %ecx", insn.rs2 as usize * 4)?;
         if trace_style.needs_callback_values() {
             writeln!(
                 file,
@@ -4316,6 +4263,7 @@ fn emit_native_memory(
     let body_label = format!(".L_memory_body_{pc:x}");
     let rd = insn.rd_internal();
 
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
     writeln!(file, "    movq {AOT_CTX_MEMORY_CELLS_OFFSET}(%r12), %r11")?;
     if trace_style.needs_callback_values() {
         writeln!(
@@ -4333,7 +4281,7 @@ fn emit_native_memory(
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)")?;
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
     }
-    emit_load_resident_register(&mut file, insn.rs1 as u32, "%eax")?;
+    writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
     if trace_style.needs_callback_values() {
         writeln!(
             file,
@@ -4435,7 +4383,7 @@ fn emit_native_memory(
                     file,
                     "    movl %eax, {AOT_CTX_TRACE_MEM_AFTER_OFFSET}(%r12)"
                 )?;
-                emit_load_resident_register(&mut file, rd, "%ecx")?;
+                writeln!(file, "    movl {}(%r10), %ecx", rd as usize * 4)?;
                 writeln!(
                     file,
                     "    movl %ecx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
@@ -4453,13 +4401,13 @@ fn emit_native_memory(
                 InsnKind::LHU => writeln!(file, "    movzwl %ax, %eax")?,
                 _ => unreachable!("unsupported native load instruction: {:?}", insn.kind),
             }
-            emit_store_resident_register(&mut file, rd, "%eax")?;
+            writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
             if trace_style.needs_callback_values() {
                 writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
             }
         }
         InsnKind::SB | InsnKind::SH | InsnKind::SW => {
-            emit_load_resident_register(&mut file, insn.rs2 as u32, "%r9d")?;
+            writeln!(file, "    movl {}(%r10), %r9d", insn.rs2 as usize * 4)?;
             if trace_style.needs_callback_values() {
                 writeln!(
                     file,
@@ -6564,47 +6512,6 @@ mod tests {
         let report = aot.run_to_halt(&mut vm, 10).unwrap();
         assert_eq!(report.executed_steps, 6);
         assert!(vm.halted());
-    }
-
-    #[test]
-    fn aot_resident_register_file_survives_partial_exit_and_ecall() {
-        let mut instructions = vec![encode_rv32(InsnKind::ADDI, 31, 0, 0, 9)];
-        instructions.extend((1..32).map(|idx| encode_rv32(InsnKind::ADDI, idx, 0, idx, 1)));
-        instructions.push(encode_rv32(
-            InsnKind::ADDI,
-            0,
-            0,
-            Platform::reg_ecall() as u32,
-            Platform::ecall_halt() as i32,
-        ));
-        instructions.push(encode_rv32(InsnKind::ECALL, 0, 0, 0, 0));
-        let program = Arc::new(program(instructions));
-
-        let mut interp = VMState::new(CENO_PLATFORM.clone(), program.clone());
-        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program.clone());
-        for idx in 1..VMState::<crate::FullTracer>::REG_COUNT as u8 {
-            let value = 0x1000_0000_u32.wrapping_add(idx as u32);
-            interp.init_register_unsafe(idx, value);
-            aot_vm.init_register_unsafe(idx, value);
-        }
-        while interp.next_step_record().unwrap().is_some() {}
-
-        let aot = AotProgram::compile(program).unwrap();
-        let partial = aot.run_to_halt(&mut aot_vm, 16).unwrap();
-        assert_eq!(partial.executed_steps, 16);
-        assert!(!aot_vm.halted());
-        assert_eq!(aot_vm.peek_register(0), 0);
-
-        let completed = aot.run_to_halt(&mut aot_vm, 64).unwrap();
-        assert!(completed.executed_steps > 0);
-        assert!(aot_vm.halted());
-        for idx in 0..VMState::<crate::FullTracer>::REG_COUNT as u8 {
-            assert_eq!(
-                aot_vm.peek_register(idx),
-                interp.peek_register(idx),
-                "register {idx} changed across resident flush/reload"
-            );
-        }
     }
 
     #[test]
