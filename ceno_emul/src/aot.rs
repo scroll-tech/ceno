@@ -60,9 +60,6 @@ enum AssemblyTraceStyle {
     /// Native code additionally maintains shard planner counters for blocks
     /// that have statically known access cost.
     PreflightDirectBlockPlan,
-    /// Block planner mode for simple memory blocks where the native code can
-    /// update exact latest-access state without falling back per instruction.
-    PreflightDirectBlockPlanExactAccess,
     /// Exact dynamic-memory tracking with block-atomic static registers.
     PreflightDirectBlockPlanMemoryAtomicRegisters,
 }
@@ -77,7 +74,6 @@ impl AssemblyTraceStyle {
             self,
             Self::PreflightDirect
                 | Self::PreflightDirectBlockPlan
-                | Self::PreflightDirectBlockPlanExactAccess
                 | Self::PreflightDirectBlockPlanMemoryAtomicRegisters
         )
     }
@@ -88,7 +84,6 @@ impl AssemblyTraceStyle {
             Self::FullTracerDirect => "fulltracer-direct",
             Self::PreflightDirect => "preflight-direct",
             Self::PreflightDirectBlockPlan => "preflight-block-plan",
-            Self::PreflightDirectBlockPlanExactAccess => "preflight-block-exact",
             Self::PreflightDirectBlockPlanMemoryAtomicRegisters => {
                 "preflight-block-memory-atomic-registers"
             }
@@ -202,7 +197,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 11;
+const AOT_ABI_VERSION: u32 = 13;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -2044,13 +2039,18 @@ fn write_assembly(
                 program,
                 block_idx,
                 block,
-                PreflightAccessMode::Exact,
+                PreflightAccessMode::BlockAtomic,
             )?;
             emit_assembly_profile_symbol(
                 &mut file,
                 &format!("ceno_aot_bb_{:08x}_accounting", block.start_pc),
             )?;
             emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
+            emit_assembly_profile_symbol(
+                &mut file,
+                &format!("ceno_aot_bb_{:08x}_register_first_checks", block.start_pc),
+            )?;
+            emit_preflight_direct_block_access_entry(&mut file, program, block_idx, block)?;
         }
         if block_plan.is_some() {
             emit_preflight_direct_block_budget_guard(&mut file, block)?;
@@ -2070,6 +2070,10 @@ fn write_assembly(
             )?;
             emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
             if block_plan.is_some() {
+                emit_assembly_profile_symbol(
+                    &mut file,
+                    &format!("ceno_aot_bb_{:08x}_register_first_checks", block.start_pc),
+                )?;
                 emit_preflight_direct_block_access_entry(&mut file, program, block_idx, block)?;
             }
         }
@@ -2083,7 +2087,7 @@ fn write_assembly(
                 } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
                     AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
                 } else if adaptive_exact_access_plan {
-                    AssemblyTraceStyle::PreflightDirectBlockPlanExactAccess
+                    AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
                 } else if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
                     AssemblyTraceStyle::PreflightDirect
                 } else {
@@ -2109,13 +2113,34 @@ fn write_assembly(
             if block_plan.is_some() {
                 emit_assembly_profile_symbol(
                     &mut file,
-                    &format!("ceno_aot_bb_{:08x}_commit", block.start_pc),
+                    &format!("ceno_aot_bb_{:08x}_register_latest_commit", block.start_pc),
                 )?;
                 emit_preflight_direct_block_register_access_exit(&mut file, program, block)?;
+                emit_assembly_profile_symbol(
+                    &mut file,
+                    &format!("ceno_aot_bb_{:08x}_plan_commit", block.start_pc),
+                )?;
                 emit_preflight_direct_block_plan_exit(&mut file, block)?;
+                emit_assembly_profile_symbol(
+                    &mut file,
+                    &format!("ceno_aot_bb_{:08x}_guards_exit", block.start_pc),
+                )?;
                 emit_preflight_direct_busy_loop_guard(&mut file, prev_pc)?;
             } else if adaptive_exact_access_plan {
+                emit_assembly_profile_symbol(
+                    &mut file,
+                    &format!("ceno_aot_bb_{:08x}_register_latest_commit", block.start_pc),
+                )?;
+                emit_preflight_direct_block_register_access_exit(&mut file, program, block)?;
+                emit_assembly_profile_symbol(
+                    &mut file,
+                    &format!("ceno_aot_bb_{:08x}_plan_commit", block.start_pc),
+                )?;
                 emit_preflight_adaptive_exact_access_plan_exit(&mut file, block)?;
+                emit_assembly_profile_symbol(
+                    &mut file,
+                    &format!("ceno_aot_bb_{:08x}_guards_exit", block.start_pc),
+                )?;
                 emit_preflight_direct_busy_loop_guard(&mut file, prev_pc)?;
             }
             emit_successor_jump(&mut file, program, &labels, next_block_pc, prev_pc, insn)?;
@@ -2942,11 +2967,19 @@ fn emit_preflight_direct_block_access_entry(
         let done_label = format!(".L_preflight_block_access_done_{block_idx}_{access_idx}");
         let event_label = format!(".L_preflight_block_access_event_{block_idx}_{access_idx}");
         let offset = access.addr as u64 * std::mem::size_of::<Cycle>() as u64;
+        emit_assembly_profile_symbol(
+            &mut file,
+            &format!("ceno_aot_bb_{block_idx}_register_first_check_{access_idx}"),
+        )?;
         writeln!(file, "    movq {offset}(%rdx), %r11")?;
         writeln!(file, "    testq %r11, %r11")?;
         writeln!(file, "    je {event_label}")?;
         writeln!(file, "    cmpq %r10, %r11")?;
         writeln!(file, "    jae {done_label}")?;
+        emit_assembly_profile_symbol(
+            &mut file,
+            &format!("ceno_aot_bb_{block_idx}_register_tape_append_{access_idx}"),
+        )?;
         writeln!(file, "{event_label}:")?;
         writeln!(file, "    movq %r8, %rax")?;
         writeln!(file, "    addq ${}, %rax", access.cycle_offset)?;
@@ -2979,6 +3012,10 @@ fn emit_preflight_direct_block_access_entry(
         }
         writeln!(file, "{done_label}:")?;
     }
+    emit_assembly_profile_symbol(
+        &mut file,
+        &format!("ceno_aot_bb_{block_idx}_register_first_publish"),
+    )?;
     if !cfg!(debug_assertions) {
         writeln!(
             file,
