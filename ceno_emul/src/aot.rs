@@ -197,7 +197,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 13;
+const AOT_ABI_VERSION: u32 = 16;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -210,6 +210,7 @@ const AOT_PREFLIGHT_HELPER_BUSY_LOOP: u32 = 2;
 const AOT_PREFLIGHT_HELPER_CALLBACK: u32 = 3;
 const AOT_PREFLIGHT_HELPER_SHARD_SPLIT: u32 = 4;
 const AOT_PREFLIGHT_HELPER_FIRST_TOUCH: u32 = 5;
+const AOT_PREFLIGHT_HELPER_GROW_TAPE: u32 = u32::MAX;
 
 thread_local! {
     static LAST_AOT_ERROR: RefCell<Option<anyhow::Error>> = const { RefCell::new(None) };
@@ -830,6 +831,9 @@ impl AotProgram {
                 execute_time: started.elapsed(),
                 next_access_events: 0,
                 next_access_capacity: 0,
+                next_access_growths: 0,
+                next_access_growth_bytes: 0,
+                next_access_growth_time: Duration::ZERO,
             });
         }
         LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = None);
@@ -1158,15 +1162,20 @@ impl AotProgram {
         if native_status != AOT_STATUS_HALTED {
             bail!("AOT native entry returned invalid status {native_status}");
         }
-        let (next_access_events, next_access_capacity) =
-            if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
-                let preflight_vm = unsafe { &*(vm_ptr as *const VMState<PreflightTracer>) };
-                preflight_vm.tracer().next_access_tape_usage()
-            } else {
-                (0, 0)
-            };
+        let (
+            next_access_events,
+            next_access_capacity,
+            next_access_growths,
+            next_access_growth_bytes,
+            next_access_growth_time,
+        ) = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+            let preflight_vm = unsafe { &*(vm_ptr as *const VMState<PreflightTracer>) };
+            preflight_vm.tracer().next_access_tape_stats()
+        } else {
+            (0, 0, 0, 0, Duration::ZERO)
+        };
         tracing::info!(
-            "AOT next-access tape usage={next_access_events} capacity={next_access_capacity} overflow=0 normal_access_callbacks=0"
+            "AOT next-access tape usage={next_access_events} capacity={next_access_capacity} growths={next_access_growths} growth_bytes={next_access_growth_bytes} growth_time={next_access_growth_time:?} normal_access_callbacks=0"
         );
         Ok(AotRunReport {
             executed_steps: executed_steps as usize,
@@ -1180,6 +1189,9 @@ impl AotProgram {
             execute_time: started.elapsed(),
             next_access_events,
             next_access_capacity,
+            next_access_growths,
+            next_access_growth_bytes,
+            next_access_growth_time,
         })
     }
 }
@@ -1192,6 +1204,9 @@ pub struct AotRunReport {
     pub execute_time: Duration,
     pub next_access_events: usize,
     pub next_access_capacity: usize,
+    pub next_access_growths: usize,
+    pub next_access_growth_bytes: usize,
+    pub next_access_growth_time: Duration,
 }
 
 pub fn partition_basic_blocks(program: &Program) -> Result<Vec<BasicBlock>> {
@@ -2817,6 +2832,7 @@ fn emit_preflight_direct_block_event_capacity_guard(
     if event_capacity == 0 {
         return Ok(());
     }
+    writeln!(file, ".L_preflight_block_capacity_retry_{block_idx}:")?;
     writeln!(file, "    leaq {}(%rbx), %rax", event_capacity * 24)?;
     writeln!(
         file,
@@ -2826,11 +2842,17 @@ fn emit_preflight_direct_block_event_capacity_guard(
     emit_flush_preflight_event_cursor(&mut file)?;
     writeln!(
         file,
-        "    movl $4294967295, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+        "    movl ${AOT_PREFLIGHT_HELPER_GROW_TAPE}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
     )?;
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    call *%r14")?;
-    writeln!(file, "    jmp L_error")?;
+    writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
+    writeln!(file, "    je L_error")?;
+    emit_reload_preflight_event_cursor(&mut file)?;
+    writeln!(
+        file,
+        "    jmp .L_preflight_block_capacity_retry_{block_idx}"
+    )?;
     writeln!(file, ".L_preflight_block_capacity_ok_{block_idx}:")?;
     Ok(())
 }
@@ -4888,6 +4910,13 @@ unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntime
                 .record_native_first_touch(WordAddr(context.preflight_event_addr));
             AOT_STATUS_CONTINUE
         }
+        AOT_PREFLIGHT_HELPER_GROW_TAPE => {
+            let (old_capacity, new_capacity) = vm.tracer_mut().grow_native_next_access_tape();
+            tracing::warn!(
+                "AOT next-access tape grew from {old_capacity} to {new_capacity} events"
+            );
+            AOT_STATUS_CONTINUE
+        }
         other => {
             LAST_AOT_ERROR.with(|slot| {
                 *slot.borrow_mut() = Some(anyhow!("unknown AOT Preflight helper kind {other}"))
@@ -5443,6 +5472,47 @@ mod tests {
         let interp_next = interp.take_tracer().into_next_accesses();
         let aot_next = aot_vm.take_tracer().into_next_accesses();
         assert_eq!(aot_next, interp_next);
+    }
+
+    #[test]
+    fn aot_preflight_direct_grows_tape_without_changing_accesses() {
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 3),
+            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
+            encode_rv32(InsnKind::BNE, 1, 0, 0, -4),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let config = crate::PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
+        let mut interp = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            config.clone(),
+        );
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let mut aot =
+            AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                .unwrap();
+        aot.next_access_capacity = 1;
+        let mut aot_vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        assert!(report.next_access_growths > 0);
+        assert!(report.next_access_growth_bytes > 0);
+        assert!(report.next_access_capacity > 1);
+        let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
+        let (aot_plan, aot_next) = aot_vm.take_tracer().into_shard_plan();
+        assert_eq!(aot_next, interp_next);
+        assert_eq!(
+            aot_plan.shard_cycle_boundaries(),
+            interp_plan.shard_cycle_boundaries()
+        );
     }
 
     #[derive(Debug)]

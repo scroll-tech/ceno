@@ -1094,6 +1094,8 @@ pub fn emulate_program<'a>(
         multi_prover.max_cycle_per_shard,
     )
     .with_step_cell_extractor(step_cell_extractor);
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let aot_tracer_config = tracer_config.clone();
     let preflight_program = program.clone();
     let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
         .in_scope(move || {
@@ -1110,12 +1112,13 @@ pub fn emulate_program<'a>(
     let aot_program = match precompiled_aot {
         Some(aot) => aot,
         None => {
-            let aot = ceno_emul::aot::AotProgram::load_or_train_preflight(
+            let aot = ceno_emul::aot::AotProgram::load_or_train_preflight_with_config(
                 platform,
                 program.clone(),
                 hints_init
                     .iter()
                     .map(|record| (record.addr.into(), record.value)),
+                aot_tracer_config,
             )
             .unwrap_or_else(|err| panic!("AOT compile failed during preflight: {err}"));
             let report = aot.report();

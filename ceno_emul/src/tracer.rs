@@ -10,7 +10,12 @@ use rayon::prelude::*;
 #[cfg(debug_assertions)]
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
-use std::{collections::BTreeMap, fmt, sync::Arc, time::Instant};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use strum::EnumCount;
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -1868,6 +1873,9 @@ pub struct PreflightTracer {
     latest_accesses: LatestAccesses,
     next_access_events: Vec<NextAccessEvent>,
     next_access_capacity: Option<usize>,
+    next_access_growths: usize,
+    next_access_growth_bytes: usize,
+    next_access_growth_time: Duration,
     register_reads_tracked: u8,
     planner: Option<ShardPlanBuilder>,
     current_shard_start_cycle: Cycle,
@@ -2063,6 +2071,9 @@ impl PreflightTracer {
             latest_accesses: LatestAccesses::new(platform),
             next_access_events: Vec::new(),
             next_access_capacity: None,
+            next_access_growths: 0,
+            next_access_growth_bytes: 0,
+            next_access_growth_time: Duration::ZERO,
             register_reads_tracked: 0,
             planner: Some(ShardPlanBuilder::new_with_cost_model(
                 max_cell_per_shard,
@@ -2203,12 +2214,34 @@ impl PreflightTracer {
 
     fn push_next_access_event(&mut self, event: NextAccessEvent) {
         if self.next_access_capacity == Some(self.next_access_events.len()) {
-            panic!(
-                "AOT next-access tape capacity {} exceeded; retrain the artifact",
-                self.next_access_events.len()
+            let (old_capacity, new_capacity) = self.grow_next_access_tape();
+            tracing::warn!(
+                "AOT next-access tape grew from {old_capacity} to {new_capacity} events"
             );
         }
         self.next_access_events.push(event);
+    }
+
+    fn grow_next_access_tape(&mut self) -> (usize, usize) {
+        let started = Instant::now();
+        let old_capacity = self.next_access_events.capacity();
+        let target_capacity = old_capacity
+            .saturating_mul(2)
+            .max(self.next_access_events.len().saturating_add(4096));
+        self.next_access_events
+            .reserve_exact(target_capacity - self.next_access_events.len());
+        let new_capacity = self.next_access_events.capacity();
+        self.next_access_capacity = Some(new_capacity);
+        self.next_access_growths = self.next_access_growths.saturating_add(1);
+        self.next_access_growth_bytes = self.next_access_growth_bytes.saturating_add(
+            new_capacity
+                .saturating_sub(old_capacity)
+                .saturating_mul(std::mem::size_of::<NextAccessEvent>()),
+        );
+        self.next_access_growth_time = self
+            .next_access_growth_time
+            .saturating_add(started.elapsed());
+        (old_capacity, new_capacity)
     }
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -2237,10 +2270,18 @@ impl PreflightTracer {
     }
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    pub(crate) fn next_access_tape_usage(&self) -> (usize, usize) {
+    pub(crate) fn grow_native_next_access_tape(&mut self) -> (usize, usize) {
+        self.grow_next_access_tape()
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn next_access_tape_stats(&self) -> (usize, usize, usize, usize, Duration) {
         (
             self.next_access_events.len(),
             self.next_access_events.capacity(),
+            self.next_access_growths,
+            self.next_access_growth_bytes,
+            self.next_access_growth_time,
         )
     }
 
@@ -2822,6 +2863,23 @@ mod tests {
         assert_eq!(
             tape.events(),
             &[NextAccessEvent::new(4, 8, Platform::register_vma(1).into())]
+        );
+    }
+
+    #[test]
+    fn preflight_next_access_tape_grows_past_trained_capacity() {
+        let mut tracer = PreflightTracer::new(&CENO_PLATFORM, PreflightTracerConfig::default());
+        tracer.next_access_capacity = Some(0);
+
+        tracer.push_next_access_event(NextAccessEvent::new(4, 8, WordAddr::from(1)));
+
+        assert_eq!(tracer.next_access_events.len(), 1);
+        assert!(tracer.next_access_events.capacity() >= 4096);
+        assert_eq!(tracer.next_access_growths, 1);
+        assert!(tracer.next_access_growth_bytes >= 4096 * std::mem::size_of::<NextAccessEvent>());
+        assert_eq!(
+            tracer.next_access_capacity,
+            Some(tracer.next_access_events.capacity())
         );
     }
 
