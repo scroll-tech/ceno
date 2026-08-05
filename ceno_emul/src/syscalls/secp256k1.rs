@@ -208,25 +208,6 @@ pub fn secp256k1_invert<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
 
 pub const COORDINATE_WORDS: usize = SECP256K1_ARG_WORDS / 2;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn direct_point_double_matches_scalar_multiplication() {
-        let mut point = secp::Point::generator();
-        for _ in 0..16 {
-            let direct = SecpMaybePoint(point + point);
-            let scalar = SecpPoint(secp::Scalar::two() * point);
-            assert_eq!(
-                <[Word; SECP256K1_ARG_WORDS]>::from(direct),
-                <[Word; SECP256K1_ARG_WORDS]>::from(scalar),
-            );
-            point = (point + secp::Point::generator()).into_option().unwrap();
-        }
-    }
-}
-
 /// Wrapper type for a single coordinate of a point on the secp256k1 curve.
 /// It implements conversions from and to VM word-representations according
 /// to the spec of syscall
@@ -316,5 +297,24 @@ pub fn secp256k1_decompress<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     SyscallEffects {
         witness: SyscallWitness::new(mem_ops, reg_ops),
         next_pc: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_point_double_matches_scalar_multiplication() {
+        let mut point = secp::Point::generator();
+        for _ in 0..16 {
+            let direct = SecpMaybePoint(point + point);
+            let scalar = SecpPoint(secp::Scalar::two() * point);
+            assert_eq!(
+                <[Word; SECP256K1_ARG_WORDS]>::from(direct),
+                <[Word; SECP256K1_ARG_WORDS]>::from(scalar),
+            );
+            point = (point + secp::Point::generator()).into_option().unwrap();
+        }
     }
 }

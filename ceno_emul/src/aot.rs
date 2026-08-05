@@ -1131,18 +1131,15 @@ impl AotProgram {
         } else {
             aot_exec_one::<T>
         };
-        let native_status = {
-            let _profile_phase = crate::cpu_profile::CpuProfileGuard::aot_execute();
-            unsafe {
-                (self.entry)(
-                    &mut context,
-                    exec_fn,
-                    trace_fn,
-                    max_steps as u64,
-                    &mut executed_steps,
-                    vm.get_pc().0,
-                )
-            }
+        let native_status = unsafe {
+            (self.entry)(
+                &mut context,
+                exec_fn,
+                trace_fn,
+                max_steps as u64,
+                &mut executed_steps,
+                vm.get_pc().0,
+            )
         };
         if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
@@ -1702,19 +1699,13 @@ fn program_digest(program: &Program) -> [u8; 32] {
 }
 
 fn aot_cache_key(program: &Program, trace_style: AssemblyTraceStyle) -> String {
-    let profile_suffix = if crate::cpu_profile::enabled() {
-        "-cpu-profile"
-    } else {
-        ""
-    };
     format!(
-        "{}-abi{}-{}-{}-{}{}",
+        "{}-abi{}-{}-{}-{}",
         hex_digest(&program_digest(program)),
         AOT_ABI_VERSION,
         trace_style.cache_name(),
         std::env::consts::ARCH,
         std::env::consts::OS,
-        profile_suffix,
     )
 }
 
@@ -4929,14 +4920,6 @@ mod tests {
             instructions,
             Default::default(),
         )
-    }
-
-    #[test]
-    fn feature_enabled_backend_defaults_to_aot() {
-        assert_eq!(
-            crate::EmulatorBackend::default(),
-            crate::EmulatorBackend::Aot
-        );
     }
 
     #[test]

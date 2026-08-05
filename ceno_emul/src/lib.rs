@@ -5,8 +5,6 @@ pub use addr::*;
 
 mod dense_addr_space;
 
-pub mod cpu_profile;
-
 mod platform;
 pub use platform::{CENO_PLATFORM, Platform};
 
@@ -23,9 +21,6 @@ pub use vm_state::{HaltState, VM_REG_COUNT, VMState};
 
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub mod aot;
-
-mod backend;
-pub use backend::EmulatorBackend;
 
 mod rv32im;
 pub use rv32im::{
