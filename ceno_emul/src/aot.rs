@@ -8,12 +8,11 @@
 //! backed elsewhere.
 
 use crate::{
-    Change, EmuContext, InsnKind, Instruction, LatestAccesses, NextAccessEvent, NextCycleAccess,
-    PC_STEP_SIZE, Platform, PreflightTracer, PreflightTracerConfig, Program, SHARD_COST_BUCKETS,
-    ShardCostModel, Tracer, VMState,
-    addr::{ByteAddr, Cycle, RegIdx, WORD_SIZE, Word, WordAddr},
+    Change, EmuContext, InsnKind, Instruction, NextAccessEvent, PC_STEP_SIZE, Platform,
+    PreflightTracer, PreflightTracerConfig, Program, SHARD_COST_BUCKETS, ShardCostModel, Tracer,
+    VMState,
+    addr::{ByteAddr, Cycle, RegIdx, Word, WordAddr},
     rv32im::TrapCause,
-    syscalls::{SyscallEffects, SyscallWitness},
     tracer::{
         NATIVE_TRACE_LOAD_MEM, NATIVE_TRACE_READ_RS1, NATIVE_TRACE_READ_RS2,
         NATIVE_TRACE_STORE_MEM, NATIVE_TRACE_WRITE_RD, NativeTraceStep,
@@ -45,6 +44,7 @@ type NativeEntry = unsafe extern "C" fn(
 ) -> u32;
 type AotInsnFn = unsafe extern "C" fn(*mut c_void, u32, *mut u32) -> u32;
 type AotTraceFn = unsafe extern "C" fn(*mut AotRuntimeContext) -> u32;
+type DecodedAotCacheMetadata = ([u8; 32], Vec<u32>, usize, [u8; 32], Vec<u32>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AssemblyTraceStyle {
@@ -197,8 +197,11 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 16;
+const AOT_ABI_VERSION: u32 = 17;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
+const AOT_INITIAL_EVENT_SEED: usize = 20_000_000;
+const AOT_MAX_COMPILE_JOBS: usize = 32;
+const AOT_BLOCK_COMPILE_OVERHEAD: usize = 16;
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
 const AOT_TRACE_MODE_CALLBACK: u32 = 1;
@@ -386,205 +389,10 @@ pub struct AotProgram {
 
 pub type AotInstance = AotProgram;
 
-#[derive(Debug)]
-struct CoverageTracer {
-    cycle: Cycle,
-    pc_before: ByteAddr,
-    pc_after: ByteAddr,
-    kind: InsnKind,
-    roots: BTreeSet<u32>,
-    program_base: u32,
-    instruction_counts: Vec<u64>,
-    branch_counts: Vec<BranchCounts>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct BranchCounts {
-    taken: u64,
-    not_taken: u64,
-}
-
-#[derive(Clone, Debug)]
-struct CoverageTracerConfig {
-    entry: u32,
-    program_base: u32,
-    instruction_count: usize,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct AotTrainingProfile {
-    roots: Vec<u32>,
-    instruction_counts: Vec<u64>,
-    branch_counts: Vec<BranchCounts>,
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct AotLayoutProfile {
-    block_counts: Vec<u64>,
-    edge_counts: BTreeMap<(u32, u32), u64>,
     emission_order: Vec<u32>,
     digest: [u8; 32],
-}
-
-impl Tracer for CoverageTracer {
-    type Record = (ByteAddr, ByteAddr, InsnKind);
-    type Config = CoverageTracerConfig;
-
-    fn new(_platform: &Platform, config: CoverageTracerConfig) -> Self {
-        Self {
-            cycle: Self::SUBCYCLES_PER_INSN,
-            pc_before: config.entry.into(),
-            pc_after: config.entry.into(),
-            kind: InsnKind::INVALID,
-            roots: BTreeSet::from([config.entry]),
-            program_base: config.program_base,
-            instruction_counts: vec![0; config.instruction_count],
-            branch_counts: vec![BranchCounts::default(); config.instruction_count],
-        }
-    }
-
-    fn advance(&mut self) -> Self::Record {
-        let record = (self.pc_before, self.pc_after, self.kind);
-        let relative_pc = self.pc_before.0.wrapping_sub(self.program_base);
-        let index = (relative_pc / PC_STEP_SIZE as u32) as usize;
-        if let Some(count) = self.instruction_counts.get_mut(index) {
-            *count = count.saturating_add(1);
-            if is_static_conditional_branch(self.kind) {
-                let branch = &mut self.branch_counts[index];
-                if self.pc_after.0 == self.pc_before.0.wrapping_add(PC_STEP_SIZE as u32) {
-                    branch.not_taken = branch.not_taken.saturating_add(1);
-                } else {
-                    branch.taken = branch.taken.saturating_add(1);
-                }
-            }
-        }
-        if self.kind == InsnKind::ECALL
-            || self.pc_after.0 != self.pc_before.0.wrapping_add(PC_STEP_SIZE as u32)
-        {
-            self.roots.insert(self.pc_after.0);
-        }
-        self.cycle += Self::SUBCYCLES_PER_INSN;
-        record
-    }
-
-    fn is_busy_loop(&self, record: &Self::Record) -> bool {
-        record.0 == record.1
-    }
-    fn store_pc(&mut self, pc: ByteAddr) {
-        self.pc_after = pc;
-    }
-    fn fetch(&mut self, pc: WordAddr, value: Instruction) {
-        self.pc_before = pc.baddr();
-        self.pc_after = self.pc_before + PC_STEP_SIZE;
-        self.kind = value.kind;
-    }
-    fn track_mmu_maxtouch_before(&mut self) {}
-    fn track_mmu_maxtouch_after(&mut self) {}
-    fn load_register(&mut self, _idx: RegIdx, _value: Word) {}
-    fn store_register(&mut self, _idx: RegIdx, _value: Change<Word>) {}
-    fn load_memory(&mut self, _addr: WordAddr, _value: Word) {}
-    fn store_memory(&mut self, _addr: WordAddr, _value: Change<Word>) {}
-    fn track_syscall(&mut self, effects: SyscallEffects) {
-        let _witness: SyscallWitness = effects.finalize(self);
-    }
-    fn track_access(&mut self, _addr: WordAddr, _subcycle: Cycle) -> Cycle {
-        0
-    }
-    fn final_accesses(&self) -> &LatestAccesses {
-        panic!("coverage tracer has no access history")
-    }
-    fn into_next_accesses(self) -> NextCycleAccess {
-        NextCycleAccess::default()
-    }
-    fn cycle(&self) -> Cycle {
-        self.cycle
-    }
-    fn executed_insts(&self) -> usize {
-        ((self.cycle - Self::SUBCYCLES_PER_INSN) / Self::SUBCYCLES_PER_INSN) as usize
-    }
-    fn probe_min_max_address_by_start_addr(
-        &self,
-        _start: WordAddr,
-    ) -> Option<(WordAddr, WordAddr)> {
-        None
-    }
-}
-
-/// Executes the complete training input while retaining dynamic block roots.
-pub fn trace_preflight_roots(
-    platform: &Platform,
-    program: Arc<Program>,
-    init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
-) -> Result<Vec<u32>> {
-    Ok(trace_preflight_profile(platform, program, init_memory)?.roots)
-}
-
-fn trace_preflight_profile(
-    platform: &Platform,
-    program: Arc<Program>,
-    init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
-) -> Result<AotTrainingProfile> {
-    let started = Instant::now();
-    let mut vm = VMState::<CoverageTracer>::new_with_tracer_config(
-        platform.clone(),
-        program.clone(),
-        CoverageTracerConfig {
-            entry: program.entry,
-            program_base: program.base_address,
-            instruction_count: program.instructions.len(),
-        },
-    );
-    for (addr, value) in init_memory {
-        vm.init_memory(addr, value);
-    }
-
-    let text_end = program.base_address + (program.instructions.len() * WORD_SIZE) as u32;
-    let mut steps = 0usize;
-    while vm.next_step_record()?.is_some() {
-        steps += 1;
-    }
-    let tracer = vm.tracer();
-    let roots = tracer
-        .roots
-        .iter()
-        .copied()
-        .filter(|pc| {
-            *pc >= program.base_address && *pc < text_end && pc.is_multiple_of(WORD_SIZE as u32)
-        })
-        .collect::<Vec<_>>();
-    tracing::info!(
-        "AOT coverage training completed {} steps in {:?}; roots={}",
-        steps,
-        started.elapsed(),
-        roots.len()
-    );
-    Ok(AotTrainingProfile {
-        roots,
-        instruction_counts: tracer.instruction_counts.clone(),
-        branch_counts: tracer.branch_counts.clone(),
-    })
-}
-
-fn trace_preflight_event_count(
-    platform: &Platform,
-    program: Arc<Program>,
-    init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
-    config: PreflightTracerConfig,
-) -> Result<usize> {
-    let started = Instant::now();
-    let mut vm =
-        VMState::<PreflightTracer>::new_with_tracer_config(platform.clone(), program, config);
-    for (addr, value) in init_memory {
-        vm.init_memory(addr, value);
-    }
-    while vm.next_step_record()?.is_some() {}
-    let event_count = vm.take_tracer().into_next_accesses().len();
-    tracing::info!(
-        "AOT next-access training counted {} events in {:?}",
-        event_count,
-        started.elapsed()
-    );
-    Ok(event_count)
 }
 
 fn next_access_capacity(event_count: usize) -> usize {
@@ -662,14 +470,19 @@ impl AotProgram {
     }
 
     /// Load or build the direct-record image used by `FullTracer` witness
-    /// replay. It reuses the trained preflight image's block leaders, so warm
-    /// replay does not repeat coverage training and has its own cache entry.
+    /// replay. It reuses the preflight image's static block leaders and has its
+    /// own cache entry.
     pub fn load_or_compile_fulltracer_replay(&self) -> Result<Self> {
         let cache_dir = default_aot_cache_dir();
         let trace_style = AssemblyTraceStyle::FullTracerDirect;
+        let roots = self
+            .blocks
+            .iter()
+            .map(|block| block.start_pc)
+            .collect::<Vec<_>>();
         let key = format!(
             "{}-layout{}-fulltracer-replay",
-            aot_cache_key(&self.program, trace_style),
+            aot_cache_key(&self.program, &roots, trace_style),
             hex_digest(&self.layout_profile.digest),
         );
         match load_cached_aot(self.program.clone(), trace_style, &cache_dir, &key) {
@@ -683,7 +496,6 @@ impl AotProgram {
             }
         }
 
-        let roots = self.blocks.iter().map(|block| block.start_pc).collect();
         compile_cached_aot(
             self.program.clone(),
             roots,
@@ -703,9 +515,10 @@ impl AotProgram {
         cache_dir: &Path,
     ) -> Result<Self> {
         let trace_style = AssemblyTraceStyle::PreflightDirectBlockPlan;
+        let roots = static_aot_roots(&program)?;
         let key = format!(
             "{}-cells{}-cycles{}",
-            aot_cache_key(&program, trace_style),
+            aot_cache_key(&program, &roots, trace_style),
             config.max_cell_per_shard(),
             config.max_cycle_per_shard()
         );
@@ -718,20 +531,18 @@ impl AotProgram {
             Err(err) => tracing::warn!("AOT artifact cache invalid, rebuilding: {err:#}"),
         }
 
-        let init_memory = init_memory.into_iter().collect::<Vec<_>>();
-        let training =
-            trace_preflight_profile(platform, program.clone(), init_memory.iter().copied())?;
-        let event_count = trace_preflight_event_count(
-            platform,
-            program.clone(),
-            init_memory.iter().copied(),
-            config,
-        )?;
-        let blocks = partition_basic_blocks_with_roots(&program, training.roots.clone())?;
-        let layout_profile = build_layout_profile(&program, &blocks, &training)?;
+        let _ = (platform, init_memory);
+        let blocks = partition_basic_blocks_with_roots(&program, roots.clone())?;
+        let layout_profile = pc_order_layout(&blocks);
+        let event_count = AOT_INITIAL_EVENT_SEED;
+        tracing::info!(
+            "AOT static roots={} blocks={} event_seed={event_count}",
+            roots.len(),
+            blocks.len(),
+        );
         compile_cached_aot(
             program,
-            training.roots.clone(),
+            roots,
             Some(layout_profile),
             trace_style,
             cache_dir,
@@ -1340,8 +1151,6 @@ fn pc_order_layout(blocks: &[BasicBlock]) -> AotLayoutProfile {
         .map(|block| block.start_pc)
         .collect::<Vec<_>>();
     let mut profile = AotLayoutProfile {
-        block_counts: vec![0; blocks.len()],
-        edge_counts: BTreeMap::new(),
         emission_order,
         digest: [0; 32],
     };
@@ -1349,185 +1158,8 @@ fn pc_order_layout(blocks: &[BasicBlock]) -> AotLayoutProfile {
     profile
 }
 
-fn build_layout_profile(
-    program: &Program,
-    blocks: &[BasicBlock],
-    training: &AotTrainingProfile,
-) -> Result<AotLayoutProfile> {
-    let block_by_pc = blocks
-        .iter()
-        .enumerate()
-        .map(|(index, block)| (block.start_pc, index))
-        .collect::<BTreeMap<_, _>>();
-    let instruction_index =
-        |pc: u32| (pc.wrapping_sub(program.base_address) / PC_STEP_SIZE as u32) as usize;
-    let block_counts = blocks
-        .iter()
-        .map(|block| {
-            training
-                .instruction_counts
-                .get(instruction_index(block.start_pc))
-                .copied()
-                .unwrap_or(0)
-        })
-        .collect::<Vec<_>>();
-    let mut edge_counts = BTreeMap::new();
-    for block in blocks {
-        let terminal_pc = block.end_pc - PC_STEP_SIZE as u32;
-        let insn = instruction_at(program, terminal_pc)?;
-        let terminal_index = instruction_index(terminal_pc);
-        let execution_count = training
-            .instruction_counts
-            .get(terminal_index)
-            .copied()
-            .unwrap_or(0);
-        if is_static_conditional_branch(insn.kind) {
-            let counts = training
-                .branch_counts
-                .get(terminal_index)
-                .copied()
-                .unwrap_or_default();
-            let target = branch_target(terminal_pc, insn)?;
-            if block_by_pc.contains_key(&target) {
-                edge_counts
-                    .entry((block.start_pc, target))
-                    .and_modify(|count: &mut u64| *count = count.saturating_add(counts.taken))
-                    .or_insert(counts.taken);
-            }
-            if let Some(fallthrough) = fallthrough_pc(program, terminal_pc) {
-                if block_by_pc.contains_key(&fallthrough) {
-                    edge_counts
-                        .entry((block.start_pc, fallthrough))
-                        .and_modify(|count| *count = count.saturating_add(counts.not_taken))
-                        .or_insert(counts.not_taken);
-                }
-            }
-        } else {
-            for successor in static_successors(program, terminal_pc, insn)? {
-                if block_by_pc.contains_key(&successor) {
-                    edge_counts.insert((block.start_pc, successor), execution_count);
-                }
-            }
-        }
-    }
-
-    let emission_order = hot_chain_emission_order(blocks, &block_counts, &edge_counts);
-    let total_edge_frequency = edge_counts
-        .values()
-        .fold(0u64, |total, count| total.saturating_add(*count));
-    let adjacent_edge_frequency = emission_order.windows(2).fold(0u64, |total, pair| {
-        total.saturating_add(edge_counts.get(&(pair[0], pair[1])).copied().unwrap_or(0))
-    });
-    let observed_blocks = block_counts.iter().filter(|&&count| count > 0).count();
-    tracing::info!(
-        "AOT layout profile observed_blocks={}/{} static_edge_frequency={} adjacent_edge_frequency={} fallthrough_coverage={:.2}%",
-        observed_blocks,
-        blocks.len(),
-        total_edge_frequency,
-        adjacent_edge_frequency,
-        if total_edge_frequency == 0 {
-            0.0
-        } else {
-            100.0 * adjacent_edge_frequency as f64 / total_edge_frequency as f64
-        }
-    );
-    let mut profile = AotLayoutProfile {
-        block_counts,
-        edge_counts,
-        emission_order,
-        digest: [0; 32],
-    };
-    profile.digest = layout_profile_digest(&profile);
-    Ok(profile)
-}
-
-fn hot_chain_emission_order(
-    blocks: &[BasicBlock],
-    block_counts: &[u64],
-    edge_counts: &BTreeMap<(u32, u32), u64>,
-) -> Vec<u32> {
-    let block_by_pc = blocks
-        .iter()
-        .enumerate()
-        .map(|(index, block)| (block.start_pc, index))
-        .collect::<BTreeMap<_, _>>();
-    let mut chains = blocks
-        .iter()
-        .enumerate()
-        .map(|(index, _)| vec![index])
-        .collect::<Vec<_>>();
-    let mut chain_of = (0..blocks.len()).collect::<Vec<_>>();
-    let mut edges = edge_counts
-        .iter()
-        .filter(|(_, count)| **count > 0)
-        .map(|(&(from, to), &count)| (count, from, to))
-        .collect::<Vec<_>>();
-    edges.sort_unstable_by(|a, b| {
-        b.0.cmp(&a.0)
-            .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| a.2.cmp(&b.2))
-    });
-
-    for (_, from_pc, to_pc) in edges {
-        let (Some(&from), Some(&to)) = (block_by_pc.get(&from_pc), block_by_pc.get(&to_pc)) else {
-            continue;
-        };
-        let from_chain = chain_of[from];
-        let to_chain = chain_of[to];
-        if from_chain == to_chain
-            || chains[from_chain].last() != Some(&from)
-            || chains[to_chain].first() != Some(&to)
-        {
-            continue;
-        }
-        let appended = std::mem::take(&mut chains[to_chain]);
-        for &index in &appended {
-            chain_of[index] = from_chain;
-        }
-        chains[from_chain].extend(appended);
-    }
-
-    let mut hot_chains = chains
-        .into_iter()
-        .filter(|chain| !chain.is_empty())
-        .filter_map(|chain| {
-            let count = chain.iter().fold(0u64, |count, &index| {
-                count.saturating_add(block_counts.get(index).copied().unwrap_or(0))
-            });
-            (count > 0).then_some((count, chain))
-        })
-        .collect::<Vec<_>>();
-    hot_chains.sort_unstable_by(|a, b| {
-        b.0.cmp(&a.0)
-            .then_with(|| blocks[a.1[0]].start_pc.cmp(&blocks[b.1[0]].start_pc))
-    });
-    let mut emission_order = hot_chains
-        .into_iter()
-        .flat_map(|(_, chain)| chain)
-        .map(|index| blocks[index].start_pc)
-        .collect::<Vec<_>>();
-    let emitted = emission_order.iter().copied().collect::<BTreeSet<_>>();
-    emission_order.extend(
-        blocks
-            .iter()
-            .filter(|block| !emitted.contains(&block.start_pc))
-            .map(|block| block.start_pc),
-    );
-    emission_order
-}
-
 fn layout_profile_digest(profile: &AotLayoutProfile) -> [u8; 32] {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(&(profile.block_counts.len() as u64).to_le_bytes());
-    for &count in &profile.block_counts {
-        bytes.extend_from_slice(&count.to_le_bytes());
-    }
-    bytes.extend_from_slice(&(profile.edge_counts.len() as u64).to_le_bytes());
-    for (&(from, to), &count) in &profile.edge_counts {
-        bytes.extend_from_slice(&from.to_le_bytes());
-        bytes.extend_from_slice(&to.to_le_bytes());
-        bytes.extend_from_slice(&count.to_le_bytes());
-    }
     bytes.extend_from_slice(&(profile.emission_order.len() as u64).to_le_bytes());
     for &pc in &profile.emission_order {
         bytes.extend_from_slice(&pc.to_le_bytes());
@@ -1573,6 +1205,32 @@ fn fallthrough_pc(program: &Program, pc: u32) -> Option<u32> {
     let relative_pc = next_pc.wrapping_sub(program.base_address);
     let idx = (relative_pc / PC_STEP_SIZE as u32) as usize;
     (idx < program.instructions.len()).then_some(next_pc)
+}
+
+fn static_aot_roots(program: &Program) -> Result<Vec<u32>> {
+    let mut roots = program.static_aot_roots.clone().ok_or_else(|| {
+        anyhow!("AOT requires an ELF .llvm_bb_addr_map generated by cargo ceno build")
+    })?;
+    roots.push(program.entry);
+    roots.extend(
+        program
+            .instructions
+            .iter()
+            .enumerate()
+            .filter(|(_, insn)| {
+                matches!(
+                    insn.kind,
+                    InsnKind::JALR | InsnKind::ECALL | InsnKind::INVALID
+                )
+            })
+            .filter_map(|(idx, _)| {
+                let pc = program.base_address + idx as u32 * PC_STEP_SIZE as u32;
+                fallthrough_pc(program, pc)
+            }),
+    );
+    roots.sort_unstable();
+    roots.dedup();
+    Ok(roots)
 }
 
 fn static_successors(program: &Program, pc: u32, insn: Instruction) -> Result<Vec<u32>> {
@@ -1635,15 +1293,122 @@ fn compile_native_to(
     asm_path: &Path,
     so_path: &Path,
 ) -> Result<()> {
-    write_assembly(asm_path, program, blocks, emission_order, trace_style)?;
+    let jobs = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .min(AOT_MAX_COMPILE_JOBS)
+        .min(blocks.len().max(1));
+    compile_native_to_with_jobs(
+        program,
+        blocks,
+        emission_order,
+        trace_style,
+        asm_path,
+        so_path,
+        jobs,
+    )
+}
+
+fn compile_native_to_with_jobs(
+    program: &Program,
+    blocks: &[BasicBlock],
+    emission_order: &[u32],
+    trace_style: AssemblyTraceStyle,
+    asm_path: &Path,
+    so_path: &Path,
+    jobs: usize,
+) -> Result<()> {
+    validate_emission_order(blocks, emission_order)?;
+    let started = Instant::now();
+    let shards = shard_emission_order(blocks, emission_order, jobs)?;
+    let path_digest = hex_digest(&keccak256(asm_path.to_string_lossy().as_bytes()));
+    let prefix = format!(".ceno-aot-{}", &path_digest[..16]);
+    let parent = asm_path
+        .parent()
+        .context("AOT assembly path has no parent")?;
+    let control_asm = parent.join(format!("{prefix}.control.S"));
+    let control_obj = parent.join(format!("{prefix}.control.o"));
+    let shard_paths = (0..shards.len())
+        .map(|index| {
+            (
+                parent.join(format!("{prefix}.shard-{index:02}.S")),
+                parent.join(format!("{prefix}.shard-{index:02}.o")),
+            )
+        })
+        .collect::<Vec<_>>();
+    let cleanup = || {
+        let _ = fs::remove_file(&control_asm);
+        let _ = fs::remove_file(&control_obj);
+        for (assembly, object) in &shard_paths {
+            let _ = fs::remove_file(assembly);
+            let _ = fs::remove_file(object);
+        }
+    };
+
+    let result = (|| -> Result<()> {
+        write_assembly(&control_asm, program, blocks, &[], trace_style, true)?;
+        assemble_object(&control_asm, &control_obj)?;
+        fs::remove_file(&control_asm)?;
+
+        std::thread::scope(|scope| -> Result<()> {
+            let mut workers = Vec::with_capacity(shards.len());
+            for ((assembly, object), shard) in shard_paths.iter().zip(&shards) {
+                workers.push(scope.spawn(move || -> Result<()> {
+                    write_assembly(assembly, program, blocks, shard, trace_style, false)?;
+                    assemble_object(assembly, object)?;
+                    fs::remove_file(assembly)?;
+                    Ok(())
+                }));
+            }
+            for worker in workers {
+                worker
+                    .join()
+                    .map_err(|_| anyhow!("AOT assembly worker panicked"))??;
+            }
+            Ok(())
+        })?;
+
+        let object_paths = std::iter::once(&control_obj)
+            .chain(shard_paths.iter().map(|(_, object)| object))
+            .collect::<Vec<_>>();
+        let peak_temporary_bytes = object_paths.iter().try_fold(0u64, |total, path| {
+            Ok::<_, anyhow::Error>(total.saturating_add(fs::metadata(path)?.len()))
+        })?;
+        let output = Command::new("cc")
+            .arg("-shared")
+            .arg("-fPIC")
+            .args(&object_paths)
+            .arg("-o")
+            .arg(so_path)
+            .output()
+            .context("link AOT objects")?;
+        if !output.status.success() {
+            bail!(
+                "AOT object link failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        tracing::info!(
+            "AOT static compile wall_time={:?} workers={} peak_temporary_bytes={}",
+            started.elapsed(),
+            shards.len(),
+            peak_temporary_bytes,
+        );
+        Ok(())
+    })();
+    cleanup();
+    result
+}
+
+fn assemble_object(asm_path: &Path, object_path: &Path) -> Result<()> {
     let output = Command::new("cc")
-        .arg("-shared")
         .arg("-fPIC")
         .arg("-x")
         .arg("assembler")
-        .arg(&asm_path)
+        .arg("-c")
+        .arg(asm_path)
         .arg("-o")
-        .arg(&so_path)
+        .arg(object_path)
         .output()
         .context("invoke cc for AOT assembly")?;
     if !output.status.success() {
@@ -1653,6 +1418,64 @@ fn compile_native_to(
         );
     }
     Ok(())
+}
+
+fn shard_emission_order(
+    blocks: &[BasicBlock],
+    emission_order: &[u32],
+    requested_jobs: usize,
+) -> Result<Vec<Vec<u32>>> {
+    validate_emission_order(blocks, emission_order)?;
+    let jobs = requested_jobs
+        .clamp(1, AOT_MAX_COMPILE_JOBS)
+        .min(blocks.len());
+    let weights = blocks
+        .iter()
+        .map(|block| {
+            (
+                block.start_pc,
+                ((block.end_pc - block.start_pc) / PC_STEP_SIZE as u32) as usize
+                    + AOT_BLOCK_COMPILE_OVERHEAD,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let total_weight = emission_order.iter().try_fold(0usize, |total, pc| {
+        Ok::<_, anyhow::Error>(
+            total.saturating_add(
+                *weights
+                    .get(pc)
+                    .ok_or_else(|| anyhow!("missing AOT block weight for {pc:#010x}"))?,
+            ),
+        )
+    })?;
+    let mut shards = Vec::with_capacity(jobs);
+    let mut start = 0usize;
+    let mut consumed_weight = 0usize;
+    for shard_index in 0..jobs {
+        let remaining_shards = jobs - shard_index;
+        let end = if remaining_shards == 1 {
+            emission_order.len()
+        } else {
+            let remaining_weight = total_weight.saturating_sub(consumed_weight);
+            let target = remaining_weight.div_ceil(remaining_shards);
+            let max_end = emission_order.len() - (remaining_shards - 1);
+            let mut end = start;
+            let mut shard_weight = 0usize;
+            while end < max_end {
+                let weight = weights[&emission_order[end]];
+                if end > start && shard_weight.saturating_add(weight) > target {
+                    break;
+                }
+                shard_weight = shard_weight.saturating_add(weight);
+                end += 1;
+            }
+            consumed_weight = consumed_weight.saturating_add(shard_weight);
+            end.max(start + 1)
+        };
+        shards.push(emission_order[start..end].to_vec());
+        start = end;
+    }
+    Ok(shards)
 }
 
 fn load_native(so_path: &Path) -> Result<(Library, NativeEntry)> {
@@ -1710,13 +1533,29 @@ fn program_digest(program: &Program) -> [u8; 32] {
         bytes.extend_from_slice(&addr.to_le_bytes());
         bytes.extend_from_slice(&value.to_le_bytes());
     }
+    let static_roots = program.static_aot_roots.as_deref().unwrap_or_default();
+    bytes.extend_from_slice(&(static_roots.len() as u64).to_le_bytes());
+    for &pc in static_roots {
+        bytes.extend_from_slice(&pc.to_le_bytes());
+    }
     keccak256(&bytes)
 }
 
-fn aot_cache_key(program: &Program, trace_style: AssemblyTraceStyle) -> String {
+fn aot_cache_key(
+    program: &Program,
+    static_roots: &[u32],
+    trace_style: AssemblyTraceStyle,
+) -> String {
+    let mut root_bytes = Vec::with_capacity(static_roots.len() * 4);
+    for &pc in static_roots {
+        root_bytes.extend_from_slice(&pc.to_le_bytes());
+    }
+    let mut identity = Vec::with_capacity(64);
+    identity.extend_from_slice(&program_digest(program));
+    identity.extend_from_slice(&keccak256(&root_bytes));
     format!(
         "{}-abi{}-{}-{}-{}",
-        hex_digest(&program_digest(program)),
+        hex_digest(&keccak256(&identity)),
         AOT_ABI_VERSION,
         trace_style.cache_name(),
         std::env::consts::ARCH,
@@ -1762,10 +1601,7 @@ fn encode_cache_metadata(
     )
 }
 
-fn decode_cache_metadata(
-    metadata: &str,
-    expected_key: &str,
-) -> Result<([u8; 32], Vec<u32>, usize, [u8; 32], Vec<u32>)> {
+fn decode_cache_metadata(metadata: &str, expected_key: &str) -> Result<DecodedAotCacheMetadata> {
     let mut lines = metadata.lines();
     if lines.next() != Some(AOT_CACHE_MAGIC) || lines.next() != Some(expected_key) {
         bail!("AOT cache program/ABI identity mismatch");
@@ -1856,11 +1692,12 @@ fn load_cached_aot(
     let blocks = partition_basic_blocks_with_roots(&program, roots)?;
     validate_emission_order(&blocks, &emission_order)?;
     let layout_profile = AotLayoutProfile {
-        block_counts: Vec::new(),
-        edge_counts: BTreeMap::new(),
         emission_order,
         digest: profile_digest,
     };
+    if layout_profile_digest(&layout_profile) != profile_digest {
+        bail!("AOT cache static layout digest mismatch");
+    }
     let started = Instant::now();
     let (library, entry) = load_native(&so_path)?;
     Ok(Some(AotProgram {
@@ -1951,51 +1788,57 @@ fn write_assembly(
     blocks: &[BasicBlock],
     emission_order: &[u32],
     trace_style: AssemblyTraceStyle,
+    emit_control: bool,
 ) -> Result<()> {
-    validate_emission_order(blocks, emission_order)?;
     let mut labels = BTreeMap::new();
-    for (idx, block) in blocks.iter().enumerate() {
-        labels.insert(block.start_pc, format!("L_bb_{idx}"));
+    for block in blocks {
+        labels.insert(
+            block.start_pc,
+            format!("ceno_aot_bb_{:08x}", block.start_pc),
+        );
     }
 
     let mut file = fs::File::create(path).context("create AOT assembly")?;
     writeln!(file, ".text")?;
-    writeln!(file, ".globl ceno_aot_entry")?;
-    writeln!(file, ".type ceno_aot_entry, @function")?;
-    writeln!(file, "ceno_aot_entry:")?;
-    writeln!(file, "    pushq %rbx")?;
-    writeln!(file, "    pushq %r12")?;
-    writeln!(file, "    pushq %r13")?;
-    writeln!(file, "    pushq %r14")?;
-    writeln!(file, "    pushq %r15")?;
-    writeln!(file, "    pushq %rbp")?;
-    writeln!(file, "    subq $72, %rsp")?;
-    writeln!(file, "    movq %rdi, %r12")?;
-    writeln!(file, "    movq %rsi, %r13")?;
-    writeln!(file, "    movq %rdx, %r14")?;
-    writeln!(file, "    movq %rcx, %rbp")?;
-    // Keep the preflight tape cursor in a callee-saved register. The executed
-    // step output pointer is cold and fits in the otherwise-unused final stack
-    // slot.
-    writeln!(file, "    movq %r8, 48(%rsp)")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12), %rbx"
-    )?;
-    writeln!(file, "    movl %r9d, %r15d")?;
-    writeln!(file, "    movq $0, 0(%rsp)")?;
-    writeln!(file, "    movl %r15d, 8(%rsp)")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_REGISTER_TOUCHED_MASK_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    movq %rax, 56(%rsp)")?;
-    emit_assembly_profile_symbol(&mut file, "ceno_aot_dispatch")?;
-    writeln!(file, "L_dispatch:")?;
-    writeln!(file, "    movq 0(%rsp), %rax")?;
-    writeln!(file, "    cmpq %rbp, %rax")?;
-    writeln!(file, "    jae L_done")?;
-    emit_dispatch_tree(&mut file, blocks, &labels, 0, blocks.len())?;
+    if emit_control {
+        writeln!(file, ".globl ceno_aot_entry")?;
+        writeln!(file, ".type ceno_aot_entry, @function")?;
+        writeln!(file, "ceno_aot_entry:")?;
+        writeln!(file, "    pushq %rbx")?;
+        writeln!(file, "    pushq %r12")?;
+        writeln!(file, "    pushq %r13")?;
+        writeln!(file, "    pushq %r14")?;
+        writeln!(file, "    pushq %r15")?;
+        writeln!(file, "    pushq %rbp")?;
+        writeln!(file, "    subq $72, %rsp")?;
+        writeln!(file, "    movq %rdi, %r12")?;
+        writeln!(file, "    movq %rsi, %r13")?;
+        writeln!(file, "    movq %rdx, %r14")?;
+        writeln!(file, "    movq %rcx, %rbp")?;
+        // Keep the preflight tape cursor in a callee-saved register. The executed
+        // step output pointer is cold and fits in the otherwise-unused final stack
+        // slot.
+        writeln!(file, "    movq %r8, 48(%rsp)")?;
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12), %rbx"
+        )?;
+        writeln!(file, "    movl %r9d, %r15d")?;
+        writeln!(file, "    movq $0, 0(%rsp)")?;
+        writeln!(file, "    movl %r15d, 8(%rsp)")?;
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_REGISTER_TOUCHED_MASK_OFFSET}(%r12), %rax"
+        )?;
+        writeln!(file, "    movq %rax, 56(%rsp)")?;
+        writeln!(file, ".globl ceno_aot_dispatch")?;
+        writeln!(file, ".hidden ceno_aot_dispatch")?;
+        writeln!(file, "ceno_aot_dispatch:")?;
+        writeln!(file, "    movq 0(%rsp), %rax")?;
+        writeln!(file, "    cmpq %rbp, %rax")?;
+        writeln!(file, "    jae ceno_aot_done")?;
+        emit_dispatch_tree(&mut file, blocks, &labels, 0, blocks.len())?;
+    }
     let blocks_by_pc = blocks
         .iter()
         .enumerate()
@@ -2011,6 +1854,9 @@ fn write_assembly(
             &mut file,
             &format!("ceno_aot_bb_{:08x}_guards", block.start_pc),
         )?;
+        writeln!(file, ".globl {label}")?;
+        writeln!(file, ".hidden {label}")?;
+        writeln!(file, ".type {label}, @function")?;
         writeln!(file, "{label}:")?;
         // Reaching a native block leader ends any Rust fallback recovery run.
         writeln!(
@@ -2035,7 +1881,7 @@ fn write_assembly(
                 AOT_FALLBACK_EXCEPTIONAL
             };
             emit_call_current_pc(&mut file, reason)?;
-            writeln!(file, "    jmp L_dispatch")?;
+            writeln!(file, "    jmp ceno_aot_dispatch")?;
             continue;
         }
         if adaptive_exact_access_plan {
@@ -2090,9 +1936,9 @@ fn write_assembly(
             let step_trace_style =
                 if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
                     AssemblyTraceStyle::PreflightDirectBlockPlan
-                } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
-                    AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
-                } else if adaptive_exact_access_plan {
+                } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess))
+                    || adaptive_exact_access_plan
+                {
                     AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
                 } else if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
                     AssemblyTraceStyle::PreflightDirect
@@ -2152,45 +1998,57 @@ fn write_assembly(
             emit_successor_jump(&mut file, program, &labels, next_block_pc, prev_pc, insn)?;
         }
     }
-    emit_assembly_profile_symbol(&mut file, "ceno_aot_dynamic_fallback")?;
-    writeln!(file, "L_dynamic:")?;
-    emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC)?;
-    writeln!(file, "    jmp L_dispatch")?;
-    writeln!(file, "L_memory_guard:")?;
-    emit_call_current_pc(&mut file, AOT_FALLBACK_MEMORY_GUARD)?;
-    writeln!(file, "    jmp L_dispatch")?;
-    writeln!(file, "L_exceptional:")?;
-    emit_call_current_pc(&mut file, AOT_FALLBACK_EXCEPTIONAL)?;
-    writeln!(file, "    jmp L_dispatch")?;
-    writeln!(file, "L_done:")?;
-    emit_sync_preflight_direct(&mut file)?;
-    emit_flush_preflight_event_cursor(&mut file)?;
-    writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
-    writeln!(file, "    movl %r15d, (%rdx)")?;
-    writeln!(file, "    movq 0(%rsp), %rax")?;
-    writeln!(file, "    movq 48(%rsp), %rdx")?;
-    writeln!(file, "    movq %rax, (%rdx)")?;
-    writeln!(file, "    movl ${AOT_STATUS_HALTED}, %eax")?;
-    writeln!(file, "    jmp L_return")?;
-    writeln!(file, "L_error:")?;
-    emit_flush_preflight_event_cursor(&mut file)?;
-    writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
-    writeln!(file, "    movl %r15d, (%rdx)")?;
-    writeln!(file, "    movq 0(%rsp), %rax")?;
-    writeln!(file, "    movq 48(%rsp), %rdx")?;
-    writeln!(file, "    movq %rax, (%rdx)")?;
-    writeln!(file, "    movl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "L_return:")?;
-    writeln!(file, "    addq $72, %rsp")?;
-    writeln!(file, "    popq %rbp")?;
-    writeln!(file, "    popq %r15")?;
-    writeln!(file, "    popq %r14")?;
-    writeln!(file, "    popq %r13")?;
-    writeln!(file, "    popq %r12")?;
-    writeln!(file, "    popq %rbx")?;
-    writeln!(file, "    ret")?;
-    if trace_style == AssemblyTraceStyle::FullTracerDirect {
-        emit_fulltracer_shared_recorder(&mut file)?;
+    if emit_control {
+        emit_assembly_profile_symbol(&mut file, "ceno_aot_dynamic_fallback")?;
+        writeln!(file, ".globl ceno_aot_dynamic")?;
+        writeln!(file, ".hidden ceno_aot_dynamic")?;
+        writeln!(file, "ceno_aot_dynamic:")?;
+        emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC)?;
+        writeln!(file, "    jmp ceno_aot_dispatch")?;
+        writeln!(file, ".globl ceno_aot_memory_guard")?;
+        writeln!(file, ".hidden ceno_aot_memory_guard")?;
+        writeln!(file, "ceno_aot_memory_guard:")?;
+        emit_call_current_pc(&mut file, AOT_FALLBACK_MEMORY_GUARD)?;
+        writeln!(file, "    jmp ceno_aot_dispatch")?;
+        writeln!(file, ".globl ceno_aot_exceptional")?;
+        writeln!(file, ".hidden ceno_aot_exceptional")?;
+        writeln!(file, "ceno_aot_exceptional:")?;
+        emit_call_current_pc(&mut file, AOT_FALLBACK_EXCEPTIONAL)?;
+        writeln!(file, "    jmp ceno_aot_dispatch")?;
+        writeln!(file, ".globl ceno_aot_done")?;
+        writeln!(file, ".hidden ceno_aot_done")?;
+        writeln!(file, "ceno_aot_done:")?;
+        emit_sync_preflight_direct(&mut file)?;
+        emit_flush_preflight_event_cursor(&mut file)?;
+        writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
+        writeln!(file, "    movl %r15d, (%rdx)")?;
+        writeln!(file, "    movq 0(%rsp), %rax")?;
+        writeln!(file, "    movq 48(%rsp), %rdx")?;
+        writeln!(file, "    movq %rax, (%rdx)")?;
+        writeln!(file, "    movl ${AOT_STATUS_HALTED}, %eax")?;
+        writeln!(file, "    jmp ceno_aot_return")?;
+        writeln!(file, ".globl ceno_aot_error")?;
+        writeln!(file, ".hidden ceno_aot_error")?;
+        writeln!(file, "ceno_aot_error:")?;
+        emit_flush_preflight_event_cursor(&mut file)?;
+        writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
+        writeln!(file, "    movl %r15d, (%rdx)")?;
+        writeln!(file, "    movq 0(%rsp), %rax")?;
+        writeln!(file, "    movq 48(%rsp), %rdx")?;
+        writeln!(file, "    movq %rax, (%rdx)")?;
+        writeln!(file, "    movl ${AOT_STATUS_ERROR}, %eax")?;
+        writeln!(file, "ceno_aot_return:")?;
+        writeln!(file, "    addq $72, %rsp")?;
+        writeln!(file, "    popq %rbp")?;
+        writeln!(file, "    popq %r15")?;
+        writeln!(file, "    popq %r14")?;
+        writeln!(file, "    popq %r13")?;
+        writeln!(file, "    popq %r12")?;
+        writeln!(file, "    popq %rbx")?;
+        writeln!(file, "    ret")?;
+        if trace_style == AssemblyTraceStyle::FullTracerDirect {
+            emit_fulltracer_shared_recorder(&mut file)?;
+        }
     }
     writeln!(file, ".section .note.GNU-stack,\"\",@progbits")?;
     Ok(())
@@ -2210,7 +2068,7 @@ fn emit_dispatch_tree(
     end: usize,
 ) -> Result<()> {
     if start >= end {
-        writeln!(file, "    jmp L_dynamic")?;
+        writeln!(file, "    jmp ceno_aot_dynamic")?;
         return Ok(());
     }
 
@@ -2220,7 +2078,7 @@ fn emit_dispatch_tree(
             writeln!(file, "    cmpl ${:#010x}, %r15d", block.start_pc)?;
             writeln!(file, "    je {label}")?;
         }
-        writeln!(file, "    jmp L_dynamic")?;
+        writeln!(file, "    jmp ceno_aot_dynamic")?;
         return Ok(());
     }
 
@@ -2272,14 +2130,14 @@ fn emit_call_current_pc(mut file: impl Write, reason: u32) -> Result<()> {
 
 fn emit_after_step(mut file: impl Write) -> Result<()> {
     writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "    je L_error")?;
+    writeln!(file, "    je ceno_aot_error")?;
     writeln!(file, "    incq 0(%rsp)")?;
     writeln!(file, "    movl 8(%rsp), %r15d")?;
     writeln!(file, "    cmpl ${AOT_STATUS_HALTED}, %eax")?;
-    writeln!(file, "    je L_done")?;
+    writeln!(file, "    je ceno_aot_done")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
     writeln!(file, "    cmpq %rbp, %rax")?;
-    writeln!(file, "    jae L_done")?;
+    writeln!(file, "    jae ceno_aot_done")?;
     Ok(())
 }
 
@@ -2303,8 +2161,10 @@ fn emit_fulltracer_shared_recorder(mut file: impl Write) -> Result<()> {
 \done_label:
 .endm
 
-.type L_fulltracer_emit_step, @function
-L_fulltracer_emit_step:
+.globl ceno_aot_fulltracer_emit_step
+.hidden ceno_aot_fulltracer_emit_step
+.type ceno_aot_fulltracer_emit_step, @function
+ceno_aot_fulltracer_emit_step:
     movq {AOT_CTX_FULLTRACER_RECORDS_OFFSET}(%r12), %r10
     movq {AOT_CTX_FULLTRACER_PENDING_INDEX_OFFSET}(%r12), %r8
     movq (%r8), %rcx
@@ -2471,7 +2331,7 @@ fn emit_after_native_step(
         )?;
         writeln!(file, "    jne {callback_label}")?;
         emit_native_trace_metadata(&mut file, pc, program, insn)?;
-        writeln!(file, "    call L_fulltracer_emit_step")?;
+        writeln!(file, "    call ceno_aot_fulltracer_emit_step")?;
         writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
         writeln!(file, "    jmp {done_label}")?;
         writeln!(file, "{callback_label}:")?;
@@ -2541,7 +2401,7 @@ fn emit_sync_preflight_direct(mut file: impl Write) -> Result<()> {
     writeln!(file, "    call *%r14")?;
     emit_reload_preflight_event_cursor(&mut file)?;
     writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "    je L_error")?;
+    writeln!(file, "    je ceno_aot_error")?;
     writeln!(file, "1:")?;
     Ok(())
 }
@@ -2792,7 +2652,7 @@ fn emit_preflight_direct_block_budget_guard(
     writeln!(file, "    movq 0(%rsp), %rax")?;
     writeln!(file, "    addq ${block_steps}, %rax")?;
     writeln!(file, "    cmpq %rbp, %rax")?;
-    writeln!(file, "    ja L_exceptional")?;
+    writeln!(file, "    ja ceno_aot_exceptional")?;
     Ok(())
 }
 
@@ -2847,7 +2707,7 @@ fn emit_preflight_direct_block_event_capacity_guard(
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    call *%r14")?;
     writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "    je L_error")?;
+    writeln!(file, "    je ceno_aot_error")?;
     emit_reload_preflight_event_cursor(&mut file)?;
     writeln!(
         file,
@@ -2892,11 +2752,11 @@ fn emit_preflight_direct_memory_fast_path_guard(
     match insn.kind {
         InsnKind::LH | InsnKind::LHU | InsnKind::SH => {
             writeln!(file, "    testl $1, %edx")?;
-            writeln!(file, "    jne L_memory_guard")?;
+            writeln!(file, "    jne ceno_aot_memory_guard")?;
         }
         InsnKind::LW | InsnKind::SW => {
             writeln!(file, "    testl $3, %edx")?;
-            writeln!(file, "    jne L_memory_guard")?;
+            writeln!(file, "    jne ceno_aot_memory_guard")?;
         }
         _ => {}
     }
@@ -2924,13 +2784,13 @@ fn emit_preflight_direct_memory_fast_path_guard(
         file,
         "    cmpl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %eax"
     )?;
-    writeln!(file, "    jb L_memory_guard")?;
+    writeln!(file, "    jb ceno_aot_memory_guard")?;
     writeln!(
         file,
         "    cmpl {AOT_CTX_MEMORY_END_WORD_OFFSET}(%r12), %eax"
     )?;
     writeln!(file, "    jb {done_label}")?;
-    writeln!(file, "    jmp L_memory_guard")?;
+    writeln!(file, "    jmp ceno_aot_memory_guard")?;
     writeln!(file, "{heap_ok_label}:")?;
     writeln!(file, "    jmp {done_label}")?;
     writeln!(file, "{stack_ok_label}:")?;
@@ -3017,7 +2877,7 @@ fn emit_preflight_direct_block_access_entry(
             writeln!(file, "    call *%r14")?;
             emit_reload_preflight_event_cursor(&mut file)?;
             writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-            writeln!(file, "    je L_error")?;
+            writeln!(file, "    je ceno_aot_error")?;
             emit_preflight_direct_access_cache_load(&mut file)?;
             writeln!(file, "    xorq %rdi, %rdi")?;
         } else {
@@ -3286,7 +3146,7 @@ fn emit_preflight_adaptive_block_plan_entry(
     writeln!(file, "    call *%r14")?;
     emit_reload_preflight_event_cursor(&mut file)?;
     writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "    je L_error")?;
+    writeln!(file, "    je ceno_aot_error")?;
     writeln!(file, "{done_label}:")?;
     Ok(())
 }
@@ -3419,9 +3279,9 @@ fn emit_preflight_direct_busy_loop_guard(mut file: impl Write, pc: u32) -> Resul
     writeln!(file, "    call *%r14")?;
     emit_reload_preflight_event_cursor(&mut file)?;
     writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "    je L_error")?;
+    writeln!(file, "    je ceno_aot_error")?;
     writeln!(file, "    cmpl ${AOT_STATUS_HALTED}, %eax")?;
-    writeln!(file, "    je L_done")?;
+    writeln!(file, "    je ceno_aot_done")?;
     writeln!(file, "{done_label}:")?;
     Ok(())
 }
@@ -3568,7 +3428,7 @@ fn emit_preflight_direct_event_append(
         writeln!(file, "    call *%r14")?;
         emit_reload_preflight_event_cursor(&mut file)?;
         writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-        writeln!(file, "    je L_error")?;
+        writeln!(file, "    je ceno_aot_error")?;
         emit_preflight_direct_access_cache_load(&mut file)?;
     } else {
         writeln!(
@@ -4584,11 +4444,11 @@ fn emit_successor_jump(
     if let Some(adjacent) = adjacent {
         if is_static_conditional_branch(insn.kind) {
             writeln!(file, "    cmpl ${adjacent:#010x}, %r15d")?;
-            writeln!(file, "    jne L_dispatch")?;
+            writeln!(file, "    jne ceno_aot_dispatch")?;
         }
         return Ok(());
     }
-    writeln!(file, "    jmp L_dispatch")?;
+    writeln!(file, "    jmp ceno_aot_dispatch")?;
     Ok(())
 }
 
@@ -4942,86 +4802,31 @@ mod tests {
     use strum::EnumCount;
 
     fn program(instructions: Vec<Instruction>) -> Program {
-        Program::new(
+        let instruction_count = instructions.len();
+        let mut program = Program::new(
             CENO_PLATFORM.pc_base(),
             CENO_PLATFORM.pc_base(),
             CENO_PLATFORM.heap.start,
             instructions,
             Default::default(),
-        )
-    }
-
-    #[test]
-    fn coverage_roots_include_entry_and_observed_jump_target() {
-        let base = CENO_PLATFORM.pc_base();
-        let program = Arc::new(program(vec![
-            encode_rv32(InsnKind::JAL, 0, 0, 0, 8),
-            encode_rv32(InsnKind::ADDI, 0, 0, 1, 1),
-            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-        ]));
-
-        let roots = trace_preflight_roots(&CENO_PLATFORM, program, []).unwrap();
-
-        assert_eq!(roots[0], base);
-        assert!(roots.contains(&(base + 8)));
-    }
-
-    #[test]
-    fn coverage_training_counts_instructions_and_branch_directions() {
-        let base = CENO_PLATFORM.pc_base();
-        let program = Arc::new(program(vec![
-            encode_rv32(InsnKind::ADDI, 0, 0, 1, 3),
-            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
-            encode_rv32(InsnKind::BNE, 1, 0, 0, -4),
-            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-        ]));
-
-        let training = trace_preflight_profile(&CENO_PLATFORM, program.clone(), []).unwrap();
-        assert_eq!(training.instruction_counts, vec![1, 3, 3, 1]);
-        assert_eq!(
-            training.branch_counts[2],
-            BranchCounts {
-                taken: 2,
-                not_taken: 1,
-            }
         );
-
-        let blocks = partition_basic_blocks_with_roots(&program, training.roots.clone()).unwrap();
-        let layout = build_layout_profile(&program, &blocks, &training).unwrap();
-        assert_eq!(layout.block_counts, vec![1, 3, 1]);
-        assert_eq!(layout.edge_counts[&(base, base + 4)], 1);
-        assert_eq!(layout.edge_counts[&(base + 4, base + 4)], 2);
-        assert_eq!(layout.edge_counts[&(base + 4, base + 12)], 1);
-    }
-
-    #[test]
-    fn hot_chains_are_deterministic_and_do_not_form_cycles() {
-        let blocks = (0..4)
-            .map(|index| BasicBlock {
-                start_pc: 0x1000 + index * 4,
-                end_pc: 0x1004 + index * 4,
-            })
-            .collect::<Vec<_>>();
-        let edges = BTreeMap::from([
-            ((0x1000, 0x1004), 30),
-            ((0x1004, 0x1008), 20),
-            ((0x1008, 0x1000), 10),
-        ]);
-
-        let first = hot_chain_emission_order(&blocks, &[30, 20, 10, 0], &edges);
-        let second = hot_chain_emission_order(&blocks, &[30, 20, 10, 0], &edges);
-        assert_eq!(first, second);
-        assert_eq!(first, vec![0x1000, 0x1004, 0x1008, 0x100c]);
-        assert_eq!(first.iter().copied().collect::<BTreeSet<_>>().len(), 4);
+        program.static_aot_roots = Some(
+            (0..instruction_count)
+                .map(|index| CENO_PLATFORM.pc_base() + index as u32 * PC_STEP_SIZE as u32)
+                .collect(),
+        );
+        program
     }
 
     #[test]
     fn cache_metadata_round_trips_layout_digest_and_emission_order() {
         let profile = AotLayoutProfile {
-            block_counts: vec![9, 4, 0],
-            edge_counts: BTreeMap::from([((0x1000, 0x1008), 7)]),
             emission_order: vec![0x1000, 0x1008, 0x1004],
-            digest: [0x5a; 32],
+            digest: [0; 32],
+        };
+        let profile = AotLayoutProfile {
+            digest: layout_profile_digest(&profile),
+            ..profile
         };
         let artifact_digest = [0xa5; 32];
         let event_count = 17;
@@ -5069,7 +4874,7 @@ mod tests {
         let conditional = String::from_utf8(conditional).unwrap();
         assert!(conditional.contains("je L_cold"));
         assert!(!conditional.contains("je L_hot"));
-        assert!(conditional.contains("jne L_dispatch"));
+        assert!(conditional.contains("jne ceno_aot_dispatch"));
 
         let jump = encode_rv32(InsnKind::JAL, 0, 0, 0, 8);
         let mut unconditional = Vec::new();
@@ -5083,63 +4888,6 @@ mod tests {
         )
         .unwrap();
         assert!(unconditional.is_empty());
-    }
-
-    #[test]
-    fn coverage_roots_include_late_indirect_target_and_post_ecall_continuation() {
-        let base = CENO_PLATFORM.pc_base();
-        let indirect = Arc::new(program(vec![
-            encode_rv32(InsnKind::JALR, 1, 0, 0, 0),
-            encode_rv32(InsnKind::ADDI, 0, 0, 0, 0),
-            encode_rv32(InsnKind::ADDI, 0, 0, 0, 0),
-            encode_rv32(InsnKind::ADDI, 0, 0, 0, 0),
-            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-        ]));
-        let mut vm = VMState::<CoverageTracer>::new_with_tracer_config(
-            CENO_PLATFORM.clone(),
-            indirect.clone(),
-            CoverageTracerConfig {
-                entry: base,
-                program_base: indirect.base_address,
-                instruction_count: indirect.instructions.len(),
-            },
-        );
-        vm.init_register_unsafe(1, base + 16);
-        while vm.next_step_record().unwrap().is_some() {}
-        let roots = &vm.tracer().roots;
-        assert!(roots.contains(&(base + 16)), "roots={roots:#x?}");
-
-        let mut platform = CENO_PLATFORM.clone();
-        platform.unsafe_ecall_nop = true;
-        let post_ecall = Arc::new(program(vec![
-            encode_rv32(InsnKind::ADDI, 0, 0, Platform::reg_ecall().into(), 123),
-            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-            encode_rv32(InsnKind::ADDI, 0, 0, Platform::reg_ecall().into(), 0),
-            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-        ]));
-        let roots = trace_preflight_roots(&platform, post_ecall, []).unwrap();
-        assert!(roots.contains(&(base + 8)));
-    }
-
-    #[test]
-    fn coverage_roots_preserve_canonical_whole_blocks() {
-        let base = CENO_PLATFORM.pc_base();
-        let program = Arc::new(program(vec![
-            encode_rv32(InsnKind::ADDI, 0, 0, 1, 1),
-            encode_rv32(InsnKind::ADDI, 1, 0, 2, 2),
-            encode_rv32(InsnKind::ADDI, 2, 0, 3, 3),
-            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-        ]));
-        let roots = trace_preflight_roots(&CENO_PLATFORM, program.clone(), []).unwrap();
-        let blocks = partition_basic_blocks_with_roots(&program, roots).unwrap();
-        assert_eq!(
-            blocks[0],
-            BasicBlock {
-                start_pc: base,
-                end_pc: base + 12
-            }
-        );
-        assert_eq!(blocks.len(), 2);
     }
 
     #[test]
@@ -5197,6 +4945,131 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn static_roots_include_metadata_and_all_resume_pcs() {
+        let base = CENO_PLATFORM.pc_base();
+        let mut program = program(vec![
+            encode_rv32(InsnKind::JALR, 1, 0, 0, 0),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+            encode_rv32(InsnKind::INVALID, 0, 0, 0, 0),
+            encode_rv32(InsnKind::ADDI, 0, 0, 0, 0),
+        ]);
+        program.static_aot_roots = Some(vec![base, base + 12]);
+
+        assert_eq!(
+            static_aot_roots(&program).unwrap(),
+            vec![base, base + 4, base + 8, base + 12]
+        );
+    }
+
+    #[test]
+    fn aot_request_rejects_missing_static_metadata() {
+        let cache = tempfile::tempdir().unwrap();
+        let mut program = program(vec![encode_rv32(InsnKind::ECALL, 0, 0, 0, 0)]);
+        program.static_aot_roots = None;
+        let err = match AotProgram::load_or_train_preflight_in(
+            &CENO_PLATFORM,
+            Arc::new(program),
+            [],
+            PreflightTracerConfig::default(),
+            cache.path(),
+        ) {
+            Ok(_) => panic!("AOT unexpectedly accepted missing static metadata"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains(".llvm_bb_addr_map"), "{err}");
+    }
+
+    #[test]
+    fn one_and_many_compile_workers_have_identical_semantics() {
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 4),
+            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
+            encode_rv32(InsnKind::BNE, 1, 0, 0, -4),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let blocks =
+            partition_basic_blocks_with_roots(&program, program.static_aot_roots.clone().unwrap())
+                .unwrap();
+        let layout = pc_order_layout(&blocks);
+
+        let compile = |jobs| {
+            let dir = tempfile::tempdir().unwrap();
+            let asm = dir.path().join("program.S");
+            let so = dir.path().join("program.so");
+            compile_native_to_with_jobs(
+                &program,
+                &blocks,
+                &layout.emission_order,
+                AssemblyTraceStyle::Generic,
+                &asm,
+                &so,
+                jobs,
+            )
+            .unwrap();
+            let (library, entry) = load_native(&so).unwrap();
+            AotProgram {
+                program: program.clone(),
+                blocks: blocks.clone(),
+                layout_profile: layout.clone(),
+                _library: library,
+                entry,
+                compile_load_time: Duration::ZERO,
+                trace_style: AssemblyTraceStyle::Generic,
+                next_access_capacity: 0,
+            }
+        };
+        let one = compile(1);
+        let many = compile(4);
+        let mut one_vm = VMState::new(CENO_PLATFORM.clone(), program.clone());
+        let mut many_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        let one_report = one.run_to_halt(&mut one_vm, 32).unwrap();
+        let many_report = many.run_to_halt(&mut many_vm, 32).unwrap();
+
+        assert_eq!(one_report.executed_steps, many_report.executed_steps);
+        assert_eq!(one_report.fallback, many_report.fallback);
+        assert_eq!(one_vm.peek_register(1), many_vm.peek_register(1));
+        assert_eq!(
+            one_vm.tracer().recorded_steps(),
+            many_vm.tracer().recorded_steps()
+        );
+    }
+
+    #[test]
+    fn static_call_returns_and_syscall_resumes_have_zero_dynamic_fallback() {
+        let base = CENO_PLATFORM.pc_base();
+        let direct_call = Arc::new(program(vec![
+            encode_rv32(InsnKind::JAL, 0, 0, 1, 8),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+            encode_rv32(InsnKind::JALR, 1, 0, 0, 0),
+        ]));
+        let aot = AotProgram::compile_with_extra_roots(
+            direct_call.clone(),
+            vec![base, base + 4, base + 8],
+        )
+        .unwrap();
+        let mut vm = VMState::new(CENO_PLATFORM.clone(), direct_call);
+        let report = aot.run_to_halt(&mut vm, 8).unwrap();
+        assert_eq!(report.fallback.dynamic_pc_miss, 0);
+
+        let mut platform = CENO_PLATFORM.clone();
+        platform.unsafe_ecall_nop = true;
+        let syscall_resume = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, Platform::reg_ecall().into(), 123),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+            encode_rv32(InsnKind::ADDI, 0, 0, Platform::reg_ecall().into(), 0),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let aot = AotProgram::compile_with_extra_roots(
+            syscall_resume.clone(),
+            vec![base, base + 4, base + 8, base + 12],
+        )
+        .unwrap();
+        let mut vm = VMState::new(platform, syscall_resume);
+        let report = aot.run_to_halt(&mut vm, 8).unwrap();
+        assert_eq!(report.fallback.dynamic_pc_miss, 0);
     }
 
     #[test]
@@ -5568,7 +5441,7 @@ mod tests {
         let warm = AotProgram::load_or_train_preflight_in(
             &CENO_PLATFORM,
             program.clone(),
-            [],
+            [(ByteAddr(CENO_PLATFORM.heap.start).waddr(), 0x1234)],
             config.clone(),
             cache.path(),
         )
@@ -5618,7 +5491,11 @@ mod tests {
 
         let key = format!(
             "{}-cells{}-cycles{}",
-            aot_cache_key(&program, AssemblyTraceStyle::PreflightDirectBlockPlan),
+            aot_cache_key(
+                &program,
+                &static_aot_roots(&program).unwrap(),
+                AssemblyTraceStyle::PreflightDirectBlockPlan,
+            ),
             config.max_cell_per_shard(),
             config.max_cycle_per_shard()
         );
@@ -5667,16 +5544,18 @@ mod tests {
     }
 
     #[test]
-    fn unseen_later_indirect_target_uses_dynamic_pc_fallback() {
+    fn static_indirect_target_has_zero_dynamic_pc_fallback() {
         let base = CENO_PLATFORM.pc_base();
         let program = Arc::new(program(vec![
             encode_rv32(InsnKind::JALR, 1, 0, 0, 0),
             encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
             encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
         ]));
-        let aot =
-            AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), vec![base + 4])
-                .unwrap();
+        let aot = AotProgram::compile_preflight_direct_with_extra_roots(
+            program.clone(),
+            vec![base + 4, base + 8],
+        )
+        .unwrap();
         let config = crate::PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
             .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
         let mut vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
@@ -5686,7 +5565,7 @@ mod tests {
         );
         vm.init_register_unsafe(1, base + 8);
         let report = aot.run_to_halt(&mut vm, 10).unwrap();
-        assert_eq!(report.fallback.dynamic_pc_miss, 1);
+        assert_eq!(report.fallback.dynamic_pc_miss, 0);
     }
 
     #[derive(Debug)]
