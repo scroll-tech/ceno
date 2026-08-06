@@ -73,4 +73,5 @@ pub struct SendEvent {
     pub prev_cycle: Cycle,
     pub value: Word,
     pub prev_value: Option<Word>,
+    pub has_future_access: bool,
 }

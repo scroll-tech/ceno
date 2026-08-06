@@ -139,6 +139,7 @@ impl<E: ExtensionField> Instruction<E> for PubIoCommitInstruction<E> {
                 Change::new(syscall_code, syscall_code),
                 step.rs1().unwrap().previous_cycle,
             ),
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
         )?;
 
         config.digest_ptr.1.assign_instance(
@@ -152,10 +153,18 @@ impl<E: ExtensionField> Instruction<E> for PubIoCommitInstruction<E> {
             lk_multiplicity,
             step.cycle(),
             &ops.reg_ops[0],
+            ops.reg_future_access[0] != 0,
         )?;
 
-        for (writer, op) in config.mem_rw.iter().zip(&ops.mem_ops) {
-            writer.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)?;
+        for (index, (writer, op)) in config.mem_rw.iter().zip(&ops.mem_ops).enumerate() {
+            writer.assign_op(
+                instance,
+                shard_ctx,
+                lk_multiplicity,
+                step.cycle(),
+                op,
+                ops.mem_future_access[index] != 0,
+            )?;
         }
 
         lk_multiplicity.fetch(step.pc().before.0);

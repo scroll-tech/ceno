@@ -69,6 +69,15 @@ impl<T: Tracer> VMState<T> {
         program: Arc<Program>,
         config: T::Config,
     ) -> Self {
+        Self::new_with_tracer_config_and_next_accesses(platform, program, config, None)
+    }
+
+    pub fn new_with_tracer_config_and_next_accesses(
+        platform: Platform,
+        program: Arc<Program>,
+        config: T::Config,
+        next_accesses: Option<Arc<crate::NextCycleAccess>>,
+    ) -> Self {
         let pc = program.entry;
 
         let mut vm = Self {
@@ -88,7 +97,7 @@ impl<T: Tracer> VMState<T> {
             ),
             registers: [0; VM_REG_COUNT],
             halt_state: None,
-            tracer: T::new(&platform, config),
+            tracer: T::with_next_accesses(&platform, config, next_accesses),
         };
 
         for (&addr, &value) in &program.image {
@@ -206,6 +215,14 @@ impl<T: Tracer> VMState<T> {
     )]
     pub(crate) fn memory_base_word(&self) -> WordAddr {
         self.memory.base()
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn memory_end_word(&self) -> WordAddr {
+        self.memory.end()
     }
 
     #[cfg_attr(

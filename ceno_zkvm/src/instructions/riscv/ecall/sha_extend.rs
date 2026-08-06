@@ -231,6 +231,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
                                 Change::new(SHA_EXTEND, SHA_EXTEND),
                                 step.rs1().unwrap().previous_cycle,
                             ),
+                            step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
                         )?;
 
                         // assign state_ptr
@@ -245,6 +246,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
                             &mut lk_multiplicity,
                             step.cycle(),
                             &ops.reg_ops[0],
+                            ops.reg_future_access[0] != 0,
                         )?;
 
                         let write_op = ops.mem_ops.last().expect("sha_extend write op");
@@ -260,13 +262,16 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
                         );
 
                         // assign mem_rw
-                        for (writer, op) in config.mem_rw.iter().zip_eq(&ops.mem_ops) {
+                        for (index, (writer, op)) in
+                            config.mem_rw.iter().zip_eq(&ops.mem_ops).enumerate()
+                        {
                             writer.assign_op(
                                 instance,
                                 &mut shard_ctx,
                                 &mut lk_multiplicity,
                                 step.cycle(),
                                 op,
+                                ops.mem_future_access[index] != 0,
                             )?;
                         }
                         // fetch

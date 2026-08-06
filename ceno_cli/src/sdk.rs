@@ -180,15 +180,6 @@ where
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub fn prepare_preflight_aot(&mut self, hints: &CenoStdin) {
-        match ceno_emul::EmulatorBackend::from_env()
-            .unwrap_or_else(|err| panic!("invalid emulator backend for SDK AOT preparation: {err}"))
-        {
-            ceno_emul::EmulatorBackend::Interp => {
-                self.preflight_aot_program = None;
-                return;
-            }
-            ceno_emul::EmulatorBackend::Aot => {}
-        }
         let Some(zkvm_prover) = self.zkvm_prover.as_ref() else {
             panic!("ZKVMProver is not initialized")
         };

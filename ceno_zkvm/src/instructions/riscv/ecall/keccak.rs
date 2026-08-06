@@ -251,6 +251,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
                                     Change::new(KECCAK_PERMUTE, KECCAK_PERMUTE),
                                     step.rs1().unwrap().previous_cycle,
                                 ),
+                                step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
                             )?;
                             config.state_ptr.1.assign_instance(
                                 instance,
@@ -263,6 +264,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
                                 &mut lk_multiplicity,
                                 step.cycle(),
                                 &ops.reg_ops[0],
+                                ops.reg_future_access[0] != 0,
                             )?;
 
                             for (i, (writer, op)) in
@@ -284,6 +286,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
                                     &mut lk_multiplicity,
                                     step.cycle(),
                                     op,
+                                    ops.mem_future_access[i] != 0,
                                 )?;
                             }
                             lk_multiplicity.fetch(step.pc().before.0);
@@ -321,6 +324,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
             step.rs1().unwrap().previous_cycle,
             KECCAK_PERMUTE,
             None,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
         );
         shard_ctx.send(
             RAMType::Register,
@@ -330,8 +334,9 @@ impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
             ops.reg_ops[0].previous_cycle,
             ops.reg_ops[0].value.after,
             None,
+            ops.reg_future_access[0] != 0,
         );
-        for op in &ops.mem_ops {
+        for (index, op) in ops.mem_ops.iter().enumerate() {
             shard_ctx.send(
                 RAMType::Memory,
                 op.addr,
@@ -340,6 +345,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
                 op.previous_cycle,
                 op.value.after,
                 Some(op.value.before),
+                ops.mem_future_access[index] != 0,
             );
         }
 

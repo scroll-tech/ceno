@@ -106,6 +106,7 @@ impl<E: ExtensionField> Instruction<E> for HaltInstruction<E> {
             step.rs2().unwrap().previous_cycle,
             step.rs2().unwrap().value,
             None,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RS2),
         );
 
         config.lt_x10_cfg.assign_instance(

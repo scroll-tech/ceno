@@ -757,6 +757,7 @@ pub fn run_uint256_mul<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + '
                                     addr: ByteAddr::from(0).waddr(),
                                     value: Default::default(),
                                 },
+                                false,
                             )
                             .expect("assign error");
                     });

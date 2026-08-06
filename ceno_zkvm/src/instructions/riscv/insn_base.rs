@@ -138,6 +138,7 @@ impl<E: ExtensionField> ReadRS1<E> {
             op.previous_cycle,
             op.value,
             None,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
         );
 
         Ok(())
@@ -166,6 +167,7 @@ impl<E: ExtensionField> ReadRS1<E> {
             prev_cycle: op.previous_cycle,
             value: op.value,
             prev_value: None,
+            has_future_access: step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
         });
         sink.touch_addr(op.addr);
     }
@@ -180,6 +182,7 @@ impl<E: ExtensionField> ReadRS1<E> {
             op.previous_cycle,
             op.value,
             None,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
         );
         shard_ctx.push_addr_accessed(op.addr);
     }
@@ -247,6 +250,7 @@ impl<E: ExtensionField> ReadRS2<E> {
             op.previous_cycle,
             op.value,
             None,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RS2),
         );
 
         Ok(())
@@ -275,6 +279,7 @@ impl<E: ExtensionField> ReadRS2<E> {
             prev_cycle: op.previous_cycle,
             value: op.value,
             prev_value: None,
+            has_future_access: step.has_future_access(StepRecord::FUTURE_ACCESS_RS2),
         });
         sink.touch_addr(op.addr);
     }
@@ -289,6 +294,7 @@ impl<E: ExtensionField> ReadRS2<E> {
             op.previous_cycle,
             op.value,
             None,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RS2),
         );
         shard_ctx.push_addr_accessed(op.addr);
     }
@@ -336,7 +342,14 @@ impl<E: ExtensionField> WriteRD<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.rd().expect("rd op");
-        self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), &op)
+        self.assign_op(
+            instance,
+            shard_ctx,
+            lk_multiplicity,
+            step.cycle(),
+            &op,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RD),
+        )
     }
 
     pub fn assign_op(
@@ -346,6 +359,7 @@ impl<E: ExtensionField> WriteRD<E> {
         lk_multiplicity: &mut LkMultiplicity,
         cycle: Cycle,
         op: &WriteOp,
+        has_future_access: bool,
     ) -> Result<(), ZKVMError> {
         let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
         let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
@@ -374,6 +388,7 @@ impl<E: ExtensionField> WriteRD<E> {
             op.previous_cycle,
             op.value.after,
             Some(op.value.before),
+            has_future_access,
         );
 
         Ok(())
@@ -385,6 +400,7 @@ impl<E: ExtensionField> WriteRD<E> {
         shard_ctx: &ShardContext,
         cycle: Cycle,
         op: &WriteOp,
+        has_future_access: bool,
     ) {
         let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
         let shard_cycle = cycle - shard_ctx.current_shard_offset_cycle();
@@ -402,6 +418,7 @@ impl<E: ExtensionField> WriteRD<E> {
             prev_cycle: op.previous_cycle,
             value: op.value.after,
             prev_value: Some(op.value.before),
+            has_future_access,
         });
         sink.touch_addr(op.addr);
     }
@@ -413,15 +430,32 @@ impl<E: ExtensionField> WriteRD<E> {
         step: &StepRecord,
     ) {
         let op = step.rd().expect("rd op");
-        self.emit_op_lk_and_shardram(sink, shard_ctx, step.cycle(), &op)
+        self.emit_op_lk_and_shardram(
+            sink,
+            shard_ctx,
+            step.cycle(),
+            &op,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RD),
+        )
     }
 
     pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
         let op = step.rd().expect("rd op");
-        self.emit_op_shardram(shard_ctx, step.cycle(), &op)
+        self.emit_op_shardram(
+            shard_ctx,
+            step.cycle(),
+            &op,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_RD),
+        )
     }
 
-    pub fn emit_op_shardram(&self, shard_ctx: &mut ShardContext, cycle: Cycle, op: &WriteOp) {
+    pub fn emit_op_shardram(
+        &self,
+        shard_ctx: &mut ShardContext,
+        cycle: Cycle,
+        op: &WriteOp,
+        has_future_access: bool,
+    ) {
         shard_ctx.record_send_without_touch(
             RAMType::Register,
             op.addr,
@@ -430,6 +464,7 @@ impl<E: ExtensionField> WriteRD<E> {
             op.previous_cycle,
             op.value.after,
             Some(op.value.before),
+            has_future_access,
         );
         shard_ctx.push_addr_accessed(op.addr);
     }
@@ -473,7 +508,14 @@ impl<E: ExtensionField> ReadMEM<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.memory_op().unwrap();
-        self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), &op)
+        self.assign_op(
+            instance,
+            shard_ctx,
+            lk_multiplicity,
+            step.cycle(),
+            &op,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_MEM),
+        )
     }
 
     pub fn assign_op(
@@ -483,6 +525,7 @@ impl<E: ExtensionField> ReadMEM<E> {
         lk_multiplicity: &mut LkMultiplicity,
         cycle: Cycle,
         op: &WriteOp,
+        has_future_access: bool,
     ) -> Result<(), ZKVMError> {
         let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
         let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
@@ -506,6 +549,7 @@ impl<E: ExtensionField> ReadMEM<E> {
             op.previous_cycle,
             op.value.after,
             None,
+            has_future_access,
         );
 
         Ok(())
@@ -534,6 +578,7 @@ impl<E: ExtensionField> ReadMEM<E> {
             prev_cycle: op.previous_cycle,
             value: op.value.after,
             prev_value: None,
+            has_future_access: step.has_future_access(StepRecord::FUTURE_ACCESS_MEM),
         });
         sink.touch_addr(op.addr);
     }
@@ -548,6 +593,7 @@ impl<E: ExtensionField> ReadMEM<E> {
             op.previous_cycle,
             op.value.after,
             None,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_MEM),
         );
         shard_ctx.push_addr_accessed(op.addr);
     }
@@ -589,7 +635,14 @@ impl WriteMEM {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.memory_op().unwrap();
-        self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), &op)
+        self.assign_op(
+            instance,
+            shard_ctx,
+            lk_multiplicity,
+            step.cycle(),
+            &op,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_MEM),
+        )
     }
 
     pub fn assign_op<F: SmallField>(
@@ -599,6 +652,7 @@ impl WriteMEM {
         lk_multiplicity: &mut LkMultiplicity,
         cycle: Cycle,
         op: &WriteOp,
+        has_future_access: bool,
     ) -> Result<(), ZKVMError> {
         let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
         let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
@@ -620,6 +674,7 @@ impl WriteMEM {
             op.previous_cycle,
             op.value.after,
             Some(op.value.before),
+            has_future_access,
         );
 
         Ok(())
@@ -631,6 +686,7 @@ impl WriteMEM {
         shard_ctx: &ShardContext,
         cycle: Cycle,
         op: &WriteOp,
+        has_future_access: bool,
     ) {
         let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
         let shard_cycle = cycle - shard_ctx.current_shard_offset_cycle();
@@ -648,6 +704,7 @@ impl WriteMEM {
             prev_cycle: op.previous_cycle,
             value: op.value.after,
             prev_value: Some(op.value.before),
+            has_future_access,
         });
         sink.touch_addr(op.addr);
     }
@@ -659,15 +716,32 @@ impl WriteMEM {
         step: &StepRecord,
     ) {
         let op = step.memory_op().expect("memory op");
-        self.emit_op_lk_and_shardram(sink, shard_ctx, step.cycle(), &op)
+        self.emit_op_lk_and_shardram(
+            sink,
+            shard_ctx,
+            step.cycle(),
+            &op,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_MEM),
+        )
     }
 
     pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
         let op = step.memory_op().expect("memory op");
-        self.emit_op_shardram(shard_ctx, step.cycle(), &op)
+        self.emit_op_shardram(
+            shard_ctx,
+            step.cycle(),
+            &op,
+            step.has_future_access(StepRecord::FUTURE_ACCESS_MEM),
+        )
     }
 
-    pub fn emit_op_shardram(&self, shard_ctx: &mut ShardContext, cycle: Cycle, op: &WriteOp) {
+    pub fn emit_op_shardram(
+        &self,
+        shard_ctx: &mut ShardContext,
+        cycle: Cycle,
+        op: &WriteOp,
+        has_future_access: bool,
+    ) {
         shard_ctx.record_send_without_touch(
             RAMType::Memory,
             op.addr,
@@ -676,6 +750,7 @@ impl WriteMEM {
             op.previous_cycle,
             op.value.after,
             Some(op.value.before),
+            has_future_access,
         );
         shard_ctx.push_addr_accessed(op.addr);
     }

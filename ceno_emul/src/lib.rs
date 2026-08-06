@@ -10,9 +10,10 @@ pub use platform::{CENO_PLATFORM, Platform};
 
 mod tracer;
 pub use tracer::{
-    Change, ChipCostSpec, FullTracer, FullTracerConfig, LatestAccesses, MemOp, NextAccessPair,
-    NextCycleAccess, PreflightTracer, PreflightTracerConfig, ReadOp, SHARD_COST_BUCKETS,
-    ShardCostModel, ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
+    Change, ChipCostSpec, FullTracer, FullTracerConfig, LatestAccesses, MemOp, NextAccessEvent,
+    NextAccessPair, NextAccessTape, NextCycleAccess, PreflightTracer, PreflightTracerConfig,
+    ReadOp, ReplayChunk, ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel,
+    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
 };
 
 mod vm_state;
@@ -20,9 +21,6 @@ pub use vm_state::{HaltState, VM_REG_COUNT, VMState};
 
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub mod aot;
-
-mod backend;
-pub use backend::EmulatorBackend;
 
 mod rv32im;
 pub use rv32im::{

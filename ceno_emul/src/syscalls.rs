@@ -70,11 +70,18 @@ pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<
 pub struct SyscallWitness {
     pub mem_ops: Vec<WriteOp>,
     pub reg_ops: Vec<WriteOp>,
+    pub mem_future_access: Vec<u8>,
+    pub reg_future_access: Vec<u8>,
 }
 
 impl SyscallWitness {
     fn new(mem_ops: Vec<WriteOp>, reg_ops: Vec<WriteOp>) -> SyscallWitness {
-        SyscallWitness { mem_ops, reg_ops }
+        SyscallWitness {
+            mem_future_access: vec![0; mem_ops.len()],
+            reg_future_access: vec![0; reg_ops.len()],
+            mem_ops,
+            reg_ops,
+        }
     }
 }
 

@@ -7,9 +7,15 @@ use crate::{
 };
 use ceno_rt::WORD_SIZE;
 use rayon::prelude::*;
+#[cfg(debug_assertions)]
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
-use std::{collections::BTreeMap, fmt, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use strum::EnumCount;
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -45,11 +51,20 @@ pub struct StepRecord {
     /// Index into the separate syscall witness storage.
     /// `u32::MAX` means no syscall for this step.
     syscall_index: u32,
+
+    /// Cross-shard successor annotations for RS1 | RS2 | RD | MEM.
+    /// This occupies the former tail padding; `StepRecord` remains 136 bytes.
+    future_access_mask: u8,
+    _padding: [u8; 3],
 }
 
 impl StepRecord {
     /// Sentinel value indicating no syscall is associated with this step.
     pub const NO_SYSCALL: u32 = u32::MAX;
+    pub const FUTURE_ACCESS_RS1: u8 = 1 << 0;
+    pub const FUTURE_ACCESS_RS2: u8 = 1 << 1;
+    pub const FUTURE_ACCESS_RD: u8 = 1 << 2;
+    pub const FUTURE_ACCESS_MEM: u8 = 1 << 3;
 }
 
 impl Default for StepRecord {
@@ -69,11 +84,38 @@ impl Default for StepRecord {
             rd: Default::default(),
             memory_op: Default::default(),
             syscall_index: StepRecord::NO_SYSCALL,
+            future_access_mask: 0,
+            _padding: [0; 3],
         }
     }
 }
 
 pub type StepIndex = usize;
+
+/// Why a replay engine returned control to its Rust consumer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReplayStopReason {
+    ShardBoundary,
+    BufferFull,
+    Halt,
+    Syscall,
+    DynamicFallback,
+    Trap,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReplayChunk {
+    pub records: usize,
+    pub stop_reason: ReplayStopReason,
+}
+
+/// Common lifecycle for interpreter and native witness replay engines.
+pub trait ReplayEngine {
+    fn begin_shard(&mut self, expected_steps: usize);
+    fn replay_chunk(&mut self) -> ReplayChunk;
+    fn finish_shard(&mut self);
+}
 
 pub trait StepCellExtractor {
     fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64;
@@ -258,8 +300,156 @@ fn padded_size_bucket(num_instances: u64) -> usize {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(C)]
+pub struct NextAccessEvent {
+    pub source_cycle: Cycle,
+    pub target_cycle: Cycle,
+    pub address: WordAddr,
+}
+
+impl NextAccessEvent {
+    pub fn new(source_cycle: Cycle, target_cycle: Cycle, address: WordAddr) -> Self {
+        Self {
+            source_cycle,
+            target_cycle,
+            address,
+        }
+    }
+}
+
+fn radix_sort_next_access_events(events: &mut Vec<NextAccessEvent>) {
+    if events.len() < 2 {
+        return;
+    }
+    let mut scratch = vec![NextAccessEvent::default(); events.len()];
+    let mut counts = vec![0usize; 1 << 16];
+    let max_address = events.iter().map(|event| event.address.0).max().unwrap();
+    let address_passes = (u32::BITS - max_address.leading_zeros()).div_ceil(16);
+    let max_source = events.iter().map(|event| event.source_cycle).max().unwrap();
+    let source_passes = (Cycle::BITS - max_source.leading_zeros()).div_ceil(16);
+
+    let mut pass = |digit: &dyn Fn(&NextAccessEvent) -> usize| {
+        counts.fill(0);
+        for event in events.iter() {
+            counts[digit(event)] += 1;
+        }
+        let mut offset = 0;
+        for count in &mut counts {
+            let next = offset + *count;
+            *count = offset;
+            offset = next;
+        }
+        for event in events.iter() {
+            let key = digit(event);
+            scratch[counts[key]] = *event;
+            counts[key] += 1;
+        }
+        std::mem::swap(events, &mut scratch);
+    };
+
+    // `(source_cycle, address)` is logically unique, so the tertiary target
+    // cannot affect the order of valid events. Sorting this unique prefix also
+    // places invalid duplicates next to each other for validation below.
+    for word in 0..address_passes {
+        let shift = word * 16;
+        pass(&|event| ((event.address.0 >> shift) & 0xffff) as usize);
+    }
+
+    for word in 0..source_passes {
+        let shift = word * 16;
+        pass(&|event| ((event.source_cycle >> shift) & 0xffff) as usize);
+    }
+}
+
+/// Canonical, source-ordered cross-shard access tape.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NextAccessTape {
+    initialization: Vec<NextAccessEvent>,
+    events: Vec<NextAccessEvent>,
+    #[cfg(debug_assertions)]
+    oracle: FxHashMap<Cycle, NextAccessPair>,
+}
+
+impl NextAccessTape {
+    pub fn from_unsorted(mut events: Vec<NextAccessEvent>) -> Self {
+        let event_count = events.len();
+        let started = Instant::now();
+        radix_sort_next_access_events(&mut events);
+        let sort_time = started.elapsed();
+        assert!(
+            events
+                .iter()
+                .all(|event| event.target_cycle > event.source_cycle)
+        );
+        for pair in events.windows(2) {
+            assert!(
+                (pair[0].source_cycle, pair[0].address, pair[0].target_cycle)
+                    <= (pair[1].source_cycle, pair[1].address, pair[1].target_cycle),
+                "next-access tape is not canonically ordered"
+            );
+            assert_ne!(
+                (pair[0].source_cycle, pair[0].address),
+                (pair[1].source_cycle, pair[1].address),
+                "duplicate logical next-access event"
+            );
+        }
+        let split = events.partition_point(|event| event.source_cycle == 0);
+        let non_initial = events.split_off(split);
+        tracing::info!(
+            "next-access tape finalized {event_count} events in {:?}; sort={:?}, initialization={}, non_initial={}",
+            started.elapsed(),
+            sort_time,
+            events.len(),
+            non_initial.len()
+        );
+        #[cfg(debug_assertions)]
+        let oracle: FxHashMap<Cycle, NextAccessPair> =
+            events
+                .iter()
+                .chain(&non_initial)
+                .fold(FxHashMap::default(), |mut oracle, event| {
+                    oracle
+                        .entry(event.source_cycle)
+                        .or_default()
+                        .push((event.address, event.target_cycle));
+                    oracle
+                });
+        Self {
+            initialization: events,
+            events: non_initial,
+            #[cfg(debug_assertions)]
+            oracle,
+        }
+    }
+
+    pub fn initialization_events(&self) -> &[NextAccessEvent] {
+        &self.initialization
+    }
+
+    pub fn events(&self) -> &[NextAccessEvent] {
+        &self.events
+    }
+
+    pub fn len(&self) -> usize {
+        self.initialization.len() + self.events.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.initialization.is_empty() && self.events.is_empty()
+    }
+
+    #[cfg(debug_assertions)]
+    fn oracle_has(&self, cycle: Cycle, address: WordAddr) -> bool {
+        self.oracle
+            .get(&cycle)
+            .is_some_and(|pairs| pairs.iter().any(|pair| pair.0 == address))
+    }
+}
+
+/// Compatibility aliases retained while downstream callers migrate to the tape.
 pub type NextAccessPair = SmallVec<[(WordAddr, Cycle); 1]>;
-pub type NextCycleAccess = FxHashMap<Cycle, NextAccessPair>;
+pub type NextCycleAccess = NextAccessTape;
 
 fn init_mmio_min_max_access(
     platform: &Platform,
@@ -1128,6 +1318,8 @@ impl StepRecord {
             insn,
             memory_op: memory_op.unwrap_or_default(),
             syscall_index: StepRecord::NO_SYSCALL,
+            future_access_mask: 0,
+            _padding: [0; 3],
             heap_maxtouch_addr,
             hint_maxtouch_addr,
         }
@@ -1185,6 +1377,16 @@ impl StepRecord {
             Some(&store[self.syscall_index as usize])
         }
     }
+
+    #[inline(always)]
+    pub fn future_access_mask(&self) -> u8 {
+        self.future_access_mask
+    }
+
+    #[inline(always)]
+    pub fn has_future_access(&self, bit: u8) -> bool {
+        self.future_access_mask & bit != 0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1213,6 +1415,21 @@ pub struct FullTracer {
 
     // keep track of each address that the cycle when they were last accessed.
     latest_accesses: LatestAccesses,
+    next_accesses: Arc<NextAccessTape>,
+    next_access_cursor: usize,
+}
+
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub(crate) struct FullTracerNativeTraceState {
+    pub records: *mut StepRecord,
+    pub len: *mut usize,
+    pub pending_index: *mut usize,
+    pub pending_cycle: *mut Cycle,
+    pub latest_cells: *mut Cycle,
+    pub latest_base: WordAddr,
+    pub latest_len: *mut usize,
+    pub max_heap_addr_access: *mut ByteAddr,
+    pub max_hint_addr_access: *mut ByteAddr,
 }
 
 impl FullTracer {
@@ -1248,6 +1465,8 @@ impl FullTracer {
             mmio_min_max_access: Some(mmio_max_access),
             platform: platform.clone(),
             latest_accesses: LatestAccesses::new(platform),
+            next_accesses: Arc::new(NextAccessTape::default()),
+            next_access_cursor: 0,
             max_heap_addr_access: ByteAddr::from(platform.heap.start),
             max_hint_addr_access: ByteAddr::from(platform.hints.start),
         };
@@ -1287,6 +1506,25 @@ impl FullTracer {
 
     pub fn recorded_steps(&self) -> &[StepRecord] {
         &self.records[..self.len]
+    }
+
+    pub fn record_buffer_bytes(&self) -> usize {
+        self.records.capacity() * std::mem::size_of::<StepRecord>()
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn native_trace_state(&mut self) -> FullTracerNativeTraceState {
+        FullTracerNativeTraceState {
+            records: self.records.as_mut_ptr(),
+            len: &mut self.len,
+            pending_index: &mut self.pending_index,
+            pending_cycle: &mut self.pending_cycle,
+            latest_cells: self.latest_accesses.cells_mut_ptr(),
+            latest_base: self.latest_accesses.base(),
+            latest_len: &mut self.latest_accesses.len,
+            max_heap_addr_access: &mut self.max_heap_addr_access,
+            max_hint_addr_access: &mut self.max_hint_addr_access,
+        }
     }
 
     /// Returns the syscall witness store. Pass this to `StepRecord::syscall()`.
@@ -1503,6 +1741,127 @@ impl FullTracer {
                 )
             })
     }
+
+    fn annotate_syscall_event(
+        &mut self,
+        witness_index: usize,
+        address: WordAddr,
+        register_ops: bool,
+    ) {
+        let ops = if register_ops {
+            &self.syscall_witnesses[witness_index].reg_ops
+        } else {
+            &self.syscall_witnesses[witness_index].mem_ops
+        };
+        let index = ops
+            .iter()
+            .rposition(|op| op.addr == address)
+            .unwrap_or_else(|| panic!("FullTracer syscall access/tape address mismatch"));
+        let masks = if register_ops {
+            &mut self.syscall_witnesses[witness_index].reg_future_access
+        } else {
+            &mut self.syscall_witnesses[witness_index].mem_future_access
+        };
+        masks[index] = 1;
+    }
+
+    fn annotate_event(&mut self, record_index: usize, event: NextAccessEvent) {
+        #[cfg(debug_assertions)]
+        assert!(
+            self.next_accesses
+                .oracle_has(event.source_cycle, event.address),
+            "cursor missed debug next-access oracle"
+        );
+        let record = self.records[record_index];
+        let subcycle = event
+            .source_cycle
+            .checked_sub(record.cycle)
+            .expect("next-access event precedes its replay record");
+        let mask = match subcycle {
+            Self::SUBCYCLE_RS1 if record.has_rs1 && record.rs1.addr == event.address => {
+                StepRecord::FUTURE_ACCESS_RS1
+            }
+            Self::SUBCYCLE_RS2 if record.has_rs2 && record.rs2.addr == event.address => {
+                StepRecord::FUTURE_ACCESS_RS2
+            }
+            Self::SUBCYCLE_RD if record.has_rd && record.rd.addr == event.address => {
+                StepRecord::FUTURE_ACCESS_RD
+            }
+            Self::SUBCYCLE_MEM
+                if record.has_memory_op && record.memory_op.addr == event.address =>
+            {
+                StepRecord::FUTURE_ACCESS_MEM
+            }
+            Self::SUBCYCLE_RD if record.syscall_index != StepRecord::NO_SYSCALL => {
+                self.annotate_syscall_event(record.syscall_index as usize, event.address, true);
+                0
+            }
+            Self::SUBCYCLE_MEM if record.syscall_index != StepRecord::NO_SYSCALL => {
+                self.annotate_syscall_event(record.syscall_index as usize, event.address, false);
+                0
+            }
+            _ => panic!(
+                "FullTracer access/tape mismatch at cycle {} for address {:?}",
+                event.source_cycle, event.address
+            ),
+        };
+        self.records[record_index].future_access_mask |= mask;
+    }
+
+    /// Apply the sorted next-access tape to a newly completed record range.
+    ///
+    /// Source cycles map directly to replay records, so this work is proportional
+    /// to the number of cross-shard events rather than the number of instructions.
+    pub fn annotate_recorded_steps(&mut self, start_index: usize) {
+        assert!(start_index <= self.len);
+        if start_index == self.len {
+            return;
+        }
+        let chunk_start_cycle = self.records[start_index].cycle;
+        let chunk_end_cycle = self.records[self.len - 1].cycle + Self::SUBCYCLES_PER_INSN;
+        while let Some(event) = self
+            .next_accesses
+            .events()
+            .get(self.next_access_cursor)
+            .copied()
+        {
+            assert!(
+                event.source_cycle >= chunk_start_cycle,
+                "FullTracer skipped next-access event {:?} before replay chunk starting at {}",
+                event,
+                chunk_start_cycle
+            );
+            if event.source_cycle >= chunk_end_cycle {
+                break;
+            }
+            let record_offset = usize::try_from(
+                (event.source_cycle - chunk_start_cycle) / Self::SUBCYCLES_PER_INSN,
+            )
+            .expect("next-access record offset does not fit usize");
+            self.annotate_event(start_index + record_offset, event);
+            self.next_access_cursor += 1;
+        }
+    }
+
+    pub fn assert_next_accesses_consumed(&self) {
+        assert_eq!(
+            self.next_access_cursor,
+            self.next_accesses.events().len(),
+            "FullTracer consumed {} of {} non-initial next-access events",
+            self.next_access_cursor,
+            self.next_accesses.events().len()
+        );
+    }
+
+    pub fn assert_next_accesses_consumed_through(&self, end_cycle: Cycle) {
+        assert!(
+            self.next_accesses
+                .events()
+                .get(self.next_access_cursor)
+                .is_none_or(|event| event.source_cycle >= end_cycle),
+            "FullTracer left a next-access event before shard end cycle {end_cycle}"
+        );
+    }
 }
 
 pub struct PreflightTracer {
@@ -1512,7 +1871,11 @@ pub struct PreflightTracer {
     last_rs1: Option<Word>,
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     latest_accesses: LatestAccesses,
-    next_accesses: NextCycleAccess,
+    next_access_events: Vec<NextAccessEvent>,
+    next_access_capacity: Option<usize>,
+    next_access_growths: usize,
+    next_access_growth_bytes: usize,
+    next_access_growth_time: Duration,
     register_reads_tracked: u8,
     planner: Option<ShardPlanBuilder>,
     current_shard_start_cycle: Cycle,
@@ -1567,6 +1930,7 @@ pub(crate) struct NativeTraceStep {
 pub(crate) struct PreflightNativeTraceState {
     pub latest_cells: *mut Cycle,
     pub latest_base: WordAddr,
+    pub latest_len: *mut usize,
     pub cycle: *mut Cycle,
     pub pc_before: *mut ByteAddr,
     pub pc_after: *mut ByteAddr,
@@ -1604,7 +1968,7 @@ impl fmt::Debug for PreflightTracer {
             .field("last_rs1", &self.last_rs1)
             .field("mmio_min_max_access", &self.mmio_min_max_access)
             .field("latest_accesses", &self.latest_accesses)
-            .field("next_accesses", &self.next_accesses)
+            .field("next_access_events", &self.next_access_events)
             .field("register_reads_tracked", &self.register_reads_tracked)
             .field("planner", &self.planner)
             .field("current_shard_start_cycle", &self.current_shard_start_cycle)
@@ -1705,7 +2069,11 @@ impl PreflightTracer {
             last_rs1: None,
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
-            next_accesses: FxHashMap::default(),
+            next_access_events: Vec::new(),
+            next_access_capacity: None,
+            next_access_growths: 0,
+            next_access_growth_bytes: 0,
+            next_access_growth_time: Duration::ZERO,
             register_reads_tracked: 0,
             planner: Some(ShardPlanBuilder::new_with_cost_model(
                 max_cell_per_shard,
@@ -1726,7 +2094,10 @@ impl PreflightTracer {
         if !planner.finalized {
             planner.finalize(self.cycle);
         }
-        (planner, self.next_accesses)
+        (
+            planner,
+            NextAccessTape::from_unsorted(self.next_access_events),
+        )
     }
 
     #[cfg_attr(
@@ -1751,6 +2122,7 @@ impl PreflightTracer {
         PreflightNativeTraceState {
             latest_cells: self.latest_accesses.cells_mut_ptr(),
             latest_base: self.latest_accesses.base(),
+            latest_len: &mut self.latest_accesses.len,
             cycle: &mut self.cycle,
             pc_before: &mut self.pc.before,
             pc_after: &mut self.pc.after,
@@ -1835,25 +2207,82 @@ impl PreflightTracer {
         (min_addr as *mut WordAddr, max_addr as *mut WordAddr)
     }
 
-    #[cfg_attr(
-        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
-        allow(dead_code)
-    )]
-    pub(crate) fn record_native_access_side_effects(
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn record_native_first_touch(&mut self, addr: WordAddr) {
+        self.latest_accesses.record_native_first_touch(addr);
+    }
+
+    fn push_next_access_event(&mut self, event: NextAccessEvent) {
+        if self.next_access_capacity == Some(self.next_access_events.len()) {
+            let (old_capacity, new_capacity) = self.grow_next_access_tape();
+            tracing::warn!(
+                "AOT next-access tape grew from {old_capacity} to {new_capacity} events"
+            );
+        }
+        self.next_access_events.push(event);
+    }
+
+    fn grow_next_access_tape(&mut self) -> (usize, usize) {
+        let started = Instant::now();
+        let old_capacity = self.next_access_events.capacity();
+        let target_capacity = old_capacity
+            .saturating_mul(2)
+            .max(self.next_access_events.len().saturating_add(4096));
+        self.next_access_events
+            .reserve_exact(target_capacity - self.next_access_events.len());
+        let new_capacity = self.next_access_events.capacity();
+        self.next_access_capacity = Some(new_capacity);
+        self.next_access_growths = self.next_access_growths.saturating_add(1);
+        self.next_access_growth_bytes = self.next_access_growth_bytes.saturating_add(
+            new_capacity
+                .saturating_sub(old_capacity)
+                .saturating_mul(std::mem::size_of::<NextAccessEvent>()),
+        );
+        self.next_access_growth_time = self
+            .next_access_growth_time
+            .saturating_add(started.elapsed());
+        (old_capacity, new_capacity)
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn prepare_native_next_access_tape(&mut self, capacity: usize) {
+        assert!(capacity >= self.next_access_events.len());
+        self.next_access_events
+            .reserve_exact(capacity - self.next_access_events.len());
+        self.next_access_capacity = Some(self.next_access_events.capacity());
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn native_next_access_ptrs(
         &mut self,
-        addr: WordAddr,
-        prev_cycle: Cycle,
-        cur_cycle: Cycle,
-    ) {
-        if prev_cycle == Cycle::default() {
-            self.latest_accesses.record_native_first_touch(addr);
-        }
-        if self.config.record_next_accesses && prev_cycle < self.current_shard_start_cycle {
-            self.next_accesses
-                .entry(prev_cycle)
-                .or_default()
-                .push((addr, cur_cycle));
-        }
+    ) -> (*mut NextAccessEvent, *mut NextAccessEvent) {
+        let base = self.next_access_events.as_mut_ptr();
+        let cursor = unsafe { base.add(self.next_access_events.len()) };
+        let end = unsafe { base.add(self.next_access_events.capacity()) };
+        (cursor, end)
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) unsafe fn sync_native_next_access_tape(&mut self, cursor: *mut NextAccessEvent) {
+        let len = unsafe { cursor.offset_from(self.next_access_events.as_mut_ptr()) };
+        assert!(len >= 0 && len as usize <= self.next_access_events.capacity());
+        unsafe { self.next_access_events.set_len(len as usize) };
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn grow_native_next_access_tape(&mut self) -> (usize, usize) {
+        self.grow_next_access_tape()
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn next_access_tape_stats(&self) -> (usize, usize, usize, usize, Duration) {
+        (
+            self.next_access_events.len(),
+            self.next_access_events.capacity(),
+            self.next_access_growths,
+            self.next_access_growth_bytes,
+            self.next_access_growth_time,
+        )
     }
 
     #[cfg_attr(
@@ -2032,10 +2461,7 @@ impl Tracer for PreflightTracer {
         let cur_cycle = self.cycle + subcycle;
         let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
         if self.config.record_next_accesses && prev_cycle < self.current_shard_start_cycle {
-            self.next_accesses
-                .entry(prev_cycle)
-                .or_default()
-                .push((addr, cur_cycle));
+            self.push_next_access_event(NextAccessEvent::new(prev_cycle, cur_cycle, addr));
         }
         prev_cycle
     }
@@ -2045,7 +2471,7 @@ impl Tracer for PreflightTracer {
     }
 
     fn into_next_accesses(self) -> NextCycleAccess {
-        self.next_accesses
+        NextAccessTape::from_unsorted(self.next_access_events)
     }
 
     fn cycle(&self) -> Cycle {
@@ -2089,6 +2515,16 @@ impl Tracer for FullTracer {
 
     fn new(platform: &Platform, config: Self::Config) -> Self {
         FullTracer::new(platform, config)
+    }
+
+    fn with_next_accesses(
+        platform: &Platform,
+        config: Self::Config,
+        next_accesses: Option<Arc<NextCycleAccess>>,
+    ) -> Self {
+        let mut tracer = FullTracer::new(platform, config);
+        tracer.next_accesses = next_accesses.unwrap_or_default();
+        tracer
     }
 
     #[inline(always)]
@@ -2321,6 +2757,88 @@ mod tests {
     }
 
     #[test]
+    fn next_access_tape_sorts_full_canonical_key() {
+        let events = vec![
+            NextAccessEvent::new(1 << 40, (1 << 40) + 9, 7u32.into()),
+            NextAccessEvent::new(8, 30, 9u32.into()),
+            NextAccessEvent::new(0, 12, 3u32.into()),
+            NextAccessEvent::new(8, 20, 2u32.into()),
+            NextAccessEvent::new(1 << 32, (1 << 32) + 4, 1u32.into()),
+        ];
+        let tape = NextAccessTape::from_unsorted(events);
+
+        assert_eq!(
+            tape.initialization_events(),
+            &[NextAccessEvent::new(0, 12, 3u32.into())]
+        );
+        assert_eq!(
+            tape.events(),
+            &[
+                NextAccessEvent::new(8, 20, 2u32.into()),
+                NextAccessEvent::new(8, 30, 9u32.into()),
+                NextAccessEvent::new(1 << 32, (1 << 32) + 4, 1u32.into()),
+                NextAccessEvent::new(1 << 40, (1 << 40) + 9, 7u32.into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn full_tracer_defers_next_access_annotation_until_chunk_completion() {
+        let address: WordAddr = Platform::register_vma(1).into();
+        let source_cycle = FullTracer::SUBCYCLES_PER_INSN + FullTracer::SUBCYCLE_RS1;
+        let tape = NextAccessTape::from_unsorted(vec![NextAccessEvent::new(
+            source_cycle,
+            source_cycle + FullTracer::SUBCYCLES_PER_INSN,
+            address,
+        )]);
+        let mut tracer = FullTracer::new(&CENO_PLATFORM, FullTracerConfig { max_step_shard: 1 });
+        tracer.next_accesses = Arc::new(tape);
+
+        tracer.load_register(1, 7);
+        tracer.advance();
+        assert_eq!(tracer.records[0].future_access_mask(), 0);
+
+        tracer.annotate_recorded_steps(0);
+        assert!(tracer.records[0].has_future_access(StepRecord::FUTURE_ACCESS_RS1));
+        tracer.assert_next_accesses_consumed();
+    }
+
+    #[test]
+    fn chunk_annotation_marks_final_matching_syscall_op() {
+        let address = WordAddr::from(17);
+        let source_cycle = FullTracer::SUBCYCLES_PER_INSN + FullTracer::SUBCYCLE_RD;
+        let tape = NextAccessTape::from_unsorted(vec![NextAccessEvent::new(
+            source_cycle,
+            source_cycle + FullTracer::SUBCYCLES_PER_INSN,
+            address,
+        )]);
+        let mut tracer = FullTracer::new(&CENO_PLATFORM, FullTracerConfig { max_step_shard: 1 });
+        tracer.next_accesses = Arc::new(tape);
+        tracer.syscall_witnesses.push(SyscallWitness {
+            reg_ops: vec![
+                WriteOp {
+                    addr: address,
+                    value: Change::new(1, 2),
+                    previous_cycle: 0,
+                },
+                WriteOp {
+                    addr: address,
+                    value: Change::new(2, 3),
+                    previous_cycle: source_cycle,
+                },
+            ],
+            reg_future_access: vec![0; 2],
+            ..Default::default()
+        });
+        tracer.records[0].syscall_index = 0;
+        tracer.advance();
+
+        tracer.annotate_recorded_steps(0);
+        assert_eq!(tracer.syscall_witnesses[0].reg_future_access, vec![0, 1]);
+        tracer.assert_next_accesses_consumed();
+    }
+
+    #[test]
     fn preflight_splits_before_tracking_current_step_accesses() {
         let config = PreflightTracerConfig::new(true, 1, Cycle::MAX)
             .with_step_cell_extractor(Arc::new(OneCellPerStep));
@@ -2341,9 +2859,27 @@ mod tests {
             tracer.planner.as_ref().unwrap().shard_cycle_boundaries(),
             &[PreflightTracer::SUBCYCLES_PER_INSN, 8]
         );
+        let tape = NextAccessTape::from_unsorted(tracer.next_access_events);
         assert_eq!(
-            tracer.next_accesses.get(&4).map(SmallVec::as_slice),
-            Some(&[(Platform::register_vma(1).into(), 8)][..])
+            tape.events(),
+            &[NextAccessEvent::new(4, 8, Platform::register_vma(1).into())]
+        );
+    }
+
+    #[test]
+    fn preflight_next_access_tape_grows_past_trained_capacity() {
+        let mut tracer = PreflightTracer::new(&CENO_PLATFORM, PreflightTracerConfig::default());
+        tracer.next_access_capacity = Some(0);
+
+        tracer.push_next_access_event(NextAccessEvent::new(4, 8, WordAddr::from(1)));
+
+        assert_eq!(tracer.next_access_events.len(), 1);
+        assert!(tracer.next_access_events.capacity() >= 4096);
+        assert_eq!(tracer.next_access_growths, 1);
+        assert!(tracer.next_access_growth_bytes >= 4096 * std::mem::size_of::<NextAccessEvent>());
+        assert_eq!(
+            tracer.next_access_capacity,
+            Some(tracer.next_access_events.capacity())
         );
     }
 
@@ -2412,6 +2948,7 @@ mod tests {
         assert_eq!(offset_of!(StepRecord, rd), 80);
         assert_eq!(offset_of!(StepRecord, memory_op), 104);
         assert_eq!(offset_of!(StepRecord, syscall_index), 128);
+        assert_eq!(offset_of!(StepRecord, future_access_mask), 132);
 
         // Total size
         assert_eq!(mem::size_of::<StepRecord>(), 136, "StepRecord total size");

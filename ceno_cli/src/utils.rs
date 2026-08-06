@@ -87,6 +87,7 @@ pub fn get_rust_flags() -> String {
         "-Zunstable-options",
         "-C",
         "passes=lower-atomic",
+        "-Cllvm-args=--basic-block-address-map",
         "--cfg",
         "getrandom_backend=\"custom\"",
     ];

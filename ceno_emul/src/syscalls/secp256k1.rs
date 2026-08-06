@@ -165,7 +165,7 @@ pub fn secp256k1_double<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let p = SecpPoint::from(p_view.words());
 
     // Compute result and convert back into words
-    let result = SecpPoint(secp::Scalar::two() * p.0);
+    let result = SecpMaybePoint(p.0 + p.0);
     let output_words: [Word; SECP256K1_ARG_WORDS] = result.into();
 
     p_view.write(output_words);
@@ -297,5 +297,24 @@ pub fn secp256k1_decompress<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     SyscallEffects {
         witness: SyscallWitness::new(mem_ops, reg_ops),
         next_pc: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_point_double_matches_scalar_multiplication() {
+        let mut point = secp::Point::generator();
+        for _ in 0..16 {
+            let direct = SecpMaybePoint(point + point);
+            let scalar = SecpPoint(secp::Scalar::two() * point);
+            assert_eq!(
+                <[Word; SECP256K1_ARG_WORDS]>::from(direct),
+                <[Word; SECP256K1_ARG_WORDS]>::from(scalar),
+            );
+            point = (point + secp::Point::generator()).into_option().unwrap();
+        }
     }
 }

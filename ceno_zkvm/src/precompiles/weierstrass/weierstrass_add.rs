@@ -827,6 +827,7 @@ pub fn run_weierstrass_add<
                                     addr: ByteAddr::from(0).waddr(),
                                     value: Default::default(),
                                 },
+                                false,
                             )
                             .expect("assign error");
                     });
