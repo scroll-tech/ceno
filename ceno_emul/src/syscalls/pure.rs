@@ -18,6 +18,64 @@ use super::{
 use crate::{Platform, WORD_SIZE, Word};
 
 const VALUE_MASK: u64 = u32::MAX as u64;
+const DOUBLE_CACHE_ENTRIES: usize = 1 << 15;
+
+#[derive(Clone, Copy)]
+struct DoubleCacheEntry {
+    input: [Word; SECP256K1_ARG_WORDS],
+    output: [Word; SECP256K1_ARG_WORDS],
+    valid: bool,
+}
+
+impl DoubleCacheEntry {
+    const EMPTY: Self = Self {
+        input: [0; SECP256K1_ARG_WORDS],
+        output: [0; SECP256K1_ARG_WORDS],
+        valid: false,
+    };
+}
+
+pub(crate) struct DoubleCache {
+    doubles: Box<[DoubleCacheEntry; DOUBLE_CACHE_ENTRIES]>,
+    hits: u64,
+    misses: u64,
+}
+
+impl DoubleCache {
+    pub(crate) fn new() -> Self {
+        Self {
+            doubles: Box::new([DoubleCacheEntry::EMPTY; DOUBLE_CACHE_ENTRIES]),
+            hits: 0,
+            misses: 0,
+        }
+    }
+
+    pub(crate) fn stats(&self) -> (u64, u64) {
+        (self.hits, self.misses)
+    }
+
+    #[inline(always)]
+    fn double(&mut self, input: [Word; SECP256K1_ARG_WORDS]) -> [Word; SECP256K1_ARG_WORDS] {
+        let mut hash = 0x9e37_79b9u32;
+        for word in input {
+            hash = hash.rotate_left(5) ^ word;
+            hash = hash.wrapping_mul(0x85eb_ca6b);
+        }
+        let entry = &mut self.doubles[hash as usize & (DOUBLE_CACHE_ENTRIES - 1)];
+        if entry.valid && entry.input == input {
+            self.hits += 1;
+            return entry.output;
+        }
+        self.misses += 1;
+        let output = secp256k1::double_words(input);
+        *entry = DoubleCacheEntry {
+            input,
+            output,
+            valid: true,
+        };
+        output
+    }
+}
 
 struct PureMemory {
     cells: *mut u64,
@@ -63,6 +121,7 @@ pub(crate) unsafe fn execute(
     memory_cells: *mut u64,
     memory_base_word: u32,
     memory_end_word: u32,
+    double_cache: *mut DoubleCache,
 ) -> bool {
     let arg0 = unsafe { *registers.add(Platform::reg_arg0() as usize) };
     let arg1 = unsafe { *registers.add(Platform::reg_arg1() as usize) };
@@ -77,7 +136,12 @@ pub(crate) unsafe fn execute(
             let Some(input) = (unsafe { memory.read::<SECP256K1_ARG_WORDS>(arg0) }) else {
                 return false;
             };
-            unsafe { memory.write(arg0, secp256k1::double_words(input)) }.is_some()
+            let output = if double_cache.is_null() {
+                secp256k1::double_words(input)
+            } else {
+                unsafe { (*double_cache).double(input) }
+            };
+            unsafe { memory.write(arg0, output) }.is_some()
         }
         SECP256K1_ADD => {
             let (Some(p), Some(q)) = (unsafe { memory.read(arg0) }, unsafe { memory.read(arg1) })
@@ -224,6 +288,7 @@ mod tests {
                 direct.memory_cells_mut_ptr(),
                 direct_base,
                 direct_end,
+                std::ptr::null_mut(),
             )
         };
         assert!(handled);
@@ -312,6 +377,7 @@ mod tests {
                 direct.memory_cells_mut_ptr(),
                 direct_base,
                 direct_end,
+                std::ptr::null_mut(),
             )
         });
         assert_eq!(
@@ -334,6 +400,7 @@ mod tests {
                 vm.memory_cells_mut_ptr(),
                 base,
                 end,
+                std::ptr::null_mut(),
             )
         });
         assert!(!unsafe {
@@ -343,6 +410,7 @@ mod tests {
                 vm.memory_cells_mut_ptr(),
                 base,
                 end,
+                std::ptr::null_mut(),
             )
         });
     }

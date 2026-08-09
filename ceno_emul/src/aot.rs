@@ -337,6 +337,7 @@ struct AotRuntimeContext {
     memory_start_ordinal: u64,
     fallback_time_ns: u64,
     pure_ecall_counts: *mut [u64; PURE_ECALL_CODES.len()],
+    pure_double_cache: *mut crate::syscalls::pure::DoubleCache,
 }
 
 const PURE_ECALL_CODES: [u32; 11] = [
@@ -1065,6 +1066,10 @@ impl AotProgram {
         let mut preflight_cost_model = None;
         let mut fallback_ecall_codes = BTreeMap::new();
         let mut pure_ecall_counts = [0u64; PURE_ECALL_CODES.len()];
+        let mut pure_double_cache = self
+            .trace_style
+            .is_pure()
+            .then(crate::syscalls::pure::DoubleCache::new);
         if trace_native_steps && TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
             if preflight_vm.tracer().supports_direct_native_trace() {
@@ -1294,6 +1299,9 @@ impl AotProgram {
             memory_start_ordinal,
             fallback_time_ns: 0,
             pure_ecall_counts: &mut pure_ecall_counts,
+            pure_double_cache: pure_double_cache
+                .as_mut()
+                .map_or(std::ptr::null_mut(), |cache| cache as *mut _),
         };
         let trace_fn = if trace_mode == AOT_TRACE_MODE_FULLTRACER_DIRECT {
             std::ptr::null()
@@ -1344,6 +1352,10 @@ impl AotProgram {
         }
         if native_status != AOT_STATUS_HALTED {
             bail!("AOT native entry returned invalid status {native_status}");
+        }
+        if let Some(cache) = pure_double_cache.as_ref() {
+            let (hits, misses) = cache.stats();
+            tracing::info!("Pure AOT secp double cache hits={hits} misses={misses}");
         }
         if native_max_steps < max_steps && executed_steps == native_max_steps as u64 && !vm.halted()
         {
@@ -4986,6 +4998,7 @@ unsafe extern "C" fn ceno_aot_pure_ecall_callback(
                     context.memory_cells,
                     context.memory_base_word,
                     context.memory_end_word,
+                    context.pure_double_cache,
                 )
             }
         {
