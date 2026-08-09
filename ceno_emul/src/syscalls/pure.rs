@@ -27,23 +27,6 @@ struct DoubleCacheEntry {
     valid: bool,
 }
 
-#[derive(Clone, Copy)]
-struct AddCacheEntry {
-    p: [Word; SECP256K1_ARG_WORDS],
-    q: [Word; SECP256K1_ARG_WORDS],
-    output: [Word; SECP256K1_ARG_WORDS],
-    valid: bool,
-}
-
-impl AddCacheEntry {
-    const EMPTY: Self = Self {
-        p: [0; SECP256K1_ARG_WORDS],
-        q: [0; SECP256K1_ARG_WORDS],
-        output: [0; SECP256K1_ARG_WORDS],
-        valid: false,
-    };
-}
-
 impl DoubleCacheEntry {
     const EMPTY: Self = Self {
         input: [0; SECP256K1_ARG_WORDS],
@@ -53,33 +36,22 @@ impl DoubleCacheEntry {
 }
 
 pub(crate) struct DoubleCache {
-    doubles: Box<[DoubleCacheEntry]>,
-    adds: Box<[AddCacheEntry]>,
-    double_hits: u64,
-    double_misses: u64,
-    add_hits: u64,
-    add_misses: u64,
+    doubles: Box<[DoubleCacheEntry; DOUBLE_CACHE_ENTRIES]>,
+    hits: u64,
+    misses: u64,
 }
 
 impl DoubleCache {
     pub(crate) fn new() -> Self {
         Self {
-            doubles: vec![DoubleCacheEntry::EMPTY; DOUBLE_CACHE_ENTRIES].into_boxed_slice(),
-            adds: vec![AddCacheEntry::EMPTY; DOUBLE_CACHE_ENTRIES].into_boxed_slice(),
-            double_hits: 0,
-            double_misses: 0,
-            add_hits: 0,
-            add_misses: 0,
+            doubles: Box::new([DoubleCacheEntry::EMPTY; DOUBLE_CACHE_ENTRIES]),
+            hits: 0,
+            misses: 0,
         }
     }
 
-    pub(crate) fn stats(&self) -> (u64, u64, u64, u64) {
-        (
-            self.double_hits,
-            self.double_misses,
-            self.add_hits,
-            self.add_misses,
-        )
+    pub(crate) fn stats(&self) -> (u64, u64) {
+        (self.hits, self.misses)
     }
 
     #[inline(always)]
@@ -91,43 +63,13 @@ impl DoubleCache {
         }
         let entry = &mut self.doubles[hash as usize & (DOUBLE_CACHE_ENTRIES - 1)];
         if entry.valid && entry.input == input {
-            self.double_hits += 1;
+            self.hits += 1;
             return entry.output;
         }
-        self.double_misses += 1;
+        self.misses += 1;
         let output = secp256k1::double_words(input);
         *entry = DoubleCacheEntry {
             input,
-            output,
-            valid: true,
-        };
-        output
-    }
-
-    #[inline(always)]
-    fn add(
-        &mut self,
-        mut p: [Word; SECP256K1_ARG_WORDS],
-        mut q: [Word; SECP256K1_ARG_WORDS],
-    ) -> [Word; SECP256K1_ARG_WORDS] {
-        if q < p {
-            std::mem::swap(&mut p, &mut q);
-        }
-        let mut hash = 0x9e37_79b9u32;
-        for word in p.into_iter().chain(q) {
-            hash = hash.rotate_left(5) ^ word;
-            hash = hash.wrapping_mul(0x85eb_ca6b);
-        }
-        let entry = &mut self.adds[hash as usize & (DOUBLE_CACHE_ENTRIES - 1)];
-        if entry.valid && entry.p == p && entry.q == q {
-            self.add_hits += 1;
-            return entry.output;
-        }
-        self.add_misses += 1;
-        let output = secp256k1::add_words(p, q);
-        *entry = AddCacheEntry {
-            p,
-            q,
             output,
             valid: true,
         };
@@ -206,12 +148,7 @@ pub(crate) unsafe fn execute(
             else {
                 return false;
             };
-            let output = if double_cache.is_null() {
-                secp256k1::add_words(p, q)
-            } else {
-                unsafe { (*double_cache).add(p, q) }
-            };
-            unsafe { memory.write(arg0, output) }.is_some()
+            unsafe { memory.write(arg0, secp256k1::add_words(p, q)) }.is_some()
         }
         KECCAK_PERMUTE => {
             let Some(input) = (unsafe { memory.read::<KECCAK_WORDS>(arg0) }) else {
@@ -447,19 +384,6 @@ mod tests {
             direct.peek_memory(ByteAddr(p_ptr).waddr() + 16usize),
             generic.peek_memory(ByteAddr(p_ptr).waddr() + 16usize),
         );
-    }
-
-    #[test]
-    fn secp_add_cache_reuses_commuted_inputs() {
-        let generator: [Word; SECP256K1_ARG_WORDS] =
-            secp256k1::SecpMaybePoint(secp::Point::generator().into()).into();
-        let doubled = secp256k1::double_words(generator);
-        let expected = secp256k1::add_words(generator, doubled);
-        let mut cache = DoubleCache::new();
-
-        assert_eq!(cache.add(generator, doubled), expected);
-        assert_eq!(cache.add(doubled, generator), expected);
-        assert_eq!(cache.stats(), (0, 0, 1, 1));
     }
 
     #[test]
