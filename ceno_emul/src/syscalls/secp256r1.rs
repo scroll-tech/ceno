@@ -197,10 +197,7 @@ pub fn secp256r1_invert<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
 
     // P's memory segment
     let mut p_view = MemoryView::<_, COORDINATE_WORDS>::new(vm, p_ptr);
-    let p = Scalar::from_repr(*FieldBytes::from_slice(&p_view.bytes())).expect("illegal p");
-    let p_inv = p.invert().unwrap();
-    let bytes: [u8; 32] = p_inv.to_bytes().into();
-    let output_words: [Word; COORDINATE_WORDS] = unsafe { std::mem::transmute(bytes) };
+    let output_words = invert_words(p_view.words());
 
     p_view.write(output_words);
     let mem_ops = p_view.mem_ops().to_vec();
@@ -210,6 +207,14 @@ pub fn secp256r1_invert<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
         witness: SyscallWitness::new(mem_ops, reg_ops),
         next_pc: None,
     }
+}
+
+#[inline(never)]
+pub(crate) fn invert_words(words: [Word; COORDINATE_WORDS]) -> [Word; COORDINATE_WORDS] {
+    let bytes: [u8; 32] = unsafe { std::mem::transmute(words) };
+    let scalar = Scalar::from_repr(bytes.into()).expect("illegal p");
+    let inverted: [u8; 32] = scalar.invert().unwrap().to_bytes().into();
+    unsafe { std::mem::transmute(inverted) }
 }
 
 pub const COORDINATE_WORDS: usize = SECP256R1_ARG_WORDS / 2;

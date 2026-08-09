@@ -23,6 +23,23 @@ impl SyscallSpec for KeccakSpec {
 /// from and to VM word-representations according to the syscall spec
 pub struct KeccakState(pub [u64; KECCAK_CELLS]);
 
+#[inline(never)]
+pub(crate) fn permute_words(words: [Word; KECCAK_WORDS]) -> [Word; KECCAK_WORDS] {
+    let mut state = [0u64; KECCAK_CELLS];
+    for (lane, pair) in state.iter_mut().zip(words.chunks_exact(2)) {
+        *lane = u64::from(pair[0]) | (u64::from(pair[1]) << 32);
+    }
+    keccakf(&mut state);
+    std::array::from_fn(|index| {
+        let lane = state[index / 2];
+        if index.is_multiple_of(2) {
+            lane as Word
+        } else {
+            (lane >> 32) as Word
+        }
+    })
+}
+
 impl From<[Word; KECCAK_WORDS]> for KeccakState {
     fn from(words: [Word; KECCAK_WORDS]) -> Self {
         KeccakState(
@@ -63,9 +80,7 @@ pub fn keccak_permute<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     )];
 
     let mut state_view = MemoryView::<_, KECCAK_WORDS>::new(vm, state_ptr);
-    let mut state = KeccakState::from(state_view.words());
-    keccakf(&mut state.0);
-    let output_words: [Word; KECCAK_WORDS] = state.into();
+    let output_words = permute_words(state_view.words());
 
     state_view.write(output_words);
     let mem_ops: Vec<WriteOp> = state_view.mem_ops().to_vec();
