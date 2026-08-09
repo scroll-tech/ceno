@@ -52,8 +52,11 @@ enum AssemblyTraceStyle {
     Pure,
     /// Pure execution inside an entry-guarded block. The caller has proved
     /// that the complete block fits the remaining instruction budget and all
-    /// memory accesses are valid, so steps are accounted once at block exit.
+    /// memory accesses are valid, so steps are reserved once at block entry.
     PureBlock,
+    /// Pure execution in a block whose instruction budget is reserved at
+    /// entry, while dynamic memory guards remain exact.
+    PureCountedBlock,
     /// Generic AOT execution calls back into Rust after each native step so the
     /// active tracer can observe register and memory values.
     Generic,
@@ -76,7 +79,7 @@ impl AssemblyTraceStyle {
     }
 
     fn is_pure(self) -> bool {
-        matches!(self, Self::Pure | Self::PureBlock)
+        matches!(self, Self::Pure | Self::PureBlock | Self::PureCountedBlock)
     }
 
     fn is_preflight_direct(self) -> bool {
@@ -90,7 +93,7 @@ impl AssemblyTraceStyle {
 
     fn cache_name(self) -> &'static str {
         match self {
-            Self::Pure | Self::PureBlock => "pure",
+            Self::Pure | Self::PureBlock | Self::PureCountedBlock => "pure",
             Self::Generic => "generic",
             Self::FullTracerDirect => "fulltracer-direct",
             Self::PreflightDirect => "preflight-direct",
@@ -210,7 +213,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 43;
+const AOT_ABI_VERSION: u32 = 44;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -2253,11 +2256,22 @@ fn write_assembly(
         } else {
             None
         };
-        if let Some(kind) = pure_block_plan {
+        let pure_counted_block = trace_style == AssemblyTraceStyle::Pure
+            && block_supports_adaptive_cost_plan(program, block)?;
+        if pure_counted_block {
             emit_pure_block_budget_guard(&mut file, block)?;
+        }
+        if let Some(kind) = pure_block_plan {
             if kind == PreflightBlockPlanKind::MemoryExactAccess {
                 emit_pure_block_memory_fast_path_guard(&mut file, program, block)?;
             }
+        }
+        if pure_counted_block {
+            writeln!(
+                file,
+                "    addq ${}, 0(%rsp)",
+                block_instruction_count(block)
+            )?;
         }
         let adaptive_exact_access_plan = block_plan.is_none()
             && trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan
@@ -2326,6 +2340,8 @@ fn write_assembly(
             let insn = instruction_at(program, pc)?;
             let step_trace_style = if pure_block_plan.is_some() {
                 AssemblyTraceStyle::PureBlock
+            } else if pure_counted_block {
+                AssemblyTraceStyle::PureCountedBlock
             } else if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
                 AssemblyTraceStyle::PreflightDirectBlockPlan
             } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
@@ -2349,18 +2365,22 @@ fn write_assembly(
                 )?;
                 last_profile_region = Some(region);
             }
-            emit_instruction_body(&mut file, program, pc, insn, step_trace_style)?;
+            let pure_block_remaining_after = pure_counted_block.then_some(
+                ((block.end_pc - pc - PC_STEP_SIZE as u32) / PC_STEP_SIZE as u32) as u64,
+            );
+            emit_instruction_body(
+                &mut file,
+                program,
+                pc,
+                insn,
+                step_trace_style,
+                pure_block_remaining_after,
+            )?;
             pc = pc.wrapping_add(PC_STEP_SIZE as u32);
         }
         if let Some(prev_pc) = pc.checked_sub(PC_STEP_SIZE as u32) {
             let insn = instruction_at(program, prev_pc)?;
-            if pure_block_plan.is_some() {
-                writeln!(
-                    file,
-                    "    addq ${}, 0(%rsp)",
-                    block_instruction_count(block)
-                )?;
-            } else if block_plan.is_some() {
+            if block_plan.is_some() {
                 emit_assembly_profile_symbol(
                     &mut file,
                     &format!("ceno_aot_bb_{:08x}_register_latest_commit", block.start_pc),
@@ -2735,7 +2755,10 @@ fn emit_after_native_step(
         writeln!(file, "    jae L_done")?;
         return Ok(());
     }
-    if trace_style == AssemblyTraceStyle::PureBlock {
+    if matches!(
+        trace_style,
+        AssemblyTraceStyle::PureBlock | AssemblyTraceStyle::PureCountedBlock
+    ) {
         return Ok(());
     }
 
@@ -3106,6 +3129,26 @@ fn emit_pure_block_budget_guard(mut file: impl Write, block: &BasicBlock) -> Res
     // If the limit ends inside this block, execute one exact fallback step and
     // dispatch again. This preserves the existing instruction-limit contract.
     writeln!(file, "    ja L_exceptional")?;
+    Ok(())
+}
+
+fn emit_rollback_reserved_block_steps(
+    mut file: impl Write,
+    remaining_after: Option<u64>,
+) -> Result<()> {
+    if let Some(remaining_after) = remaining_after {
+        writeln!(file, "    subq ${}, 0(%rsp)", remaining_after + 1)?;
+    }
+    Ok(())
+}
+
+fn emit_restore_reserved_block_steps(
+    mut file: impl Write,
+    remaining_after: Option<u64>,
+) -> Result<()> {
+    if let Some(remaining_after) = remaining_after.filter(|remaining| *remaining != 0) {
+        writeln!(file, "    addq ${remaining_after}, 0(%rsp)")?;
+    }
     Ok(())
 }
 
@@ -4007,17 +4050,28 @@ fn emit_instruction_body(
     pc: u32,
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
+    pure_block_remaining_after: Option<u64>,
 ) -> Result<()> {
     match native_opcode_family(insn.kind) {
         Some(NativeOpcodeFamily::Compute) => {
             emit_native_compute(&mut file, pc, program, insn, trace_style)
         }
-        Some(NativeOpcodeFamily::ControlFlow) => {
-            emit_native_control_flow(&mut file, pc, program, insn, trace_style)
-        }
-        Some(NativeOpcodeFamily::Memory) => {
-            emit_native_memory(&mut file, pc, program, insn, trace_style)
-        }
+        Some(NativeOpcodeFamily::ControlFlow) => emit_native_control_flow(
+            &mut file,
+            pc,
+            program,
+            insn,
+            trace_style,
+            pure_block_remaining_after,
+        ),
+        Some(NativeOpcodeFamily::Memory) => emit_native_memory(
+            &mut file,
+            pc,
+            program,
+            insn,
+            trace_style,
+            pure_block_remaining_after,
+        ),
         None => emit_call_one(
             &mut file,
             pc,
@@ -4555,6 +4609,7 @@ fn emit_native_control_flow(
     program: &Program,
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
+    pure_block_remaining_after: Option<u64>,
 ) -> Result<()> {
     writeln!(file, "    movq %r13, %r10")?;
     if trace_style.needs_callback_values() {
@@ -4622,7 +4677,9 @@ fn emit_native_control_flow(
         emit_after_native_step(&mut file, pc, program, insn, trace_style, false)?;
         writeln!(file, "    jmp {done_label}")?;
         writeln!(file, "{slow_label}:")?;
+        emit_rollback_reserved_block_steps(&mut file, pure_block_remaining_after)?;
         emit_call_one(&mut file, pc, AOT_FALLBACK_EXCEPTIONAL, trace_style)?;
+        emit_restore_reserved_block_steps(&mut file, pure_block_remaining_after)?;
         writeln!(file, "{done_label}:")?;
         return Ok(());
     } else {
@@ -4674,6 +4731,7 @@ fn emit_native_memory(
     program: &Program,
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
+    pure_block_remaining_after: Option<u64>,
 ) -> Result<()> {
     let slow_label = format!(".L_memory_slow_{pc:x}");
     let done_label = format!(".L_memory_done_{pc:x}");
@@ -4955,7 +5013,9 @@ fn emit_native_memory(
     // actually fails.
     writeln!(file, ".pushsection .text.unlikely,\"ax\",@progbits")?;
     writeln!(file, "{slow_label}:")?;
+    emit_rollback_reserved_block_steps(&mut file, pure_block_remaining_after)?;
     emit_call_one(&mut file, pc, AOT_FALLBACK_MEMORY_GUARD, trace_style)?;
+    emit_restore_reserved_block_steps(&mut file, pure_block_remaining_after)?;
     writeln!(file, "    jmp {done_label}")?;
     writeln!(file, ".popsection")?;
     writeln!(file, "{done_label}:")?;
