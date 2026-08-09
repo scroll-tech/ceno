@@ -51,6 +51,48 @@ impl VMState<PreflightTracer> {
         self.pc = step.pc_after.0;
         self.tracer.trace_native_step(step)
     }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn finish_direct_preflight_syscall(
+        &mut self,
+        plan: crate::syscalls::pure::AccessPlan,
+    ) {
+        let cycle = self.tracer.cycle() + PreflightTracer::SUBCYCLE_MEM;
+        for region in &plan.regions[..plan.region_count] {
+            let start = ByteAddr(region.byte_addr).waddr();
+            for offset in 0..region.words {
+                let addr = start + offset;
+                let value = self.memory.read(addr).unwrap_or_else(|| {
+                    panic!("addr {addr:?} outside dense memory layout after direct syscall")
+                });
+                let previous_cycle = self
+                    .memory
+                    .access(addr, cycle, Some(value))
+                    .expect("direct syscall range was validated before mutation")
+                    .1;
+                self.tracer
+                    .track_direct_syscall_memory(addr, previous_cycle);
+            }
+        }
+
+        self.tracer.track_access(
+            Platform::register_vma(Platform::reg_arg0()).into(),
+            PreflightTracer::SUBCYCLE_RD,
+        );
+        if plan.register_count == 2 {
+            self.tracer.track_access(
+                Platform::register_vma(Platform::reg_arg1()).into(),
+                PreflightTracer::SUBCYCLE_RD,
+            );
+        }
+
+        self.pc = self.pc.wrapping_add(PC_STEP_SIZE as u32);
+        self.tracer.store_pc(ByteAddr(self.pc));
+        self.tracer.advance();
+    }
 }
 
 impl<T: Tracer> VMState<T> {

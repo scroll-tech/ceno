@@ -1073,10 +1073,11 @@ impl AotProgram {
         let mut preflight_cost_model = None;
         let mut fallback_ecall_codes = BTreeMap::new();
         let mut pure_ecall_counts = [0u64; PURE_ECALL_CODES.len()];
-        let mut pure_double_cache = self
-            .trace_style
-            .is_pure()
-            .then(crate::syscalls::pure::DoubleCache::new);
+        let mut pure_double_cache = matches!(
+            self.trace_style,
+            AssemblyTraceStyle::Pure | AssemblyTraceStyle::PreflightDirectBlockPlan
+        )
+        .then(crate::syscalls::pure::DoubleCache::new);
         if trace_native_steps && TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
             if preflight_vm.tracer().supports_direct_native_trace() {
@@ -2373,13 +2374,12 @@ fn write_assembly(
                 )?;
                 last_profile_region = Some(region);
             }
-            let reserved_block_step = (pure_counted_block || block_plan.is_some()).then_some(
-                ReservedBlockStep {
+            let reserved_block_step =
+                (pure_counted_block || block_plan.is_some()).then_some(ReservedBlockStep {
                     remaining_after: ((block.end_pc - pc - PC_STEP_SIZE as u32)
                         / PC_STEP_SIZE as u32) as u64,
                     cycle_offset: (pc - block.start_pc) as u64,
-                },
-            );
+                });
             emit_instruction_body(
                 &mut file,
                 program,
@@ -4170,16 +4170,14 @@ fn emit_instruction_body(
     reserved_block_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
     match native_opcode_family(insn.kind) {
-        Some(NativeOpcodeFamily::Compute) => {
-            emit_native_compute(
-                &mut file,
-                pc,
-                program,
-                insn,
-                trace_style,
-                reserved_block_step,
-            )
-        }
+        Some(NativeOpcodeFamily::Compute) => emit_native_compute(
+            &mut file,
+            pc,
+            program,
+            insn,
+            trace_style,
+            reserved_block_step,
+        ),
         Some(NativeOpcodeFamily::ControlFlow) => emit_native_control_flow(
             &mut file,
             pc,
@@ -5391,11 +5389,62 @@ unsafe extern "C" fn ceno_aot_pure_ecall_callback(
 #[unsafe(no_mangle)]
 #[inline(never)]
 unsafe extern "C" fn ceno_aot_preflight_fallback_callback(
-    context: *mut c_void,
+    raw_context: *mut c_void,
     pc: u32,
     next_pc: *mut u32,
 ) -> u32 {
-    unsafe { aot_exec_one::<PreflightTracer>(context, pc, next_pc) }
+    let fallback_started = Instant::now();
+    let context = unsafe { &mut *(raw_context as *mut AotRuntimeContext) };
+    if context.fallback_reason == AOT_FALLBACK_ECALL {
+        let code = unsafe { *context.registers.add(Platform::reg_ecall() as usize) };
+        let arg0 = unsafe { *context.registers.add(Platform::reg_arg0() as usize) };
+        let arg1 = unsafe { *context.registers.add(Platform::reg_arg1() as usize) };
+        if let (Some(index), Some(plan)) = (
+            pure_ecall_index(code),
+            crate::syscalls::pure::access_plan(code, arg0, arg1),
+        ) && unsafe {
+            crate::syscalls::pure::execute(
+                code,
+                context.registers,
+                context.memory_cells,
+                context.memory_base_word,
+                context.memory_end_word,
+                context.pure_double_cache,
+            )
+        } {
+            let vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
+            let pc = ByteAddr(pc);
+            vm.set_pc(pc);
+            let insn = vm
+                .fetch(pc.waddr())
+                .expect("direct syscall PC must belong to the compiled program");
+            debug_assert_eq!(insn.kind, InsnKind::ECALL);
+            let loaded_code = vm
+                .load_register(Platform::reg_ecall())
+                .expect("register load cannot fail");
+            debug_assert_eq!(loaded_code, code);
+            vm.finish_direct_preflight_syscall(plan);
+
+            context.fallback_steps += 1;
+            context.fallback_ecall += 1;
+            unsafe {
+                (*context.pure_ecall_counts)[index] += 1;
+                *next_pc = vm.get_pc().0;
+            }
+            (context.preflight_event_cursor, context.preflight_event_end) =
+                vm.tracer_mut().native_next_access_ptrs();
+            let shard_start = unsafe { *context.preflight_current_shard_start };
+            if shard_start != context.preflight_register_shard_start {
+                context.preflight_register_touched_mask = 0;
+                context.preflight_register_shard_start = shard_start;
+            }
+            context.fallback_time_ns = context
+                .fallback_time_ns
+                .saturating_add(fallback_started.elapsed().as_nanos() as u64);
+            return AOT_STATUS_CONTINUE;
+        }
+    }
+    unsafe { aot_exec_one::<PreflightTracer>(raw_context, pc, next_pc) }
 }
 
 unsafe extern "C" fn aot_trace_native_compute<T: Tracer>(context: *mut AotRuntimeContext) -> u32 {
@@ -6262,6 +6311,73 @@ mod tests {
         );
     }
 
+    #[test]
+    fn aot_preflight_direct_syscall_matches_generic_tracking() {
+        let base = CENO_PLATFORM.heap.start;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+            encode_rv32(
+                InsnKind::ADDI,
+                0,
+                0,
+                Platform::reg_ecall().into(),
+                Platform::ecall_halt() as i32,
+            ),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let config = crate::PreflightTracerConfig::new(true, 64, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
+        let input: [Word; crate::syscalls::secp256k1::SECP256K1_ARG_WORDS] =
+            crate::syscalls::secp256k1::SecpMaybePoint(secp::Point::generator().into()).into();
+
+        let mut interp = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            config.clone(),
+        );
+        let mut direct = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            config,
+        );
+        for vm in [&mut interp, &mut direct] {
+            vm.init_register_unsafe(Platform::reg_ecall(), crate::SECP256K1_DOUBLE);
+            vm.init_register_unsafe(Platform::reg_arg0(), base);
+            for (offset, value) in input.into_iter().enumerate() {
+                vm.init_memory(ByteAddr(base).waddr() + offset, value);
+            }
+        }
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot =
+            AotProgram::compile_preflight_direct_with_extra_roots(program, Vec::new()).unwrap();
+        let report = aot.run_to_halt(&mut direct, 3).unwrap();
+        assert_eq!(report.executed_steps, 3);
+        assert_eq!(report.fallback.ecall_by_code[&crate::SECP256K1_DOUBLE], 1);
+        for offset in 0..crate::syscalls::secp256k1::SECP256K1_ARG_WORDS {
+            let addr = ByteAddr(base).waddr() + offset;
+            assert_eq!(direct.peek_memory(addr), interp.peek_memory(addr));
+            assert_eq!(
+                direct.final_access_cycle(addr),
+                interp.final_access_cycle(addr)
+            );
+        }
+        assert_eq!(direct.final_access_count(), interp.final_access_count());
+        for addr in interp.final_access_addresses() {
+            assert_eq!(
+                direct.final_access_cycle(addr),
+                interp.final_access_cycle(addr)
+            );
+        }
+        let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
+        let (direct_plan, direct_next) = direct.take_tracer().into_shard_plan();
+        assert_eq!(direct_next, interp_next);
+        assert_eq!(
+            direct_plan.shard_cycle_boundaries(),
+            interp_plan.shard_cycle_boundaries()
+        );
+    }
+
     #[derive(Debug)]
     struct OneCellPerNativeStep;
 
@@ -6279,6 +6395,7 @@ mod tests {
             opcodes[InsnKind::ECALL as usize].clear();
             let mut ecalls = BTreeMap::new();
             ecalls.insert(Platform::ecall_halt(), vec![0]);
+            ecalls.insert(crate::SECP256K1_DOUBLE, vec![0]);
             Some(Arc::new(ShardCostModel::new(
                 opcodes,
                 ecalls,

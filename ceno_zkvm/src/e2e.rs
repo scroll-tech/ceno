@@ -1155,9 +1155,11 @@ pub fn emulate_program<'a>(
                 .run_to_halt(&mut vm, max_steps)
                 .unwrap_or_else(|err| panic!("AOT emulator trapped before halt: {err}"));
             tracing::info!(
-                "AOT preflight executed {} instructions in {:?}; fallback_steps={} ({:.2}%); dynamic_pc={} memory_guard={} ecall_by_code={:?} exceptional={}",
+                "AOT preflight executed {} instructions in {:?}; native={:?} fallback={:?}; fallback_steps={} ({:.2}%); dynamic_pc={} memory_guard={} ecall_by_code={:?} exceptional={}",
                 report.executed_steps,
                 report.execute_time,
+                report.native_time(),
+                report.fallback_time,
                 report.fallback_steps,
                 report.fallback_steps as f64 * 100.0 / report.executed_steps.max(1) as f64,
                 report.fallback.dynamic_pc_miss,

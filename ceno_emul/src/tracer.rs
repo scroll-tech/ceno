@@ -2115,6 +2115,15 @@ impl PreflightTracer {
         not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
         allow(dead_code)
     )]
+    #[inline(always)]
+    pub(crate) fn track_direct_syscall_memory(&mut self, addr: WordAddr, previous_cycle: Cycle) {
+        self.record_memory_access(addr, previous_cycle);
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn native_trace_state(&mut self) -> PreflightNativeTraceState {
         debug_assert!(self.supports_direct_native_trace());
         let planner = self.planner.as_mut().expect("shard planner missing");

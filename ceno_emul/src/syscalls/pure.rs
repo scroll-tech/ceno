@@ -41,6 +41,101 @@ pub(crate) struct DoubleCache {
     misses: u64,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct AccessRegion {
+    pub(crate) byte_addr: Word,
+    pub(crate) words: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct AccessPlan {
+    pub(crate) regions: [AccessRegion; 2],
+    pub(crate) region_count: usize,
+    pub(crate) register_count: usize,
+}
+
+impl AccessPlan {
+    fn one(byte_addr: Word, words: usize, register_count: usize) -> Self {
+        Self {
+            regions: [
+                AccessRegion { byte_addr, words },
+                AccessRegion {
+                    byte_addr: 0,
+                    words: 0,
+                },
+            ],
+            region_count: 1,
+            register_count,
+        }
+    }
+
+    fn two(
+        first_addr: Word,
+        first_words: usize,
+        second_addr: Word,
+        second_words: usize,
+        register_count: usize,
+    ) -> Self {
+        Self {
+            regions: [
+                AccessRegion {
+                    byte_addr: first_addr,
+                    words: first_words,
+                },
+                AccessRegion {
+                    byte_addr: second_addr,
+                    words: second_words,
+                },
+            ],
+            region_count: 2,
+            register_count,
+        }
+    }
+}
+
+/// The exact memory-operation ordering and argument-register footprint used by
+/// the generic syscall witnesses. The direct Preflight path uses this only
+/// after the value kernel has validated all ranges and completed successfully.
+pub(crate) fn access_plan(code: Word, arg0: Word, arg1: Word) -> Option<AccessPlan> {
+    match code {
+        SECP256K1_DOUBLE => Some(AccessPlan::one(arg0, SECP256K1_ARG_WORDS, 1)),
+        SECP256K1_ADD => disjoint(arg0, SECP256K1_ARG_WORDS, arg1, SECP256K1_ARG_WORDS)
+            .then(|| AccessPlan::two(arg0, SECP256K1_ARG_WORDS, arg1, SECP256K1_ARG_WORDS, 2)),
+        KECCAK_PERMUTE => Some(AccessPlan::one(arg0, KECCAK_WORDS, 1)),
+        KECCAK_XORIN => Some(AccessPlan::two(
+            arg1,
+            KECCAK_RATE_WORDS,
+            arg0,
+            KECCAK_RATE_WORDS,
+            2,
+        )),
+        SECP256K1_DECOMPRESS => Some(AccessPlan::two(
+            arg0,
+            COORDINATE_WORDS,
+            arg0.checked_add((COORDINATE_WORDS * WORD_SIZE) as u32)?,
+            COORDINATE_WORDS,
+            2,
+        )),
+        SECP256K1_SCALAR_INVERT => Some(AccessPlan::one(arg0, COORDINATE_WORDS, 1)),
+        BN254_FP_ADD | BN254_FP_MUL => disjoint(arg0, BN254_FP_WORDS, arg1, BN254_FP_WORDS)
+            .then(|| AccessPlan::two(arg0, BN254_FP_WORDS, arg1, BN254_FP_WORDS, 2)),
+        BN254_FP2_ADD | BN254_FP2_MUL => disjoint(arg0, BN254_FP2_WORDS, arg1, BN254_FP2_WORDS)
+            .then(|| AccessPlan::two(arg0, BN254_FP2_WORDS, arg1, BN254_FP2_WORDS, 2)),
+        SECP256R1_SCALAR_INVERT => Some(AccessPlan::one(arg0, secp256r1::COORDINATE_WORDS, 1)),
+        _ => None,
+    }
+}
+
+fn disjoint(first: Word, first_words: usize, second: Word, second_words: usize) -> bool {
+    let Some(first_end) = first.checked_add((first_words * WORD_SIZE) as u32) else {
+        return false;
+    };
+    let Some(second_end) = second.checked_add((second_words * WORD_SIZE) as u32) else {
+        return false;
+    };
+    first_end <= second || second_end <= first
+}
+
 impl DoubleCache {
     pub(crate) fn new() -> Self {
         Self {
