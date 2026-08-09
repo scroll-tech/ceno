@@ -206,7 +206,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 31;
+const AOT_ABI_VERSION: u32 = 32;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -2187,16 +2187,22 @@ fn write_assembly(
     writeln!(file, "    subq $72, %rsp")?;
     writeln!(file, "    movq %rdi, %r12")?;
     writeln!(file, "    movq %rsi, %r13")?;
-    writeln!(file, "    movq %rdx, %r14")?;
+    if !trace_style.is_pure() {
+        writeln!(file, "    movq %rdx, %r14")?;
+    }
     writeln!(file, "    movq %rcx, %rbp")?;
     // Keep the preflight tape cursor in a callee-saved register. The executed
     // step output pointer is cold and fits in the otherwise-unused final stack
     // slot.
     writeln!(file, "    movq %r8, 48(%rsp)")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12), %rbx"
-    )?;
+    if trace_style.is_pure() {
+        emit_reload_pure_hot_registers(&mut file)?;
+    } else {
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_EVENT_CURSOR_OFFSET}(%r12), %rbx"
+        )?;
+    }
     writeln!(file, "    movl %r9d, %r15d")?;
     writeln!(file, "    movq $0, 0(%rsp)")?;
     writeln!(file, "    movl %r15d, 8(%rsp)")?;
@@ -2249,7 +2255,7 @@ fn write_assembly(
             } else {
                 AOT_FALLBACK_EXCEPTIONAL
             };
-            emit_call_current_pc(&mut file, reason)?;
+            emit_call_current_pc(&mut file, reason, trace_style)?;
             writeln!(file, "    jmp L_dispatch")?;
             continue;
         }
@@ -2369,17 +2375,21 @@ fn write_assembly(
     }
     emit_assembly_profile_symbol(&mut file, "ceno_aot_dynamic_fallback")?;
     writeln!(file, "L_dynamic:")?;
-    emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC)?;
+    emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC, trace_style)?;
     writeln!(file, "    jmp L_dispatch")?;
     writeln!(file, "L_memory_guard:")?;
-    emit_call_current_pc(&mut file, AOT_FALLBACK_MEMORY_GUARD)?;
+    emit_call_current_pc(&mut file, AOT_FALLBACK_MEMORY_GUARD, trace_style)?;
     writeln!(file, "    jmp L_dispatch")?;
     writeln!(file, "L_exceptional:")?;
-    emit_call_current_pc(&mut file, AOT_FALLBACK_EXCEPTIONAL)?;
+    emit_call_current_pc(&mut file, AOT_FALLBACK_EXCEPTIONAL, trace_style)?;
     writeln!(file, "    jmp L_dispatch")?;
     writeln!(file, "L_done:")?;
-    emit_sync_preflight_direct(&mut file)?;
-    emit_flush_preflight_event_cursor(&mut file)?;
+    if trace_style.is_pure() {
+        emit_flush_pure_hot_registers(&mut file)?;
+    } else {
+        emit_sync_preflight_direct(&mut file)?;
+        emit_flush_preflight_event_cursor(&mut file)?;
+    }
     writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
     writeln!(file, "    movl %r15d, (%rdx)")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
@@ -2388,7 +2398,11 @@ fn write_assembly(
     writeln!(file, "    movl ${AOT_STATUS_HALTED}, %eax")?;
     writeln!(file, "    jmp L_return")?;
     writeln!(file, "L_error:")?;
-    emit_flush_preflight_event_cursor(&mut file)?;
+    if trace_style.is_pure() {
+        emit_flush_pure_hot_registers(&mut file)?;
+    } else {
+        emit_flush_preflight_event_cursor(&mut file)?;
+    }
     writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
     writeln!(file, "    movl %r15d, (%rdx)")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
@@ -2453,9 +2467,18 @@ fn emit_dispatch_tree(
     Ok(())
 }
 
-fn emit_call_one(mut file: impl Write, pc: u32, reason: u32) -> Result<()> {
-    emit_sync_preflight_direct(&mut file)?;
-    emit_flush_preflight_event_cursor(&mut file)?;
+fn emit_call_one(
+    mut file: impl Write,
+    pc: u32,
+    reason: u32,
+    trace_style: AssemblyTraceStyle,
+) -> Result<()> {
+    if trace_style.is_pure() {
+        emit_flush_pure_hot_registers(&mut file)?;
+    } else {
+        emit_sync_preflight_direct(&mut file)?;
+        emit_flush_preflight_event_cursor(&mut file)?;
+    }
     writeln!(
         file,
         "    movl ${reason}, {AOT_CTX_FALLBACK_REASON_OFFSET}(%r12)"
@@ -2464,14 +2487,26 @@ fn emit_call_one(mut file: impl Write, pc: u32, reason: u32) -> Result<()> {
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    movl ${pc:#010x}, %esi")?;
     writeln!(file, "    call *%r13")?;
-    emit_reload_preflight_event_cursor(&mut file)?;
+    if trace_style.is_pure() {
+        emit_reload_pure_hot_registers(&mut file)?;
+    } else {
+        emit_reload_preflight_event_cursor(&mut file)?;
+    }
     emit_after_step(&mut file)?;
     Ok(())
 }
 
-fn emit_call_current_pc(mut file: impl Write, reason: u32) -> Result<()> {
-    emit_sync_preflight_direct(&mut file)?;
-    emit_flush_preflight_event_cursor(&mut file)?;
+fn emit_call_current_pc(
+    mut file: impl Write,
+    reason: u32,
+    trace_style: AssemblyTraceStyle,
+) -> Result<()> {
+    if trace_style.is_pure() {
+        emit_flush_pure_hot_registers(&mut file)?;
+    } else {
+        emit_sync_preflight_direct(&mut file)?;
+        emit_flush_preflight_event_cursor(&mut file)?;
+    }
     writeln!(
         file,
         "    movl ${reason}, {AOT_CTX_FALLBACK_REASON_OFFSET}(%r12)"
@@ -2480,7 +2515,11 @@ fn emit_call_current_pc(mut file: impl Write, reason: u32) -> Result<()> {
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    movl %r15d, %esi")?;
     writeln!(file, "    call *%r13")?;
-    emit_reload_preflight_event_cursor(&mut file)?;
+    if trace_style.is_pure() {
+        emit_reload_pure_hot_registers(&mut file)?;
+    } else {
+        emit_reload_preflight_event_cursor(&mut file)?;
+    }
     emit_after_step(&mut file)?;
     Ok(())
 }
@@ -2495,6 +2534,56 @@ fn emit_after_step(mut file: impl Write) -> Result<()> {
     writeln!(file, "    movq 0(%rsp), %rax")?;
     writeln!(file, "    cmpq %rbp, %rax")?;
     writeln!(file, "    jae L_done")?;
+    Ok(())
+}
+
+fn emit_reload_pure_hot_registers(mut file: impl Write) -> Result<()> {
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %rdx")?;
+    writeln!(file, "    movl 40(%rdx), %ebx")?;
+    writeln!(file, "    movl 44(%rdx), %r14d")?;
+    Ok(())
+}
+
+fn emit_flush_pure_hot_registers(mut file: impl Write) -> Result<()> {
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %rax")?;
+    writeln!(file, "    movl %ebx, 40(%rax)")?;
+    writeln!(file, "    movl %r14d, 44(%rax)")?;
+    Ok(())
+}
+
+fn emit_load_guest_register(
+    mut file: impl Write,
+    register: u32,
+    destination: &str,
+    trace_style: AssemblyTraceStyle,
+) -> Result<()> {
+    if trace_style.is_pure() && register == 10 {
+        writeln!(file, "    movl %ebx, {destination}")?;
+    } else if trace_style.is_pure() && register == 11 {
+        writeln!(file, "    movl %r14d, {destination}")?;
+    } else {
+        writeln!(
+            file,
+            "    movl {}(%r10), {destination}",
+            register as usize * 4
+        )?;
+    }
+    Ok(())
+}
+
+fn emit_store_guest_register(
+    mut file: impl Write,
+    register: u32,
+    source: &str,
+    trace_style: AssemblyTraceStyle,
+) -> Result<()> {
+    if trace_style.is_pure() && register == 10 {
+        writeln!(file, "    movl {source}, %ebx")?;
+    } else if trace_style.is_pure() && register == 11 {
+        writeln!(file, "    movl {source}, %r14d")?;
+    } else {
+        writeln!(file, "    movl {source}, {}(%r10)", register as usize * 4)?;
+    }
     Ok(())
 }
 
@@ -3910,6 +3999,7 @@ fn emit_instruction_body(
             } else {
                 AOT_FALLBACK_EXCEPTIONAL
             },
+            trace_style,
         ),
     }
 }
@@ -4265,7 +4355,7 @@ fn emit_native_compute(
 ) -> Result<()> {
     let rd = insn.rd_internal();
     writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
-    writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
+    emit_load_guest_register(&mut file, insn.rs1 as u32, "%eax", trace_style)?;
     if trace_style.needs_callback_values() {
         writeln!(
             file,
@@ -4273,7 +4363,7 @@ fn emit_native_compute(
         )?;
     }
     if native_compute_reads_rs2(insn.kind) {
-        writeln!(file, "    movl {}(%r10), %ecx", insn.rs2 as usize * 4)?;
+        emit_load_guest_register(&mut file, insn.rs2 as u32, "%ecx", trace_style)?;
         if trace_style.needs_callback_values() {
             writeln!(
                 file,
@@ -4284,7 +4374,7 @@ fn emit_native_compute(
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12)")?;
     }
     if trace_style.needs_callback_values() {
-        writeln!(file, "    movl {}(%r10), %edx", rd as usize * 4)?;
+        emit_load_guest_register(&mut file, rd, "%edx", trace_style)?;
         writeln!(
             file,
             "    movl %edx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
@@ -4355,7 +4445,7 @@ fn emit_native_compute(
         )?,
         _ => unreachable!("unsupported native compute instruction: {:?}", insn.kind),
     }
-    writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
+    emit_store_guest_register(&mut file, rd, "%eax", trace_style)?;
     if trace_style.needs_callback_values() {
         writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
         writeln!(
@@ -4454,7 +4544,7 @@ fn emit_native_control_flow(
     if insn.kind == InsnKind::JAL {
         let rd = insn.rd_internal();
         if trace_style.needs_callback_values() {
-            writeln!(file, "    movl {}(%r10), %edx", rd as usize * 4)?;
+            emit_load_guest_register(&mut file, rd, "%edx", trace_style)?;
             writeln!(
                 file,
                 "    movl %edx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
@@ -4465,7 +4555,7 @@ fn emit_native_control_flow(
             "    movl ${:#010x}, %eax",
             pc.wrapping_add(PC_STEP_SIZE as u32)
         )?;
-        writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
+        emit_store_guest_register(&mut file, rd, "%eax", trace_style)?;
         if trace_style.needs_callback_values() {
             writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
         }
@@ -4474,7 +4564,7 @@ fn emit_native_control_flow(
         let slow_label = format!(".L_jalr_slow_{pc:x}");
         let done_label = format!(".L_jalr_done_{pc:x}");
         let rd = insn.rd_internal();
-        writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
+        emit_load_guest_register(&mut file, insn.rs1 as u32, "%eax", trace_style)?;
         if trace_style.needs_callback_values() {
             writeln!(
                 file,
@@ -4487,7 +4577,7 @@ fn emit_native_control_flow(
         writeln!(file, "    jne {slow_label}")?;
         emit_native_next_pc_register(&mut file, "%edx", trace_style)?;
         if trace_style.needs_callback_values() {
-            writeln!(file, "    movl {}(%r10), %edx", rd as usize * 4)?;
+            emit_load_guest_register(&mut file, rd, "%edx", trace_style)?;
             writeln!(
                 file,
                 "    movl %edx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
@@ -4498,14 +4588,14 @@ fn emit_native_control_flow(
             "    movl ${:#010x}, %eax",
             pc.wrapping_add(PC_STEP_SIZE as u32)
         )?;
-        writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
+        emit_store_guest_register(&mut file, rd, "%eax", trace_style)?;
         if trace_style.needs_callback_values() {
             writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
         }
         emit_after_native_step(&mut file, pc, program, insn, trace_style, false)?;
         writeln!(file, "    jmp {done_label}")?;
         writeln!(file, "{slow_label}:")?;
-        emit_call_one(&mut file, pc, AOT_FALLBACK_EXCEPTIONAL)?;
+        emit_call_one(&mut file, pc, AOT_FALLBACK_EXCEPTIONAL, trace_style)?;
         writeln!(file, "{done_label}:")?;
         return Ok(());
     } else {
@@ -4513,14 +4603,14 @@ fn emit_native_control_flow(
         let fallthrough_pc = pc.wrapping_add(PC_STEP_SIZE as u32);
         let taken_label = format!(".L_branch_taken_{pc:x}");
         let done_label = format!(".L_branch_done_{pc:x}");
-        writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
+        emit_load_guest_register(&mut file, insn.rs1 as u32, "%eax", trace_style)?;
         if trace_style.needs_callback_values() {
             writeln!(
                 file,
                 "    movl %eax, {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12)"
             )?;
         }
-        writeln!(file, "    movl {}(%r10), %ecx", insn.rs2 as usize * 4)?;
+        emit_load_guest_register(&mut file, insn.rs2 as u32, "%ecx", trace_style)?;
         if trace_style.needs_callback_values() {
             writeln!(
                 file,
@@ -4581,7 +4671,7 @@ fn emit_native_memory(
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)")?;
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
     }
-    writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
+    emit_load_guest_register(&mut file, insn.rs1 as u32, "%eax", trace_style)?;
     if trace_style.needs_callback_values() {
         writeln!(
             file,
@@ -4696,7 +4786,7 @@ fn emit_native_memory(
                     file,
                     "    movl %eax, {AOT_CTX_TRACE_MEM_AFTER_OFFSET}(%r12)"
                 )?;
-                writeln!(file, "    movl {}(%r10), %ecx", rd as usize * 4)?;
+                emit_load_guest_register(&mut file, rd, "%ecx", trace_style)?;
                 writeln!(
                     file,
                     "    movl %ecx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
@@ -4714,13 +4804,13 @@ fn emit_native_memory(
                 InsnKind::LHU => writeln!(file, "    movzwl %ax, %eax")?,
                 _ => unreachable!("unsupported native load instruction: {:?}", insn.kind),
             }
-            writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
+            emit_store_guest_register(&mut file, rd, "%eax", trace_style)?;
             if trace_style.needs_callback_values() {
                 writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
             }
         }
         InsnKind::SB | InsnKind::SH | InsnKind::SW => {
-            writeln!(file, "    movl {}(%r10), %r9d", insn.rs2 as usize * 4)?;
+            emit_load_guest_register(&mut file, insn.rs2 as u32, "%r9d", trace_style)?;
             if trace_style.needs_callback_values() {
                 writeln!(
                     file,
@@ -4797,7 +4887,7 @@ fn emit_native_memory(
     )?;
     writeln!(file, "    jmp {done_label}")?;
     writeln!(file, "{slow_label}:")?;
-    emit_call_one(&mut file, pc, AOT_FALLBACK_MEMORY_GUARD)?;
+    emit_call_one(&mut file, pc, AOT_FALLBACK_MEMORY_GUARD, trace_style)?;
     writeln!(file, "{done_label}:")?;
     Ok(())
 }
@@ -6785,12 +6875,12 @@ mod tests {
     fn aot_pure_execution_updates_state_without_native_trace_callbacks() {
         let base = CENO_PLATFORM.heap.start;
         let program = Arc::new(program(vec![
-            encode_rv32(InsnKind::ADDI, 0, 0, 1, 7),
-            encode_rv32(InsnKind::ADDI, 0, 0, 2, 0),
-            encode_rv32(InsnKind::ADD, 2, 1, 2, 0),
-            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
-            encode_rv32(InsnKind::BNE, 1, 0, 0, -8),
-            encode_rv32(InsnKind::SW, 20, 2, 0, 0),
+            encode_rv32(InsnKind::ADDI, 0, 0, 10, 7),
+            encode_rv32(InsnKind::ADDI, 0, 0, 11, 0),
+            encode_rv32(InsnKind::ADD, 11, 10, 11, 0),
+            encode_rv32(InsnKind::ADDI, 10, 0, 10, -1),
+            encode_rv32(InsnKind::BNE, 10, 0, 0, -8),
+            encode_rv32(InsnKind::SW, 20, 11, 0, 0),
             encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
         ]));
 
@@ -6808,18 +6898,28 @@ mod tests {
         let mut aot_vm = VMState::<PureAotTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
         aot_vm.init_register_unsafe(20, base);
         aot_vm.init_memory(ByteAddr(base).waddr(), 0);
+        let partial = aot.run_pure_to_halt(&mut aot_vm, 4).unwrap();
+        assert_eq!(partial.executed_steps, 4);
+        assert!(!aot_vm.halted());
+        assert_eq!(aot_vm.peek_register(10), 6);
+        assert_eq!(aot_vm.peek_register(11), 7);
+
         let report = aot.run_pure_to_halt(&mut aot_vm, 100).unwrap();
 
-        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        assert_eq!(
+            partial.executed_steps + report.executed_steps,
+            interp.tracer().executed_insts()
+        );
         assert!(aot_vm.halted());
-        assert_eq!(aot_vm.peek_register(1), interp.peek_register(1));
-        assert_eq!(aot_vm.peek_register(2), interp.peek_register(2));
+        assert_eq!(aot_vm.peek_register(10), interp.peek_register(10));
+        assert_eq!(aot_vm.peek_register(11), interp.peek_register(11));
         assert_eq!(
             aot_vm.peek_memory(ByteAddr(base).waddr()),
             interp.peek_memory(ByteAddr(base).waddr())
         );
         assert_eq!(aot_vm.final_access_cycle(ByteAddr(base).waddr()), 0);
-        assert_eq!(report.fallback_steps, 1);
+        assert_eq!(report.fallback_steps, 2);
+        assert_eq!(report.fallback.dynamic_pc_miss, 1);
         assert_eq!(
             report.execute_time,
             report.native_time() + report.fallback_time
