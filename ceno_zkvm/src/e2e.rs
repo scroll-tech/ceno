@@ -1183,7 +1183,6 @@ pub fn emulate_program<'a>(
             tracing::info!("========= END: I/O from guest =========");
         }
     }
-    let final_access = vm.tracer().final_accesses();
     let end_cycle = vm.tracer().cycle();
     let insts = vm.tracer().executed_insts();
     tracing::info!("program executed {insts} instructions in {end_cycle} cycles");
@@ -1201,7 +1200,7 @@ pub fn emulate_program<'a>(
                     addr: rec.addr,
                     value: vm.peek_register(index),
                     init_value: rec.value,
-                    cycle: final_access.cycle(vma),
+                    cycle: vm.final_access_cycle(vma),
                 }
             } else {
                 // The table is padded beyond the number of registers.
@@ -1226,7 +1225,7 @@ pub fn emulate_program<'a>(
                 addr: rec.addr,
                 value: vm.peek_memory(vma),
                 init_value: rec.value,
-                cycle: final_access.cycle(vma),
+                cycle: vm.final_access_cycle(vma),
             }
         })
         .collect_vec();
@@ -1242,7 +1241,7 @@ pub fn emulate_program<'a>(
             addr: rec.addr,
             value: rec.value,
             init_value: rec.value,
-            cycle: final_access.cycle(rec.addr.into()),
+            cycle: vm.final_access_cycle(rec.addr.into()),
         })
         .collect_vec();
 
@@ -1261,7 +1260,7 @@ pub fn emulate_program<'a>(
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
                     init_value: 0,
-                    cycle: final_access.cycle(vma),
+                    cycle: vm.final_access_cycle(vma),
                 }
             })
             .collect_vec()
@@ -1286,7 +1285,7 @@ pub fn emulate_program<'a>(
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
                     init_value: 0,
-                    cycle: final_access.cycle(vma),
+                    cycle: vm.final_access_cycle(vma),
                 }
             })
             .collect_vec()
@@ -3209,11 +3208,10 @@ fn debug_memory_ranges<'a, T: Tracer, I: Iterator<Item = &'a MemFinalRecord>>(
     mem_final: I,
 ) {
     let accessed_addrs = vm
-        .tracer()
-        .final_accesses()
-        .iter()
-        .filter(|&(_, cycle)| *cycle != 0)
-        .map(|(&addr, _)| addr.baddr())
+        .final_access_addresses()
+        .into_iter()
+        .filter(|&addr| vm.final_access_cycle(addr) != 0)
+        .map(|addr| addr.baddr())
         .filter(|addr| vm.platform().can_read(addr.0))
         .collect_vec();
 

@@ -29,12 +29,11 @@ fn test_vm_trace() -> Result<()> {
     let ops: Vec<InsnKind> = steps.iter().map(|step| step.insn().kind).collect();
     assert_eq!(ops, expected_ops_fibonacci_20());
 
-    let final_accesses = ctx.tracer().final_accesses();
     let expected = expected_final_accesses_fibonacci_20();
-    assert_eq!(final_accesses.len(), expected.len());
+    assert_eq!(ctx.final_access_count(), expected.len());
     for (addr, cycle) in expected {
         assert_eq!(
-            final_accesses.cycle(addr),
+            ctx.final_access_cycle(addr),
             cycle,
             "mismatch at addr {:?}",
             addr

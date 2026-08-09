@@ -525,15 +525,15 @@ pub trait Tracer {
 
     fn store_register(&mut self, idx: RegIdx, value: Change<Word>);
 
-    fn load_memory(&mut self, addr: WordAddr, value: Word);
+    fn load_memory(&mut self, addr: WordAddr, value: Word, previous_cycle: Cycle);
 
-    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>);
+    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>, previous_cycle: Cycle);
 
     fn track_syscall(&mut self, effects: SyscallEffects);
 
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle;
 
-    fn final_accesses(&self) -> &LatestAccesses;
+    fn final_register_accesses(&self) -> &LatestAccesses;
 
     fn into_next_accesses(self) -> NextCycleAccess
     where
@@ -588,12 +588,11 @@ pub struct LatestAccesses {
 }
 
 impl LatestAccesses {
-    fn new(platform: &Platform) -> Self {
+    fn new(_platform: &Platform) -> Self {
+        let last_register: WordAddr = Platform::register_vma(32).into();
         Self {
-            store: DenseAddrSpace::new(
-                WordAddr::from(0u32),
-                ByteAddr::from(platform.stack.end).waddr(),
-            ),
+            // Include the internal x0 sink at register slot 32.
+            store: DenseAddrSpace::new(WordAddr::from(0u32), last_register + 1usize),
             len: 0,
             #[cfg(any(test, debug_assertions))]
             touched: Vec::new(),
@@ -1632,12 +1631,12 @@ impl FullTracer {
     }
 
     #[inline(always)]
-    pub fn load_memory(&mut self, addr: WordAddr, value: Word) {
-        self.store_memory(addr, Change::new(value, value));
+    pub fn load_memory(&mut self, addr: WordAddr, value: Word, previous_cycle: Cycle) {
+        self.store_memory(addr, Change::new(value, value), previous_cycle);
     }
 
     #[inline(always)]
-    pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
+    pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>, previous_cycle: Cycle) {
         if self.records[self.pending_index].has_memory_op {
             unimplemented!("Only one memory access is supported");
         }
@@ -1671,7 +1670,6 @@ impl FullTracer {
             }
         }
 
-        let previous_cycle = self.track_access(addr, Self::SUBCYCLE_MEM);
         self.records[self.pending_index].memory_op = WriteOp {
             addr,
             value,
@@ -1702,7 +1700,7 @@ impl FullTracer {
         self.latest_accesses.track(addr, cur_cycle)
     }
 
-    pub fn final_accesses(&self) -> &LatestAccesses {
+    pub fn final_register_accesses(&self) -> &LatestAccesses {
         &self.latest_accesses
     }
 
@@ -1921,6 +1919,7 @@ pub(crate) struct NativeTraceStep {
     pub rs2_idx: RegIdx,
     pub rd_idx: RegIdx,
     pub memory_addr: WordAddr,
+    pub memory_previous_cycle: Cycle,
 }
 
 #[cfg_attr(
@@ -2222,6 +2221,14 @@ impl PreflightTracer {
         self.next_access_events.push(event);
     }
 
+    #[inline(always)]
+    fn record_memory_access(&mut self, addr: WordAddr, previous_cycle: Cycle) {
+        let current_cycle = self.cycle + Self::SUBCYCLE_MEM;
+        if self.config.record_next_accesses && previous_cycle < self.current_shard_start_cycle {
+            self.push_next_access_event(NextAccessEvent::new(previous_cycle, current_cycle, addr));
+        }
+    }
+
     fn grow_next_access_tape(&mut self) -> (usize, usize) {
         let started = Instant::now();
         let old_capacity = self.next_access_events.capacity();
@@ -2367,10 +2374,10 @@ impl PreflightTracer {
             );
         }
         if step.flags & NATIVE_TRACE_LOAD_MEM != 0 {
-            self.track_access(step.memory_addr, Self::SUBCYCLE_MEM);
+            self.record_memory_access(step.memory_addr, step.memory_previous_cycle);
         } else if step.flags & NATIVE_TRACE_STORE_MEM != 0 {
             self.update_mmio_bounds(step.memory_addr);
-            self.track_access(step.memory_addr, Self::SUBCYCLE_MEM);
+            self.record_memory_access(step.memory_addr, step.memory_previous_cycle);
         }
 
         self.pc.after = step.pc_after;
@@ -2441,18 +2448,21 @@ impl Tracer for PreflightTracer {
     }
 
     #[inline(always)]
-    fn load_memory(&mut self, addr: WordAddr, value: Word) {
-        self.store_memory(addr, Change::new(value, value));
+    fn load_memory(&mut self, addr: WordAddr, value: Word, previous_cycle: Cycle) {
+        self.store_memory(addr, Change::new(value, value), previous_cycle);
     }
 
     #[inline(always)]
-    fn store_memory(&mut self, addr: WordAddr, _value: Change<Word>) {
+    fn store_memory(&mut self, addr: WordAddr, _value: Change<Word>, previous_cycle: Cycle) {
         self.update_mmio_bounds(addr);
-        self.track_access(addr, Self::SUBCYCLE_MEM);
+        self.record_memory_access(addr, previous_cycle);
     }
 
     #[inline(always)]
-    fn track_syscall(&mut self, effects: SyscallEffects) {
+    fn track_syscall(&mut self, mut effects: SyscallEffects) {
+        for op in effects.iter_mem_ops_mut() {
+            self.record_memory_access(op.addr, op.previous_cycle);
+        }
         let _ = effects.finalize(self);
     }
 
@@ -2466,7 +2476,7 @@ impl Tracer for PreflightTracer {
         prev_cycle
     }
 
-    fn final_accesses(&self) -> &LatestAccesses {
+    fn final_register_accesses(&self) -> &LatestAccesses {
         &self.latest_accesses
     }
 
@@ -2566,13 +2576,13 @@ impl Tracer for FullTracer {
     }
 
     #[inline(always)]
-    fn load_memory(&mut self, addr: WordAddr, value: Word) {
-        FullTracer::load_memory(self, addr, value)
+    fn load_memory(&mut self, addr: WordAddr, value: Word, previous_cycle: Cycle) {
+        FullTracer::load_memory(self, addr, value, previous_cycle)
     }
 
     #[inline(always)]
-    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
-        FullTracer::store_memory(self, addr, value)
+    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>, previous_cycle: Cycle) {
+        FullTracer::store_memory(self, addr, value, previous_cycle)
     }
 
     #[inline(always)]
@@ -2585,8 +2595,8 @@ impl Tracer for FullTracer {
         FullTracer::track_access(self, addr, subcycle)
     }
 
-    fn final_accesses(&self) -> &LatestAccesses {
-        FullTracer::final_accesses(self)
+    fn final_register_accesses(&self) -> &LatestAccesses {
+        FullTracer::final_register_accesses(self)
     }
 
     fn into_next_accesses(self) -> NextCycleAccess {
