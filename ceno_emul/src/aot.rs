@@ -206,7 +206,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 37;
+const AOT_ABI_VERSION: u32 = 35;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -4659,10 +4659,10 @@ fn emit_native_memory(
         // Value-only execution does not maintain heap/stack/hints extrema, so
         // one unsigned dense-memory check is sufficient. Traced modes retain
         // exact region classification and bounds updates below.
-        writeln!(file, "    movl %edx, %esi")?;
-        writeln!(file, "    shrl $2, %esi")?;
-        writeln!(file, "    subl %r14d, %esi")?;
-        writeln!(file, "    cmpl 64(%rsp), %esi")?;
+        writeln!(file, "    movl %edx, %eax")?;
+        writeln!(file, "    shrl $2, %eax")?;
+        writeln!(file, "    subl %r14d, %eax")?;
+        writeln!(file, "    cmpl 64(%rsp), %eax")?;
         writeln!(file, "    jae {slow_label}")?;
     } else {
         emit_native_range_check(
@@ -4727,20 +4727,22 @@ fn emit_native_memory(
     writeln!(file, "    movl %edx, %r8d")?;
     writeln!(file, "    andl $3, %r8d")?;
     writeln!(file, "    shll $3, %r8d")?;
+    writeln!(file, "    shrl $2, %edx")?;
     if !trace_style.is_pure() {
-        writeln!(file, "    shrl $2, %edx")?;
         writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
         writeln!(file, "    jmp {body_label}")?;
     }
 
     writeln!(file, "{body_label}:")?;
-    if !trace_style.is_pure() {
+    if trace_style.is_pure() {
+        writeln!(file, "    subl %r14d, %edx")?;
+    } else {
         writeln!(
             file,
             "    subl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %edx"
         )?;
-        writeln!(file, "    movl %edx, %esi")?;
     }
+    writeln!(file, "    movl %edx, %esi")?;
     if trace_style.is_pure() {
         writeln!(file, "    movl ({memory_cells},%rsi,8), %eax")?;
     } else {
