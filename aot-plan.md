@@ -473,6 +473,7 @@ env CENO_MAX_CELL_PER_SHARD=4500000000 OUTPUT_PATH=<metrics.json> RUST_LOG=info 
 
 - Resident next-PC experiment: 9.83065 seconds versus a nearby 9.858-second baseline, only 27 ms; reverted because it missed the 0.25-second retention gate.
 - Native bucket-ceiling cache: 9.909 seconds but incorrect (28 shards and 16,614,485 events). Rust fallback/syscall planner mutations made the native-only cache stale; reverted.
+- Block-entry memory validation/extrema fusion (temporary ABI 51): exact cold 8.32600 seconds and warm 8.30269 seconds versus retained 8.36702 seconds, only a 64 ms improvement. It preserved the hash, 994,896,527 instructions, 16,865,461 events, FullTracer replay, and all 35 boundaries, but missed the 0.25-second gate and was reverted. Artifacts: `preflight-fused-memory-4p5b/`.
 - Prior fixed-field secp256k1 and alternate-Keccak replacements remain rejected. The direct syscall stage revisited syscall dispatch only after new evidence isolated 2.856 seconds in generic tracked fallback; it reuses existing value kernels rather than changing cryptographic algorithms.
 - Latest whole-process `perf record` is `preflight-direct-syscalls-4p5b/perf.data`, with the symbol report in `perf-report.txt`. It includes setup/finalization and FullTracer materialization, so its percentages are attribution hints rather than Preflight-only elapsed fractions.
 - Observed causal result: direct tracked syscalls remove about 1.54 seconds while preserving exact traces.
