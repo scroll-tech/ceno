@@ -96,6 +96,39 @@ next measured priority is ecall/fallback execution, especially the 600576
 secp256k1-double, 299171 secp256k1-add, 195780 Keccak-permute, and 195777
 Keccak-XOR-in calls, rather than further access-tracking work.
 
+### Pure AOT host profile and rejected register-base trim
+
+A CPU-0-pinned `perf stat` run of the ABI-30 artifact retired 89,405,298,386
+host instructions in 31,088,216,292 cycles (2.88 IPC), with 9,409,144,338
+branches, 151,589,372 branch misses (1.61%), and 502,526,983 cache misses.
+This measures the whole benchmark process, while the benchmark's own split for
+that instrumented run was 2.4776s native and 2.9302s in fallbacks.
+
+The matching `perf record` profile was dominated by fallback crypto rather than
+native dispatch: secp256k1 modular inversion was 17.31% of samples,
+`tiny_keccak::keccakf` 3.53%, secp256k1 field multiplication 3.50%, k256 point
+addition 2.44%, secp256k1 field squaring 2.35%, and Keccak software code 1.90%.
+The AOT dispatch loop was 2.08%, the hottest native AOT memory symbol 1.37%, and
+`aot_exec_one` 1.27%. These data reinforce the fallback-first priority.
+
+A follow-up trim pinned the guest register-file base in callee-saved `%r14` for
+pure artifacts. Five warm target/control pairs were alternated on CPU 0:
+
+| Sample | Target total (s) | Target native (s) | Target fallback (s) | Control total (s) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 5.166670944 | 2.242645256 | 2.924025688 | 3.637591930 |
+| 2 | 5.172576993 | 2.243702951 | 2.928874042 | 3.648101970 |
+| 3 | 5.193288135 | 2.261705102 | 2.931583033 | 3.645297047 |
+| 4 | 5.145129991 | 2.246988275 | 2.898141716 | 3.643232283 |
+| 5 | 5.154314029 | 2.238116090 | 2.916197939 | 3.642553004 |
+
+The target medians were 5.166670944s total, 2.243702951s native, and
+2.924025688s fallback. The total is only 0.000953045s (0.018%) below the
+ABI-30 median, far below both retention gates. The control median was
+3.643232283s and did not regress. All ten runs matched their expected hashes,
+zero exit codes, and instruction counts. The trim and its ABI bump were
+removed.
+
 ## Implemented In This Pass
 
 Current base commit before block-boundary planner work: `8d5cf094 Make Preflight AOT shard-aware`.
