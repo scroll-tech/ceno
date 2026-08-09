@@ -206,7 +206,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 30;
+const AOT_ABI_VERSION: u32 = 31;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -336,6 +336,39 @@ struct AotRuntimeContext {
     preflight_register_shard_start: Cycle,
     memory_start_ordinal: u64,
     fallback_time_ns: u64,
+    pure_ecall_counts: *mut [u64; PURE_ECALL_CODES.len()],
+}
+
+const PURE_ECALL_CODES: [u32; 11] = [
+    crate::SECP256K1_DOUBLE,
+    crate::SECP256K1_ADD,
+    crate::KECCAK_PERMUTE,
+    crate::KECCAK_XORIN,
+    crate::SECP256K1_DECOMPRESS,
+    crate::SECP256K1_SCALAR_INVERT,
+    crate::BN254_FP_ADD,
+    crate::BN254_FP_MUL,
+    crate::BN254_FP2_ADD,
+    crate::BN254_FP2_MUL,
+    crate::SECP256R1_SCALAR_INVERT,
+];
+
+#[inline(always)]
+fn pure_ecall_index(code: u32) -> Option<usize> {
+    match code {
+        crate::SECP256K1_DOUBLE => Some(0),
+        crate::SECP256K1_ADD => Some(1),
+        crate::KECCAK_PERMUTE => Some(2),
+        crate::KECCAK_XORIN => Some(3),
+        crate::SECP256K1_DECOMPRESS => Some(4),
+        crate::SECP256K1_SCALAR_INVERT => Some(5),
+        crate::BN254_FP_ADD => Some(6),
+        crate::BN254_FP_MUL => Some(7),
+        crate::BN254_FP2_ADD => Some(8),
+        crate::BN254_FP2_MUL => Some(9),
+        crate::SECP256R1_SCALAR_INVERT => Some(10),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -931,7 +964,6 @@ impl AotProgram {
             bail!("AOT program does not match VM program");
         }
 
-        let started = Instant::now();
         // Generic callback tracing cannot move a shard boundary ahead of a
         // native step after that step has already mutated access state. Keep
         // generic Preflight execution on the exact Rust path; production AOT
@@ -940,6 +972,7 @@ impl AotProgram {
             && TypeId::of::<T>() == TypeId::of::<PreflightTracer>()
             && self.trace_style == AssemblyTraceStyle::Generic
         {
+            let started = Instant::now();
             let mut executed_steps = 0;
             while executed_steps < max_steps && !vm.halted() {
                 if vm.next_step_record()?.is_none() {
@@ -1031,6 +1064,7 @@ impl AotProgram {
         let mut preflight_chip_contributions = Vec::new();
         let mut preflight_cost_model = None;
         let mut fallback_ecall_codes = BTreeMap::new();
+        let mut pure_ecall_counts = [0u64; PURE_ECALL_CODES.len()];
         if trace_native_steps && TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
             if preflight_vm.tracer().supports_direct_native_trace() {
@@ -1259,6 +1293,7 @@ impl AotProgram {
             preflight_register_shard_start,
             memory_start_ordinal,
             fallback_time_ns: 0,
+            pure_ecall_counts: &mut pure_ecall_counts,
         };
         let trace_fn = if trace_mode == AOT_TRACE_MODE_FULLTRACER_DIRECT {
             std::ptr::null()
@@ -1275,11 +1310,14 @@ impl AotProgram {
         } else {
             std::ptr::null()
         };
-        let exec_fn = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+        let exec_fn = if self.trace_style.is_pure() && !trace_native_steps {
+            ceno_aot_pure_ecall_callback as AotInsnFn
+        } else if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             ceno_aot_preflight_fallback_callback as AotInsnFn
         } else {
             aot_exec_one::<T>
         };
+        let started = Instant::now();
         let native_status = unsafe {
             (self.entry)(
                 &mut context,
@@ -1326,6 +1364,14 @@ impl AotProgram {
         tracing::info!(
             "AOT next-access tape usage={next_access_events} capacity={next_access_capacity} growths={next_access_growths} growth_bytes={next_access_growth_bytes} growth_time={next_access_growth_time:?} normal_access_callbacks=0"
         );
+        for (code, count) in PURE_ECALL_CODES.into_iter().zip(pure_ecall_counts) {
+            if count != 0 {
+                fallback_ecall_codes
+                    .entry(code)
+                    .and_modify(|existing| *existing += count as usize)
+                    .or_insert(count as usize);
+            }
+        }
         Ok(AotRunReport {
             executed_steps: executed_steps as usize,
             fallback_steps: context.fallback_steps as usize,
@@ -4919,6 +4965,40 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
         .fallback_time_ns
         .saturating_add(fallback_started.elapsed().as_nanos() as u64);
     status
+}
+
+/// Stable symbol for benchmark-only, value-only Pure AOT syscalls.
+#[unsafe(no_mangle)]
+#[inline(never)]
+unsafe extern "C" fn ceno_aot_pure_ecall_callback(
+    raw_context: *mut c_void,
+    pc: u32,
+    next_pc: *mut u32,
+) -> u32 {
+    let context = unsafe { &mut *(raw_context as *mut AotRuntimeContext) };
+    if context.fallback_reason == AOT_FALLBACK_ECALL {
+        let code = unsafe { *context.registers.add(Platform::reg_ecall() as usize) };
+        if let Some(index) = pure_ecall_index(code)
+            && unsafe {
+                crate::syscalls::pure::execute(
+                    code,
+                    context.registers,
+                    context.memory_cells,
+                    context.memory_base_word,
+                    context.memory_end_word,
+                )
+            }
+        {
+            context.fallback_steps += 1;
+            context.fallback_ecall += 1;
+            unsafe {
+                (*context.pure_ecall_counts)[index] += 1;
+                *next_pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+            }
+            return AOT_STATUS_CONTINUE;
+        }
+    }
+    unsafe { aot_exec_one::<PureAotTracer>(raw_context, pc, next_pc) }
 }
 
 /// Stable symbol covering the Rust fallback path, including syscall bodies.

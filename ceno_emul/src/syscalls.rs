@@ -6,6 +6,8 @@ pub mod keccak_permute;
 pub mod keccak_xorin;
 pub mod phantom;
 pub mod pubio_commit;
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub(crate) mod pure;
 pub mod secp256k1;
 pub(crate) mod secp256r1;
 pub mod sha256;
