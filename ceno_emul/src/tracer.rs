@@ -489,6 +489,10 @@ pub trait Tracer {
     type Record;
     type Config;
 
+    /// Whether VM memory operations update packed latest-access stamps.
+    /// Diagnostic execution tracers may disable this while preserving values.
+    const TRACK_MEMORY_ACCESSES: bool = true;
+
     const SUBCYCLE_RS1: Cycle = 0;
     const SUBCYCLE_RS2: Cycle = 1;
     const SUBCYCLE_RD: Cycle = 2;

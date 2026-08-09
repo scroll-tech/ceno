@@ -48,6 +48,8 @@ type AotTraceFn = unsafe extern "C" fn(*mut AotRuntimeContext) -> u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AssemblyTraceStyle {
+    /// Benchmark-only value execution with no trace or access bookkeeping.
+    Pure,
     /// Generic AOT execution calls back into Rust after each native step so the
     /// active tracer can observe register and memory values.
     Generic,
@@ -69,6 +71,10 @@ impl AssemblyTraceStyle {
         matches!(self, Self::Generic | Self::FullTracerDirect)
     }
 
+    fn is_pure(self) -> bool {
+        self == Self::Pure
+    }
+
     fn is_preflight_direct(self) -> bool {
         matches!(
             self,
@@ -80,6 +86,7 @@ impl AssemblyTraceStyle {
 
     fn cache_name(self) -> &'static str {
         match self {
+            Self::Pure => "pure",
             Self::Generic => "generic",
             Self::FullTracerDirect => "fulltracer-direct",
             Self::PreflightDirect => "preflight-direct",
@@ -199,7 +206,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 27;
+const AOT_ABI_VERSION: u32 = 30;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -328,6 +335,7 @@ struct AotRuntimeContext {
     preflight_register_touched_mask: u64,
     preflight_register_shard_start: Cycle,
     memory_start_ordinal: u64,
+    fallback_time_ns: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -369,6 +377,78 @@ pub struct AotFallbackReport {
     pub memory_guard: usize,
     pub ecall_by_code: BTreeMap<u32, usize>,
     pub exceptional_jump_or_trap: usize,
+}
+
+/// State-only tracer used by benchmark-only pure AOT execution.
+#[derive(Debug)]
+pub struct PureAotTracer {
+    pc_before: ByteAddr,
+    pc_after: ByteAddr,
+    executed_fallbacks: usize,
+}
+
+impl Tracer for PureAotTracer {
+    type Record = (ByteAddr, ByteAddr);
+    type Config = ();
+
+    const TRACK_MEMORY_ACCESSES: bool = false;
+
+    fn new(_platform: &Platform, _config: Self::Config) -> Self {
+        Self {
+            pc_before: 0.into(),
+            pc_after: 0.into(),
+            executed_fallbacks: 0,
+        }
+    }
+
+    fn advance(&mut self) -> Self::Record {
+        self.executed_fallbacks += 1;
+        (self.pc_before, self.pc_after)
+    }
+
+    fn is_busy_loop(&self, record: &Self::Record) -> bool {
+        record.0 == record.1
+    }
+
+    fn store_pc(&mut self, pc: ByteAddr) {
+        self.pc_after = pc;
+    }
+
+    fn fetch(&mut self, pc: WordAddr, _value: Instruction) {
+        self.pc_before = pc.baddr();
+        self.pc_after = self.pc_before + PC_STEP_SIZE;
+    }
+
+    fn track_mmu_maxtouch_before(&mut self) {}
+    fn track_mmu_maxtouch_after(&mut self) {}
+    fn load_register(&mut self, _idx: RegIdx, _value: Word) {}
+    fn store_register(&mut self, _idx: RegIdx, _value: Change<Word>) {}
+    fn load_memory(&mut self, _addr: WordAddr, _value: Word, _previous_cycle: Cycle) {}
+    fn store_memory(&mut self, _addr: WordAddr, _value: Change<Word>, _previous_cycle: Cycle) {}
+    fn track_syscall(&mut self, effects: SyscallEffects) {
+        let _ = effects.finalize(self);
+    }
+    fn track_access(&mut self, _addr: WordAddr, _subcycle: Cycle) -> Cycle {
+        0
+    }
+    fn final_register_accesses(&self) -> &LatestAccesses {
+        panic!("pure AOT execution has no access history")
+    }
+    fn into_next_accesses(self) -> NextCycleAccess {
+        NextCycleAccess::default()
+    }
+    fn cycle(&self) -> Cycle {
+        (self.executed_fallbacks as Cycle + 1) * Self::SUBCYCLES_PER_INSN
+    }
+    fn executed_insts(&self) -> usize {
+        self.executed_fallbacks
+    }
+    fn probe_min_max_address_by_start_addr(
+        &self,
+        _start_addr: WordAddr,
+    ) -> Option<(WordAddr, WordAddr)> {
+        None
+    }
 }
 
 /// Loaded native image for one guest program.
@@ -614,6 +694,48 @@ pub struct BasicBlock {
 }
 
 impl AotProgram {
+    /// Load or build the benchmark-only value-execution image.
+    pub fn load_or_train_pure(
+        platform: &Platform,
+        program: Arc<Program>,
+        init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
+    ) -> Result<Self> {
+        let cache_dir = default_aot_cache_dir();
+        let trace_style = AssemblyTraceStyle::Pure;
+        let key = aot_cache_key(&program, trace_style);
+        match load_cached_aot(program.clone(), trace_style, &cache_dir, &key) {
+            Ok(Some(aot)) => {
+                tracing::info!("Pure AOT artifact cache hit: {key}");
+                return Ok(aot);
+            }
+            Ok(None) => tracing::info!("Pure AOT artifact cache miss: {key}"),
+            Err(err) => tracing::warn!("Pure AOT artifact cache invalid, rebuilding: {err:#}"),
+        }
+
+        let init_memory = init_memory.into_iter().collect::<Vec<_>>();
+        let training =
+            trace_preflight_profile(platform, program.clone(), init_memory.iter().copied())?;
+        let blocks = partition_basic_blocks_with_roots(&program, training.roots.clone())?;
+        let layout_profile = build_layout_profile(&program, &blocks, &training)?;
+        compile_cached_aot(
+            program,
+            training.roots,
+            Some(layout_profile),
+            trace_style,
+            &cache_dir,
+            &key,
+            0,
+        )
+    }
+
+    pub fn cache_identity(&self) -> String {
+        aot_cache_key(&self.program, self.trace_style)
+    }
+
+    pub const fn abi_version() -> u32 {
+        AOT_ABI_VERSION
+    }
+
     pub fn compile(program: Arc<Program>) -> Result<Self> {
         Self::compile_with_extra_roots(program, Vec::new())
     }
@@ -832,6 +954,7 @@ impl AotProgram {
                     dynamic_pc_miss: executed_steps,
                     ..Default::default()
                 },
+                fallback_time: started.elapsed(),
                 execute_time: started.elapsed(),
                 next_access_events: 0,
                 next_access_capacity: 0,
@@ -851,13 +974,21 @@ impl AotProgram {
         let registers = vm.registers_mut_ptr();
         let pc_ptr = vm.pc_mut_ptr();
         let memory_cells = vm.memory_cells_mut_ptr();
-        let memory_start_ordinal = vm.tracer().cycle() >> 2;
+        let memory_start_ordinal = if self.trace_style.is_pure() {
+            0
+        } else {
+            vm.tracer().cycle() >> 2
+        };
         if memory_start_ordinal > u64::from(u32::MAX) {
             bail!("packed memory access stamp exceeds u32::MAX");
         }
         // Bound the whole native invocation once, rather than checking every
         // memory instruction. A step at the final ordinal is representable.
-        let packed_step_limit = (u64::from(u32::MAX) - memory_start_ordinal + 1) as usize;
+        let packed_step_limit = if self.trace_style.is_pure() {
+            usize::MAX
+        } else {
+            (u64::from(u32::MAX) - memory_start_ordinal + 1) as usize
+        };
         let native_max_steps = max_steps.min(packed_step_limit);
         let instructions = self.program.instructions.as_ptr();
         let program_base = self.program.base_address;
@@ -1127,6 +1258,7 @@ impl AotProgram {
             preflight_register_touched_mask,
             preflight_register_shard_start,
             memory_start_ordinal,
+            fallback_time_ns: 0,
         };
         let trace_fn = if trace_mode == AOT_TRACE_MODE_FULLTRACER_DIRECT {
             std::ptr::null()
@@ -1203,6 +1335,7 @@ impl AotProgram {
                 ecall_by_code: fallback_ecall_codes,
                 exceptional_jump_or_trap: context.fallback_exceptional as usize,
             },
+            fallback_time: Duration::from_nanos(context.fallback_time_ns),
             execute_time: started.elapsed(),
             next_access_events,
             next_access_capacity,
@@ -1218,12 +1351,19 @@ pub struct AotRunReport {
     pub executed_steps: usize,
     pub fallback_steps: usize,
     pub fallback: AotFallbackReport,
+    pub fallback_time: Duration,
     pub execute_time: Duration,
     pub next_access_events: usize,
     pub next_access_capacity: usize,
     pub next_access_growths: usize,
     pub next_access_growth_bytes: usize,
     pub next_access_growth_time: Duration,
+}
+
+impl AotRunReport {
+    pub fn native_time(&self) -> Duration {
+        self.execute_time.saturating_sub(self.fallback_time)
+    }
 }
 
 pub fn partition_basic_blocks(program: &Program) -> Result<Vec<BasicBlock>> {
@@ -2459,6 +2599,14 @@ fn emit_after_native_step(
     trace_style: AssemblyTraceStyle,
     preflight_memory_bounds_updated: bool,
 ) -> Result<()> {
+    if trace_style == AssemblyTraceStyle::Pure {
+        writeln!(file, "    incq 0(%rsp)")?;
+        writeln!(file, "    movq 0(%rsp), %rax")?;
+        writeln!(file, "    cmpq %rbp, %rax")?;
+        writeln!(file, "    jae L_done")?;
+        return Ok(());
+    }
+
     if trace_style.is_preflight_direct() {
         writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
         writeln!(file, "    movl %r15d, 8(%rsp)")?;
@@ -4018,6 +4166,38 @@ fn native_trace_kind(kind: u32) -> InsnKind {
     }
 }
 
+fn emit_native_next_pc_immediate(
+    mut file: impl Write,
+    next_pc: u32,
+    trace_style: AssemblyTraceStyle,
+) -> Result<()> {
+    if trace_style.is_pure() {
+        writeln!(file, "    movl ${next_pc:#010x}, %r15d")?;
+    } else {
+        writeln!(
+            file,
+            "    movl ${next_pc:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)"
+        )?;
+    }
+    Ok(())
+}
+
+fn emit_native_next_pc_register(
+    mut file: impl Write,
+    next_pc_reg: &str,
+    trace_style: AssemblyTraceStyle,
+) -> Result<()> {
+    if trace_style.is_pure() {
+        writeln!(file, "    movl {next_pc_reg}, %r15d")?;
+    } else {
+        writeln!(
+            file,
+            "    movl {next_pc_reg}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)"
+        )?;
+    }
+    Ok(())
+}
+
 fn emit_native_compute(
     mut file: impl Write,
     pc: u32,
@@ -4125,11 +4305,7 @@ fn emit_native_compute(
             "    movl ${pc:#010x}, {AOT_CTX_TRACE_PC_OFFSET}(%r12)"
         )?;
     }
-    writeln!(
-        file,
-        "    movl ${:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)",
-        pc.wrapping_add(PC_STEP_SIZE as u32)
-    )?;
+    emit_native_next_pc_immediate(&mut file, pc.wrapping_add(PC_STEP_SIZE as u32), trace_style)?;
     emit_after_native_step(&mut file, pc, program, insn, trace_style, false)?;
     Ok(())
 }
@@ -4235,11 +4411,7 @@ fn emit_native_control_flow(
         if trace_style.needs_callback_values() {
             writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
         }
-        writeln!(
-            file,
-            "    movl ${:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)",
-            branch_target(pc, insn)?
-        )?;
+        emit_native_next_pc_immediate(&mut file, branch_target(pc, insn)?, trace_style)?;
     } else if insn.kind == InsnKind::JALR {
         let slow_label = format!(".L_jalr_slow_{pc:x}");
         let done_label = format!(".L_jalr_done_{pc:x}");
@@ -4255,7 +4427,7 @@ fn emit_native_control_flow(
         writeln!(file, "    andl $0xfffffffe, %edx")?;
         writeln!(file, "    testl $3, %edx")?;
         writeln!(file, "    jne {slow_label}")?;
-        writeln!(file, "    movl %edx, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)")?;
+        emit_native_next_pc_register(&mut file, "%edx", trace_style)?;
         if trace_style.needs_callback_values() {
             writeln!(file, "    movl {}(%r10), %edx", rd as usize * 4)?;
             writeln!(
@@ -4310,16 +4482,10 @@ fn emit_native_control_flow(
                 insn.kind
             ),
         }
-        writeln!(
-            file,
-            "    movl ${fallthrough_pc:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)"
-        )?;
+        emit_native_next_pc_immediate(&mut file, fallthrough_pc, trace_style)?;
         writeln!(file, "    jmp {done_label}")?;
         writeln!(file, "{taken_label}:")?;
-        writeln!(
-            file,
-            "    movl ${target_pc:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)"
-        )?;
+        emit_native_next_pc_immediate(&mut file, target_pc, trace_style)?;
         writeln!(file, "{done_label}:")?;
     }
 
@@ -4351,11 +4517,7 @@ fn emit_native_memory(
             "    movl ${pc:#010x}, {AOT_CTX_TRACE_PC_OFFSET}(%r12)"
         )?;
     }
-    writeln!(
-        file,
-        "    movl ${:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)",
-        pc.wrapping_add(PC_STEP_SIZE as u32)
-    )?;
+    emit_native_next_pc_immediate(&mut file, pc.wrapping_add(PC_STEP_SIZE as u32), trace_style)?;
     if trace_style.needs_callback_values() {
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12)")?;
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)")?;
@@ -4442,7 +4604,9 @@ fn emit_native_memory(
     writeln!(file, "    andl $3, %r8d")?;
     writeln!(file, "    shll $3, %r8d")?;
     writeln!(file, "    shrl $2, %edx")?;
-    writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
+    if !trace_style.is_pure() {
+        writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
+    }
     writeln!(file, "    jmp {body_label}")?;
 
     writeln!(file, "{body_label}:")?;
@@ -4451,13 +4615,17 @@ fn emit_native_memory(
         "    subl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %edx"
     )?;
     writeln!(file, "    movl %edx, %esi")?;
-    writeln!(file, "    movq (%r11,%rsi,8), %rax")?;
-    writeln!(file, "    movq %rax, %rcx")?;
-    writeln!(file, "    shrq $32, %rcx")?;
-    writeln!(
-        file,
-        "    movq %rcx, {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12)"
-    )?;
+    if trace_style.is_pure() {
+        writeln!(file, "    movl (%r11,%rsi,8), %eax")?;
+    } else {
+        writeln!(file, "    movq (%r11,%rsi,8), %rax")?;
+        writeln!(file, "    movq %rax, %rcx")?;
+        writeln!(file, "    shrq $32, %rcx")?;
+        writeln!(
+            file,
+            "    movq %rcx, {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12)"
+        )?;
+    }
     match insn.kind {
         InsnKind::LB | InsnKind::LH | InsnKind::LW | InsnKind::LBU | InsnKind::LHU => {
             writeln!(file, "    movl %eax, %r9d")?;
@@ -4542,17 +4710,25 @@ fn emit_native_memory(
         }
         _ => unreachable!("unsupported native memory instruction: {:?}", insn.kind),
     }
-    writeln!(
-        file,
-        "    movq {AOT_CTX_MEMORY_START_ORDINAL_OFFSET}(%r12), %rcx"
-    )?;
-    writeln!(file, "    addq 0(%rsp), %rcx")?;
-    writeln!(file, "    shlq $32, %rcx")?;
-    if native_step_loads_memory(insn.kind) {
-        writeln!(file, "    movl %r9d, %eax")?;
+    if trace_style.is_pure() {
+        if !native_step_loads_memory(insn.kind) {
+            // Update only the value half; pure execution deliberately leaves
+            // the packed latest-access half untouched.
+            writeln!(file, "    movl %eax, (%r11,%rsi,8)")?;
+        }
+    } else {
+        writeln!(
+            file,
+            "    movq {AOT_CTX_MEMORY_START_ORDINAL_OFFSET}(%r12), %rcx"
+        )?;
+        writeln!(file, "    addq 0(%rsp), %rcx")?;
+        writeln!(file, "    shlq $32, %rcx")?;
+        if native_step_loads_memory(insn.kind) {
+            writeln!(file, "    movl %r9d, %eax")?;
+        }
+        writeln!(file, "    orq %rax, %rcx")?;
+        writeln!(file, "    movq %rcx, (%r11,%rsi,8)")?;
     }
-    writeln!(file, "    orq %rax, %rcx")?;
-    writeln!(file, "    movq %rcx, (%r11,%rsi,8)")?;
     emit_after_native_step(
         &mut file,
         pc,
@@ -4581,7 +4757,9 @@ fn emit_native_memory_region_entry(
     writeln!(file, "    andl $3, %r8d")?;
     writeln!(file, "    shll $3, %r8d")?;
     writeln!(file, "    shrl $2, %edx")?;
-    writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
+    if !trace_style.is_pure() {
+        writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
+    }
     if trace_style.is_preflight_direct() {
         emit_preflight_direct_memory_bound_known_region(
             &mut file,
@@ -4644,6 +4822,7 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
     pc: u32,
     next_pc: *mut u32,
 ) -> u32 {
+    let fallback_started = Instant::now();
     let context = unsafe { &mut *(context as *mut AotRuntimeContext) };
     let vm = unsafe { &mut *(context.vm as *mut VMState<T>) };
     context.fallback_steps += 1;
@@ -4673,6 +4852,9 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
             LAST_AOT_ERROR.with(|slot| {
                 *slot.borrow_mut() = Some(anyhow!("unknown AOT fallback reason {other}"))
             });
+            context.fallback_time_ns = context
+                .fallback_time_ns
+                .saturating_add(fallback_started.elapsed().as_nanos() as u64);
             return AOT_STATUS_ERROR;
         }
     }
@@ -4680,6 +4862,9 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
         unsafe {
             *next_pc = vm.get_pc().0;
         }
+        context.fallback_time_ns = context
+            .fallback_time_ns
+            .saturating_add(fallback_started.elapsed().as_nanos() as u64);
         return AOT_STATUS_HALTED;
     }
 
@@ -4711,7 +4896,7 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
         }
     }
 
-    match result {
+    let status = match result {
         Ok(()) => {
             unsafe {
                 *next_pc = vm.get_pc().0;
@@ -4729,7 +4914,11 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
             LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(err));
             AOT_STATUS_ERROR
         }
-    }
+    };
+    context.fallback_time_ns = context
+        .fallback_time_ns
+        .saturating_add(fallback_started.elapsed().as_nanos() as u64);
+    status
 }
 
 /// Stable symbol covering the Rust fallback path, including syscall bodies.
@@ -6517,8 +6706,13 @@ mod tests {
         interp.init_memory(ByteAddr(base).waddr(), 0);
         while interp.next_step_record().unwrap().is_some() {}
 
-        let aot = AotProgram::compile(program.clone()).unwrap();
-        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        let aot = AotProgram::compile_with_extra_roots_and_trace_style(
+            program.clone(),
+            Vec::new(),
+            AssemblyTraceStyle::Pure,
+        )
+        .unwrap();
+        let mut aot_vm = VMState::<PureAotTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
         aot_vm.init_register_unsafe(20, base);
         aot_vm.init_memory(ByteAddr(base).waddr(), 0);
         let report = aot.run_pure_to_halt(&mut aot_vm, 100).unwrap();
@@ -6530,6 +6724,12 @@ mod tests {
         assert_eq!(
             aot_vm.peek_memory(ByteAddr(base).waddr()),
             interp.peek_memory(ByteAddr(base).waddr())
+        );
+        assert_eq!(aot_vm.final_access_cycle(ByteAddr(base).waddr()), 0);
+        assert_eq!(report.fallback_steps, 1);
+        assert_eq!(
+            report.execute_time,
+            report.native_time() + report.fallback_time
         );
     }
 

@@ -28,6 +28,7 @@ pub struct VMState<T: Tracer = FullTracer> {
     registers: [Word; VM_REG_COUNT],
     // Termination.
     halt_state: Option<HaltState>,
+    committed_public_io: Option<[Word; 8]>,
     tracer: T,
 }
 
@@ -97,6 +98,7 @@ impl<T: Tracer> VMState<T> {
             ),
             registers: [0; VM_REG_COUNT],
             halt_state: None,
+            committed_public_io: None,
             tracer: T::with_next_accesses(&platform, config, next_accesses),
         };
 
@@ -125,6 +127,11 @@ impl<T: Tracer> VMState<T> {
 
     pub fn halted_state(&self) -> Option<&HaltState> {
         self.halt_state.as_ref()
+    }
+
+    /// The last digest passed to the guest public-I/O commit syscall.
+    pub fn committed_public_io(&self) -> Option<[Word; 8]> {
+        self.committed_public_io
     }
 
     pub fn tracer(&self) -> &T {
@@ -274,10 +281,17 @@ impl<T: Tracer> VMState<T> {
         let cycle = self.tracer.cycle() + T::SUBCYCLE_MEM;
         for op in effects.iter_mem_ops_mut() {
             let addr = op.addr;
-            let (_, previous_cycle) = self
-                .memory
-                .access(addr, cycle, Some(op.value.after))
-                .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
+            let previous_cycle = if T::TRACK_MEMORY_ACCESSES {
+                self.memory
+                    .access(addr, cycle, Some(op.value.after))
+                    .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"))
+                    .1
+            } else {
+                self.memory
+                    .write_value(addr, op.value.after)
+                    .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
+                0
+            };
             op.previous_cycle = previous_cycle;
         }
 
@@ -303,6 +317,12 @@ impl<T: Tracer> EmuContext for VMState<T> {
             self.halt(exit_code);
             Ok(true)
         } else {
+            if function == ceno_syscall::PUB_IO_COMMIT {
+                let digest_ptr = self.peek_register(Platform::reg_arg0());
+                self.committed_public_io = Some(std::array::from_fn(|index| {
+                    self.peek_memory(ByteAddr(digest_ptr).waddr() + index)
+                }));
+            }
             match handle_syscall(self, function) {
                 Ok(effects) => {
                     self.apply_syscall(effects)?;
@@ -370,6 +390,9 @@ impl<T: Tracer> EmuContext for VMState<T> {
 
     /// Load a memory word and record this operation.
     fn load_memory(&mut self, addr: WordAddr) -> Result<Word> {
+        if !T::TRACK_MEMORY_ACCESSES {
+            return Ok(self.peek_memory(addr));
+        }
         let cycle = self.tracer.cycle() + T::SUBCYCLE_MEM;
         let (value, previous_cycle) = self
             .memory
@@ -381,6 +404,12 @@ impl<T: Tracer> EmuContext for VMState<T> {
 
     /// Store a memory word and record this operation.
     fn store_memory(&mut self, addr: WordAddr, after: Word) -> Result<()> {
+        if !T::TRACK_MEMORY_ACCESSES {
+            self.memory
+                .write_value(addr, after)
+                .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
+            return Ok(());
+        }
         let cycle = self.tracer.cycle() + T::SUBCYCLE_MEM;
         let (before, previous_cycle) = self
             .memory

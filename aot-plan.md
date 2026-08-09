@@ -42,6 +42,60 @@ same block and hash: 394856684 additional instructions, or 1.658x OpenVM's
 count. Earlier access-tracking trims bottomed out near 10.55s, so tracking alone
 cannot explain the remaining execution gap.
 
+### Pure AOT diagnostic baseline
+
+The first warm benchmark-only pure artifact for block 25580200 completed in
+5.914101908s and preserved the required block hash, zero exit code, and all
+994896527 guest instructions. The measured split was 2.996984944s outside Rust
+fallbacks and 2.917116964s inside 2036036 fallbacks. Of those, 550681 were
+dynamic-PC recovery steps and the remainder were ecalls. Artifact setup was
+332.453771ms on the warm cache path and is excluded from the execution number.
+Peak process RSS was 431468 KiB. The artifact identity was
+`a38e283553d65fa5c9a44042218415d7cfd0cf71919cfb3c2794eeb618dd4b34-abi28-pure-x86_64-linux`.
+
+Exploratory trim: register/control-only basic blocks accounted retired
+instructions once per block instead of once per instruction, with a cold exact
+budget fallback preserving `max_steps`. The comparable execution reached the
+same hash, exit code, instruction count, and fallback counts in 5.890454992s
+(2.959418556s outside fallbacks and 2.931036436s inside). The observed 0.023646916s
+(0.40%) improvement is far below both retention gates and was not repeated as a
+five-run candidate. The trim was removed. This rejects block accounting in its
+limited register/control-only form; it does not rule out a broader design that
+also safely covers memory blocks.
+
+Retained candidate: pure native instructions now keep next PC in the resident
+dispatch register and use a pure completion sequence rather than storing and
+reloading next PC through `AotRuntimeContext`, mirroring it on the stack, and
+checking callback status. Five warm samples pinned to CPU 0 on an AMD Ryzen 9
+5900XT with the `schedutil` governor were:
+
+| Sample | Total (s) | Outside fallbacks (s) | Fallback (s) | Peak RSS (KiB) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 5.128647843 | 2.350559900 | 2.778087943 | 424816 |
+| 2 | 5.169784328 | 2.373606283 | 2.796178045 | 421856 |
+| 3 | 5.167623989 | 2.380161737 | 2.787462252 | 430508 |
+| 4 | 5.160250988 | 2.377315099 | 2.782935889 | 424804 |
+| 5 | 5.174068376 | 2.380187852 | 2.793880524 | 425204 |
+
+The median is 5.167623989s total, 2.377315099s outside fallbacks, and
+2.787462252s in fallbacks. Every sample matched the required hash, exit code,
+994896527 instructions, and identical fallback counts. Relative to the first
+warm ABI-28 baseline, total time improves by 0.746477919s (12.62%), clearing
+both retention gates. The retained artifact identity ends in
+`abi30-pure-x86_64-linux`.
+
+The control block 25687400 also matched its required hash and zero exit code,
+executed 663258404 instructions, and completed in 3.715457166s total
+(1.702176507s outside fallbacks and 2.013280659s in fallbacks). No prior pure
+baseline exists for a valid percentage-regression claim; production packed
+Preflight remained faster than its recorded unpacked control baseline.
+
+The 3.0s pure target is not yet met. The retained change puts native-only time
+below the target, but 2036036 Rust fallbacks still consume a 2.79s median. The
+next measured priority is ecall/fallback execution, especially the 600576
+secp256k1-double, 299171 secp256k1-add, 195780 Keccak-permute, and 195777
+Keccak-XOR-in calls, rather than further access-tracking work.
+
 ## Implemented In This Pass
 
 Current base commit before block-boundary planner work: `8d5cf094 Make Preflight AOT shard-aware`.
