@@ -206,7 +206,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 34;
+const AOT_ABI_VERSION: u32 = 35;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -2184,9 +2184,10 @@ fn write_assembly(
     writeln!(file, "    pushq %r14")?;
     writeln!(file, "    pushq %r15")?;
     writeln!(file, "    pushq %rbp")?;
-    writeln!(file, "    subq $72, %rsp")?;
+    writeln!(file, "    subq $88, %rsp")?;
     writeln!(file, "    movq %rdi, %r12")?;
-    writeln!(file, "    movq %rsi, %r13")?;
+    writeln!(file, "    movq %rsi, 72(%rsp)")?;
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r13")?;
     if !trace_style.is_pure() {
         writeln!(file, "    movq %rdx, %r14")?;
     }
@@ -2406,7 +2407,7 @@ fn write_assembly(
     writeln!(file, "    movq %rax, (%rdx)")?;
     writeln!(file, "    movl ${AOT_STATUS_ERROR}, %eax")?;
     writeln!(file, "L_return:")?;
-    writeln!(file, "    addq $72, %rsp")?;
+    writeln!(file, "    addq $88, %rsp")?;
     writeln!(file, "    popq %rbp")?;
     writeln!(file, "    popq %r15")?;
     writeln!(file, "    popq %r14")?;
@@ -2480,7 +2481,7 @@ fn emit_call_one(
     writeln!(file, "    leaq 8(%rsp), %rdx")?;
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    movl ${pc:#010x}, %esi")?;
-    writeln!(file, "    call *%r13")?;
+    writeln!(file, "    call *72(%rsp)")?;
     if trace_style.is_pure() {
         emit_reload_pure_memory_state(&mut file)?;
     } else {
@@ -2506,7 +2507,7 @@ fn emit_call_current_pc(
     writeln!(file, "    leaq 8(%rsp), %rdx")?;
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    movl %r15d, %esi")?;
-    writeln!(file, "    call *%r13")?;
+    writeln!(file, "    call *72(%rsp)")?;
     if trace_style.is_pure() {
         emit_reload_pure_memory_state(&mut file)?;
     } else {
@@ -3136,7 +3137,7 @@ fn emit_preflight_direct_block_memory_fast_path_guard(
     program: &Program,
     block: &BasicBlock,
 ) -> Result<()> {
-    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
+    writeln!(file, "    movq %r13, %r10")?;
     let mut pc = block.start_pc;
     while pc < block.end_pc {
         let insn = instruction_at(program, pc)?;
@@ -4311,7 +4312,7 @@ fn emit_native_compute(
     trace_style: AssemblyTraceStyle,
 ) -> Result<()> {
     let rd = insn.rd_internal();
-    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
+    writeln!(file, "    movq %r13, %r10")?;
     writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
     if trace_style.needs_callback_values() {
         writeln!(
@@ -4486,7 +4487,7 @@ fn emit_native_control_flow(
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
 ) -> Result<()> {
-    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
+    writeln!(file, "    movq %r13, %r10")?;
     if trace_style.needs_callback_values() {
         writeln!(
             file,
@@ -4619,7 +4620,6 @@ fn emit_native_memory(
         "%r11"
     };
 
-    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
     if !trace_style.is_pure() {
         writeln!(file, "    movq {AOT_CTX_MEMORY_CELLS_OFFSET}(%r12), %r11")?;
     }
@@ -4635,6 +4635,7 @@ fn emit_native_memory(
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)")?;
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
     }
+    writeln!(file, "    movq %r13, %r10")?;
     writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
     if trace_style.needs_callback_values() {
         writeln!(
