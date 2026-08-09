@@ -211,14 +211,12 @@ const AOT_CTX_MEMORY_START_ORDINAL_OFFSET: usize = 648;
 const AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET: usize = 680;
 const AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET: usize = 688;
 const AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET: usize = 696;
-const AOT_CTX_PREFLIGHT_BUCKET_FAST_BLOCKS_OFFSET: usize = 704;
-const AOT_CTX_PREFLIGHT_BUCKET_SLOW_BLOCKS_OFFSET: usize = 712;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 54;
+const AOT_ABI_VERSION: u32 = 56;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -353,8 +351,6 @@ struct AotRuntimeContext {
     preflight_bucket_ceilings: *mut u64,
     preflight_bucket_generations: *mut u64,
     preflight_bucket_generation: u64,
-    preflight_bucket_fast_blocks: u64,
-    preflight_bucket_slow_blocks: u64,
 }
 
 const PURE_ECALL_CODES: [u32; 11] = [
@@ -1347,8 +1343,6 @@ impl AotProgram {
             preflight_bucket_ceilings: preflight_bucket_ceilings.as_mut_ptr(),
             preflight_bucket_generations: preflight_bucket_generations.as_mut_ptr(),
             preflight_bucket_generation: 1,
-            preflight_bucket_fast_blocks: 0,
-            preflight_bucket_slow_blocks: 0,
         };
         let trace_fn = if trace_mode == AOT_TRACE_MODE_FULLTRACER_DIRECT {
             std::ptr::null()
@@ -1423,14 +1417,6 @@ impl AotProgram {
         tracing::info!(
             "AOT next-access tape usage={next_access_events} capacity={next_access_capacity} growths={next_access_growths} growth_bytes={next_access_growth_bytes} growth_time={next_access_growth_time:?} normal_access_callbacks=0"
         );
-        if context.preflight_bucket_fast_blocks != 0 || context.preflight_bucket_slow_blocks != 0 {
-            tracing::info!(
-                "AOT planner bucket cache fast_blocks={} slow_blocks={} generation={}",
-                context.preflight_bucket_fast_blocks,
-                context.preflight_bucket_slow_blocks,
-                context.preflight_bucket_generation,
-            );
-        }
         for (code, count) in PURE_ECALL_CODES.into_iter().zip(pure_ecall_counts) {
             if count != 0 {
                 fallback_ecall_codes
@@ -3610,10 +3596,6 @@ fn emit_preflight_adaptive_block_plan_entry(
         writeln!(file, "    jne {bucket_scan_label}")?;
         writeln!(file, "{bucket_scan_done_label}:")?;
         writeln!(file, "{bucket_fast_label}:")?;
-        writeln!(
-            file,
-            "    incq {AOT_CTX_PREFLIGHT_BUCKET_FAST_BLOCKS_OFFSET}(%r12)"
-        )?;
         writeln!(file, "    jmp {unchanged_label}")?;
         writeln!(file, "{bucket_slow_label}:")?;
         writeln!(
@@ -3642,10 +3624,6 @@ fn emit_preflight_adaptive_block_plan_entry(
         writeln!(file, "    jne {bucket_rollback_label}")?;
         writeln!(file, "{bucket_rollback_label}_done:")?;
     }
-    writeln!(
-        file,
-        "    incq {AOT_CTX_PREFLIGHT_BUCKET_SLOW_BLOCKS_OFFSET}(%r12)"
-    )?;
 
     // Speculatively update all affected chip counts while accumulating trace
     // and main deltas and the largest absolute tower peak. The only loop
@@ -6348,14 +6326,6 @@ mod tests {
         assert_eq!(
             std::mem::offset_of!(AotRuntimeContext, preflight_bucket_generation),
             AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET
-        );
-        assert_eq!(
-            std::mem::offset_of!(AotRuntimeContext, preflight_bucket_fast_blocks),
-            AOT_CTX_PREFLIGHT_BUCKET_FAST_BLOCKS_OFFSET
-        );
-        assert_eq!(
-            std::mem::offset_of!(AotRuntimeContext, preflight_bucket_slow_blocks),
-            AOT_CTX_PREFLIGHT_BUCKET_SLOW_BLOCKS_OFFSET
         );
     }
 
