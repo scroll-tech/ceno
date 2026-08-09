@@ -419,3 +419,70 @@ Target: support all RV32IM instructions in native AOT except `ECALL`. Done.
    - `keccak_syscall_guest_aot_emulates`
    - Reth-style cached loop-heavy workload
    - Require pure execution to reach at least 10x interpreter speedup on loop-heavy workloads before calling AOT perf-ready.
+
+## 2026-08-09: Block 25580200 Instruction-Normalized Campaign
+
+This section appends the current campaign; it does not supersede the historical results above.
+
+### Fixed workload and machine state
+
+- Ceno revision at the latest retained stage: `49032696ad9d541e1fccd1f6a249af16aeb6d773`.
+- Benchmark revision: `d53aed57efd03d7ad5b0f0303abb49a8cc267310`.
+- Machine: AMD Ryzen 9 5900XT, 32 logical CPUs. Runs in this stage were pinned to CPU 2.
+- Governor observed before the latest run: `schedutil`; instantaneous recorded frequency: 2,200,455 kHz. Per-run OpenVM frequency samples are under `openvm-aot-final/warm/*.freq-khz`.
+- Cached block: 25580200, chain 1.
+- Required and observed hash: `34439c597563024690ce3c91a082c34507569c7e18cc4d1b3b68550b791a2773`.
+- Ceno instruction count: exactly 994,896,527. OpenVM instruction count: exactly 600,039,843.
+- Normalization factor: `600,039,843 / 994,896,527 = 0.603118...`.
+- Production shard configuration for this comparison is `CENO_MAX_CELL_PER_SHARD=4500000000`. The prior 1,073,741,824 setting produces 140 shards and is not a semantic regression; 4.5B produces the expected 35 shards.
+
+Representative Ceno command:
+
+```text
+env CENO_MAX_CELL_PER_SHARD=4500000000 OUTPUT_PATH=<metrics.json> RUST_LOG=info \
+  taskset -c 2 target/release/ceno-reth-benchmark-bin \
+  --block-number 25580200 --chain-id 1 --cache-dir block_data \
+  --mode execute --skip-comparison
+```
+
+### Pure golden baseline and normalized comparison
+
+- Golden anchor commit: `4068feec` (content parent `10a908dc`).
+- Five cached Pure samples: 2.3863, 2.3741, 2.3669, 2.3883, and 2.3726 seconds; median 2.37414 seconds.
+- Instruction-normalized Pure median: `2.37414 * 0.603118 = 1.43189` seconds.
+- OpenVM AOT `execute` five samples: 1.51, 1.57, 1.53, 1.54, and 1.59 seconds; median 1.54 seconds.
+- Observed result: normalized Ceno Pure is about 0.108 seconds (7.0%) faster than the OpenVM median. This is observed elapsed time plus a normalized projection, not a raw-time win.
+- Pure artifact ABI 43 cold diagnostic: total 2.28717 seconds, native 2.26806 seconds, generic fallback 19.1 ms.
+- Pure raw artifacts: `/home/wusm/rust/ceno-reth-benchmark/.codex-results/aot-normalized-20260809/`; the final OpenVM samples are under `openvm-aot-final/warm/`.
+- `pure-block-plan/perf/stat.csv` records whole-process counters. Generated-DSO-only cycles/guest still require a matched Ceno/OpenVM counter extraction before the generated-code-cycle success criterion can be closed.
+
+### Tracked Preflight baseline and retained work
+
+- `1a1eda44` retained block-level executed-step reservation, exact static cycle offsets, block-exit cycle publication, cold memory-event layout, and exact packed-memory ordinal handling.
+- Exact 4.5B warm baseline before direct syscalls: 9.91177 seconds total, 7.05603 seconds native, and 2.85574 seconds fallback. Only 2,036,036 steps (0.20%) fell back, proving that fallback cost was disproportionate to its instruction count.
+- Retained `49032696` adds allocation-free, trace-compatible Preflight handling for the hot Pure syscall kernels. It applies exact packed access stamps, memory event ordering, argument-register accesses, planner observation, cycle advancement, and shard transitions. Unsupported, invalid-range, and aliased binary operands retain the generic fallback.
+- Latest cold execution after cache training: 8.38034 seconds total, 6.75392 seconds native, 1.62642 seconds fallback.
+- Latest cached warm execution: 8.36702 seconds total, 6.76007 seconds native, 1.60695 seconds fallback.
+- Controlled delta versus the exact prior warm baseline: -1.54475 seconds (-15.6%), clearing the retention gate.
+- The direct syscall stage observed 295,348 secp-double cache hits and 305,228 misses.
+- Correctness remained exact: 994,896,527 instructions, 16,865,461 next-access events, exact output hash, FullTracer replay completion, and exactly 35 shard boundaries. The boundary vector ends at cycle 3,979,586,112 and matches the pre-change 4.5B vector byte-for-byte in the log.
+- Focused generic-versus-direct syscall test compares final memory, latest-access cycles/tables, next-access tape, and shard boundaries. Complete applicable AOT suite: 44 passed, 1 ignored.
+- Artifacts: `/home/wusm/rust/ceno-reth-benchmark/.codex-results/aot-normalized-20260809/preflight-direct-syscalls-4p5b/`.
+
+### Controlled failures and profile-driven interpretation
+
+- Resident next-PC experiment: 9.83065 seconds versus a nearby 9.858-second baseline, only 27 ms; reverted because it missed the 0.25-second retention gate.
+- Native bucket-ceiling cache: 9.909 seconds but incorrect (28 shards and 16,614,485 events). Rust fallback/syscall planner mutations made the native-only cache stale; reverted.
+- Prior fixed-field secp256k1 and alternate-Keccak replacements remain rejected. The direct syscall stage revisited syscall dispatch only after new evidence isolated 2.856 seconds in generic tracked fallback; it reuses existing value kernels rather than changing cryptographic algorithms.
+- Latest whole-process `perf record` is `preflight-direct-syscalls-4p5b/perf.data`, with the symbol report in `perf-report.txt`. It includes setup/finalization and FullTracer materialization, so its percentages are attribution hints rather than Preflight-only elapsed fractions.
+- Observed causal result: direct tracked syscalls remove about 1.54 seconds while preserving exact traces.
+- Observed remaining fact: 6.76 seconds is still classified as native tracked execution. Therefore the earlier expectation `12 - 3 = about 9 seconds saved` is falsified: the Pure speedup removed work that tracked Preflight must still perform inside generated blocks, including exact packed-memory stamps, per-access next-access decisions/events, register latest-access state, extrema, and shard-cost planning. Those costs are not confined to basic-block boundaries.
+- Normalized projection of the current tracked warm time is `8.36702 * 0.603118 = 5.0463` seconds. This is a projection only and does not satisfy the requested raw `<5s` target.
+- Unresolved inference: further architectural state residency and lower-overhead exact memory/access tracking may reduce the 6.76-second native component, but the present measurements do not justify claiming that all remaining tracking can be moved to boundaries.
+
+### Status against campaign stop conditions
+
+- Pure normalized elapsed comparison: passed on the available five-run medians.
+- Exact Preflight/FullTracer correctness at 4.5B: passed for the retained stages above.
+- Expected 35-shard production configuration: restored and verified.
+- Raw tracked Preflight `<5s`, five alternating final samples, block 25687400 regression gate, matched OpenVM metered comparison, and generated-DSO cycles/guest comparison: still open. Do not treat this section as the final campaign conclusion.
