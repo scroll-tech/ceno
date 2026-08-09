@@ -213,7 +213,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 44;
+const AOT_ABI_VERSION: u32 = 50;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -2333,6 +2333,14 @@ fn write_assembly(
                 )?;
                 emit_preflight_direct_block_access_entry(&mut file, program, block_idx, block)?;
             }
+            // The entry guards make this block atomic with respect to Rust
+            // fallback. Reserve its executed-step count once, as Pure AOT
+            // does, and publish tracked cycle/step state at block exit.
+            writeln!(
+                file,
+                "    addq ${}, 0(%rsp)",
+                block_instruction_count(block)
+            )?;
         }
         let mut pc = block.start_pc;
         let mut last_profile_region = None;
@@ -2365,8 +2373,12 @@ fn write_assembly(
                 )?;
                 last_profile_region = Some(region);
             }
-            let pure_block_remaining_after = pure_counted_block.then_some(
-                ((block.end_pc - pc - PC_STEP_SIZE as u32) / PC_STEP_SIZE as u32) as u64,
+            let reserved_block_step = (pure_counted_block || block_plan.is_some()).then_some(
+                ReservedBlockStep {
+                    remaining_after: ((block.end_pc - pc - PC_STEP_SIZE as u32)
+                        / PC_STEP_SIZE as u32) as u64,
+                    cycle_offset: (pc - block.start_pc) as u64,
+                },
             );
             emit_instruction_body(
                 &mut file,
@@ -2374,13 +2386,14 @@ fn write_assembly(
                 pc,
                 insn,
                 step_trace_style,
-                pure_block_remaining_after,
+                reserved_block_step,
             )?;
             pc = pc.wrapping_add(PC_STEP_SIZE as u32);
         }
         if let Some(prev_pc) = pc.checked_sub(PC_STEP_SIZE as u32) {
             let insn = instruction_at(program, prev_pc)?;
             if block_plan.is_some() {
+                emit_preflight_direct_block_trace_exit(&mut file, block)?;
                 emit_assembly_profile_symbol(
                     &mut file,
                     &format!("ceno_aot_bb_{:08x}_register_latest_commit", block.start_pc),
@@ -2747,6 +2760,7 @@ fn emit_after_native_step(
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
     preflight_memory_bounds_updated: bool,
+    reserved_block_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
     if trace_style == AssemblyTraceStyle::Pure {
         writeln!(file, "    incq 0(%rsp)")?;
@@ -2763,8 +2777,16 @@ fn emit_after_native_step(
     }
 
     if trace_style.is_preflight_direct() {
-        writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
-        writeln!(file, "    movl %r15d, 8(%rsp)")?;
+        let batched_block = reserved_block_step.is_some()
+            && matches!(
+                trace_style,
+                AssemblyTraceStyle::PreflightDirectBlockPlan
+                    | AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
+            );
+        if !batched_block {
+            writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
+            writeln!(file, "    movl %r15d, 8(%rsp)")?;
+        }
         emit_preflight_direct_step_static(
             &mut file,
             pc,
@@ -2780,8 +2802,11 @@ fn emit_after_native_step(
                 PreflightAccessMode::Exact
             },
             matches!(trace_style, AssemblyTraceStyle::PreflightDirect),
+            reserved_block_step.map(|step| step.cycle_offset),
         )?;
-        emit_after_step(&mut file)?;
+        if !batched_block {
+            emit_after_step(&mut file)?;
+        }
         return Ok(());
     }
 
@@ -2840,6 +2865,7 @@ fn emit_after_native_step(
         false,
         PreflightAccessMode::Exact,
         true,
+        None,
     )?;
     writeln!(file, "{done_label}:")?;
     emit_after_step(&mut file)?;
@@ -2897,6 +2923,12 @@ fn emit_reload_preflight_event_cursor(mut file: impl Write) -> Result<()> {
 
 fn block_instruction_count(block: &BasicBlock) -> u64 {
     ((block.end_pc - block.start_pc) / PC_STEP_SIZE as u32) as u64
+}
+
+#[derive(Clone, Copy)]
+struct ReservedBlockStep {
+    remaining_after: u64,
+    cycle_offset: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -3134,20 +3166,20 @@ fn emit_pure_block_budget_guard(mut file: impl Write, block: &BasicBlock) -> Res
 
 fn emit_rollback_reserved_block_steps(
     mut file: impl Write,
-    remaining_after: Option<u64>,
+    reserved_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
-    if let Some(remaining_after) = remaining_after {
-        writeln!(file, "    subq ${}, 0(%rsp)", remaining_after + 1)?;
+    if let Some(step) = reserved_step {
+        writeln!(file, "    subq ${}, 0(%rsp)", step.remaining_after + 1)?;
     }
     Ok(())
 }
 
 fn emit_restore_reserved_block_steps(
     mut file: impl Write,
-    remaining_after: Option<u64>,
+    reserved_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
-    if let Some(remaining_after) = remaining_after.filter(|remaining| *remaining != 0) {
-        writeln!(file, "    addq ${remaining_after}, 0(%rsp)")?;
+    if let Some(step) = reserved_step.filter(|step| step.remaining_after != 0) {
+        writeln!(file, "    addq ${}, 0(%rsp)", step.remaining_after)?;
     }
     Ok(())
 }
@@ -3462,6 +3494,8 @@ fn emit_preflight_adaptive_block_plan_entry(
 ) -> Result<()> {
     let loop_label = format!(".L_preflight_cost_loop_{block_idx}");
     let loop_done_label = format!(".L_preflight_cost_loop_done_{block_idx}");
+    let contribution_done_label = format!(".L_preflight_cost_contribution_done_{block_idx}");
+    let unchanged_label = format!(".L_preflight_cost_unchanged_{block_idx}");
     let accept_label = format!(".L_preflight_cost_accept_{block_idx}");
     let first_shard_label = format!(".L_preflight_cost_first_shard_{block_idx}");
     let target_done_label = format!(".L_preflight_cost_target_done_{block_idx}");
@@ -3475,6 +3509,7 @@ fn emit_preflight_adaptive_block_plan_entry(
     // and main deltas and the largest absolute tower peak. The only loop
     // branch depends on descriptor size; bucket selection and max use cmov.
     writeln!(file, "    pxor %xmm0, %xmm0")?;
+    writeln!(file, "    movq $0, 80(%rsp)")?;
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_TOWER_OFFSET}(%r12), %rax"
@@ -3508,13 +3543,6 @@ fn emit_preflight_adaptive_block_plan_entry(
     writeln!(file, "    movq (%rsi), %r9")?;
     writeln!(file, "    addq %r9, %r11")?;
     writeln!(file, "    movq %r11, (%rsi)")?;
-    // Point at this chip's precomputed cost-table row. Keeping the row
-    // offset in the descriptor avoids two serialized multiplies per chip.
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_COST_TABLE_OFFSET}(%r12), %rdi"
-    )?;
-    writeln!(file, "    addq %rdx, %rdi")?;
     if has_lzcnt {
         writeln!(file, "    leaq -1(%r9), %rdx")?;
         writeln!(file, "    lzcntq %rdx, %rdx")?;
@@ -3548,6 +3576,17 @@ fn emit_preflight_adaptive_block_plan_entry(
         writeln!(file, "    movq $1, %r8")?;
         writeln!(file, "    cmovbe %r8, %r9")?;
     }
+    writeln!(file, "    cmpq %r9, %rdx")?;
+    writeln!(file, "    je {contribution_done_label}")?;
+    writeln!(file, "    movq $1, 80(%rsp)")?;
+    // Point at this chip's precomputed cost-table row. Keeping the row
+    // offset in the descriptor avoids two serialized multiplies per chip.
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_COST_TABLE_OFFSET}(%r12), %rdi"
+    )?;
+    writeln!(file, "    movq 40(%rsp), %r8")?;
+    writeln!(file, "    addq %r8, %rdi")?;
     // Trace and main are adjacent table lanes. Accumulate both deltas in one
     // SIMD register, avoiding four scalar loads and stack updates per chip.
     writeln!(file, "    movq %rdx, %r8")?;
@@ -3572,10 +3611,13 @@ fn emit_preflight_adaptive_block_plan_entry(
     writeln!(file, "    cmpq %r8, %rax")?;
     writeln!(file, "    cmovaq %rax, %r8")?;
     writeln!(file, "    movq %r8, 32(%rsp)")?;
+    writeln!(file, "{contribution_done_label}:")?;
     writeln!(file, "    addq $16, %r10")?;
     writeln!(file, "    decl %ecx")?;
     writeln!(file, "    jne {loop_label}")?;
     writeln!(file, "{loop_done_label}:")?;
+    writeln!(file, "    cmpq $0, 80(%rsp)")?;
+    writeln!(file, "    je {unchanged_label}")?;
     writeln!(file, "    movdqu %xmm0, 16(%rsp)")?;
     // candidate = trace_total + max(main_total, tower_peak)
     writeln!(
@@ -3657,6 +3699,25 @@ fn emit_preflight_adaptive_block_plan_entry(
     writeln!(file, "    movq 32(%rsp), %r8")?;
     writeln!(file, "    movq %r8, (%rax)")?;
     writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, "{unchanged_label}:")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET}(%r12), %r10"
+    )?;
+    writeln!(file, "    cmpq $0, (%r10)")?;
+    writeln!(file, "    je {done_label}")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %r10"
+    )?;
+    writeln!(file, "    movq (%r10), %r11")?;
+    writeln!(file, "    addq ${block_cycles}, %r11")?;
+    writeln!(
+        file,
+        "    cmpq {AOT_CTX_PREFLIGHT_MAX_CYCLE_PER_SHARD_OFFSET}(%r12), %r11"
+    )?;
+    writeln!(file, "    jae {split_label}")?;
+    writeln!(file, "    jmp {done_label}")?;
     writeln!(file, "{split_label}:")?;
     writeln!(
         file,
@@ -3692,6 +3753,23 @@ fn emit_preflight_direct_block_plan_exit(mut file: impl Write, block: &BasicBloc
     Ok(())
 }
 
+fn emit_preflight_direct_block_trace_exit(mut file: impl Write, block: &BasicBlock) -> Result<()> {
+    let block_steps = block_instruction_count(block);
+    let block_cycles = block_steps * PC_STEP_SIZE as u64;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_CYCLE_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    addq ${block_cycles}, (%rax)")?;
+    writeln!(
+        file,
+        "    addq ${block_steps}, {AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
+    writeln!(file, "    movl %r15d, 8(%rsp)")?;
+    Ok(())
+}
+
 fn emit_preflight_adaptive_exact_access_plan_exit(
     mut file: impl Write,
     block: &BasicBlock,
@@ -3718,6 +3796,7 @@ fn emit_preflight_direct_step_static(
     preflight_memory_bounds_updated: bool,
     access_mode: PreflightAccessMode,
     check_busy_loop: bool,
+    block_cycle_offset: Option<u64>,
 ) -> Result<()> {
     let has_memory_access =
         native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind);
@@ -3745,7 +3824,12 @@ fn emit_preflight_direct_step_static(
                     )?;
                 }
                 writeln!(file, "    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %eax")?;
-                emit_preflight_direct_memory_access_cached(&mut file, "%eax")?;
+                emit_preflight_direct_memory_access_cached(
+                    &mut file,
+                    pc,
+                    "%eax",
+                    block_cycle_offset.unwrap_or(0),
+                )?;
                 if native_step_writes_rd(insn.kind) {
                     emit_preflight_direct_register_access_cached(
                         &mut file,
@@ -3759,28 +3843,40 @@ fn emit_preflight_direct_step_static(
                 }
                 if has_memory_access {
                     writeln!(file, "    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %eax")?;
-                    emit_preflight_direct_memory_access_cached(&mut file, "%eax")?;
+                    emit_preflight_direct_memory_access_cached(
+                        &mut file,
+                        pc,
+                        "%eax",
+                        block_cycle_offset.unwrap_or(0),
+                    )?;
                 }
             }
         }
         PreflightAccessMode::BlockAtomic => {
             if has_memory_access {
-                emit_preflight_direct_access_cache_load(&mut file)?;
+                emit_preflight_direct_memory_shard_cache_load(&mut file)?;
                 writeln!(file, "    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %eax")?;
-                emit_preflight_direct_memory_access_cached(&mut file, "%eax")?;
+                emit_preflight_direct_memory_access_cached(
+                    &mut file,
+                    pc,
+                    "%eax",
+                    block_cycle_offset.unwrap_or(0),
+                )?;
             }
         }
     }
 
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_CYCLE_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    addq $4, (%rax)")?;
-    writeln!(
-        file,
-        "    incq {AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET}(%r12)"
-    )?;
+    if block_cycle_offset.is_none() {
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_CYCLE_OFFSET}(%r12), %rax"
+        )?;
+        writeln!(file, "    addq $4, (%rax)")?;
+        writeln!(
+            file,
+            "    incq {AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET}(%r12)"
+        )?;
+    }
     if check_busy_loop {
         emit_preflight_direct_busy_loop_guard(&mut file, pc)?;
     }
@@ -3929,6 +4025,15 @@ fn emit_preflight_direct_access_cache_load(mut file: impl Write) -> Result<()> {
     Ok(())
 }
 
+fn emit_preflight_direct_memory_shard_cache_load(mut file: impl Write) -> Result<()> {
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_CURRENT_SHARD_START_OFFSET}(%r12), %rsi"
+    )?;
+    writeln!(file, "    movq (%rsi), %r10")?;
+    Ok(())
+}
+
 fn emit_preflight_direct_event_append(
     mut file: impl Write,
     source_reg: &str,
@@ -3965,17 +4070,27 @@ fn emit_preflight_direct_event_append(
     Ok(())
 }
 
-fn emit_preflight_direct_memory_access_cached(mut file: impl Write, addr_reg: &str) -> Result<()> {
-    writeln!(file, "    movl {addr_reg}, %ecx")?;
-    writeln!(file, "    movq %r8, %r9")?;
-    writeln!(file, "    addq $3, %r9")?;
+fn emit_preflight_direct_memory_access_cached(
+    mut file: impl Write,
+    pc: u32,
+    addr_reg: &str,
+    cycle_offset: u64,
+) -> Result<()> {
+    let event_label = format!(".L_preflight_memory_event_{pc:x}");
+    let done_label = format!(".L_preflight_memory_event_done_{pc:x}");
     writeln!(
         file,
         "    movq {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12), %r11"
     )?;
     writeln!(file, "    shlq $2, %r11")?;
     writeln!(file, "    cmpq %r10, %r11")?;
-    writeln!(file, "    jae 2f")?;
+    writeln!(file, "    jb {event_label}")?;
+    writeln!(file, ".pushsection .text.unlikely,\"ax\",@progbits")?;
+    writeln!(file, "{event_label}:")?;
+    writeln!(file, "    movl {addr_reg}, %ecx")?;
+    writeln!(file, "    movq {AOT_CTX_PREFLIGHT_CYCLE_OFFSET}(%r12), %r9")?;
+    writeln!(file, "    movq (%r9), %r9")?;
+    writeln!(file, "    addq ${}, %r9", cycle_offset + 3)?;
     writeln!(file, "    testq %r11, %r11")?;
     writeln!(file, "    je 1f")?;
     writeln!(file, "    orq $3, %r11")?;
@@ -3991,7 +4106,9 @@ fn emit_preflight_direct_memory_access_cached(mut file: impl Write, addr_reg: &s
         "%ecx",
         AOT_PREFLIGHT_HELPER_MEMORY_FIRST_TOUCH,
     )?;
-    writeln!(file, "2:")?;
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, ".popsection")?;
+    writeln!(file, "{done_label}:")?;
     Ok(())
 }
 
@@ -4050,11 +4167,18 @@ fn emit_instruction_body(
     pc: u32,
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
-    pure_block_remaining_after: Option<u64>,
+    reserved_block_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
     match native_opcode_family(insn.kind) {
         Some(NativeOpcodeFamily::Compute) => {
-            emit_native_compute(&mut file, pc, program, insn, trace_style)
+            emit_native_compute(
+                &mut file,
+                pc,
+                program,
+                insn,
+                trace_style,
+                reserved_block_step,
+            )
         }
         Some(NativeOpcodeFamily::ControlFlow) => emit_native_control_flow(
             &mut file,
@@ -4062,7 +4186,7 @@ fn emit_instruction_body(
             program,
             insn,
             trace_style,
-            pure_block_remaining_after,
+            reserved_block_step,
         ),
         Some(NativeOpcodeFamily::Memory) => emit_native_memory(
             &mut file,
@@ -4070,7 +4194,7 @@ fn emit_instruction_body(
             program,
             insn,
             trace_style,
-            pure_block_remaining_after,
+            reserved_block_step,
         ),
         None => emit_call_one(
             &mut file,
@@ -4433,6 +4557,7 @@ fn emit_native_compute(
     program: &Program,
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
+    reserved_block_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
     let rd = insn.rd_internal();
     writeln!(file, "    movq %r13, %r10")?;
@@ -4535,7 +4660,15 @@ fn emit_native_compute(
         )?;
     }
     emit_native_next_pc_immediate(&mut file, pc.wrapping_add(PC_STEP_SIZE as u32), trace_style)?;
-    emit_after_native_step(&mut file, pc, program, insn, trace_style, false)?;
+    emit_after_native_step(
+        &mut file,
+        pc,
+        program,
+        insn,
+        trace_style,
+        false,
+        reserved_block_step,
+    )?;
     Ok(())
 }
 
@@ -4609,7 +4742,7 @@ fn emit_native_control_flow(
     program: &Program,
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
-    pure_block_remaining_after: Option<u64>,
+    reserved_block_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
     writeln!(file, "    movq %r13, %r10")?;
     if trace_style.needs_callback_values() {
@@ -4674,12 +4807,20 @@ fn emit_native_control_flow(
         if trace_style.needs_callback_values() {
             writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
         }
-        emit_after_native_step(&mut file, pc, program, insn, trace_style, false)?;
+        emit_after_native_step(
+            &mut file,
+            pc,
+            program,
+            insn,
+            trace_style,
+            false,
+            reserved_block_step,
+        )?;
         writeln!(file, "    jmp {done_label}")?;
         writeln!(file, "{slow_label}:")?;
-        emit_rollback_reserved_block_steps(&mut file, pure_block_remaining_after)?;
+        emit_rollback_reserved_block_steps(&mut file, reserved_block_step)?;
         emit_call_one(&mut file, pc, AOT_FALLBACK_EXCEPTIONAL, trace_style)?;
-        emit_restore_reserved_block_steps(&mut file, pure_block_remaining_after)?;
+        emit_restore_reserved_block_steps(&mut file, reserved_block_step)?;
         writeln!(file, "{done_label}:")?;
         return Ok(());
     } else {
@@ -4721,7 +4862,15 @@ fn emit_native_control_flow(
         writeln!(file, "{done_label}:")?;
     }
 
-    emit_after_native_step(&mut file, pc, program, insn, trace_style, false)?;
+    emit_after_native_step(
+        &mut file,
+        pc,
+        program,
+        insn,
+        trace_style,
+        false,
+        reserved_block_step,
+    )?;
     Ok(())
 }
 
@@ -4731,7 +4880,7 @@ fn emit_native_memory(
     program: &Program,
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
-    pure_block_remaining_after: Option<u64>,
+    reserved_block_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
     let slow_label = format!(".L_memory_slow_{pc:x}");
     let done_label = format!(".L_memory_done_{pc:x}");
@@ -4993,6 +5142,9 @@ fn emit_native_memory(
             "    movq {AOT_CTX_MEMORY_START_ORDINAL_OFFSET}(%r12), %rcx"
         )?;
         writeln!(file, "    addq 0(%rsp), %rcx")?;
+        if let Some(step) = reserved_block_step {
+            writeln!(file, "    subq ${}, %rcx", step.remaining_after + 1)?;
+        }
         writeln!(file, "    shlq $32, %rcx")?;
         if native_step_loads_memory(insn.kind) {
             writeln!(file, "    movl %r9d, %eax")?;
@@ -5007,15 +5159,16 @@ fn emit_native_memory(
         insn,
         trace_style,
         trace_style.is_preflight_direct(),
+        reserved_block_step,
     )?;
     // Keep the valid-access path contiguous. The per-PC callback stub lives in
     // a cold section and jumps back only when an alignment or range guard
     // actually fails.
     writeln!(file, ".pushsection .text.unlikely,\"ax\",@progbits")?;
     writeln!(file, "{slow_label}:")?;
-    emit_rollback_reserved_block_steps(&mut file, pure_block_remaining_after)?;
+    emit_rollback_reserved_block_steps(&mut file, reserved_block_step)?;
     emit_call_one(&mut file, pc, AOT_FALLBACK_MEMORY_GUARD, trace_style)?;
-    emit_restore_reserved_block_steps(&mut file, pure_block_remaining_after)?;
+    emit_restore_reserved_block_steps(&mut file, reserved_block_step)?;
     writeln!(file, "    jmp {done_label}")?;
     writeln!(file, ".popsection")?;
     writeln!(file, "{done_label}:")?;
