@@ -208,12 +208,17 @@ const AOT_CTX_PREFLIGHT_REGISTER_TOUCHED_MASK_OFFSET: usize = 632;
 #[cfg(test)]
 const AOT_CTX_PREFLIGHT_REGISTER_SHARD_START_OFFSET: usize = 640;
 const AOT_CTX_MEMORY_START_ORDINAL_OFFSET: usize = 648;
+const AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET: usize = 680;
+const AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET: usize = 688;
+const AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET: usize = 696;
+const AOT_CTX_PREFLIGHT_BUCKET_FAST_BLOCKS_OFFSET: usize = 704;
+const AOT_CTX_PREFLIGHT_BUCKET_SLOW_BLOCKS_OFFSET: usize = 712;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 50;
+const AOT_ABI_VERSION: u32 = 54;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -345,6 +350,11 @@ struct AotRuntimeContext {
     fallback_time_ns: u64,
     pure_ecall_counts: *mut [u64; PURE_ECALL_CODES.len()],
     pure_double_cache: *mut crate::syscalls::pure::DoubleCache,
+    preflight_bucket_ceilings: *mut u64,
+    preflight_bucket_generations: *mut u64,
+    preflight_bucket_generation: u64,
+    preflight_bucket_fast_blocks: u64,
+    preflight_bucket_slow_blocks: u64,
 }
 
 const PURE_ECALL_CODES: [u32; 11] = [
@@ -402,6 +412,17 @@ struct AotChipContribution {
 struct AotAdditiveCost {
     trace_cells: u64,
     main_peak: u64,
+}
+
+fn next_cost_bucket_ceiling(count: u64) -> u64 {
+    if count == 0 {
+        1
+    } else {
+        count
+            .checked_next_power_of_two()
+            .unwrap_or(u64::MAX)
+            .saturating_add(1)
+    }
 }
 
 #[derive(Debug)]
@@ -1201,6 +1222,19 @@ impl AotProgram {
                 preflight_latest_cells,
                 preflight_current_shard_start,
             );
+        let mut preflight_bucket_ceilings = vec![0u64; preflight_planner_num_chips];
+        let mut preflight_bucket_generations = vec![1u64; preflight_planner_num_chips];
+        if !preflight_planner_num_instances.is_null() {
+            let counts = unsafe {
+                std::slice::from_raw_parts(
+                    preflight_planner_num_instances,
+                    preflight_planner_num_chips,
+                )
+            };
+            for (ceiling, &count) in preflight_bucket_ceilings.iter_mut().zip(counts) {
+                *ceiling = next_cost_bucket_ceiling(count);
+            }
+        }
         let mut context = AotRuntimeContext {
             vm: vm_ptr,
             registers,
@@ -1310,6 +1344,11 @@ impl AotProgram {
             pure_double_cache: pure_double_cache
                 .as_mut()
                 .map_or(std::ptr::null_mut(), |cache| cache as *mut _),
+            preflight_bucket_ceilings: preflight_bucket_ceilings.as_mut_ptr(),
+            preflight_bucket_generations: preflight_bucket_generations.as_mut_ptr(),
+            preflight_bucket_generation: 1,
+            preflight_bucket_fast_blocks: 0,
+            preflight_bucket_slow_blocks: 0,
         };
         let trace_fn = if trace_mode == AOT_TRACE_MODE_FULLTRACER_DIRECT {
             std::ptr::null()
@@ -1384,6 +1423,14 @@ impl AotProgram {
         tracing::info!(
             "AOT next-access tape usage={next_access_events} capacity={next_access_capacity} growths={next_access_growths} growth_bytes={next_access_growth_bytes} growth_time={next_access_growth_time:?} normal_access_callbacks=0"
         );
+        if context.preflight_bucket_fast_blocks != 0 || context.preflight_bucket_slow_blocks != 0 {
+            tracing::info!(
+                "AOT planner bucket cache fast_blocks={} slow_blocks={} generation={}",
+                context.preflight_bucket_fast_blocks,
+                context.preflight_bucket_slow_blocks,
+                context.preflight_bucket_generation,
+            );
+        }
         for (code, count) in PURE_ECALL_CODES.into_iter().zip(pure_ecall_counts) {
             if count != 0 {
                 fallback_ecall_codes
@@ -3501,9 +3548,104 @@ fn emit_preflight_adaptive_block_plan_entry(
     let target_done_label = format!(".L_preflight_cost_target_done_{block_idx}");
     let split_label = format!(".L_preflight_cost_split_{block_idx}");
     let done_label = format!(".L_preflight_cost_done_{block_idx}");
+    let bucket_scan_label = format!(".L_preflight_bucket_scan_{block_idx}");
+    let bucket_scan_done_label = format!(".L_preflight_bucket_scan_done_{block_idx}");
+    let bucket_fast_label = format!(".L_preflight_bucket_fast_{block_idx}");
+    let bucket_slow_label = format!(".L_preflight_bucket_slow_{block_idx}");
+    let bucket_rollback_label = format!(".L_preflight_bucket_rollback_{block_idx}");
     let block_cycles = block_instruction_count(block) * PC_STEP_SIZE as u64;
     let descriptor_offset = block_idx * std::mem::size_of::<AotBlockCostDescriptor>();
     let has_lzcnt = std::is_x86_feature_detected!("lzcnt");
+    let has_bucket_cache = has_lzcnt && std::is_x86_feature_detected!("bmi2");
+
+    if has_bucket_cache {
+        // Most blocks do not cross a power-of-two cost bucket. Prove that
+        // first, then update only instance counts. Rust callbacks advance a
+        // generation so chips they may have changed retry the exact path.
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12), %r10"
+        )?;
+        writeln!(file, "    movl {descriptor_offset}(%r10), %eax")?;
+        writeln!(file, "    movl {}(%r10), %ecx", descriptor_offset + 4)?;
+        writeln!(file, "    shlq $4, %rax")?;
+        writeln!(
+            file,
+            "    addq {AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET}(%r12), %rax"
+        )?;
+        writeln!(file, "    movq %rax, %r10")?;
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET}(%r12), %r8"
+        )?;
+        writeln!(file, "    testl %ecx, %ecx")?;
+        writeln!(file, "    je {bucket_scan_done_label}")?;
+        writeln!(file, "{bucket_scan_label}:")?;
+        writeln!(file, "    movl (%r10), %eax")?;
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET}(%r12), %rdi"
+        )?;
+        writeln!(file, "    cmpq %r8, (%rdi,%rax,8)")?;
+        writeln!(file, "    jne {bucket_slow_label}")?;
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+        )?;
+        writeln!(file, "    movq (%rdi,%rax,8), %r9")?;
+        writeln!(file, "    addq 8(%r10), %r9")?;
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET}(%r12), %rdi"
+        )?;
+        writeln!(file, "    cmpq (%rdi,%rax,8), %r9")?;
+        writeln!(file, "    jae {bucket_slow_label}")?;
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+        )?;
+        writeln!(file, "    movq %r9, (%rdi,%rax,8)")?;
+        writeln!(file, "    addq $16, %r10")?;
+        writeln!(file, "    decl %ecx")?;
+        writeln!(file, "    jne {bucket_scan_label}")?;
+        writeln!(file, "{bucket_scan_done_label}:")?;
+        writeln!(file, "{bucket_fast_label}:")?;
+        writeln!(
+            file,
+            "    incq {AOT_CTX_PREFLIGHT_BUCKET_FAST_BLOCKS_OFFSET}(%r12)"
+        )?;
+        writeln!(file, "    jmp {unchanged_label}")?;
+        writeln!(file, "{bucket_slow_label}:")?;
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12), %rsi"
+        )?;
+        writeln!(file, "    movl {descriptor_offset}(%rsi), %eax")?;
+        writeln!(file, "    shlq $4, %rax")?;
+        writeln!(
+            file,
+            "    addq {AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET}(%r12), %rax"
+        )?;
+        writeln!(file, "    movq %rax, %rsi")?;
+        writeln!(file, "    cmpq %r10, %rsi")?;
+        writeln!(file, "    je {bucket_rollback_label}_done")?;
+        writeln!(file, "{bucket_rollback_label}:")?;
+        writeln!(file, "    movl (%rsi), %eax")?;
+        writeln!(file, "    movq 8(%rsi), %r9")?;
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+        )?;
+        writeln!(file, "    subq %r9, (%rdi,%rax,8)")?;
+        writeln!(file, "    addq $16, %rsi")?;
+        writeln!(file, "    cmpq %r10, %rsi")?;
+        writeln!(file, "    jne {bucket_rollback_label}")?;
+        writeln!(file, "{bucket_rollback_label}_done:")?;
+    }
+    writeln!(
+        file,
+        "    incq {AOT_CTX_PREFLIGHT_BUCKET_SLOW_BLOCKS_OFFSET}(%r12)"
+    )?;
 
     // Speculatively update all affected chip counts while accumulating trace
     // and main deltas and the largest absolute tower peak. The only loop
@@ -3555,6 +3697,26 @@ fn emit_preflight_adaptive_block_plan_entry(
         writeln!(file, "    lzcntq %r9, %r9")?;
         writeln!(file, "    negq %r9")?;
         writeln!(file, "    addq $65, %r9")?;
+        if has_bucket_cache {
+            writeln!(file, "    leaq -1(%r9), %r8")?;
+            writeln!(file, "    movq $1, %rdi")?;
+            writeln!(file, "    shlxq %r8, %rdi, %r8")?;
+            writeln!(file, "    incq %r8")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET}(%r12), %rdi"
+            )?;
+            writeln!(file, "    movq %r8, (%rdi,%rax,8)")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET}(%r12), %rdi"
+            )?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET}(%r12), %r8"
+            )?;
+            writeln!(file, "    movq %r8, (%rdi,%rax,8)")?;
+        }
     } else {
         writeln!(file, "    movq %r9, %rdx")?;
         writeln!(file, "    decq %rdx")?;
@@ -5395,6 +5557,7 @@ unsafe extern "C" fn ceno_aot_preflight_fallback_callback(
 ) -> u32 {
     let fallback_started = Instant::now();
     let context = unsafe { &mut *(raw_context as *mut AotRuntimeContext) };
+    invalidate_preflight_bucket_cache(context);
     if context.fallback_reason == AOT_FALLBACK_ECALL {
         let code = unsafe { *context.registers.add(Platform::reg_ecall() as usize) };
         let arg0 = unsafe { *context.registers.add(Platform::reg_arg0() as usize) };
@@ -5546,6 +5709,22 @@ unsafe extern "C" fn aot_trace_native_compute<T: Tracer>(context: *mut AotRuntim
     }
 }
 
+fn invalidate_preflight_bucket_cache(context: &mut AotRuntimeContext) {
+    context.preflight_bucket_generation = context.preflight_bucket_generation.wrapping_add(1);
+    if context.preflight_bucket_generation == 0 {
+        if !context.preflight_bucket_generations.is_null() {
+            let generations = unsafe {
+                std::slice::from_raw_parts_mut(
+                    context.preflight_bucket_generations,
+                    context.preflight_num_chips,
+                )
+            };
+            generations.fill(0);
+        }
+        context.preflight_bucket_generation = 1;
+    }
+}
+
 unsafe extern "C" fn aot_trace_native_preflight(context: *mut AotRuntimeContext) -> u32 {
     let context = unsafe { &mut *context };
     let vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
@@ -5581,6 +5760,7 @@ unsafe extern "C" fn aot_trace_native_preflight(context: *mut AotRuntimeContext)
 #[inline(never)]
 unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntimeContext) -> u32 {
     let context = unsafe { &mut *context };
+    invalidate_preflight_bucket_cache(context);
     let vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
     if !context.preflight_event_cursor.is_null() {
         unsafe {
@@ -6157,6 +6337,36 @@ mod tests {
             std::mem::offset_of!(AotRuntimeContext, memory_start_ordinal),
             AOT_CTX_MEMORY_START_ORDINAL_OFFSET
         );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_bucket_ceilings),
+            AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_bucket_generations),
+            AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_bucket_generation),
+            AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_bucket_fast_blocks),
+            AOT_CTX_PREFLIGHT_BUCKET_FAST_BLOCKS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_bucket_slow_blocks),
+            AOT_CTX_PREFLIGHT_BUCKET_SLOW_BLOCKS_OFFSET
+        );
+    }
+
+    #[test]
+    fn next_cost_bucket_ceiling_matches_ceil_log2_transitions() {
+        assert_eq!(next_cost_bucket_ceiling(0), 1);
+        assert_eq!(next_cost_bucket_ceiling(1), 2);
+        assert_eq!(next_cost_bucket_ceiling(2), 3);
+        assert_eq!(next_cost_bucket_ceiling(3), 5);
+        assert_eq!(next_cost_bucket_ceiling(4), 5);
+        assert_eq!(next_cost_bucket_ceiling(5), 9);
     }
 
     #[test]
