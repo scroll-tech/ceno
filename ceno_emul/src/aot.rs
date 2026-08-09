@@ -1354,8 +1354,10 @@ impl AotProgram {
             bail!("AOT native entry returned invalid status {native_status}");
         }
         if let Some(cache) = pure_double_cache.as_ref() {
-            let (hits, misses) = cache.stats();
-            tracing::info!("Pure AOT secp double cache hits={hits} misses={misses}");
+            let (double_hits, double_misses, add_hits, add_misses) = cache.stats();
+            tracing::info!(
+                "Pure AOT secp cache double_hits={double_hits} double_misses={double_misses} add_hits={add_hits} add_misses={add_misses}"
+            );
         }
         if native_max_steps < max_steps && executed_steps == native_max_steps as u64 && !vm.halted()
         {
