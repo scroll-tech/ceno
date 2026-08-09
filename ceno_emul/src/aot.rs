@@ -50,6 +50,10 @@ type AotTraceFn = unsafe extern "C" fn(*mut AotRuntimeContext) -> u32;
 enum AssemblyTraceStyle {
     /// Benchmark-only value execution with no trace or access bookkeeping.
     Pure,
+    /// Pure execution inside an entry-guarded block. The caller has proved
+    /// that the complete block fits the remaining instruction budget and all
+    /// memory accesses are valid, so steps are accounted once at block exit.
+    PureBlock,
     /// Generic AOT execution calls back into Rust after each native step so the
     /// active tracer can observe register and memory values.
     Generic,
@@ -72,7 +76,7 @@ impl AssemblyTraceStyle {
     }
 
     fn is_pure(self) -> bool {
-        self == Self::Pure
+        matches!(self, Self::Pure | Self::PureBlock)
     }
 
     fn is_preflight_direct(self) -> bool {
@@ -86,7 +90,7 @@ impl AssemblyTraceStyle {
 
     fn cache_name(self) -> &'static str {
         match self {
-            Self::Pure => "pure",
+            Self::Pure | Self::PureBlock => "pure",
             Self::Generic => "generic",
             Self::FullTracerDirect => "fulltracer-direct",
             Self::PreflightDirect => "preflight-direct",
@@ -206,7 +210,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 35;
+const AOT_ABI_VERSION: u32 = 43;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -2244,6 +2248,17 @@ fn write_assembly(
         } else {
             None
         };
+        let pure_block_plan = if trace_style == AssemblyTraceStyle::Pure {
+            preflight_block_plan_kind(program, block)?
+        } else {
+            None
+        };
+        if let Some(kind) = pure_block_plan {
+            emit_pure_block_budget_guard(&mut file, block)?;
+            if kind == PreflightBlockPlanKind::MemoryExactAccess {
+                emit_pure_block_memory_fast_path_guard(&mut file, program, block)?;
+            }
+        }
         let adaptive_exact_access_plan = block_plan.is_none()
             && trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan
             && block_supports_adaptive_cost_plan(program, block)?;
@@ -2309,18 +2324,19 @@ fn write_assembly(
         let mut last_profile_region = None;
         while pc < block.end_pc {
             let insn = instruction_at(program, pc)?;
-            let step_trace_style =
-                if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
-                    AssemblyTraceStyle::PreflightDirectBlockPlan
-                } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
-                    AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
-                } else if adaptive_exact_access_plan {
-                    AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
-                } else if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
-                    AssemblyTraceStyle::PreflightDirect
-                } else {
-                    trace_style
-                };
+            let step_trace_style = if pure_block_plan.is_some() {
+                AssemblyTraceStyle::PureBlock
+            } else if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
+                AssemblyTraceStyle::PreflightDirectBlockPlan
+            } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
+                AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
+            } else if adaptive_exact_access_plan {
+                AssemblyTraceStyle::PreflightDirectBlockPlanMemoryAtomicRegisters
+            } else if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
+                AssemblyTraceStyle::PreflightDirect
+            } else {
+                trace_style
+            };
             let region = if native_opcode_family(insn.kind) == Some(NativeOpcodeFamily::Memory) {
                 "memory"
             } else {
@@ -2338,7 +2354,13 @@ fn write_assembly(
         }
         if let Some(prev_pc) = pc.checked_sub(PC_STEP_SIZE as u32) {
             let insn = instruction_at(program, prev_pc)?;
-            if block_plan.is_some() {
+            if pure_block_plan.is_some() {
+                writeln!(
+                    file,
+                    "    addq ${}, 0(%rsp)",
+                    block_instruction_count(block)
+                )?;
+            } else if block_plan.is_some() {
                 emit_assembly_profile_symbol(
                     &mut file,
                     &format!("ceno_aot_bb_{:08x}_register_latest_commit", block.start_pc),
@@ -2541,6 +2563,8 @@ fn emit_reload_pure_memory_state(mut file: impl Write) -> Result<()> {
         "    movl {AOT_CTX_MEMORY_END_WORD_OFFSET}(%r12), %edx"
     )?;
     writeln!(file, "    subl %r14d, %edx")?;
+    writeln!(file, "    shll $2, %r14d")?;
+    writeln!(file, "    shll $2, %edx")?;
     writeln!(file, "    movl %edx, 64(%rsp)")?;
     Ok(())
 }
@@ -2709,6 +2733,9 @@ fn emit_after_native_step(
         writeln!(file, "    movq 0(%rsp), %rax")?;
         writeln!(file, "    cmpq %rbp, %rax")?;
         writeln!(file, "    jae L_done")?;
+        return Ok(());
+    }
+    if trace_style == AssemblyTraceStyle::PureBlock {
         return Ok(());
     }
 
@@ -3068,6 +3095,48 @@ fn emit_preflight_direct_block_budget_guard(
     writeln!(file, "    addq ${block_steps}, %rax")?;
     writeln!(file, "    cmpq %rbp, %rax")?;
     writeln!(file, "    ja L_exceptional")?;
+    Ok(())
+}
+
+fn emit_pure_block_budget_guard(mut file: impl Write, block: &BasicBlock) -> Result<()> {
+    let block_steps = block_instruction_count(block);
+    writeln!(file, "    movq 0(%rsp), %rax")?;
+    writeln!(file, "    addq ${block_steps}, %rax")?;
+    writeln!(file, "    cmpq %rbp, %rax")?;
+    // If the limit ends inside this block, execute one exact fallback step and
+    // dispatch again. This preserves the existing instruction-limit contract.
+    writeln!(file, "    ja L_exceptional")?;
+    Ok(())
+}
+
+fn emit_pure_block_memory_fast_path_guard(
+    mut file: impl Write,
+    program: &Program,
+    block: &BasicBlock,
+) -> Result<()> {
+    let mut pc = block.start_pc;
+    while pc < block.end_pc {
+        let insn = instruction_at(program, pc)?;
+        if native_opcode_family(insn.kind) == Some(NativeOpcodeFamily::Memory) {
+            writeln!(file, "    movl {}(%r13), %eax", insn.rs1 as usize * 4)?;
+            writeln!(file, "    leal {}(%rax), %edx", insn.imm)?;
+            match insn.kind {
+                InsnKind::LH | InsnKind::LHU | InsnKind::SH => {
+                    writeln!(file, "    testl $1, %edx")?;
+                    writeln!(file, "    jne L_memory_guard")?;
+                }
+                InsnKind::LW | InsnKind::SW => {
+                    writeln!(file, "    testl $3, %edx")?;
+                    writeln!(file, "    jne L_memory_guard")?;
+                }
+                _ => {}
+            }
+            writeln!(file, "    subl %r14d, %edx")?;
+            writeln!(file, "    cmpl 64(%rsp), %edx")?;
+            writeln!(file, "    jae L_memory_guard")?;
+        }
+        pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+    }
     Ok(())
 }
 
@@ -4644,25 +4713,28 @@ fn emit_native_memory(
         )?;
     }
     writeln!(file, "    leal {}(%rax), %edx", insn.imm)?;
-    match insn.kind {
-        InsnKind::LH | InsnKind::LHU | InsnKind::SH => {
-            writeln!(file, "    testl $1, %edx")?;
-            writeln!(file, "    jne {slow_label}")?;
+    if trace_style != AssemblyTraceStyle::PureBlock {
+        match insn.kind {
+            InsnKind::LH | InsnKind::LHU | InsnKind::SH => {
+                writeln!(file, "    testl $1, %edx")?;
+                writeln!(file, "    jne {slow_label}")?;
+            }
+            InsnKind::LW | InsnKind::SW => {
+                writeln!(file, "    testl $3, %edx")?;
+                writeln!(file, "    jne {slow_label}")?;
+            }
+            _ => {}
         }
-        InsnKind::LW | InsnKind::SW => {
-            writeln!(file, "    testl $3, %edx")?;
-            writeln!(file, "    jne {slow_label}")?;
-        }
-        _ => {}
     }
-    if trace_style.is_pure() {
+    if trace_style == AssemblyTraceStyle::PureBlock {
+        // Alignment and dense-memory membership were checked once at block
+        // entry, using bases that this block cannot overwrite.
+    } else if trace_style.is_pure() {
         // Value-only execution does not maintain heap/stack/hints extrema, so
         // one unsigned dense-memory check is sufficient. Traced modes retain
         // exact region classification and bounds updates below.
-        writeln!(file, "    movl %edx, %eax")?;
-        writeln!(file, "    shrl $2, %eax")?;
-        writeln!(file, "    subl %r14d, %eax")?;
-        writeln!(file, "    cmpl 64(%rsp), %eax")?;
+        writeln!(file, "    subl %r14d, %edx")?;
+        writeln!(file, "    cmpl 64(%rsp), %edx")?;
         writeln!(file, "    jae {slow_label}")?;
     } else {
         emit_native_range_check(
@@ -4724,19 +4796,32 @@ fn emit_native_memory(
 
         writeln!(file, "{dense_ok_label}:")?;
     }
-    writeln!(file, "    movl %edx, %r8d")?;
-    writeln!(file, "    andl $3, %r8d")?;
-    writeln!(file, "    shll $3, %r8d")?;
-    writeln!(file, "    shrl $2, %edx")?;
-    if !trace_style.is_pure() {
+    if trace_style.is_pure() {
+        if trace_style == AssemblyTraceStyle::PureBlock {
+            writeln!(file, "    subl %r14d, %edx")?;
+        }
+        if matches!(insn.kind, InsnKind::LW | InsnKind::SW) {
+            // Word accesses are already aligned, and neither operation needs
+            // a byte-lane shift or an address mask.
+        } else {
+            writeln!(file, "    movl %edx, %r8d")?;
+            // Variable 32-bit shifts mask the count to five bits, so after
+            // multiplying the byte address by eight the upper address bits
+            // cannot affect the selected byte lane.
+            writeln!(file, "    shll $3, %r8d")?;
+            writeln!(file, "    andl $0xfffffffc, %edx")?;
+        }
+    } else {
+        writeln!(file, "    movl %edx, %r8d")?;
+        writeln!(file, "    andl $3, %r8d")?;
+        writeln!(file, "    shll $3, %r8d")?;
+        writeln!(file, "    shrl $2, %edx")?;
         writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
         writeln!(file, "    jmp {body_label}")?;
     }
 
     writeln!(file, "{body_label}:")?;
-    if trace_style.is_pure() {
-        writeln!(file, "    subl %r14d, %edx")?;
-    } else {
+    if !trace_style.is_pure() {
         writeln!(
             file,
             "    subl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %edx"
@@ -4744,7 +4829,7 @@ fn emit_native_memory(
     }
     writeln!(file, "    movl %edx, %esi")?;
     if trace_style.is_pure() {
-        writeln!(file, "    movl ({memory_cells},%rsi,8), %eax")?;
+        writeln!(file, "    movl ({memory_cells},%rsi,2), %eax")?;
     } else {
         writeln!(file, "    movq ({memory_cells},%rsi,8), %rax")?;
         writeln!(file, "    movq %rax, %rcx")?;
@@ -4842,7 +4927,7 @@ fn emit_native_memory(
         if !native_step_loads_memory(insn.kind) {
             // Update only the value half; pure execution deliberately leaves
             // the packed latest-access half untouched.
-            writeln!(file, "    movl %eax, ({memory_cells},%rsi,8)")?;
+            writeln!(file, "    movl %eax, ({memory_cells},%rsi,2)")?;
         }
     } else {
         writeln!(
@@ -4865,9 +4950,14 @@ fn emit_native_memory(
         trace_style,
         trace_style.is_preflight_direct(),
     )?;
-    writeln!(file, "    jmp {done_label}")?;
+    // Keep the valid-access path contiguous. The per-PC callback stub lives in
+    // a cold section and jumps back only when an alignment or range guard
+    // actually fails.
+    writeln!(file, ".pushsection .text.unlikely,\"ax\",@progbits")?;
     writeln!(file, "{slow_label}:")?;
     emit_call_one(&mut file, pc, AOT_FALLBACK_MEMORY_GUARD, trace_style)?;
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, ".popsection")?;
     writeln!(file, "{done_label}:")?;
     Ok(())
 }
@@ -7062,6 +7152,31 @@ mod tests {
         let report = aot.run_to_halt(&mut vm, 10).unwrap();
         assert_eq!(report.executed_steps, 6);
         assert!(vm.halted());
+    }
+
+    #[test]
+    fn aot_pure_block_plan_respects_limit_inside_block() {
+        let base = CENO_PLATFORM.pc_base();
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 3),
+            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
+            encode_rv32(InsnKind::BNE, 1, 0, 0, -4),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let aot = AotProgram::compile_with_extra_roots_and_trace_style(
+            program.clone(),
+            Vec::new(),
+            AssemblyTraceStyle::Pure,
+        )
+        .unwrap();
+        let mut vm = VMState::<PureAotTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
+
+        let report = aot.run_pure_to_halt(&mut vm, 2).unwrap();
+
+        assert_eq!(report.executed_steps, 2);
+        assert!(!vm.halted());
+        assert_eq!(vm.get_pc().0, base + 8);
+        assert_eq!(vm.peek_register(1), 2);
     }
 
     #[test]
