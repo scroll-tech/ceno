@@ -264,7 +264,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 61;
+const AOT_ABI_VERSION: u32 = 62;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -3696,6 +3696,12 @@ fn emit_preflight_direct_block_access_entry(
         mask | preflight_register_bit(access.addr >> 6)
     });
     if !emit_events {
+        let all_seen_label = format!(".L_preflight_block_latest_all_seen_{block_idx}");
+        writeln!(file, "    movq 56(%rsp), %rax")?;
+        writeln!(file, "    movl ${}, %ecx", register_mask as u32)?;
+        writeln!(file, "    andl %ecx, %eax")?;
+        writeln!(file, "    cmpl %ecx, %eax")?;
+        writeln!(file, "    je {all_seen_label}")?;
         writeln!(
             file,
             "    movq {AOT_CTX_PREFLIGHT_LATEST_CELLS_OFFSET}(%r12), %rdx"
@@ -3739,8 +3745,9 @@ fn emit_preflight_direct_block_access_entry(
             )?;
             writeln!(file, "    addq %rdi, (%rsi)")?;
         }
-        writeln!(file, "    movabsq ${register_mask:#018x}, %rax")?;
+        writeln!(file, "    movl ${}, %eax", register_mask as u32)?;
         writeln!(file, "    orq %rax, 56(%rsp)")?;
+        writeln!(file, "{all_seen_label}:")?;
         return Ok(());
     }
     let all_touched_label = format!(".L_preflight_block_access_all_touched_{block_idx}");
