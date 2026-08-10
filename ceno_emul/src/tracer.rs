@@ -1959,6 +1959,7 @@ pub struct PreflightTracer {
     register_reads_tracked: u8,
     planner: Option<ShardPlanBuilder>,
     current_shard_start_cycle: Cycle,
+    defer_mmio_bounds: bool,
     config: PreflightTracerConfig,
 }
 
@@ -2185,6 +2186,9 @@ impl PreflightTracer {
 
     #[inline(always)]
     fn stage_enabled(&self, stage: PreflightAotStage) -> bool {
+        if self.defer_mmio_bounds && stage == PreflightAotStage::MmioBounds {
+            return false;
+        }
         self.config.aot_stage.map_or(true, |active| active >= stage)
     }
 
@@ -2235,6 +2239,7 @@ impl PreflightTracer {
                 cost_model,
             )),
             current_shard_start_cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
+            defer_mmio_bounds: false,
             config,
         };
         tracer.reset_register_tracking();
@@ -2371,6 +2376,48 @@ impl PreflightTracer {
             return (std::ptr::null_mut(), std::ptr::null_mut());
         };
         (min_addr as *mut WordAddr, max_addr as *mut WordAddr)
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn begin_deferred_mmio_bounds(&mut self) {
+        assert!(
+            self.config.record_next_accesses,
+            "deferred MMIO bounds require first-access events"
+        );
+        self.defer_mmio_bounds = true;
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn finish_deferred_mmio_bounds(&mut self) {
+        if !self.defer_mmio_bounds {
+            return;
+        }
+        self.defer_mmio_bounds = false;
+
+        let Some(regions) = self.mmio_min_max_access.as_mut() else {
+            return;
+        };
+        let mut bounds = regions.values().copied().collect::<Vec<_>>();
+        for (start_addr, end_addr, min_addr, max_addr) in &mut bounds {
+            *min_addr = *end_addr;
+            *max_addr = *start_addr;
+        }
+        for event in self
+            .next_access_events
+            .iter()
+            .filter(|event| event.source_cycle == 0)
+        {
+            for (start_addr, end_addr, min_addr, max_addr) in &mut bounds {
+                if event.address >= *start_addr && event.address < *end_addr {
+                    *min_addr = (*min_addr).min(event.address);
+                    *max_addr = (*max_addr).max(event.address + 1usize);
+                    break;
+                }
+            }
+        }
+        for ((_, region), bounds) in regions.iter_mut().zip(bounds) {
+            *region = bounds;
+        }
     }
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -3121,6 +3168,47 @@ mod tests {
         assert_eq!(
             tracer.next_access_capacity,
             Some(tracer.next_access_events.capacity())
+        );
+    }
+
+    #[test]
+    fn deferred_mmio_bounds_rebuild_from_first_access_events() {
+        let mut tracer = PreflightTracer::new(
+            &CENO_PLATFORM,
+            PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX),
+        );
+        let heap_start = ByteAddr(CENO_PLATFORM.heap.start).waddr();
+        let stack_start = ByteAddr(CENO_PLATFORM.stack.start).waddr();
+        let hints_start = ByteAddr(CENO_PLATFORM.hints.start).waddr();
+        let accesses = [
+            heap_start + 3usize,
+            heap_start + 9usize,
+            stack_start + 2usize,
+            stack_start + 7usize,
+            hints_start + 5usize,
+        ];
+
+        tracer.begin_deferred_mmio_bounds();
+        for (index, address) in accesses.into_iter().enumerate() {
+            tracer.push_next_access_event(NextAccessEvent::new(
+                0,
+                8 + index as Cycle * PreflightTracer::SUBCYCLES_PER_INSN,
+                address,
+            ));
+        }
+        tracer.finish_deferred_mmio_bounds();
+
+        assert_eq!(
+            tracer.probe_min_max_address_by_start_addr(heap_start),
+            Some((heap_start + 3usize, heap_start + 10usize))
+        );
+        assert_eq!(
+            tracer.probe_min_max_address_by_start_addr(stack_start),
+            Some((stack_start + 2usize, stack_start + 8usize))
+        );
+        assert_eq!(
+            tracer.probe_min_max_address_by_start_addr(hints_start),
+            Some((hints_start + 5usize, hints_start + 6usize))
         );
     }
 

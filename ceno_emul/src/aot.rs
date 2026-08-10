@@ -125,6 +125,11 @@ impl AssemblyTraceStyle {
     }
 
     fn stage_enabled(self, stage: PreflightAotStage) -> bool {
+        if self.tracking_stage() == Some(PreflightAotStage::Full)
+            && stage == PreflightAotStage::MmioBounds
+        {
+            return false;
+        }
         self.tracking_stage().map_or(true, |active| active >= stage)
     }
 
@@ -268,7 +273,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 63;
+const AOT_ABI_VERSION: u32 = 64;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -1300,6 +1305,11 @@ impl AotProgram {
                         .map(|insn| preflight_vm.tracer().native_step_cells_for_kind(insn.kind))
                         .collect();
                 }
+                if self.trace_style
+                    == AssemblyTraceStyle::PreflightTracking(PreflightAotStage::Full)
+                {
+                    preflight_vm.tracer_mut().begin_deferred_mmio_bounds();
+                }
                 (preflight_heap_min, preflight_heap_max) = preflight_vm
                     .tracer_mut()
                     .native_mmio_bound_ptrs(ByteAddr(heap.start).waddr());
@@ -1588,6 +1598,7 @@ impl AotProgram {
                     .tracer_mut()
                     .sync_native_next_access_tape(context.preflight_event_cursor)
             };
+            preflight_vm.tracer_mut().finish_deferred_mmio_bounds();
         }
         if native_status == AOT_STATUS_ERROR {
             let err = LAST_AOT_ERROR
