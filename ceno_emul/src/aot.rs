@@ -253,12 +253,18 @@ const AOT_CTX_MEMORY_START_ORDINAL_OFFSET: usize = 648;
 const AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET: usize = 680;
 const AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET: usize = 688;
 const AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET: usize = 696;
+const AOT_CTX_PREFLIGHT_PENDING_SPECIALIZED_OFFSET: usize = 704;
+const AOT_CTX_PREFLIGHT_PENDING_CHIPS_OFFSET: usize = 712;
+const AOT_CTX_PREFLIGHT_PENDING_DELTAS_OFFSET: usize = 720;
+const AOT_CTX_PREFLIGHT_PENDING_TRACE_OFFSET: usize = 736;
+const AOT_CTX_PREFLIGHT_PENDING_MAIN_OFFSET: usize = 744;
+const AOT_CTX_PREFLIGHT_PENDING_TOWER_OFFSET: usize = 752;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 59;
+const AOT_ABI_VERSION: u32 = 61;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -393,6 +399,12 @@ struct AotRuntimeContext {
     preflight_bucket_ceilings: *mut u64,
     preflight_bucket_generations: *mut u64,
     preflight_bucket_generation: u64,
+    preflight_pending_specialized: u64,
+    preflight_pending_chips: [u32; 2],
+    preflight_pending_deltas: [u64; 2],
+    preflight_pending_trace: u64,
+    preflight_pending_main: u64,
+    preflight_pending_tower: u64,
 }
 
 const PURE_ECALL_CODES: [u32; 11] = [
@@ -443,6 +455,19 @@ struct AotChipContribution {
     chip_index: u32,
     cost_row_byte_offset: u32,
     instance_delta: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+struct AotPlannerMetadata {
+    descriptors: Vec<AotBlockCostDescriptor>,
+    contributions: Vec<AotChipContribution>,
+}
+
+impl AotPlannerMetadata {
+    fn contributions_for(&self, descriptor: &AotBlockCostDescriptor) -> &[AotChipContribution] {
+        let start = descriptor.contribution_offset as usize;
+        &self.contributions[start..start + descriptor.contribution_count as usize]
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -567,6 +592,7 @@ pub struct AotProgram {
     compile_load_time: Duration,
     trace_style: AssemblyTraceStyle,
     next_access_capacity: usize,
+    planner_fingerprint: Option<[u8; 32]>,
 }
 
 pub type AotInstance = AotProgram;
@@ -804,7 +830,7 @@ impl AotProgram {
         let cache_dir = default_aot_cache_dir();
         let trace_style = AssemblyTraceStyle::Pure;
         let key = aot_cache_key(&program, trace_style);
-        match load_cached_aot(program.clone(), trace_style, &cache_dir, &key) {
+        match load_cached_aot(program.clone(), trace_style, &cache_dir, &key, None) {
             Ok(Some(aot)) => {
                 tracing::info!("Pure AOT artifact cache hit: {key}");
                 return Ok(aot);
@@ -826,6 +852,7 @@ impl AotProgram {
             &cache_dir,
             &key,
             0,
+            None,
         )
     }
 
@@ -899,13 +926,33 @@ impl AotProgram {
     ) -> Result<Self> {
         let cache_dir = default_aot_cache_dir();
         let trace_style = AssemblyTraceStyle::PreflightTracking(stage);
+        let planner_model = if stage >= PreflightAotStage::Planner {
+            Some(
+                config
+                    .step_cell_extractor()
+                    .and_then(|extractor| extractor.shard_cost_model())
+                    .ok_or_else(|| anyhow!("planner tracking AOT requires a shard cost model"))?,
+            )
+        } else {
+            None
+        };
+        let base_key = planner_model.as_ref().map_or_else(
+            || aot_cache_key(&program, trace_style),
+            |model| planner_cache_key(&program, trace_style, model),
+        );
         let key = format!(
             "{}-cells{}-cycles{}",
-            aot_cache_key(&program, trace_style),
+            base_key,
             config.max_cell_per_shard(),
             config.max_cycle_per_shard()
         );
-        match load_cached_aot(program.clone(), trace_style, &cache_dir, &key) {
+        match load_cached_aot(
+            program.clone(),
+            trace_style,
+            &cache_dir,
+            &key,
+            planner_model.as_ref().map(|model| model.fingerprint()),
+        ) {
             Ok(Some(aot)) => {
                 tracing::info!(
                     stage = stage.cache_name(),
@@ -949,6 +996,7 @@ impl AotProgram {
             &cache_dir,
             &key,
             event_count,
+            planner_model.as_deref(),
         )
     }
 
@@ -963,7 +1011,7 @@ impl AotProgram {
             aot_cache_key(&self.program, trace_style),
             hex_digest(&self.layout_profile.digest),
         );
-        match load_cached_aot(self.program.clone(), trace_style, &cache_dir, &key) {
+        match load_cached_aot(self.program.clone(), trace_style, &cache_dir, &key, None) {
             Ok(Some(aot)) => {
                 tracing::info!("FullTracer AOT replay artifact cache hit: {key}");
                 return Ok(aot);
@@ -983,6 +1031,7 @@ impl AotProgram {
             &cache_dir,
             &key,
             0,
+            None,
         )
     }
 
@@ -994,13 +1043,23 @@ impl AotProgram {
         cache_dir: &Path,
     ) -> Result<Self> {
         let trace_style = AssemblyTraceStyle::PreflightDirectBlockPlan;
+        let planner_model = config
+            .step_cell_extractor()
+            .and_then(|extractor| extractor.shard_cost_model())
+            .ok_or_else(|| anyhow!("preflight block AOT requires a shard cost model"))?;
         let key = format!(
             "{}-cells{}-cycles{}",
-            aot_cache_key(&program, trace_style),
+            planner_cache_key(&program, trace_style, &planner_model),
             config.max_cell_per_shard(),
             config.max_cycle_per_shard()
         );
-        match load_cached_aot(program.clone(), trace_style, cache_dir, &key) {
+        match load_cached_aot(
+            program.clone(),
+            trace_style,
+            cache_dir,
+            &key,
+            Some(planner_model.fingerprint()),
+        ) {
             Ok(Some(aot)) => {
                 tracing::info!("AOT artifact cache hit: {}", key);
                 return Ok(aot);
@@ -1028,6 +1087,7 @@ impl AotProgram {
             cache_dir,
             &key,
             event_count,
+            Some(&planner_model),
         )
     }
 
@@ -1055,6 +1115,7 @@ impl AotProgram {
             compile_load_time: started.elapsed(),
             trace_style,
             next_access_capacity: 0,
+            planner_fingerprint: None,
         })
     }
 
@@ -1216,10 +1277,16 @@ impl AotProgram {
                     let model = preflight_vm.tracer().shard_cost_model().ok_or_else(|| {
                         anyhow!("preflight block AOT requires a shard cost model")
                     })?;
-                    (
-                        preflight_block_cost_descriptors,
-                        preflight_chip_contributions,
-                    ) = build_aot_block_cost_descriptors(&self.program, &self.blocks, &model)?;
+                    if self
+                        .planner_fingerprint
+                        .is_some_and(|fingerprint| fingerprint != model.fingerprint())
+                    {
+                        bail!("AOT artifact shard-cost-model identity mismatch");
+                    }
+                    let metadata =
+                        build_aot_block_cost_descriptors(&self.program, &self.blocks, &model)?;
+                    preflight_block_cost_descriptors = metadata.descriptors;
+                    preflight_chip_contributions = metadata.contributions;
                     preflight_cost_model = Some(model);
                 } else {
                     preflight_step_cells = self
@@ -1463,6 +1530,12 @@ impl AotProgram {
             preflight_bucket_ceilings: preflight_bucket_ceilings.as_mut_ptr(),
             preflight_bucket_generations: preflight_bucket_generations.as_mut_ptr(),
             preflight_bucket_generation: 1,
+            preflight_pending_specialized: 0,
+            preflight_pending_chips: [0; 2],
+            preflight_pending_deltas: [0; 2],
+            preflight_pending_trace: 0,
+            preflight_pending_main: 0,
+            preflight_pending_tower: 0,
         };
         let trace_fn = if trace_mode == AOT_TRACE_MODE_FULLTRACER_DIRECT {
             std::ptr::null()
@@ -2004,6 +2077,7 @@ fn compile_and_load_native(
         blocks,
         emission_order,
         trace_style,
+        None,
         &asm_path,
         &so_path,
     )?;
@@ -2015,10 +2089,18 @@ fn compile_native_to(
     blocks: &[BasicBlock],
     emission_order: &[u32],
     trace_style: AssemblyTraceStyle,
+    planner_metadata: Option<&AotPlannerMetadata>,
     asm_path: &Path,
     so_path: &Path,
 ) -> Result<()> {
-    write_assembly(asm_path, program, blocks, emission_order, trace_style)?;
+    write_assembly_with_planner(
+        asm_path,
+        program,
+        blocks,
+        emission_order,
+        trace_style,
+        planner_metadata,
+    )?;
     let output = Command::new("cc")
         .arg("-shared")
         .arg("-fPIC")
@@ -2104,6 +2186,18 @@ fn aot_cache_key(program: &Program, trace_style: AssemblyTraceStyle) -> String {
         trace_style.cache_name(),
         std::env::consts::ARCH,
         std::env::consts::OS,
+    )
+}
+
+fn planner_cache_key(
+    program: &Program,
+    trace_style: AssemblyTraceStyle,
+    model: &ShardCostModel,
+) -> String {
+    format!(
+        "{}-cost{}",
+        aot_cache_key(program, trace_style),
+        hex_digest(&model.fingerprint())
     )
 }
 
@@ -2219,6 +2313,7 @@ fn load_cached_aot(
     trace_style: AssemblyTraceStyle,
     cache_dir: &Path,
     key: &str,
+    planner_fingerprint: Option<[u8; 32]>,
 ) -> Result<Option<AotProgram>> {
     let (so_path, metadata_path) = cache_paths(cache_dir, key);
     if !so_path.exists() || !metadata_path.exists() {
@@ -2256,6 +2351,7 @@ fn load_cached_aot(
         compile_load_time: started.elapsed(),
         trace_style,
         next_access_capacity: event_capacity,
+        planner_fingerprint,
     }))
 }
 
@@ -2267,11 +2363,15 @@ fn compile_cached_aot(
     cache_dir: &Path,
     key: &str,
     event_count: usize,
+    planner_model: Option<&ShardCostModel>,
 ) -> Result<AotProgram> {
     let started = Instant::now();
     fs::create_dir_all(cache_dir)
         .with_context(|| format!("create AOT cache directory {}", cache_dir.display()))?;
     let blocks = partition_basic_blocks_with_roots(&program, roots.clone())?;
+    let planner_metadata = planner_model
+        .map(|model| build_aot_block_cost_descriptors(&program, &blocks, model))
+        .transpose()?;
     let layout_profile = layout_profile.unwrap_or_else(|| pc_order_layout(&blocks));
     validate_emission_order(&blocks, &layout_profile.emission_order)?;
     let nonce = format!("{}.{}", std::process::id(), started.elapsed().as_nanos());
@@ -2285,6 +2385,7 @@ fn compile_cached_aot(
             &blocks,
             &layout_profile.emission_order,
             trace_style,
+            planner_metadata.as_ref(),
             &asm_tmp,
             &so_tmp,
         )?;
@@ -2327,15 +2428,28 @@ fn compile_cached_aot(
         compile_load_time: started.elapsed(),
         trace_style,
         next_access_capacity: next_access_capacity(event_count),
+        planner_fingerprint: planner_model.map(ShardCostModel::fingerprint),
     })
 }
 
+#[cfg(test)]
 fn write_assembly(
     path: &Path,
     program: &Program,
     blocks: &[BasicBlock],
     emission_order: &[u32],
     trace_style: AssemblyTraceStyle,
+) -> Result<()> {
+    write_assembly_with_planner(path, program, blocks, emission_order, trace_style, None)
+}
+
+fn write_assembly_with_planner(
+    path: &Path,
+    program: &Program,
+    blocks: &[BasicBlock],
+    emission_order: &[u32],
+    trace_style: AssemblyTraceStyle,
+    planner_metadata: Option<&AotPlannerMetadata>,
 ) -> Result<()> {
     validate_emission_order(blocks, emission_order)?;
     let mut labels = BTreeMap::new();
@@ -2470,7 +2584,12 @@ fn write_assembly(
                 &mut file,
                 &format!("ceno_aot_bb_{:08x}_accounting", block.start_pc),
             )?;
-            emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
+            emit_preflight_adaptive_block_plan_entry(
+                &mut file,
+                block_idx,
+                block,
+                planner_metadata,
+            )?;
             emit_assembly_profile_symbol(
                 &mut file,
                 &format!("ceno_aot_bb_{:08x}_register_first_checks", block.start_pc),
@@ -2503,7 +2622,12 @@ fn write_assembly(
                 &mut file,
                 &format!("ceno_aot_bb_{:08x}_accounting", block.start_pc),
             )?;
-            emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
+            emit_preflight_adaptive_block_plan_entry(
+                &mut file,
+                block_idx,
+                block,
+                planner_metadata,
+            )?;
             if block_plan.is_some() {
                 emit_assembly_profile_symbol(
                     &mut file,
@@ -3289,7 +3413,7 @@ fn build_aot_block_cost_descriptors(
     program: &Program,
     blocks: &[BasicBlock],
     model: &ShardCostModel,
-) -> Result<(Vec<AotBlockCostDescriptor>, Vec<AotChipContribution>)> {
+) -> Result<AotPlannerMetadata> {
     let mut descriptors = Vec::with_capacity(blocks.len());
     let mut contributions = Vec::new();
     let mut counts = vec![0u64; model.chip_count()];
@@ -3333,7 +3457,10 @@ fn build_aot_block_cost_descriptors(
             standalone_tower_peak,
         });
     }
-    Ok((descriptors, contributions))
+    Ok(AotPlannerMetadata {
+        descriptors,
+        contributions,
+    })
 }
 
 fn emit_preflight_direct_block_budget_guard(
@@ -3731,148 +3858,24 @@ fn emit_preflight_direct_block_register_access_exit(
     Ok(())
 }
 
-fn emit_preflight_adaptive_block_plan_entry(
+fn emit_preflight_specialized_cost_contribution(
     mut file: impl Write,
     block_idx: usize,
-    block: &BasicBlock,
+    contribution_idx: usize,
+    contribution: &AotChipContribution,
+    has_lzcnt: bool,
+    has_bucket_cache: bool,
 ) -> Result<()> {
-    let loop_label = format!(".L_preflight_cost_loop_{block_idx}");
-    let loop_done_label = format!(".L_preflight_cost_loop_done_{block_idx}");
-    let contribution_done_label = format!(".L_preflight_cost_contribution_done_{block_idx}");
-    let unchanged_label = format!(".L_preflight_cost_unchanged_{block_idx}");
-    let accept_label = format!(".L_preflight_cost_accept_{block_idx}");
-    let first_shard_label = format!(".L_preflight_cost_first_shard_{block_idx}");
-    let target_done_label = format!(".L_preflight_cost_target_done_{block_idx}");
-    let split_label = format!(".L_preflight_cost_split_{block_idx}");
-    let done_label = format!(".L_preflight_cost_done_{block_idx}");
-    let bucket_scan_label = format!(".L_preflight_bucket_scan_{block_idx}");
-    let bucket_scan_done_label = format!(".L_preflight_bucket_scan_done_{block_idx}");
-    let bucket_fast_label = format!(".L_preflight_bucket_fast_{block_idx}");
-    let bucket_slow_label = format!(".L_preflight_bucket_slow_{block_idx}");
-    let bucket_rollback_label = format!(".L_preflight_bucket_rollback_{block_idx}");
-    let block_cycles = block_instruction_count(block) * PC_STEP_SIZE as u64;
-    let descriptor_offset = block_idx * std::mem::size_of::<AotBlockCostDescriptor>();
-    let has_lzcnt = std::is_x86_feature_detected!("lzcnt");
-    let has_bucket_cache = has_lzcnt && std::is_x86_feature_detected!("bmi2");
-
-    if has_bucket_cache {
-        // Most blocks do not cross a power-of-two cost bucket. Prove that
-        // first, then update only instance counts. Rust callbacks advance a
-        // generation so chips they may have changed retry the exact path.
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12), %r10"
-        )?;
-        writeln!(file, "    movl {descriptor_offset}(%r10), %eax")?;
-        writeln!(file, "    movl {}(%r10), %ecx", descriptor_offset + 4)?;
-        writeln!(file, "    shlq $4, %rax")?;
-        writeln!(
-            file,
-            "    addq {AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET}(%r12), %rax"
-        )?;
-        writeln!(file, "    movq %rax, %r10")?;
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET}(%r12), %r8"
-        )?;
-        writeln!(file, "    testl %ecx, %ecx")?;
-        writeln!(file, "    je {bucket_scan_done_label}")?;
-        writeln!(file, "{bucket_scan_label}:")?;
-        writeln!(file, "    movl (%r10), %eax")?;
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET}(%r12), %rdi"
-        )?;
-        writeln!(file, "    cmpq %r8, (%rdi,%rax,8)")?;
-        writeln!(file, "    jne {bucket_slow_label}")?;
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
-        )?;
-        writeln!(file, "    movq (%rdi,%rax,8), %r9")?;
-        writeln!(file, "    addq 8(%r10), %r9")?;
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET}(%r12), %rdi"
-        )?;
-        writeln!(file, "    cmpq (%rdi,%rax,8), %r9")?;
-        writeln!(file, "    jae {bucket_slow_label}")?;
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
-        )?;
-        writeln!(file, "    movq %r9, (%rdi,%rax,8)")?;
-        writeln!(file, "    addq $16, %r10")?;
-        writeln!(file, "    decl %ecx")?;
-        writeln!(file, "    jne {bucket_scan_label}")?;
-        writeln!(file, "{bucket_scan_done_label}:")?;
-        writeln!(file, "{bucket_fast_label}:")?;
-        writeln!(file, "    jmp {unchanged_label}")?;
-        writeln!(file, "{bucket_slow_label}:")?;
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12), %rsi"
-        )?;
-        writeln!(file, "    movl {descriptor_offset}(%rsi), %eax")?;
-        writeln!(file, "    shlq $4, %rax")?;
-        writeln!(
-            file,
-            "    addq {AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET}(%r12), %rax"
-        )?;
-        writeln!(file, "    movq %rax, %rsi")?;
-        writeln!(file, "    cmpq %r10, %rsi")?;
-        writeln!(file, "    je {bucket_rollback_label}_done")?;
-        writeln!(file, "{bucket_rollback_label}:")?;
-        writeln!(file, "    movl (%rsi), %eax")?;
-        writeln!(file, "    movq 8(%rsi), %r9")?;
-        writeln!(
-            file,
-            "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
-        )?;
-        writeln!(file, "    subq %r9, (%rdi,%rax,8)")?;
-        writeln!(file, "    addq $16, %rsi")?;
-        writeln!(file, "    cmpq %r10, %rsi")?;
-        writeln!(file, "    jne {bucket_rollback_label}")?;
-        writeln!(file, "{bucket_rollback_label}_done:")?;
-    }
-
-    // Speculatively update all affected chip counts while accumulating trace
-    // and main deltas and the largest absolute tower peak. The only loop
-    // branch depends on descriptor size; bucket selection and max use cmov.
-    writeln!(file, "    pxor %xmm0, %xmm0")?;
-    writeln!(file, "    movq $0, 80(%rsp)")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_TOWER_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    movq (%rax), %rax")?;
-    writeln!(file, "    movq %rax, 32(%rsp)")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12), %r10"
-    )?;
-    writeln!(file, "    movl {descriptor_offset}(%r10), %eax")?;
-    writeln!(file, "    movl {}(%r10), %ecx", descriptor_offset + 4)?;
-    writeln!(file, "    shlq $4, %rax")?;
-    writeln!(
-        file,
-        "    addq {AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    movq %rax, %r10")?;
-    writeln!(file, "    testl %ecx, %ecx")?;
-    writeln!(file, "    je {loop_done_label}")?;
-    writeln!(file, "{loop_label}:")?;
-    writeln!(file, "    movl (%r10), %eax")?;
-    writeln!(file, "    movl 4(%r10), %edx")?;
-    writeln!(file, "    movq %rdx, 40(%rsp)")?;
-    writeln!(file, "    movq 8(%r10), %r11")?;
+    let done_label = format!(".L_preflight_cost_contribution_done_{block_idx}_{contribution_idx}");
+    writeln!(file, "    movl ${}, %eax", contribution.chip_index)?;
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
     )?;
     writeln!(file, "    leaq (%rdi,%rax,8), %rsi")?;
     writeln!(file, "    movq (%rsi), %r9")?;
-    writeln!(file, "    addq %r9, %r11")?;
+    writeln!(file, "    movq %r9, %r11")?;
+    writeln!(file, "    addq ${}, %r11", contribution.instance_delta)?;
     writeln!(file, "    movq %r11, (%rsi)")?;
     if has_lzcnt {
         writeln!(file, "    leaq -1(%r9), %rdx")?;
@@ -3928,18 +3931,17 @@ fn emit_preflight_adaptive_block_plan_entry(
         writeln!(file, "    cmovbe %r8, %r9")?;
     }
     writeln!(file, "    cmpq %r9, %rdx")?;
-    writeln!(file, "    je {contribution_done_label}")?;
+    writeln!(file, "    je {done_label}")?;
     writeln!(file, "    movq $1, 80(%rsp)")?;
-    // Point at this chip's precomputed cost-table row. Keeping the row
-    // offset in the descriptor avoids two serialized multiplies per chip.
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_COST_TABLE_OFFSET}(%r12), %rdi"
     )?;
-    writeln!(file, "    movq 40(%rsp), %r8")?;
-    writeln!(file, "    addq %r8, %rdi")?;
-    // Trace and main are adjacent table lanes. Accumulate both deltas in one
-    // SIMD register, avoiding four scalar loads and stack updates per chip.
+    writeln!(
+        file,
+        "    addq ${}, %rdi",
+        contribution.cost_row_byte_offset
+    )?;
     writeln!(file, "    movq %rdx, %r8")?;
     writeln!(file, "    shlq $4, %r8")?;
     writeln!(file, "    movq %r9, %rax")?;
@@ -3948,24 +3950,334 @@ fn emit_preflight_adaptive_block_plan_entry(
     writeln!(file, "    movdqu (%rdi,%rax), %xmm2")?;
     writeln!(file, "    psubq %xmm1, %xmm2")?;
     writeln!(file, "    paddq %xmm2, %xmm0")?;
-    // Tower tasks do not coexist across chips: retain only the largest new
-    // absolute per-chip peak, rather than summing tower deltas.
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_TOWER_COST_TABLE_OFFSET}(%r12), %rdi"
     )?;
-    writeln!(file, "    movq 40(%rsp), %r8")?;
-    writeln!(file, "    shrq $1, %r8")?;
-    writeln!(file, "    addq %r8, %rdi")?;
+    writeln!(
+        file,
+        "    addq ${}, %rdi",
+        contribution.cost_row_byte_offset / 2
+    )?;
     writeln!(file, "    movq (%rdi,%r9,8), %rax")?;
     writeln!(file, "    movq 32(%rsp), %r8")?;
     writeln!(file, "    cmpq %r8, %rax")?;
     writeln!(file, "    cmovaq %rax, %r8")?;
     writeln!(file, "    movq %r8, 32(%rsp)")?;
-    writeln!(file, "{contribution_done_label}:")?;
-    writeln!(file, "    addq $16, %r10")?;
-    writeln!(file, "    decl %ecx")?;
-    writeln!(file, "    jne {loop_label}")?;
+    writeln!(file, "{done_label}:")?;
+    Ok(())
+}
+
+fn emit_preflight_adaptive_block_plan_entry(
+    mut file: impl Write,
+    block_idx: usize,
+    block: &BasicBlock,
+    planner_metadata: Option<&AotPlannerMetadata>,
+) -> Result<()> {
+    let specialized_descriptor = planner_metadata
+        .map(|metadata| {
+            let descriptor = &metadata.descriptors[block_idx];
+            (descriptor, metadata.contributions_for(descriptor))
+        })
+        .filter(|(_, contributions)| contributions.len() <= 2);
+    let loop_label = format!(".L_preflight_cost_loop_{block_idx}");
+    let loop_done_label = format!(".L_preflight_cost_loop_done_{block_idx}");
+    let contribution_done_label = format!(".L_preflight_cost_contribution_done_{block_idx}");
+    let unchanged_label = format!(".L_preflight_cost_unchanged_{block_idx}");
+    let accept_label = format!(".L_preflight_cost_accept_{block_idx}");
+    let first_shard_label = format!(".L_preflight_cost_first_shard_{block_idx}");
+    let target_done_label = format!(".L_preflight_cost_target_done_{block_idx}");
+    let split_label = format!(".L_preflight_cost_split_{block_idx}");
+    let done_label = format!(".L_preflight_cost_done_{block_idx}");
+    let bucket_scan_label = format!(".L_preflight_bucket_scan_{block_idx}");
+    let bucket_scan_done_label = format!(".L_preflight_bucket_scan_done_{block_idx}");
+    let bucket_fast_label = format!(".L_preflight_bucket_fast_{block_idx}");
+    let bucket_slow_label = format!(".L_preflight_bucket_slow_{block_idx}");
+    let bucket_rollback_label = format!(".L_preflight_bucket_rollback_{block_idx}");
+    let block_cycles = block_instruction_count(block) * PC_STEP_SIZE as u64;
+    let descriptor_offset = block_idx * std::mem::size_of::<AotBlockCostDescriptor>();
+    let has_lzcnt = std::is_x86_feature_detected!("lzcnt");
+    let has_bucket_cache = has_lzcnt && std::is_x86_feature_detected!("bmi2");
+
+    if has_bucket_cache {
+        if let Some((_, contributions)) = specialized_descriptor {
+            // The common one/two-chip case embeds immutable descriptor fields
+            // directly in the artifact and has no descriptor-table scan.
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET}(%r12), %r8"
+            )?;
+            for (index, contribution) in contributions.iter().enumerate() {
+                let fail_label = format!(".L_preflight_bucket_special_fail_{block_idx}_{index}");
+                writeln!(file, "    movl ${}, %eax", contribution.chip_index)?;
+                writeln!(
+                    file,
+                    "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET}(%r12), %rdi"
+                )?;
+                writeln!(file, "    cmpq %r8, (%rdi,%rax,8)")?;
+                writeln!(file, "    jne {fail_label}")?;
+                writeln!(
+                    file,
+                    "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+                )?;
+                writeln!(file, "    movq (%rdi,%rax,8), %r9")?;
+                writeln!(file, "    addq ${}, %r9", contribution.instance_delta)?;
+                writeln!(
+                    file,
+                    "    movq {AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET}(%r12), %rdi"
+                )?;
+                writeln!(file, "    cmpq (%rdi,%rax,8), %r9")?;
+                writeln!(file, "    jae {fail_label}")?;
+                writeln!(
+                    file,
+                    "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+                )?;
+                writeln!(file, "    movq %r9, (%rdi,%rax,8)")?;
+            }
+            writeln!(file, "    jmp {unchanged_label}")?;
+            for (index, _) in contributions.iter().enumerate() {
+                let fail_label = format!(".L_preflight_bucket_special_fail_{block_idx}_{index}");
+                writeln!(file, "{fail_label}:")?;
+                for contribution in &contributions[..index] {
+                    writeln!(file, "    movl ${}, %eax", contribution.chip_index)?;
+                    writeln!(
+                        file,
+                        "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+                    )?;
+                    writeln!(
+                        file,
+                        "    subq ${}, (%rdi,%rax,8)",
+                        contribution.instance_delta
+                    )?;
+                }
+                writeln!(file, "    jmp {bucket_slow_label}")?;
+            }
+            writeln!(file, "{bucket_slow_label}:")?;
+        } else {
+            // Most blocks do not cross a power-of-two cost bucket. Prove that
+            // first, then update only instance counts. Rust callbacks advance a
+            // generation so chips they may have changed retry the exact path.
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12), %r10"
+            )?;
+            writeln!(file, "    movl {descriptor_offset}(%r10), %eax")?;
+            writeln!(file, "    movl {}(%r10), %ecx", descriptor_offset + 4)?;
+            writeln!(file, "    shlq $4, %rax")?;
+            writeln!(
+                file,
+                "    addq {AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET}(%r12), %rax"
+            )?;
+            writeln!(file, "    movq %rax, %r10")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET}(%r12), %r8"
+            )?;
+            writeln!(file, "    testl %ecx, %ecx")?;
+            writeln!(file, "    je {bucket_scan_done_label}")?;
+            writeln!(file, "{bucket_scan_label}:")?;
+            writeln!(file, "    movl (%r10), %eax")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET}(%r12), %rdi"
+            )?;
+            writeln!(file, "    cmpq %r8, (%rdi,%rax,8)")?;
+            writeln!(file, "    jne {bucket_slow_label}")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+            )?;
+            writeln!(file, "    movq (%rdi,%rax,8), %r9")?;
+            writeln!(file, "    addq 8(%r10), %r9")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET}(%r12), %rdi"
+            )?;
+            writeln!(file, "    cmpq (%rdi,%rax,8), %r9")?;
+            writeln!(file, "    jae {bucket_slow_label}")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+            )?;
+            writeln!(file, "    movq %r9, (%rdi,%rax,8)")?;
+            writeln!(file, "    addq $16, %r10")?;
+            writeln!(file, "    decl %ecx")?;
+            writeln!(file, "    jne {bucket_scan_label}")?;
+            writeln!(file, "{bucket_scan_done_label}:")?;
+            writeln!(file, "{bucket_fast_label}:")?;
+            writeln!(file, "    jmp {unchanged_label}")?;
+            writeln!(file, "{bucket_slow_label}:")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12), %rsi"
+            )?;
+            writeln!(file, "    movl {descriptor_offset}(%rsi), %eax")?;
+            writeln!(file, "    shlq $4, %rax")?;
+            writeln!(
+                file,
+                "    addq {AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET}(%r12), %rax"
+            )?;
+            writeln!(file, "    movq %rax, %rsi")?;
+            writeln!(file, "    cmpq %r10, %rsi")?;
+            writeln!(file, "    je {bucket_rollback_label}_done")?;
+            writeln!(file, "{bucket_rollback_label}:")?;
+            writeln!(file, "    movl (%rsi), %eax")?;
+            writeln!(file, "    movq 8(%rsi), %r9")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+            )?;
+            writeln!(file, "    subq %r9, (%rdi,%rax,8)")?;
+            writeln!(file, "    addq $16, %rsi")?;
+            writeln!(file, "    cmpq %r10, %rsi")?;
+            writeln!(file, "    jne {bucket_rollback_label}")?;
+            writeln!(file, "{bucket_rollback_label}_done:")?;
+        }
+    }
+
+    // Speculatively update all affected chip counts while accumulating trace
+    // and main deltas and the largest absolute tower peak. The only loop
+    // branch depends on descriptor size; bucket selection and max use cmov.
+    writeln!(file, "    pxor %xmm0, %xmm0")?;
+    writeln!(file, "    movq $0, 80(%rsp)")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_TOWER_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq (%rax), %rax")?;
+    writeln!(file, "    movq %rax, 32(%rsp)")?;
+    if let Some((_, contributions)) = specialized_descriptor {
+        for (index, contribution) in contributions.iter().enumerate() {
+            emit_preflight_specialized_cost_contribution(
+                &mut file,
+                block_idx,
+                index,
+                contribution,
+                has_lzcnt,
+                has_bucket_cache,
+            )?;
+        }
+    } else {
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12), %r10"
+        )?;
+        writeln!(file, "    movl {descriptor_offset}(%r10), %eax")?;
+        writeln!(file, "    movl {}(%r10), %ecx", descriptor_offset + 4)?;
+        writeln!(file, "    shlq $4, %rax")?;
+        writeln!(
+            file,
+            "    addq {AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET}(%r12), %rax"
+        )?;
+        writeln!(file, "    movq %rax, %r10")?;
+        writeln!(file, "    testl %ecx, %ecx")?;
+        writeln!(file, "    je {loop_done_label}")?;
+        writeln!(file, "{loop_label}:")?;
+        writeln!(file, "    movl (%r10), %eax")?;
+        writeln!(file, "    movl 4(%r10), %edx")?;
+        writeln!(file, "    movq %rdx, 40(%rsp)")?;
+        writeln!(file, "    movq 8(%r10), %r11")?;
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
+        )?;
+        writeln!(file, "    leaq (%rdi,%rax,8), %rsi")?;
+        writeln!(file, "    movq (%rsi), %r9")?;
+        writeln!(file, "    addq %r9, %r11")?;
+        writeln!(file, "    movq %r11, (%rsi)")?;
+        if has_lzcnt {
+            writeln!(file, "    leaq -1(%r9), %rdx")?;
+            writeln!(file, "    lzcntq %rdx, %rdx")?;
+            writeln!(file, "    movq $65, %r8")?;
+            writeln!(file, "    subq %rdx, %r8")?;
+            writeln!(file, "    testq %r9, %r9")?;
+            writeln!(file, "    cmovz %r9, %r8")?;
+            writeln!(file, "    movq %r8, %rdx")?;
+            writeln!(file, "    leaq -1(%r11), %r9")?;
+            writeln!(file, "    lzcntq %r9, %r9")?;
+            writeln!(file, "    negq %r9")?;
+            writeln!(file, "    addq $65, %r9")?;
+            if has_bucket_cache {
+                writeln!(file, "    leaq -1(%r9), %r8")?;
+                writeln!(file, "    movq $1, %rdi")?;
+                writeln!(file, "    shlxq %r8, %rdi, %r8")?;
+                writeln!(file, "    incq %r8")?;
+                writeln!(
+                    file,
+                    "    movq {AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET}(%r12), %rdi"
+                )?;
+                writeln!(file, "    movq %r8, (%rdi,%rax,8)")?;
+                writeln!(
+                    file,
+                    "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET}(%r12), %rdi"
+                )?;
+                writeln!(
+                    file,
+                    "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET}(%r12), %r8"
+                )?;
+                writeln!(file, "    movq %r8, (%rdi,%rax,8)")?;
+            }
+        } else {
+            writeln!(file, "    movq %r9, %rdx")?;
+            writeln!(file, "    decq %rdx")?;
+            writeln!(file, "    orq $1, %rdx")?;
+            writeln!(file, "    bsrq %rdx, %rdx")?;
+            writeln!(file, "    addq $2, %rdx")?;
+            writeln!(file, "    movq $1, %r8")?;
+            writeln!(file, "    cmpq $1, %r9")?;
+            writeln!(file, "    cmovbe %r8, %rdx")?;
+            writeln!(file, "    xorq %r8, %r8")?;
+            writeln!(file, "    testq %r9, %r9")?;
+            writeln!(file, "    cmovz %r8, %rdx")?;
+            writeln!(file, "    movq %r11, %r9")?;
+            writeln!(file, "    decq %r9")?;
+            writeln!(file, "    orq $1, %r9")?;
+            writeln!(file, "    bsrq %r9, %r9")?;
+            writeln!(file, "    addq $2, %r9")?;
+            writeln!(file, "    cmpq $1, %r11")?;
+            writeln!(file, "    movq $1, %r8")?;
+            writeln!(file, "    cmovbe %r8, %r9")?;
+        }
+        writeln!(file, "    cmpq %r9, %rdx")?;
+        writeln!(file, "    je {contribution_done_label}")?;
+        writeln!(file, "    movq $1, 80(%rsp)")?;
+        // Point at this chip's precomputed cost-table row. Keeping the row
+        // offset in the descriptor avoids two serialized multiplies per chip.
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_COST_TABLE_OFFSET}(%r12), %rdi"
+        )?;
+        writeln!(file, "    movq 40(%rsp), %r8")?;
+        writeln!(file, "    addq %r8, %rdi")?;
+        // Trace and main are adjacent table lanes. Accumulate both deltas in one
+        // SIMD register, avoiding four scalar loads and stack updates per chip.
+        writeln!(file, "    movq %rdx, %r8")?;
+        writeln!(file, "    shlq $4, %r8")?;
+        writeln!(file, "    movq %r9, %rax")?;
+        writeln!(file, "    shlq $4, %rax")?;
+        writeln!(file, "    movdqu (%rdi,%r8), %xmm1")?;
+        writeln!(file, "    movdqu (%rdi,%rax), %xmm2")?;
+        writeln!(file, "    psubq %xmm1, %xmm2")?;
+        writeln!(file, "    paddq %xmm2, %xmm0")?;
+        // Tower tasks do not coexist across chips: retain only the largest new
+        // absolute per-chip peak, rather than summing tower deltas.
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_TOWER_COST_TABLE_OFFSET}(%r12), %rdi"
+        )?;
+        writeln!(file, "    movq 40(%rsp), %r8")?;
+        writeln!(file, "    shrq $1, %r8")?;
+        writeln!(file, "    addq %r8, %rdi")?;
+        writeln!(file, "    movq (%rdi,%r9,8), %rax")?;
+        writeln!(file, "    movq 32(%rsp), %r8")?;
+        writeln!(file, "    cmpq %r8, %rax")?;
+        writeln!(file, "    cmovaq %rax, %r8")?;
+        writeln!(file, "    movq %r8, 32(%rsp)")?;
+        writeln!(file, "{contribution_done_label}:")?;
+        writeln!(file, "    addq $16, %r10")?;
+        writeln!(file, "    decl %ecx")?;
+        writeln!(file, "    jne {loop_label}")?;
+    }
     writeln!(file, "{loop_done_label}:")?;
     writeln!(file, "    cmpq $0, 80(%rsp)")?;
     writeln!(file, "    je {unchanged_label}")?;
@@ -4070,6 +4382,44 @@ fn emit_preflight_adaptive_block_plan_entry(
     writeln!(file, "    jae {split_label}")?;
     writeln!(file, "    jmp {done_label}")?;
     writeln!(file, "{split_label}:")?;
+    if let Some((descriptor, contributions)) = specialized_descriptor {
+        writeln!(
+            file,
+            "    movq ${}, {AOT_CTX_PREFLIGHT_PENDING_SPECIALIZED_OFFSET}(%r12)",
+            contributions.len() + 1
+        )?;
+        for (index, contribution) in contributions.iter().enumerate() {
+            writeln!(
+                file,
+                "    movl ${}, {}(%r12)",
+                contribution.chip_index,
+                AOT_CTX_PREFLIGHT_PENDING_CHIPS_OFFSET + index * std::mem::size_of::<u32>()
+            )?;
+            writeln!(file, "    movabsq ${}, %rax", contribution.instance_delta)?;
+            writeln!(
+                file,
+                "    movq %rax, {}(%r12)",
+                AOT_CTX_PREFLIGHT_PENDING_DELTAS_OFFSET + index * std::mem::size_of::<u64>()
+            )?;
+        }
+        for (offset, value) in [
+            (
+                AOT_CTX_PREFLIGHT_PENDING_TRACE_OFFSET,
+                descriptor.standalone_trace_cells,
+            ),
+            (
+                AOT_CTX_PREFLIGHT_PENDING_MAIN_OFFSET,
+                descriptor.standalone_main_peak,
+            ),
+            (
+                AOT_CTX_PREFLIGHT_PENDING_TOWER_OFFSET,
+                descriptor.standalone_tower_peak,
+            ),
+        ] {
+            writeln!(file, "    movabsq ${value}, %rax")?;
+            writeln!(file, "    movq %rax, {offset}(%r12)")?;
+        }
+    }
     writeln!(
         file,
         "    movq ${block_idx}, {AOT_CTX_PREFLIGHT_PENDING_BLOCK_OFFSET}(%r12)"
@@ -6157,14 +6507,31 @@ unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntime
             unsafe { aot_trace_native_preflight(context as *mut AotRuntimeContext) }
         }
         AOT_PREFLIGHT_HELPER_SHARD_SPLIT => {
+            let specialized_count = context
+                .preflight_pending_specialized
+                .checked_sub(1)
+                .map(|count| count as usize);
             let adaptive_descriptor = (!context.preflight_block_cost_descriptors.is_null()
+                && specialized_count.is_none()
                 && context.preflight_pending_block != usize::MAX)
                 .then(|| unsafe {
                     *context
                         .preflight_block_cost_descriptors
                         .add(context.preflight_pending_block)
                 });
-            if let Some(descriptor) = adaptive_descriptor {
+            if let Some(count) = specialized_count {
+                let counts = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        context.preflight_num_instances,
+                        context.preflight_num_chips,
+                    )
+                };
+                for index in 0..count {
+                    let chip = context.preflight_pending_chips[index] as usize;
+                    counts[chip] =
+                        counts[chip].saturating_sub(context.preflight_pending_deltas[index]);
+                }
+            } else if let Some(descriptor) = adaptive_descriptor {
                 // Restore the accepted shard's counts before finalizing it;
                 // the native entry speculatively stored this block's candidate.
                 let counts = unsafe {
@@ -6188,7 +6555,31 @@ unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntime
                 }
             }
             vm.tracer_mut().record_native_shard_split();
-            if let Some(descriptor) = adaptive_descriptor {
+            if let Some(count) = specialized_count {
+                let counts = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        context.preflight_num_instances,
+                        context.preflight_num_chips,
+                    )
+                };
+                for index in 0..count {
+                    counts[context.preflight_pending_chips[index] as usize] =
+                        context.preflight_pending_deltas[index];
+                }
+                unsafe {
+                    *context.preflight_planner_cur_trace_cells = context.preflight_pending_trace;
+                    *context.preflight_planner_cur_main_peak = context.preflight_pending_main;
+                    *context.preflight_planner_cur_tower_peak = context.preflight_pending_tower;
+                    *context.preflight_planner_cur_cells =
+                        context.preflight_pending_trace.saturating_add(
+                            context
+                                .preflight_pending_main
+                                .max(context.preflight_pending_tower),
+                        );
+                }
+                context.preflight_pending_specialized = 0;
+                context.preflight_pending_block = usize::MAX;
+            } else if let Some(descriptor) = adaptive_descriptor {
                 let counts = unsafe {
                     std::slice::from_raw_parts_mut(
                         context.preflight_num_instances,
@@ -6722,6 +7113,30 @@ mod tests {
             std::mem::offset_of!(AotRuntimeContext, preflight_bucket_generation),
             AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET
         );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_pending_specialized),
+            AOT_CTX_PREFLIGHT_PENDING_SPECIALIZED_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_pending_chips),
+            AOT_CTX_PREFLIGHT_PENDING_CHIPS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_pending_deltas),
+            AOT_CTX_PREFLIGHT_PENDING_DELTAS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_pending_trace),
+            AOT_CTX_PREFLIGHT_PENDING_TRACE_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_pending_main),
+            AOT_CTX_PREFLIGHT_PENDING_MAIN_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_pending_tower),
+            AOT_CTX_PREFLIGHT_PENDING_TOWER_OFFSET
+        );
     }
 
     #[test]
@@ -7165,7 +7580,14 @@ mod tests {
 
         let key = format!(
             "{}-cells{}-cycles{}",
-            aot_cache_key(&program, AssemblyTraceStyle::PreflightDirectBlockPlan),
+            planner_cache_key(
+                &program,
+                AssemblyTraceStyle::PreflightDirectBlockPlan,
+                &config
+                    .step_cell_extractor()
+                    .and_then(|extractor| extractor.shard_cost_model())
+                    .unwrap(),
+            ),
             config.max_cell_per_shard(),
             config.max_cycle_per_shard()
         );
@@ -7211,6 +7633,55 @@ mod tests {
         );
         let identity_report = identity_rebuilt.run_to_halt(&mut identity_vm, 10).unwrap();
         assert_eq!(identity_report.executed_steps, expected_steps);
+    }
+
+    #[test]
+    fn specialized_planner_matches_generic_finite_cell_shards() {
+        let cache = tempfile::tempdir().unwrap();
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 8),
+            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
+            encode_rv32(InsnKind::BNE, 1, 0, 0, -4),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let config = crate::PreflightTracerConfig::new(true, 4, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
+        let generic_aot =
+            AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                .unwrap();
+        let mut generic = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            config.clone(),
+        );
+        let generic_report = generic_aot.run_to_halt(&mut generic, 64).unwrap();
+
+        let aot = AotProgram::load_or_train_preflight_in(
+            &CENO_PLATFORM,
+            program.clone(),
+            [],
+            config.clone(),
+            cache.path(),
+        )
+        .unwrap();
+        let mut direct = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
+        let report = aot.run_to_halt(&mut direct, 64).unwrap();
+        assert_eq!(report.fallback, generic_report.fallback);
+        let (generic_plan, generic_next) = generic.take_tracer().into_shard_plan();
+        let (direct_plan, direct_next) = direct.take_tracer().into_shard_plan();
+        assert_eq!(
+            direct_plan.shard_cycle_boundaries(),
+            generic_plan.shard_cycle_boundaries()
+        );
+        assert_eq!(
+            direct_plan.predicted_shard_costs(),
+            generic_plan.predicted_shard_costs()
+        );
+        assert_eq!(direct_next, generic_next);
     }
 
     #[test]
@@ -8368,25 +8839,33 @@ mod tests {
             .iter()
             .map(|block| block.start_pc)
             .collect::<Vec<_>>();
+        let model = crate::StepCellExtractor::shard_cost_model(&OneCellPerNativeStep).unwrap();
+        let planner_metadata = build_aot_block_cost_descriptors(&program, &blocks, &model).unwrap();
         let cache = tempfile::tempdir().unwrap();
         let production = cache.path().join("production.S");
         let tracking = cache.path().join("tracking-full.S");
-        write_assembly(
+        write_assembly_with_planner(
             &production,
             &program,
             &blocks,
             &order,
             AssemblyTraceStyle::PreflightDirectBlockPlan,
+            Some(&planner_metadata),
         )
         .unwrap();
-        write_assembly(
+        write_assembly_with_planner(
             &tracking,
             &program,
             &blocks,
             &order,
             AssemblyTraceStyle::PreflightTracking(PreflightAotStage::Full),
+            Some(&planner_metadata),
         )
         .unwrap();
-        assert_eq!(fs::read(production).unwrap(), fs::read(tracking).unwrap());
+        let production = fs::read(production).unwrap();
+        assert_eq!(production, fs::read(tracking).unwrap());
+        let assembly = String::from_utf8(production).unwrap();
+        assert!(assembly.contains("preflight_bucket_special_fail"));
+        assert!(!assembly.contains(".L_preflight_cost_loop_0:"));
     }
 }

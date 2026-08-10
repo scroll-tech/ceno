@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 use strum::EnumCount;
+use tiny_keccak::{Hasher, Keccak};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -161,6 +162,7 @@ pub struct ShardCostModel {
     main_cost_table: Vec<u64>,
     tower_cost_table: Vec<u64>,
     extension_field_degree: u64,
+    fingerprint: [u8; 32],
 }
 
 impl ShardCostModel {
@@ -181,7 +183,7 @@ impl ShardCostModel {
                 .all(|&chip| chip < chip_specs.len()),
             "shard cost mapping references an unknown chip"
         );
-        let opcode_chips = opcode_chips
+        let opcode_chips: Vec<Vec<u32>> = opcode_chips
             .into_iter()
             .map(|chips| chips.into_iter().map(|chip| chip as u32).collect())
             .collect();
@@ -222,6 +224,15 @@ impl ShardCostModel {
                 tower_cost_table.push(tower_peak);
             }
         }
+        let fingerprint = shard_cost_model_fingerprint(
+            &opcode_chips,
+            &ecall_chips,
+            &chip_specs,
+            &trace_cost_table,
+            &main_cost_table,
+            &tower_cost_table,
+            extension_field_degree,
+        );
         Self {
             opcode_chips,
             ecall_chips,
@@ -230,6 +241,7 @@ impl ShardCostModel {
             main_cost_table,
             tower_cost_table,
             extension_field_degree,
+            fingerprint,
         }
     }
 
@@ -289,6 +301,68 @@ impl ShardCostModel {
     pub fn extension_field_degree(&self) -> u64 {
         self.extension_field_degree
     }
+
+    pub fn fingerprint(&self) -> [u8; 32] {
+        self.fingerprint
+    }
+}
+
+fn shard_cost_model_fingerprint(
+    opcode_chips: &[Vec<u32>],
+    ecall_chips: &BTreeMap<Word, Vec<u32>>,
+    chip_specs: &[ChipCostSpec],
+    trace_cost_table: &[u64],
+    main_cost_table: &[u64],
+    tower_cost_table: &[u64],
+    extension_field_degree: u64,
+) -> [u8; 32] {
+    fn update_u64(hasher: &mut Keccak, value: u64) {
+        hasher.update(&value.to_le_bytes());
+    }
+    fn update_u32_slice(hasher: &mut Keccak, values: &[u32]) {
+        update_u64(hasher, values.len() as u64);
+        for &value in values {
+            hasher.update(&value.to_le_bytes());
+        }
+    }
+    fn update_u64_slice(hasher: &mut Keccak, values: &[u64]) {
+        update_u64(hasher, values.len() as u64);
+        for &value in values {
+            update_u64(hasher, value);
+        }
+    }
+
+    let mut hasher = Keccak::v256();
+    hasher.update(b"ceno-shard-cost-model-v1");
+    update_u64(&mut hasher, opcode_chips.len() as u64);
+    for chips in opcode_chips {
+        update_u32_slice(&mut hasher, chips);
+    }
+    update_u64(&mut hasher, ecall_chips.len() as u64);
+    for (&code, chips) in ecall_chips {
+        hasher.update(&code.to_le_bytes());
+        update_u32_slice(&mut hasher, chips);
+    }
+    update_u64(&mut hasher, chip_specs.len() as u64);
+    for spec in chip_specs {
+        hasher.update(&[spec.rotation]);
+        update_u64(&mut hasher, spec.trace_cells_per_row);
+        update_u64(&mut hasher, spec.tower_peak_cells_per_row);
+        match &spec.tower_peak_cells_by_bucket {
+            Some(costs) => {
+                hasher.update(&[1]);
+                update_u64_slice(&mut hasher, costs);
+            }
+            None => hasher.update(&[0]),
+        }
+    }
+    update_u64_slice(&mut hasher, trace_cost_table);
+    update_u64_slice(&mut hasher, main_cost_table);
+    update_u64_slice(&mut hasher, tower_cost_table);
+    update_u64(&mut hasher, extension_field_degree);
+    let mut fingerprint = [0u8; 32];
+    hasher.finalize(&mut fingerprint);
+    fingerprint
 }
 
 #[inline(always)]
@@ -2779,6 +2853,49 @@ mod tests {
         assert_eq!(model.shard_cost(&[3]), 48);
         assert_eq!(model.shard_cost(&[4]), 48);
         assert_eq!(model.shard_cost(&[5]), 96);
+    }
+
+    #[test]
+    fn shard_cost_model_fingerprint_covers_planner_inputs() {
+        let spec = ChipCostSpec {
+            rotation: 1,
+            trace_cells_per_row: 2,
+            tower_peak_cells_per_row: 3,
+            tower_peak_cells_by_bucket: None,
+        };
+        let base = cost_model(vec![spec.clone()]);
+        let duplicate = cost_model(vec![spec.clone()]);
+        assert_eq!(base.fingerprint(), duplicate.fingerprint());
+
+        let mut opcodes = vec![Vec::new(); InsnKind::COUNT];
+        opcodes[InsnKind::SUB as usize] = vec![0];
+        let mut ecalls = BTreeMap::new();
+        ecalls.insert(7, vec![0]);
+        let remapped = ShardCostModel::new(opcodes, ecalls.clone(), vec![spec.clone()], 4);
+        assert_ne!(base.fingerprint(), remapped.fingerprint());
+
+        let changed_spec = ShardCostModel::new(
+            vec![Vec::new(); InsnKind::COUNT],
+            ecalls.clone(),
+            vec![ChipCostSpec {
+                trace_cells_per_row: 4,
+                ..spec.clone()
+            }],
+            4,
+        );
+        assert_ne!(base.fingerprint(), changed_spec.fingerprint());
+
+        let changed_ecall = ShardCostModel::new(
+            vec![Vec::new(); InsnKind::COUNT],
+            BTreeMap::from([(8, vec![0])]),
+            vec![spec.clone()],
+            4,
+        );
+        assert_ne!(base.fingerprint(), changed_ecall.fingerprint());
+
+        let changed_extension =
+            ShardCostModel::new(vec![Vec::new(); InsnKind::COUNT], ecalls, vec![spec], 2);
+        assert_ne!(base.fingerprint(), changed_extension.fingerprint());
     }
 
     #[test]
