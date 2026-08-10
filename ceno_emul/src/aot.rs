@@ -264,7 +264,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 62;
+const AOT_ABI_VERSION: u32 = 63;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
@@ -2528,6 +2528,11 @@ fn write_assembly_with_planner(
         } else {
             None
         };
+        let memory_access_count = preflight_block_memory_access_count(program, block)?;
+        let hoist_memory_regions =
+            matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess))
+                && trace_style.stage_enabled(PreflightAotStage::MmioBounds)
+                && memory_access_count <= 32;
         let pure_block_plan = if trace_style == AssemblyTraceStyle::Pure {
             preflight_block_plan_kind(program, block)?
         } else {
@@ -2607,7 +2612,12 @@ fn write_assembly_with_planner(
         if block_plan.is_some() {
             emit_preflight_direct_block_budget_guard(&mut file, block)?;
             if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
-                emit_preflight_direct_block_memory_fast_path_guard(&mut file, program, block)?;
+                emit_preflight_direct_block_memory_fast_path_guard(
+                    &mut file,
+                    program,
+                    block,
+                    hoist_memory_regions,
+                )?;
             }
             if trace_style.stage_enabled(PreflightAotStage::EventCapacity) {
                 emit_preflight_direct_block_event_capacity_guard(
@@ -2653,9 +2663,18 @@ fn write_assembly_with_planner(
             )?;
         }
         let mut pc = block.start_pc;
+        let mut memory_access_index = 0usize;
         let mut last_profile_region = None;
         while pc < block.end_pc {
             let insn = instruction_at(program, pc)?;
+            let current_memory_access_index =
+                if native_opcode_family(insn.kind) == Some(NativeOpcodeFamily::Memory) {
+                    let index = memory_access_index;
+                    memory_access_index += 1;
+                    Some(index)
+                } else {
+                    None
+                };
             let step_trace_style = if execution_state_block {
                 AssemblyTraceStyle::PreflightExecutionBlock
             } else if trace_style.tracking_stage().is_some() {
@@ -2694,6 +2713,13 @@ fn write_assembly_with_planner(
                 remaining_after: ((block.end_pc - pc - PC_STEP_SIZE as u32) / PC_STEP_SIZE as u32)
                     as u64,
                 cycle_offset: (pc - block.start_pc) as u64,
+                memory_guard_hoisted: matches!(
+                    block_plan,
+                    Some(PreflightBlockPlanKind::MemoryExactAccess)
+                ),
+                memory_region_index: hoist_memory_regions
+                    .then_some(current_memory_access_index)
+                    .flatten(),
             });
             emit_instruction_body(
                 &mut file,
@@ -3248,6 +3274,8 @@ fn block_instruction_count(block: &BasicBlock) -> u64 {
 struct ReservedBlockStep {
     remaining_after: u64,
     cycle_offset: u64,
+    memory_guard_hoisted: bool,
+    memory_region_index: Option<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -3562,6 +3590,19 @@ fn preflight_block_event_capacity(
         })
 }
 
+fn preflight_block_memory_access_count(program: &Program, block: &BasicBlock) -> Result<usize> {
+    let mut count = 0usize;
+    let mut pc = block.start_pc;
+    while pc < block.end_pc {
+        let insn = instruction_at(program, pc)?;
+        count += usize::from(
+            native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind),
+        );
+        pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+    }
+    Ok(count)
+}
+
 fn emit_preflight_direct_block_event_capacity_guard(
     mut file: impl Write,
     program: &Program,
@@ -3602,18 +3643,32 @@ fn emit_preflight_direct_block_memory_fast_path_guard(
     mut file: impl Write,
     program: &Program,
     block: &BasicBlock,
+    record_regions: bool,
 ) -> Result<()> {
     writeln!(file, "    movq %r13, %r10")?;
+    if record_regions {
+        writeln!(file, "    xorq %r11, %r11")?;
+    }
     let mut pc = block.start_pc;
+    let mut memory_access_index = 0usize;
     while pc < block.end_pc {
         let insn = instruction_at(program, pc)?;
         if matches!(
             native_opcode_family(insn.kind),
             Some(NativeOpcodeFamily::Memory)
         ) {
-            emit_preflight_direct_memory_fast_path_guard(&mut file, pc, insn)?;
+            emit_preflight_direct_memory_fast_path_guard(
+                &mut file,
+                pc,
+                insn,
+                record_regions.then_some(memory_access_index),
+            )?;
+            memory_access_index += 1;
         }
         pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+    }
+    if record_regions {
+        writeln!(file, "    movq %r11, 64(%rsp)")?;
     }
     Ok(())
 }
@@ -3622,6 +3677,7 @@ fn emit_preflight_direct_memory_fast_path_guard(
     mut file: impl Write,
     pc: u32,
     insn: Instruction,
+    region_index: Option<usize>,
 ) -> Result<()> {
     let heap_ok_label = format!(".L_block_memory_heap_ok_{pc:x}");
     let stack_ok_label = format!(".L_block_memory_stack_ok_{pc:x}");
@@ -3672,11 +3728,23 @@ fn emit_preflight_direct_memory_fast_path_guard(
     )?;
     writeln!(file, "    jb {done_label}")?;
     writeln!(file, "    jmp L_memory_guard")?;
-    writeln!(file, "{heap_ok_label}:")?;
-    writeln!(file, "    jmp {done_label}")?;
-    writeln!(file, "{stack_ok_label}:")?;
-    writeln!(file, "    jmp {done_label}")?;
-    writeln!(file, "{hints_ok_label}:")?;
+    for (label, region) in [
+        (&heap_ok_label, 1u8),
+        (&stack_ok_label, 2u8),
+        (&hints_ok_label, 3u8),
+    ] {
+        writeln!(file, "{label}:")?;
+        if let Some(index) = region_index {
+            let bit = index * 2;
+            if region & 1 != 0 {
+                writeln!(file, "    btsq ${bit}, %r11")?;
+            }
+            if region & 2 != 0 {
+                writeln!(file, "    btsq ${}, %r11", bit + 1)?;
+            }
+        }
+        writeln!(file, "    jmp {done_label}")?;
+    }
     writeln!(file, "{done_label}:")?;
     Ok(())
 }
@@ -5680,6 +5748,10 @@ fn emit_native_memory(
         !trace_style.is_pure() && trace_style.stage_enabled(PreflightAotStage::MemoryLatest);
     let tracks_mmio_bounds =
         !trace_style.is_pure() && trace_style.stage_enabled(PreflightAotStage::MmioBounds);
+    let memory_guard_hoisted = reserved_block_step
+        .map(|step| step.memory_guard_hoisted)
+        .unwrap_or(false);
+    let encoded_memory_region = reserved_block_step.and_then(|step| step.memory_region_index);
     let memory_cells = if trace_style.is_pure() {
         "%rbx"
     } else {
@@ -5710,7 +5782,7 @@ fn emit_native_memory(
         )?;
     }
     writeln!(file, "    leal {}(%rax), %edx", insn.imm)?;
-    if trace_style != AssemblyTraceStyle::PureBlock {
+    if trace_style != AssemblyTraceStyle::PureBlock && !memory_guard_hoisted {
         match insn.kind {
             InsnKind::LH | InsnKind::LHU | InsnKind::SH => {
                 writeln!(file, "    testl $1, %edx")?;
@@ -5733,7 +5805,7 @@ fn emit_native_memory(
         writeln!(file, "    subl %r14d, %edx")?;
         writeln!(file, "    cmpl 64(%rsp), %edx")?;
         writeln!(file, "    jae {slow_label}")?;
-    } else if tracks_mmio_bounds {
+    } else if tracks_mmio_bounds && encoded_memory_region.is_none() {
         emit_native_range_check(
             &mut file,
             AOT_CTX_HEAP_START_OFFSET,
@@ -5792,7 +5864,7 @@ fn emit_native_memory(
         )?;
 
         writeln!(file, "{dense_ok_label}:")?;
-    } else {
+    } else if !memory_guard_hoisted {
         writeln!(file, "    movl %edx, %eax")?;
         writeln!(file, "    shrl $2, %eax")?;
         writeln!(
@@ -5829,7 +5901,11 @@ fn emit_native_memory(
         if tracks_mmio_bounds || trace_style.stage_enabled(PreflightAotStage::Full) {
             writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
         }
-        writeln!(file, "    jmp {body_label}")?;
+        if let Some(region_index) = encoded_memory_region {
+            emit_preflight_direct_encoded_memory_region(&mut file, pc, region_index, &body_label)?;
+        } else {
+            writeln!(file, "    jmp {body_label}")?;
+        }
     }
 
     writeln!(file, "{body_label}:")?;
@@ -6008,6 +6084,51 @@ fn emit_native_memory_region_entry(
         )?;
     }
     writeln!(file, "    jmp {body_label}")?;
+    Ok(())
+}
+
+fn emit_preflight_direct_encoded_memory_region(
+    mut file: impl Write,
+    pc: u32,
+    region_index: usize,
+    body_label: &str,
+) -> Result<()> {
+    let heap_label = format!(".L_memory_encoded_heap_{pc:x}");
+    let stack_label = format!(".L_memory_encoded_stack_{pc:x}");
+    let hints_label = format!(".L_memory_encoded_hints_{pc:x}");
+    writeln!(file, "    movq 64(%rsp), %rax")?;
+    if region_index != 0 {
+        writeln!(file, "    shrq ${}, %rax", region_index * 2)?;
+    }
+    writeln!(file, "    andl $3, %eax")?;
+    writeln!(file, "    cmpl $1, %eax")?;
+    writeln!(file, "    je {heap_label}")?;
+    writeln!(file, "    cmpl $2, %eax")?;
+    writeln!(file, "    je {stack_label}")?;
+    writeln!(file, "    cmpl $3, %eax")?;
+    writeln!(file, "    je {hints_label}")?;
+    writeln!(file, "    jmp {body_label}")?;
+    for (label, min_offset, max_offset) in [
+        (
+            heap_label,
+            AOT_CTX_PREFLIGHT_HEAP_MIN_OFFSET,
+            AOT_CTX_PREFLIGHT_HEAP_MAX_OFFSET,
+        ),
+        (
+            stack_label,
+            AOT_CTX_PREFLIGHT_STACK_MIN_OFFSET,
+            AOT_CTX_PREFLIGHT_STACK_MAX_OFFSET,
+        ),
+        (
+            hints_label,
+            AOT_CTX_PREFLIGHT_HINTS_MIN_OFFSET,
+            AOT_CTX_PREFLIGHT_HINTS_MAX_OFFSET,
+        ),
+    ] {
+        writeln!(file, "{label}:")?;
+        emit_preflight_direct_memory_bound_known_region(&mut file, "%edx", min_offset, max_offset)?;
+        writeln!(file, "    jmp {body_label}")?;
+    }
     Ok(())
 }
 
