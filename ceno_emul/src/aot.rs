@@ -144,6 +144,10 @@ impl AssemblyTraceStyle {
     }
 }
 
+const fn production_preflight_trace_style() -> AssemblyTraceStyle {
+    AssemblyTraceStyle::PreflightTracking(PreflightAotStage::Full)
+}
+
 const AOT_STATUS_HALTED: u32 = 0;
 const AOT_STATUS_CONTINUE: u32 = 1;
 const AOT_STATUS_ERROR: u32 = 2;
@@ -883,7 +887,7 @@ impl AotProgram {
         Self::compile_with_extra_roots_and_trace_style(
             program,
             extra_roots,
-            AssemblyTraceStyle::PreflightDirectBlockPlan,
+            production_preflight_trace_style(),
         )
     }
 
@@ -1042,7 +1046,7 @@ impl AotProgram {
         config: PreflightTracerConfig,
         cache_dir: &Path,
     ) -> Result<Self> {
-        let trace_style = AssemblyTraceStyle::PreflightDirectBlockPlan;
+        let trace_style = production_preflight_trace_style();
         let planner_model = config
             .step_cell_extractor()
             .and_then(|extractor| extractor.shard_cost_model())
@@ -7710,7 +7714,7 @@ mod tests {
             "{}-cells{}-cycles{}",
             planner_cache_key(
                 &program,
-                AssemblyTraceStyle::PreflightDirectBlockPlan,
+                production_preflight_trace_style(),
                 &config
                     .step_cell_extractor()
                     .and_then(|extractor| extractor.shard_cost_model())
@@ -7979,10 +7983,7 @@ mod tests {
         let aot =
             AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
                 .unwrap();
-        assert_eq!(
-            aot.trace_style,
-            AssemblyTraceStyle::PreflightDirectBlockPlan
-        );
+        assert_eq!(aot.trace_style, production_preflight_trace_style());
         let mut aot_vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
             CENO_PLATFORM.clone(),
             program,
@@ -8957,7 +8958,11 @@ mod tests {
     }
 
     #[test]
-    fn tracking_full_uses_production_preflight_emitter() {
+    fn production_preflight_uses_tracking_full_emitter() {
+        assert_eq!(
+            production_preflight_trace_style(),
+            AssemblyTraceStyle::PreflightTracking(PreflightAotStage::Full)
+        );
         let program = program(vec![
             encode_rv32(InsnKind::ADDI, 0, 0, 1, 1),
             encode_rv32(InsnKind::ADD, 1, 1, 2, 0),
@@ -8971,27 +8976,16 @@ mod tests {
         let planner_metadata = build_aot_block_cost_descriptors(&program, &blocks, &model).unwrap();
         let cache = tempfile::tempdir().unwrap();
         let production = cache.path().join("production.S");
-        let tracking = cache.path().join("tracking-full.S");
         write_assembly_with_planner(
             &production,
             &program,
             &blocks,
             &order,
-            AssemblyTraceStyle::PreflightDirectBlockPlan,
-            Some(&planner_metadata),
-        )
-        .unwrap();
-        write_assembly_with_planner(
-            &tracking,
-            &program,
-            &blocks,
-            &order,
-            AssemblyTraceStyle::PreflightTracking(PreflightAotStage::Full),
+            production_preflight_trace_style(),
             Some(&planner_metadata),
         )
         .unwrap();
         let production = fs::read(production).unwrap();
-        assert_eq!(production, fs::read(tracking).unwrap());
         let assembly = String::from_utf8(production).unwrap();
         assert!(assembly.contains("preflight_bucket_special_fail"));
         assert!(!assembly.contains(".L_preflight_cost_loop_0:"));
