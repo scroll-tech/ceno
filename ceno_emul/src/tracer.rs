@@ -493,6 +493,10 @@ pub trait Tracer {
     /// Diagnostic execution tracers may disable this while preserving values.
     const TRACK_MEMORY_ACCESSES: bool = true;
 
+    fn track_memory_accesses(&self) -> bool {
+        Self::TRACK_MEMORY_ACCESSES
+    }
+
     const SUBCYCLE_RS1: Cycle = 0;
     const SUBCYCLE_RS2: Cycle = 1;
     const SUBCYCLE_RD: Cycle = 2;
@@ -1884,6 +1888,53 @@ pub struct PreflightTracer {
     config: PreflightTracerConfig,
 }
 
+/// Cumulative responsibilities compiled into a benchmark Preflight AOT image.
+/// Ordering is part of the stage contract.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PreflightAotStage {
+    #[default]
+    Pure,
+    Runtime,
+    ExecutionState,
+    Planner,
+    RegisterLatest,
+    MemoryLatest,
+    MmioBounds,
+    EventCapacity,
+    RegisterEvents,
+    Full,
+}
+
+impl PreflightAotStage {
+    pub const ALL: [Self; 10] = [
+        Self::Pure,
+        Self::Runtime,
+        Self::ExecutionState,
+        Self::Planner,
+        Self::RegisterLatest,
+        Self::MemoryLatest,
+        Self::MmioBounds,
+        Self::EventCapacity,
+        Self::RegisterEvents,
+        Self::Full,
+    ];
+
+    pub const fn cache_name(self) -> &'static str {
+        match self {
+            Self::Pure => "pure",
+            Self::Runtime => "runtime",
+            Self::ExecutionState => "execution-state",
+            Self::Planner => "planner",
+            Self::RegisterLatest => "register-latest",
+            Self::MemoryLatest => "memory-latest",
+            Self::MmioBounds => "mmio-bounds",
+            Self::EventCapacity => "event-capacity",
+            Self::RegisterEvents => "register-events",
+            Self::Full => "full",
+        }
+    }
+}
+
 #[cfg_attr(
     not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
     allow(dead_code)
@@ -1960,6 +2011,7 @@ pub struct PreflightTracerConfig {
     max_cell_per_shard: u64,
     max_cycle_per_shard: Cycle,
     step_cell_extractor: Option<Arc<dyn StepCellExtractor>>,
+    aot_stage: Option<PreflightAotStage>,
 }
 
 impl fmt::Debug for PreflightTracer {
@@ -1987,6 +2039,7 @@ impl fmt::Debug for PreflightTracerConfig {
             .field("max_cell_per_shard", &self.max_cell_per_shard)
             .field("max_cycle_per_shard", &self.max_cycle_per_shard)
             .field("step_cell_extractor", &self.step_cell_extractor.is_some())
+            .field("aot_stage", &self.aot_stage)
             .finish()
     }
 }
@@ -2002,6 +2055,7 @@ impl PreflightTracerConfig {
             max_cell_per_shard,
             max_cycle_per_shard,
             step_cell_extractor: None,
+            aot_stage: None,
         }
     }
 
@@ -2022,6 +2076,15 @@ impl PreflightTracerConfig {
         self
     }
 
+    pub fn with_aot_stage(mut self, stage: PreflightAotStage) -> Self {
+        self.aot_stage = Some(stage);
+        self
+    }
+
+    pub fn aot_stage(&self) -> Option<PreflightAotStage> {
+        self.aot_stage
+    }
+
     pub fn step_cell_extractor(&self) -> Option<Arc<dyn StepCellExtractor>> {
         self.step_cell_extractor.clone()
     }
@@ -2034,6 +2097,7 @@ impl Default for PreflightTracerConfig {
             max_cell_per_shard: u64::MAX,
             max_cycle_per_shard: Cycle::MAX,
             step_cell_extractor: None,
+            aot_stage: None,
         }
     }
 }
@@ -2045,8 +2109,21 @@ impl PreflightTracer {
     pub const SUBCYCLE_MEM: Cycle = <Self as Tracer>::SUBCYCLE_MEM;
     pub const SUBCYCLES_PER_INSN: Cycle = <Self as Tracer>::SUBCYCLES_PER_INSN;
 
+    #[inline(always)]
+    fn stage_enabled(&self, stage: PreflightAotStage) -> bool {
+        self.config.aot_stage.map_or(true, |active| active >= stage)
+    }
+
     pub fn last_insn_kind(&self) -> InsnKind {
         self.last_kind
+    }
+
+    pub fn last_pc_change(&self) -> Change<ByteAddr> {
+        self.pc
+    }
+
+    pub fn aot_stage(&self) -> Option<PreflightAotStage> {
+        self.config.aot_stage()
     }
 
     pub fn last_rs1_value(&self) -> Option<Word> {
@@ -2180,6 +2257,9 @@ impl PreflightTracer {
 
     #[inline(always)]
     fn observe_current_step(&mut self, ecall_code: Option<Word>) {
+        if !self.stage_enabled(PreflightAotStage::Planner) {
+            return;
+        }
         if let Some(planner) = self.planner.as_mut() {
             if planner.cost_model.is_some() {
                 planner.observe_modeled_step(self.cycle, self.last_kind, ecall_code);
@@ -2236,8 +2316,14 @@ impl PreflightTracer {
 
     #[inline(always)]
     fn record_memory_access(&mut self, addr: WordAddr, previous_cycle: Cycle) {
+        if !self.stage_enabled(PreflightAotStage::MemoryLatest) {
+            return;
+        }
         let current_cycle = self.cycle + Self::SUBCYCLE_MEM;
-        if self.config.record_next_accesses && previous_cycle < self.current_shard_start_cycle {
+        if self.stage_enabled(PreflightAotStage::Full)
+            && self.config.record_next_accesses
+            && previous_cycle < self.current_shard_start_cycle
+        {
             self.push_next_access_event(NextAccessEvent::new(previous_cycle, current_cycle, addr));
         }
     }
@@ -2335,6 +2421,9 @@ impl PreflightTracer {
 
     #[inline(always)]
     fn update_mmio_bounds(&mut self, addr: WordAddr) {
+        if !self.stage_enabled(PreflightAotStage::MmioBounds) {
+            return;
+        }
         if let Some((_, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
             .as_mut()
@@ -2403,13 +2492,19 @@ impl Tracer for PreflightTracer {
     type Record = ();
     type Config = PreflightTracerConfig;
 
+    fn track_memory_accesses(&self) -> bool {
+        self.stage_enabled(PreflightAotStage::MemoryLatest)
+    }
+
     fn new(platform: &Platform, config: Self::Config) -> Self {
         PreflightTracer::new(platform, config)
     }
 
     #[inline(always)]
     fn advance(&mut self) -> Self::Record {
-        self.cycle += Self::SUBCYCLES_PER_INSN;
+        if self.stage_enabled(PreflightAotStage::ExecutionState) {
+            self.cycle += Self::SUBCYCLES_PER_INSN;
+        }
         self.reset_register_tracking();
     }
 
@@ -2481,9 +2576,15 @@ impl Tracer for PreflightTracer {
 
     #[inline(always)]
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
+        if !self.stage_enabled(PreflightAotStage::RegisterLatest) {
+            return 0;
+        }
         let cur_cycle = self.cycle + subcycle;
         let prev_cycle = self.latest_accesses.track(addr, cur_cycle);
-        if self.config.record_next_accesses && prev_cycle < self.current_shard_start_cycle {
+        if self.stage_enabled(PreflightAotStage::RegisterEvents)
+            && self.config.record_next_accesses
+            && prev_cycle < self.current_shard_start_cycle
+        {
             self.push_next_access_event(NextAccessEvent::new(prev_cycle, cur_cycle, addr));
         }
         prev_cycle

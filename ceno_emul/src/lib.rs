@@ -11,9 +11,9 @@ pub use platform::{CENO_PLATFORM, Platform};
 mod tracer;
 pub use tracer::{
     Change, ChipCostSpec, FullTracer, FullTracerConfig, LatestAccesses, MemOp, NextAccessEvent,
-    NextAccessPair, NextAccessTape, NextCycleAccess, PreflightTracer, PreflightTracerConfig,
-    ReadOp, ReplayChunk, ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel,
-    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
+    NextAccessPair, NextAccessTape, NextCycleAccess, PreflightAotStage, PreflightTracer,
+    PreflightTracerConfig, ReadOp, ReplayChunk, ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS,
+    ShardCostModel, ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
 };
 
 mod vm_state;
