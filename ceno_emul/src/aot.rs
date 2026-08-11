@@ -4261,32 +4261,28 @@ fn emit_preflight_adaptive_block_plan_entry(
                 file,
                 "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET}(%r12), %r8"
             )?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET}(%r12), %rsi"
+            )?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdx"
+            )?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET}(%r12), %r11"
+            )?;
             for (index, contribution) in contributions.iter().enumerate() {
                 let fail_label = format!(".L_preflight_bucket_special_fail_{block_idx}_{index}");
                 writeln!(file, "    movl ${}, %eax", contribution.chip_index)?;
-                writeln!(
-                    file,
-                    "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET}(%r12), %rdi"
-                )?;
-                writeln!(file, "    cmpq %r8, (%rdi,%rax,8)")?;
+                writeln!(file, "    cmpq %r8, (%rsi,%rax,8)")?;
                 writeln!(file, "    jne {fail_label}")?;
-                writeln!(
-                    file,
-                    "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
-                )?;
-                writeln!(file, "    movq (%rdi,%rax,8), %r9")?;
+                writeln!(file, "    movq (%rdx,%rax,8), %r9")?;
                 writeln!(file, "    addq ${}, %r9", contribution.instance_delta)?;
-                writeln!(
-                    file,
-                    "    movq {AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET}(%r12), %rdi"
-                )?;
-                writeln!(file, "    cmpq (%rdi,%rax,8), %r9")?;
+                writeln!(file, "    cmpq (%r11,%rax,8), %r9")?;
                 writeln!(file, "    jae {fail_label}")?;
-                writeln!(
-                    file,
-                    "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
-                )?;
-                writeln!(file, "    movq %r9, (%rdi,%rax,8)")?;
+                writeln!(file, "    movq %r9, (%rdx,%rax,8)")?;
             }
             writeln!(file, "    jmp {unchanged_label}")?;
             for (index, _) in contributions.iter().enumerate() {
@@ -4296,11 +4292,7 @@ fn emit_preflight_adaptive_block_plan_entry(
                     writeln!(file, "    movl ${}, %eax", contribution.chip_index)?;
                     writeln!(
                         file,
-                        "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
-                    )?;
-                    writeln!(
-                        file,
-                        "    subq ${}, (%rdi,%rax,8)",
+                        "    subq ${}, (%rdx,%rax,8)",
                         contribution.instance_delta
                     )?;
                 }
@@ -4327,33 +4319,29 @@ fn emit_preflight_adaptive_block_plan_entry(
                 file,
                 "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATION_OFFSET}(%r12), %r8"
             )?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET}(%r12), %rsi"
+            )?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdx"
+            )?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET}(%r12), %r11"
+            )?;
             writeln!(file, "    testl %ecx, %ecx")?;
             writeln!(file, "    je {bucket_scan_done_label}")?;
             writeln!(file, "{bucket_scan_label}:")?;
             writeln!(file, "    movl (%r10), %eax")?;
-            writeln!(
-                file,
-                "    movq {AOT_CTX_PREFLIGHT_BUCKET_GENERATIONS_OFFSET}(%r12), %rdi"
-            )?;
-            writeln!(file, "    cmpq %r8, (%rdi,%rax,8)")?;
+            writeln!(file, "    cmpq %r8, (%rsi,%rax,8)")?;
             writeln!(file, "    jne {bucket_slow_label}")?;
-            writeln!(
-                file,
-                "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
-            )?;
-            writeln!(file, "    movq (%rdi,%rax,8), %r9")?;
+            writeln!(file, "    movq (%rdx,%rax,8), %r9")?;
             writeln!(file, "    addq 8(%r10), %r9")?;
-            writeln!(
-                file,
-                "    movq {AOT_CTX_PREFLIGHT_BUCKET_CEILINGS_OFFSET}(%r12), %rdi"
-            )?;
-            writeln!(file, "    cmpq (%rdi,%rax,8), %r9")?;
+            writeln!(file, "    cmpq (%r11,%rax,8), %r9")?;
             writeln!(file, "    jae {bucket_slow_label}")?;
-            writeln!(
-                file,
-                "    movq {AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET}(%r12), %rdi"
-            )?;
-            writeln!(file, "    movq %r9, (%rdi,%rax,8)")?;
+            writeln!(file, "    movq %r9, (%rdx,%rax,8)")?;
             writeln!(file, "    addq $16, %r10")?;
             writeln!(file, "    decl %ecx")?;
             writeln!(file, "    jne {bucket_scan_label}")?;
