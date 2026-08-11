@@ -274,7 +274,7 @@ const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
 const AOT_ABI_VERSION: u32 = 64;
-const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v3";
+const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v5";
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
 const AOT_TRACE_MODE_CALLBACK: u32 = 1;
@@ -3305,6 +3305,13 @@ struct PreflightBlockAccess {
     cycle_offset: u64,
 }
 
+#[derive(Clone, Copy)]
+struct PreflightMemoryGuardAccess {
+    pc: u32,
+    insn: Instruction,
+    region_index: usize,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PreflightBlockPlanKind {
     RegisterOnly,
@@ -3664,6 +3671,7 @@ fn emit_preflight_direct_block_memory_fast_path_guard(
     if record_regions {
         writeln!(file, "    xorq %r11, %r11")?;
     }
+    let mut accesses = Vec::new();
     let mut pc = block.start_pc;
     let mut memory_access_index = 0usize;
     while pc < block.end_pc {
@@ -3672,19 +3680,143 @@ fn emit_preflight_direct_block_memory_fast_path_guard(
             native_opcode_family(insn.kind),
             Some(NativeOpcodeFamily::Memory)
         ) {
-            emit_preflight_direct_memory_fast_path_guard(
-                &mut file,
+            accesses.push(PreflightMemoryGuardAccess {
                 pc,
                 insn,
-                record_regions.then_some(memory_access_index),
-            )?;
+                region_index: memory_access_index,
+            });
             memory_access_index += 1;
         }
         pc = pc.wrapping_add(PC_STEP_SIZE as u32);
     }
+
+    let mut word_groups = BTreeMap::<(u8, u32), Vec<PreflightMemoryGuardAccess>>::new();
+    for access in &accesses {
+        if matches!(access.insn.kind, InsnKind::LW | InsnKind::SW) {
+            word_groups
+                .entry((access.insn.rs1, access.insn.imm as u32 & 3))
+                .or_default()
+                .push(*access);
+        }
+    }
+    let grouped_indices = word_groups
+        .values()
+        .filter(|group| group.len() >= 2)
+        .flat_map(|group| group.iter().map(|access| access.region_index))
+        .collect::<BTreeSet<_>>();
+    for (group_index, group) in word_groups
+        .values()
+        .filter(|group| group.len() >= 2)
+        .enumerate()
+    {
+        emit_preflight_direct_memory_fast_path_group_guard(
+            &mut file,
+            block.start_pc,
+            group_index,
+            group,
+            record_regions,
+        )?;
+    }
+    for access in accesses {
+        if grouped_indices.contains(&access.region_index) {
+            continue;
+        }
+        emit_preflight_direct_memory_fast_path_guard(
+            &mut file,
+            access.pc,
+            access.insn,
+            record_regions.then_some(access.region_index),
+        )?;
+    }
     if record_regions {
         writeln!(file, "    movq %r11, 64(%rsp)")?;
     }
+    Ok(())
+}
+
+fn emit_preflight_direct_memory_fast_path_group_guard(
+    mut file: impl Write,
+    block_pc: u32,
+    group_index: usize,
+    accesses: &[PreflightMemoryGuardAccess],
+    record_regions: bool,
+) -> Result<()> {
+    debug_assert!(accesses.len() >= 2);
+    debug_assert!(
+        accesses
+            .iter()
+            .all(|access| matches!(access.insn.kind, InsnKind::LW | InsnKind::SW))
+    );
+    let rs1 = accesses[0].insn.rs1;
+    debug_assert!(accesses.iter().all(|access| access.insn.rs1 == rs1));
+    let min_imm = accesses.iter().map(|access| access.insn.imm).min().unwrap();
+    let max_imm = accesses.iter().map(|access| access.insn.imm).max().unwrap();
+    let heap_ok_label = format!(".L_block_memory_group_heap_ok_{block_pc:x}_{group_index}");
+    let stack_ok_label = format!(".L_block_memory_group_stack_ok_{block_pc:x}_{group_index}");
+    let hints_ok_label = format!(".L_block_memory_group_hints_ok_{block_pc:x}_{group_index}");
+    let done_label = format!(".L_block_memory_group_done_{block_pc:x}_{group_index}");
+
+    writeln!(file, "    movl {}(%r10), %eax", rs1 as usize * 4)?;
+    writeln!(file, "    leal {min_imm}(%rax), %edx")?;
+    writeln!(file, "    testl $3, %edx")?;
+    writeln!(file, "    jne L_memory_guard")?;
+    writeln!(file, "    leal {max_imm}(%rax), %ecx")?;
+    // If the affine interval wraps the 32-bit guest address space, use the
+    writeln!(file, "    cmpl %edx, %ecx")?;
+    writeln!(file, "    jb L_memory_guard")?;
+    for (start_offset, end_offset, label) in [
+        (
+            AOT_CTX_HEAP_START_OFFSET,
+            AOT_CTX_HEAP_END_OFFSET,
+            &heap_ok_label,
+        ),
+        (
+            AOT_CTX_STACK_START_OFFSET,
+            AOT_CTX_STACK_END_OFFSET,
+            &stack_ok_label,
+        ),
+        (
+            AOT_CTX_HINTS_START_OFFSET,
+            AOT_CTX_HINTS_END_OFFSET,
+            &hints_ok_label,
+        ),
+    ] {
+        writeln!(file, "    cmpl {start_offset}(%r12), %edx")?;
+        writeln!(file, "    jb 1f")?;
+        writeln!(file, "    cmpl {end_offset}(%r12), %ecx")?;
+        writeln!(file, "    jb {label}")?;
+        writeln!(file, "1:")?;
+    }
+    writeln!(file, "    shrl $2, %edx")?;
+    writeln!(file, "    shrl $2, %ecx")?;
+    writeln!(
+        file,
+        "    cmpl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %edx"
+    )?;
+    writeln!(file, "    jb L_memory_guard")?;
+    writeln!(
+        file,
+        "    cmpl {AOT_CTX_MEMORY_END_WORD_OFFSET}(%r12), %ecx"
+    )?;
+    writeln!(file, "    jb {done_label}")?;
+    writeln!(file, "    jmp L_memory_guard")?;
+
+    for (label, region) in [
+        (&heap_ok_label, 1u64),
+        (&stack_ok_label, 2u64),
+        (&hints_ok_label, 3u64),
+    ] {
+        writeln!(file, "{label}:")?;
+        if record_regions {
+            let mask = accesses.iter().fold(0u64, |mask, access| {
+                mask | (region << (access.region_index * 2))
+            });
+            writeln!(file, "    movabsq ${mask:#018x}, %rdi")?;
+            writeln!(file, "    orq %rdi, %r11")?;
+        }
+        writeln!(file, "    jmp {done_label}")?;
+    }
+    writeln!(file, "{done_label}:")?;
     Ok(())
 }
 
