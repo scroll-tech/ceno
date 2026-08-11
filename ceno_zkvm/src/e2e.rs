@@ -49,6 +49,7 @@ use std::{
     marker::PhantomData,
     ops::Range,
     sync::Arc,
+    time::Duration,
 };
 use tiny_keccak::{Hasher, Keccak};
 use tracing::info_span;
@@ -148,6 +149,9 @@ pub struct EmulationResult<'a> {
     pub shard_ctx_builder: ShardContextBuilder,
     pub shard_cycle_boundaries: Arc<Vec<Cycle>>,
     pub executed_steps: usize,
+    /// Native AOT executor timing, excluding shard-plan finalization and replay
+    /// artifact preparation. Present on the x86_64 AOT production path.
+    pub preflight_execution: Option<PreflightExecutionReport>,
     /// FullTracer capacity computed by the finalized preflight shard plan.
     /// Keep this as the tracer configuration so replay cannot fall back to
     /// `FullTracerConfig::default()` and allocate only its pending slot.
@@ -156,6 +160,20 @@ pub struct EmulationResult<'a> {
     pub replay_aot_program: Arc<ceno_emul::aot::AotProgram>,
     pub phantom: PhantomData<&'a ()>,
     // pub shard_ctxs: Vec<ShardContext<'a>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreflightExecutionReport {
+    pub executed_steps: usize,
+    pub fallback_steps: usize,
+    pub execute_time: Duration,
+    pub fallback_time: Duration,
+}
+
+impl PreflightExecutionReport {
+    pub fn native_time(&self) -> Duration {
+        self.execute_time.saturating_sub(self.fallback_time)
+    }
 }
 
 pub struct RAMRecord {
@@ -1095,6 +1113,85 @@ impl StepSource for StepReplay {
     }
 }
 
+/// Summary of a bounded FullTracer replay performed from a finalized preflight plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FullTraceReplayReport {
+    pub executed_steps: usize,
+    pub replayed_shards: usize,
+    pub syscall_witnesses: usize,
+    pub exit_code: Option<u32>,
+    pub committed_public_io: Option<[u32; 8]>,
+}
+
+/// Replay every preflight shard with FullTracer without assigning circuit witnesses.
+///
+/// This is the narrow production replay boundary used by execution benchmarks. It
+/// consumes the finalized shard plan, next-access tape, replay program, and exact
+/// FullTracer capacity carried by [`EmulationResult`].
+pub fn replay_full_trace(
+    mut emul_result: EmulationResult<'_>,
+    program: Arc<Program>,
+    platform: &Platform,
+    init_mem_state: &InitMemState,
+) -> FullTraceReplayReport {
+    assert!(
+        emul_result.executed_steps > 0,
+        "execution trace must contain at least one step"
+    );
+
+    let expected_steps = emul_result.executed_steps;
+    let expected_exit_code = emul_result.exit_code;
+    let mut shard_ctx_builder = std::mem::take(&mut emul_result.shard_ctx_builder);
+    let expected_shards = shard_ctx_builder.total_shards();
+    let mut step_iter = StepReplay::new(
+        platform.clone(),
+        program,
+        init_mem_state,
+        expected_steps,
+        expected_shards,
+        emul_result.full_tracer_config,
+        shard_ctx_builder.next_accesses(),
+        emul_result.shard_cycle_boundaries,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        emul_result.replay_aot_program,
+    );
+    let mut replayed_steps = 0usize;
+    let mut replayed_shards = 0usize;
+    let mut syscall_witnesses = 0usize;
+    while let Some((_shard_ctx, summary)) =
+        shard_ctx_builder.position_next_shard(&mut step_iter, |_, _| {})
+    {
+        replayed_steps += summary.step_count;
+        replayed_shards += 1;
+        syscall_witnesses += step_iter.syscall_witnesses().len();
+    }
+
+    assert_eq!(
+        replayed_steps, expected_steps,
+        "FullTracer replay step mismatch"
+    );
+    assert_eq!(
+        replayed_shards, expected_shards,
+        "FullTracer replay shard mismatch"
+    );
+    let exit_code = step_iter
+        .vm
+        .halted_state()
+        .map(|halt_state| halt_state.exit_code);
+    assert_eq!(
+        exit_code, expected_exit_code,
+        "FullTracer replay exit code differs from preflight"
+    );
+
+    FullTraceReplayReport {
+        executed_steps: replayed_steps,
+        replayed_shards,
+        syscall_witnesses,
+        exit_code,
+        committed_public_io: step_iter.vm.committed_public_io(),
+    }
+}
+
 pub fn emulate_program<'a>(
     program: Arc<Program>,
     max_steps: usize,
@@ -1159,6 +1256,7 @@ pub fn emulate_program<'a>(
         }
     };
 
+    let mut preflight_execution = None;
     let exit_code = info_span!("[ceno] preflight-execute").in_scope(|| {
         #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
         {
@@ -1194,6 +1292,12 @@ pub fn emulate_program<'a>(
                 report.fallback.ecall_by_code,
                 report.fallback.exceptional_jump_or_trap,
             );
+            preflight_execution = Some(PreflightExecutionReport {
+                executed_steps: report.executed_steps,
+                fallback_steps: report.fallback_steps,
+                execute_time: report.execute_time,
+                fallback_time: report.fallback_time,
+            });
         }
         vm.halted_state().map(|halt_state| halt_state.exit_code)
     });
@@ -1383,6 +1487,7 @@ pub fn emulate_program<'a>(
         shard_ctx_builder,
         shard_cycle_boundaries: shard_cycle_boundaries.clone(),
         executed_steps: insts,
+        preflight_execution,
         full_tracer_config,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         replay_aot_program,
