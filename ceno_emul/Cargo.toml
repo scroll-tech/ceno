@@ -16,6 +16,7 @@ ceno_syscall.workspace = true
 elf = "0.7"
 ff_ext.workspace = true
 itertools.workspace = true
+halo2curves-axiom = { version = "=0.7.2", features = ["asm"] }
 libloading = { version = "0.8", optional = true }
 multilinear_extensions.workspace = true
 num.workspace = true
@@ -25,6 +26,7 @@ once_cell.workspace = true
 rayon.workspace = true
 rrs_lib = { package = "rrs-succinct", version = "0.1.0" }
 rustc-hash.workspace = true
+ruint = { version = "=1.17.0", default-features = false }
 # TODO clean up secp and only use k256 from elliptic-curves
 k256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa"] }
 p256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa", "arithmetic"] }

@@ -508,5 +508,9 @@ mod tests {
                 std::ptr::null_mut(),
             )
         });
+
+        let ptr = CENO_PLATFORM.heap.start;
+        assert!(access_plan(SECP256K1_ADD, ptr, ptr).is_none());
+        assert!(access_plan(SECP256K1_ADD, ptr, ptr + WORD_SIZE as u32).is_none());
     }
 }
