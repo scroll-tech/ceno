@@ -67,11 +67,9 @@ impl From<[Word; SECP256R1_ARG_WORDS]> for SecpPoint {
         x_bytes.reverse();
         y_bytes.reverse();
 
-        let encoded = EncodedPoint::from_affine_coordinates(
-            FieldBytes::from_slice(&x_bytes),
-            FieldBytes::from_slice(&y_bytes),
-            false,
-        );
+        let x_bytes = FieldBytes::from(x_bytes);
+        let y_bytes = FieldBytes::from(y_bytes);
+        let encoded = EncodedPoint::from_affine_coordinates(&x_bytes, &y_bytes, false);
 
         let point = Option::from(AffinePoint::from_encoded_point(&encoded))
             .expect("illegal secp256r1 point");
@@ -92,11 +90,11 @@ impl From<SecpPoint> for [Word; SECP256R1_ARG_WORDS] {
         };
 
         let mut x_bytes = [0u8; COORDINATE_WORDS * WORD_SIZE];
-        x_bytes.copy_from_slice(x.as_slice());
+        x_bytes.copy_from_slice(x);
         x_bytes.reverse();
 
         let mut y_bytes = [0u8; COORDINATE_WORDS * WORD_SIZE];
-        y_bytes.copy_from_slice(y.as_slice());
+        y_bytes.copy_from_slice(y);
         y_bytes.reverse();
 
         let x_words: [Word; COORDINATE_WORDS] = SecpCoordinate(x_bytes).into();

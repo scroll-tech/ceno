@@ -885,6 +885,7 @@ struct StepReplay {
 }
 
 impl StepReplay {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         platform: Platform,
         program: Arc<Program>,
@@ -1256,7 +1257,10 @@ pub fn emulate_program<'a>(
         }
     };
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let mut preflight_execution = None;
+    #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
+    let preflight_execution = None;
     let exit_code = info_span!("[ceno] preflight-execute").in_scope(|| {
         #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
         {

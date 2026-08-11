@@ -52,10 +52,7 @@ impl VMState<PreflightTracer> {
         self.tracer.trace_native_step(step)
     }
 
-    #[cfg_attr(
-        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
-        allow(dead_code)
-    )]
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub(crate) fn finish_direct_preflight_syscall(
         &mut self,
         plan: crate::syscalls::pure::AccessPlan,

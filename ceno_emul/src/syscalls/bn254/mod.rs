@@ -8,6 +8,7 @@ pub use bn254_fptower::{
     Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec, Bn254FpMulSpec, bn254_fp_add, bn254_fp_mul,
     bn254_fp2_add, bn254_fp2_mul,
 };
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) use bn254_fptower::{fp_add_words, fp_mul_words, fp2_add_words, fp2_mul_words};
 
 pub use types::{BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS};

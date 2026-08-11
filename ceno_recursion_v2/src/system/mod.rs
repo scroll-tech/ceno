@@ -264,6 +264,7 @@ impl<'a> TraceModuleRef<'a> {
     }
 
     #[tracing::instrument(name = "wrapper.run_preflight", level = "trace", skip_all)]
+    #[allow(dead_code)]
     fn run_preflight<TS>(
         self,
         child_vk: &RecursionVk,

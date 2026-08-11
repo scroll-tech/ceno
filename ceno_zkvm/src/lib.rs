@@ -1,4 +1,7 @@
 #![deny(clippy::cargo)]
+// Transitive cryptography and Ethereum dependencies intentionally span several
+// incompatible major versions; resolving them is outside this crate's control.
+#![allow(clippy::multiple_crate_versions)]
 #![feature(box_patterns)]
 #![feature(stmt_expr_attributes)]
 #![feature(variant_count)]

@@ -3082,6 +3082,7 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     #[test]
     fn deferred_mmio_bounds_rebuild_from_first_access_events() {
         let mut tracer = PreflightTracer::new(

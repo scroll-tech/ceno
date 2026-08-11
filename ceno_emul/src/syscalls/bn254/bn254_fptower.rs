@@ -100,6 +100,7 @@ fn bn254_fptower_binary_op<
 }
 
 #[inline(never)]
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) fn fp_add_words(
     p: [Word; BN254_FP_WORDS],
     q: [Word; BN254_FP_WORDS],
@@ -108,6 +109,7 @@ pub(crate) fn fp_add_words(
 }
 
 #[inline(never)]
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) fn fp_mul_words(
     p: [Word; BN254_FP_WORDS],
     q: [Word; BN254_FP_WORDS],
@@ -116,6 +118,7 @@ pub(crate) fn fp_mul_words(
 }
 
 #[inline(never)]
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) fn fp2_add_words(
     p: [Word; BN254_FP2_WORDS],
     q: [Word; BN254_FP2_WORDS],
@@ -124,6 +127,7 @@ pub(crate) fn fp2_add_words(
 }
 
 #[inline(never)]
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) fn fp2_mul_words(
     p: [Word; BN254_FP2_WORDS],
     q: [Word; BN254_FP2_WORDS],

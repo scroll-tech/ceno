@@ -296,7 +296,11 @@ pub struct SecpCoordinate(pub [u8; COORDINATE_WORDS * WORD_SIZE]);
 
 impl From<[Word; COORDINATE_WORDS]> for SecpCoordinate {
     fn from(words: [Word; COORDINATE_WORDS]) -> Self {
-        SecpCoordinate(unsafe { std::mem::transmute(words) })
+        SecpCoordinate(unsafe {
+            std::mem::transmute::<[Word; COORDINATE_WORDS], [u8; COORDINATE_WORDS * WORD_SIZE]>(
+                words,
+            )
+        })
     }
 }
 
