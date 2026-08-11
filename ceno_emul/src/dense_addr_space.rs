@@ -51,6 +51,18 @@ impl<T: Copy + Default> DenseAddrSpace<T> {
         self.index(addr).map(|idx| &self.cells[idx])
     }
 
+    #[cfg(not(any(test, debug_assertions)))]
+    pub(crate) fn non_default_addresses(&self) -> impl Iterator<Item = WordAddr> + '_
+    where
+        T: PartialEq,
+    {
+        self.cells
+            .iter()
+            .enumerate()
+            .filter(|(_, value)| **value != T::default())
+            .map(|(index, _)| WordAddr(self.base.0 + index as u32))
+    }
+
     #[cfg_attr(
         not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
         allow(dead_code)
@@ -184,8 +196,18 @@ impl PackedMemory {
     }
 
     #[cfg(any(test, debug_assertions))]
-    pub(crate) fn addresses(&self) -> impl Iterator<Item = &WordAddr> {
-        self.touched.iter()
+    pub(crate) fn addresses(&self) -> impl Iterator<Item = WordAddr> + '_ {
+        self.touched.iter().copied()
+    }
+
+    #[cfg(not(any(test, debug_assertions)))]
+    pub(crate) fn addresses(&self) -> impl Iterator<Item = WordAddr> + '_ {
+        self.store
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| (**cell >> 32) != 0)
+            .map(|(index, _)| WordAddr(self.store.base.0 + index as u32))
     }
 
     #[cfg(all(

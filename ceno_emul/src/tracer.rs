@@ -747,13 +747,13 @@ impl LatestAccesses {
     }
 
     #[cfg(any(test, debug_assertions))]
-    pub fn addresses(&self) -> impl Iterator<Item = &WordAddr> + '_ {
-        self.touched.iter()
+    pub fn addresses(&self) -> impl Iterator<Item = WordAddr> + '_ {
+        self.touched.iter().copied()
     }
 
     #[cfg(not(any(test, debug_assertions)))]
-    pub fn addresses(&self) -> std::iter::Empty<&WordAddr> {
-        unimplemented!("no track touched address in release build")
+    pub fn addresses(&self) -> impl Iterator<Item = WordAddr> + '_ {
+        self.store.non_default_addresses()
     }
 }
 
@@ -1473,7 +1473,8 @@ impl StepRecord {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FullTracerConfig {
     /// Maximum number of completed steps per shard. Internally, `FullTracer`
-    /// reserves one extra slot to hold the pending (in-progress) record.
+    /// reserves one extra slot to hold the pending (in-progress) record. A zero
+    /// value leaves the buffer dynamically sized for standalone VM execution.
     pub max_step_shard: usize,
 }
 
@@ -1483,6 +1484,7 @@ pub struct FullTracer {
     len: usize,
     pending_index: usize,
     pending_cycle: Cycle,
+    allow_step_buffer_growth: bool,
 
     /// Syscall witnesses stored separately (StepRecord references by index).
     syscall_witnesses: Vec<SyscallWitness>,
@@ -1542,6 +1544,7 @@ impl FullTracer {
             len: 0,
             pending_index: 0,
             pending_cycle: Self::SUBCYCLES_PER_INSN,
+            allow_step_buffer_growth: config.max_step_shard == 0 || cfg!(debug_assertions),
             syscall_witnesses: Vec::new(),
             mmio_min_max_access: Some(mmio_max_access),
             platform: platform.clone(),
@@ -1560,9 +1563,9 @@ impl FullTracer {
     #[inline(always)]
     fn reset_pending_slot(&mut self) {
         if self.pending_index >= self.records.len() {
-            if cfg!(debug_assertions) {
-                // Allow unit/integration tests (which always build with debug assertions)
-                // to auto-grow so they don't have to plumb accurate shard sizes.
+            if self.allow_step_buffer_growth {
+                // Standalone VM execution and debug tests do not need to plumb
+                // an accurate shard capacity.
                 self.records.push(StepRecord::default());
             } else {
                 panic!(

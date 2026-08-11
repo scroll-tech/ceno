@@ -223,13 +223,11 @@ impl<T: Tracer> VMState<T> {
         self.memory.record_native_first_touch(addr);
     }
 
-    #[cfg(any(test, debug_assertions))]
     pub fn final_access_addresses(&self) -> Vec<WordAddr> {
         self.tracer
             .final_register_accesses()
             .addresses()
             .chain(self.memory.addresses())
-            .copied()
             .collect()
     }
 
