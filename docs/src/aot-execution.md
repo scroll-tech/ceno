@@ -15,12 +15,18 @@ to the scalar Rust path.
 
 ## Training and cache identity
 
-Coverage training interprets the program once to discover indirect targets and
-post-syscall continuations, count block and branch frequency, and choose a
-stable block layout. Production training also sizes the next-access tape and
-binds the artifact to the active shard-cost model. The cache key includes the
-program digest, target, AOT ABI, emission style, layout digest, shard limits,
-and planner fingerprint where applicable.
+`cargo ceno build` asks LLVM to emit `.llvm_bb_addr_map`. The ELF loader
+validates its version, features, addresses, alignment, block sizes, metadata,
+and callsite return PCs. These workload-independent roots are always admitted
+as possible AOT entries, including blocks that the training input does not
+execute.
+
+Coverage training still interprets the program once to discover dynamic
+targets and post-syscall continuations, count block and branch frequency, and
+choose a stable block layout. Production training also sizes the next-access
+tape and binds the artifact to the active shard-cost model. The cache key
+includes the program and static-root digest, target, AOT ABI, emission style,
+layout digest, shard limits, and planner fingerprint where applicable.
 
 Generated-code changes must update the private cache identity or ABI metadata.
 On a cache hit, Ceno validates metadata, the shared-object digest, block layout,

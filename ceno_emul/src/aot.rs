@@ -93,13 +93,13 @@ impl AssemblyTraceStyle {
     }
 
     fn is_preflight_direct(self) -> bool {
-        match self {
+        matches!(
+            self,
             Self::PreflightScalar
-            | Self::PreflightAdmittedRegisterBlock
-            | Self::PreflightAdmittedMemoryBlock
-            | Self::PreflightProduction => true,
-            _ => false,
-        }
+                | Self::PreflightAdmittedRegisterBlock
+                | Self::PreflightAdmittedMemoryBlock
+                | Self::PreflightProduction
+        )
     }
 
     fn uses_preflight_block_plan(self) -> bool {
@@ -1549,9 +1549,10 @@ fn partition_basic_blocks_inner(
         bail!("AOT program has no instructions");
     }
 
-    let mut leaders = BTreeSet::new();
-    leaders.insert(program.entry);
-    leaders.extend(extra_roots.iter().copied());
+    let mut roots = BTreeSet::from([program.entry]);
+    roots.extend(program.static_aot_roots.iter().flatten().copied());
+    roots.extend(extra_roots);
+    let mut leaders = roots.clone();
     for (idx, &insn) in program.instructions.iter().enumerate() {
         let pc = program.base_address + (idx as u32 * PC_STEP_SIZE as u32);
         match insn.kind {
@@ -1590,13 +1591,10 @@ fn partition_basic_blocks_inner(
         .collect::<BTreeSet<_>>();
 
     let mut reachable_leaders = BTreeSet::new();
-    let mut pending = vec![program.entry];
-    pending.extend(
-        valid_leaders
-            .iter()
-            .copied()
-            .filter(|pc| extra_roots.contains(pc)),
-    );
+    let mut pending = roots
+        .into_iter()
+        .filter(|pc| valid_leaders.contains(pc))
+        .collect::<Vec<_>>();
     let mut blocks = Vec::new();
     while let Some(start_pc) = pending.pop() {
         if !valid_leaders.contains(&start_pc) || !reachable_leaders.insert(start_pc) {
@@ -1715,13 +1713,13 @@ fn build_layout_profile(
                     .and_modify(|count: &mut u64| *count = count.saturating_add(counts.taken))
                     .or_insert(counts.taken);
             }
-            if let Some(fallthrough) = fallthrough_pc(program, terminal_pc) {
-                if block_by_pc.contains_key(&fallthrough) {
-                    edge_counts
-                        .entry((block.start_pc, fallthrough))
-                        .and_modify(|count| *count = count.saturating_add(counts.not_taken))
-                        .or_insert(counts.not_taken);
-                }
+            if let Some(fallthrough) = fallthrough_pc(program, terminal_pc)
+                && block_by_pc.contains_key(&fallthrough)
+            {
+                edge_counts
+                    .entry((block.start_pc, fallthrough))
+                    .and_modify(|count| *count = count.saturating_add(counts.not_taken))
+                    .or_insert(counts.not_taken);
             }
         } else {
             for successor in static_successors(program, terminal_pc, insn)? {
@@ -1972,9 +1970,9 @@ fn compile_native_to(
         .arg("-fPIC")
         .arg("-x")
         .arg("assembler")
-        .arg(&asm_path)
+        .arg(asm_path)
         .arg("-o")
-        .arg(&so_path)
+        .arg(so_path)
         .output()
         .context("invoke cc for AOT assembly")?;
     if !output.status.success() {
@@ -2041,6 +2039,11 @@ fn program_digest(program: &Program) -> [u8; 32] {
         bytes.extend_from_slice(&addr.to_le_bytes());
         bytes.extend_from_slice(&value.to_le_bytes());
     }
+    let static_roots = program.static_aot_roots.as_deref().unwrap_or_default();
+    bytes.extend_from_slice(&(static_roots.len() as u64).to_le_bytes());
+    for &pc in static_roots {
+        bytes.extend_from_slice(&pc.to_le_bytes());
+    }
     keccak256(&bytes)
 }
 
@@ -2105,10 +2108,9 @@ fn encode_cache_metadata(
     )
 }
 
-fn decode_cache_metadata(
-    metadata: &str,
-    expected_key: &str,
-) -> Result<([u8; 32], Vec<u32>, usize, [u8; 32], Vec<u32>)> {
+type DecodedCacheMetadata = ([u8; 32], Vec<u32>, usize, [u8; 32], Vec<u32>);
+
+fn decode_cache_metadata(metadata: &str, expected_key: &str) -> Result<DecodedCacheMetadata> {
     let mut lines = metadata.lines();
     if lines.next() != Some(AOT_CACHE_MAGIC) || lines.next() != Some(expected_key) {
         bail!("AOT cache program/ABI identity mismatch");
@@ -2221,6 +2223,7 @@ fn load_cached_aot(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compile_cached_aot(
     program: Arc<Program>,
     roots: Vec<u32>,
@@ -2398,10 +2401,10 @@ fn write_assembly_with_planner(
         if pure_counted_block {
             emit_pure_block_budget_guard(&mut file, block)?;
         }
-        if let Some(kind) = pure_block_plan {
-            if kind == PreflightBlockPlanKind::MemoryExactAccess {
-                emit_pure_block_memory_fast_path_guard(&mut file, program, block)?;
-            }
+        if let Some(kind) = pure_block_plan
+            && kind == PreflightBlockPlanKind::MemoryExactAccess
+        {
+            emit_pure_block_memory_fast_path_guard(&mut file, program, block)?;
         }
         if pure_counted_block {
             writeln!(
@@ -2555,9 +2558,9 @@ fn write_assembly_with_planner(
                 AssemblyTraceStyle::PureCountedBlock
             } else if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
                 AssemblyTraceStyle::PreflightAdmittedRegisterBlock
-            } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
-                AssemblyTraceStyle::PreflightAdmittedMemoryBlock
-            } else if adaptive_exact_access_plan {
+            } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess))
+                || adaptive_exact_access_plan
+            {
                 AssemblyTraceStyle::PreflightAdmittedMemoryBlock
             } else if trace_style.uses_preflight_block_plan() {
                 AssemblyTraceStyle::PreflightScalar
@@ -2970,6 +2973,7 @@ L_fulltracer_emit_step:
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_after_native_step(
     mut file: impl Write,
     pc: u32,
@@ -4558,6 +4562,7 @@ fn emit_preflight_adaptive_exact_access_plan_exit(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_preflight_direct_step_static(
     mut file: impl Write,
     pc: u32,
@@ -4902,6 +4907,7 @@ fn emit_preflight_direct_event_append(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_preflight_direct_memory_access_cached(
     mut file: impl Write,
     pc: u32,
@@ -7039,6 +7045,33 @@ mod tests {
                     end_pc: base + 8,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn llvm_static_roots_admit_unobserved_blocks_and_change_cache_identity() {
+        let base = CENO_PLATFORM.pc_base();
+        let mut program = program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 1),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 2),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]);
+        let training_only_key = aot_cache_key(&program, AssemblyTraceStyle::Pure);
+
+        program.static_aot_roots = Some(vec![base, base + 8]);
+        let blocks = partition_basic_blocks(&program).unwrap();
+
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| block.start_pc)
+                .collect::<Vec<_>>(),
+            vec![base, base + 4, base + 8, base + 12]
+        );
+        assert_ne!(
+            aot_cache_key(&program, AssemblyTraceStyle::Pure),
+            training_only_key
         );
     }
 
