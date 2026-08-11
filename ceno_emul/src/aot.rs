@@ -268,6 +268,7 @@ const AOT_CTX_PREFLIGHT_PENDING_DELTAS_OFFSET: usize = 720;
 const AOT_CTX_PREFLIGHT_PENDING_TRACE_OFFSET: usize = 736;
 const AOT_CTX_PREFLIGHT_PENDING_MAIN_OFFSET: usize = 744;
 const AOT_CTX_PREFLIGHT_PENDING_TOWER_OFFSET: usize = 752;
+const AOT_CTX_PREFLIGHT_MEMORY_SHARD_START_ORDINAL_OFFSET: usize = 760;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
@@ -414,6 +415,7 @@ struct AotRuntimeContext {
     preflight_pending_trace: u64,
     preflight_pending_main: u64,
     preflight_pending_tower: u64,
+    preflight_memory_shard_start_ordinal: u64,
 }
 
 const PURE_ECALL_CODES: [u32; 11] = [
@@ -1550,6 +1552,7 @@ impl AotProgram {
             preflight_pending_trace: 0,
             preflight_pending_main: 0,
             preflight_pending_tower: 0,
+            preflight_memory_shard_start_ordinal: preflight_register_shard_start >> 2,
         };
         let trace_fn = if trace_mode == AOT_TRACE_MODE_FULLTRACER_DIRECT {
             std::ptr::null()
@@ -2677,6 +2680,26 @@ fn write_assembly_with_planner(
                 block_instruction_count(block)
             )?;
         }
+        let registers_resident = !cfg!(debug_assertions) && block_plan.is_some();
+        let memory_cells_resident = registers_resident && memory_access_count != 0;
+        if registers_resident {
+            writeln!(file, "    movq %r13, %r10")?;
+        }
+        if memory_cells_resident {
+            writeln!(file, "    movq {AOT_CTX_MEMORY_CELLS_OFFSET}(%r12), %r11")?;
+            writeln!(
+                file,
+                "    movl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %eax"
+            )?;
+            writeln!(file, "    negq %rax")?;
+            writeln!(file, "    leaq (%r11,%rax,8), %r11")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_MEMORY_START_ORDINAL_OFFSET}(%r12), %r15"
+            )?;
+            writeln!(file, "    addq 0(%rsp), %r15")?;
+            writeln!(file, "    subq ${}, %r15", block_instruction_count(block))?;
+        }
         let mut pc = block.start_pc;
         let mut memory_access_index = 0usize;
         let mut last_profile_region = None;
@@ -2735,6 +2758,9 @@ fn write_assembly_with_planner(
                 memory_region_index: hoist_memory_regions
                     .then_some(current_memory_access_index)
                     .flatten(),
+                registers_resident,
+                memory_cells_resident,
+                memory_ordinal_resident: memory_cells_resident,
             });
             emit_instruction_body(
                 &mut file,
@@ -3123,6 +3149,7 @@ fn emit_after_native_step(
     insn: Instruction,
     trace_style: AssemblyTraceStyle,
     preflight_memory_bounds_updated: bool,
+    preflight_memory_event_updated: bool,
     reserved_block_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
     if matches!(
@@ -3154,6 +3181,7 @@ fn emit_after_native_step(
             pc,
             insn,
             preflight_memory_bounds_updated,
+            preflight_memory_event_updated,
             if trace_style.uses_preflight_block_plan() {
                 PreflightAccessMode::BlockAtomic
             } else {
@@ -3221,6 +3249,7 @@ fn emit_after_native_step(
         &mut file,
         pc,
         insn,
+        false,
         false,
         PreflightAccessMode::Exact,
         true,
@@ -3291,6 +3320,9 @@ struct ReservedBlockStep {
     cycle_offset: u64,
     memory_guard_hoisted: bool,
     memory_region_index: Option<usize>,
+    registers_resident: bool,
+    memory_cells_resident: bool,
+    memory_ordinal_resident: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -4754,6 +4786,7 @@ fn emit_preflight_direct_step_static(
     pc: u32,
     insn: Instruction,
     preflight_memory_bounds_updated: bool,
+    preflight_memory_event_updated: bool,
     access_mode: PreflightAccessMode,
     check_busy_loop: bool,
     block_cycle_offset: Option<u64>,
@@ -4794,6 +4827,11 @@ fn emit_preflight_direct_step_static(
                         pc,
                         "%eax",
                         block_cycle_offset.unwrap_or(0),
+                        None,
+                        "%r11",
+                        "%r10",
+                        false,
+                        false,
                     )?;
                 }
                 if register_latest && native_step_writes_rd(insn.kind) {
@@ -4822,12 +4860,20 @@ fn emit_preflight_direct_step_static(
                         pc,
                         "%eax",
                         block_cycle_offset.unwrap_or(0),
+                        None,
+                        "%r11",
+                        "%r10",
+                        false,
+                        false,
                     )?;
                 }
             }
         }
         PreflightAccessMode::BlockAtomic => {
-            if has_memory_access && trace_style.stage_enabled(PreflightAotStage::Full) {
+            if has_memory_access
+                && trace_style.stage_enabled(PreflightAotStage::Full)
+                && !preflight_memory_event_updated
+            {
                 emit_preflight_direct_memory_shard_cache_load(&mut file)?;
                 writeln!(file, "    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %eax")?;
                 emit_preflight_direct_memory_access_cached(
@@ -4835,6 +4881,11 @@ fn emit_preflight_direct_step_static(
                     pc,
                     "%eax",
                     block_cycle_offset.unwrap_or(0),
+                    None,
+                    "%r11",
+                    "%r10",
+                    false,
+                    false,
                 )?;
             }
         }
@@ -4855,7 +4906,9 @@ fn emit_preflight_direct_step_static(
     if check_busy_loop {
         emit_preflight_direct_busy_loop_guard(&mut file, pc)?;
     }
-    writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
+    if block_cycle_offset.is_none() {
+        writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
+    }
     Ok(())
 }
 
@@ -5074,25 +5127,56 @@ fn emit_preflight_direct_memory_access_cached(
     pc: u32,
     addr_reg: &str,
     cycle_offset: u64,
+    prev_stamp_reg: Option<&str>,
+    prev_work_reg: &str,
+    shard_start_reg: &str,
+    prev_is_ordinal: bool,
+    addr_is_dense_index: bool,
 ) -> Result<()> {
     let event_label = format!(".L_preflight_memory_event_{pc:x}");
     let done_label = format!(".L_preflight_memory_event_done_{pc:x}");
-    writeln!(
-        file,
-        "    movq {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12), %r11"
-    )?;
-    writeln!(file, "    shlq $2, %r11")?;
-    writeln!(file, "    cmpq %r10, %r11")?;
+    if let Some(prev_stamp_reg) = prev_stamp_reg
+        && prev_stamp_reg != prev_work_reg
+    {
+        writeln!(file, "    movq {prev_stamp_reg}, {prev_work_reg}")?;
+    } else if prev_stamp_reg.is_none() {
+        writeln!(
+            file,
+            "    movq {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12), {prev_work_reg}"
+        )?;
+    }
+    if !prev_is_ordinal {
+        writeln!(file, "    shlq $2, {prev_work_reg}")?;
+    }
+    writeln!(file, "    cmpq {shard_start_reg}, {prev_work_reg}")?;
     writeln!(file, "    jb {event_label}")?;
     writeln!(file, ".pushsection .text.unlikely,\"ax\",@progbits")?;
     writeln!(file, "{event_label}:")?;
+    let event_prev_work_reg = if prev_work_reg == "%rcx" {
+        writeln!(file, "    movq %rcx, %rdi")?;
+        "%rdi"
+    } else {
+        prev_work_reg
+    };
     writeln!(file, "    movl {addr_reg}, %ecx")?;
+    if addr_is_dense_index {
+        writeln!(
+            file,
+            "    addl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %ecx"
+        )?;
+    }
     writeln!(file, "    movq {AOT_CTX_PREFLIGHT_CYCLE_OFFSET}(%r12), %r9")?;
     writeln!(file, "    movq (%r9), %r9")?;
     writeln!(file, "    addq ${}, %r9", cycle_offset + 3)?;
-    writeln!(file, "    testq %r11, %r11")?;
+    if prev_is_ordinal {
+        writeln!(file, "    shlq $2, {event_prev_work_reg}")?;
+    }
+    writeln!(
+        file,
+        "    testq {event_prev_work_reg}, {event_prev_work_reg}"
+    )?;
     writeln!(file, "    je 1f")?;
-    writeln!(file, "    orq $3, %r11")?;
+    writeln!(file, "    orq $3, {event_prev_work_reg}")?;
     writeln!(file, "1:")?;
     writeln!(
         file,
@@ -5100,7 +5184,7 @@ fn emit_preflight_direct_memory_access_cached(
     )?;
     emit_preflight_direct_event_append(
         &mut file,
-        "%r11",
+        event_prev_work_reg,
         "%r9",
         "%ecx",
         AOT_PREFLIGHT_HELPER_MEMORY_FIRST_TOUCH,
@@ -5561,7 +5645,9 @@ fn emit_native_compute(
     reserved_block_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
     let rd = insn.rd_internal();
-    writeln!(file, "    movq %r13, %r10")?;
+    if !reserved_block_step.is_some_and(|step| step.registers_resident) {
+        writeln!(file, "    movq %r13, %r10")?;
+    }
     writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
     if trace_style.needs_callback_values() {
         writeln!(
@@ -5660,13 +5746,20 @@ fn emit_native_compute(
             "    movl ${pc:#010x}, {AOT_CTX_TRACE_PC_OFFSET}(%r12)"
         )?;
     }
-    emit_native_next_pc_immediate(&mut file, pc.wrapping_add(PC_STEP_SIZE as u32), trace_style)?;
+    if reserved_block_step.is_none_or(|step| step.remaining_after == 0) {
+        emit_native_next_pc_immediate(
+            &mut file,
+            pc.wrapping_add(PC_STEP_SIZE as u32),
+            trace_style,
+        )?;
+    }
     emit_after_native_step(
         &mut file,
         pc,
         program,
         insn,
         trace_style,
+        false,
         false,
         reserved_block_step,
     )?;
@@ -5745,7 +5838,9 @@ fn emit_native_control_flow(
     trace_style: AssemblyTraceStyle,
     reserved_block_step: Option<ReservedBlockStep>,
 ) -> Result<()> {
-    writeln!(file, "    movq %r13, %r10")?;
+    if !reserved_block_step.is_some_and(|step| step.registers_resident) {
+        writeln!(file, "    movq %r13, %r10")?;
+    }
     if trace_style.needs_callback_values() {
         writeln!(
             file,
@@ -5815,6 +5910,7 @@ fn emit_native_control_flow(
             insn,
             trace_style,
             false,
+            false,
             reserved_block_step,
         )?;
         writeln!(file, "    jmp {done_label}")?;
@@ -5870,6 +5966,7 @@ fn emit_native_control_flow(
         insn,
         trace_style,
         false,
+        false,
         reserved_block_step,
     )?;
     Ok(())
@@ -5895,17 +5992,24 @@ fn emit_native_memory(
         !trace_style.is_pure() && trace_style.stage_enabled(PreflightAotStage::MemoryLatest);
     let tracks_mmio_bounds =
         !trace_style.is_pure() && trace_style.stage_enabled(PreflightAotStage::MmioBounds);
+    let emits_memory_event_early = !cfg!(debug_assertions)
+        && reserved_block_step.is_some()
+        && trace_style.uses_preflight_block_plan()
+        && trace_style.stage_enabled(PreflightAotStage::Full);
     let memory_guard_hoisted = reserved_block_step
         .map(|step| step.memory_guard_hoisted)
         .unwrap_or(false);
     let encoded_memory_region = reserved_block_step.and_then(|step| step.memory_region_index);
+    let memory_cells_resident = reserved_block_step.is_some_and(|step| step.memory_cells_resident);
+    let memory_ordinal_resident =
+        reserved_block_step.is_some_and(|step| step.memory_ordinal_resident);
     let memory_cells = if trace_style.is_pure() {
         "%rbx"
     } else {
         "%r11"
     };
 
-    if !trace_style.is_pure() {
+    if !trace_style.is_pure() && !memory_cells_resident {
         writeln!(file, "    movq {AOT_CTX_MEMORY_CELLS_OFFSET}(%r12), %r11")?;
     }
     if trace_style.needs_callback_values() {
@@ -5914,13 +6018,21 @@ fn emit_native_memory(
             "    movl ${pc:#010x}, {AOT_CTX_TRACE_PC_OFFSET}(%r12)"
         )?;
     }
-    emit_native_next_pc_immediate(&mut file, pc.wrapping_add(PC_STEP_SIZE as u32), trace_style)?;
+    if reserved_block_step.is_none_or(|step| step.remaining_after == 0) {
+        emit_native_next_pc_immediate(
+            &mut file,
+            pc.wrapping_add(PC_STEP_SIZE as u32),
+            trace_style,
+        )?;
+    }
     if trace_style.needs_callback_values() {
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12)")?;
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)")?;
         writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
     }
-    writeln!(file, "    movq %r13, %r10")?;
+    if !reserved_block_step.is_some_and(|step| step.registers_resident) {
+        writeln!(file, "    movq %r13, %r10")?;
+    }
     writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
     if trace_style.needs_callback_values() {
         writeln!(
@@ -6041,22 +6153,24 @@ fn emit_native_memory(
             writeln!(file, "    andl $0xfffffffc, %edx")?;
         }
     } else {
-        writeln!(file, "    movl %edx, %r8d")?;
-        writeln!(file, "    andl $3, %r8d")?;
-        writeln!(file, "    shll $3, %r8d")?;
+        if !matches!(insn.kind, InsnKind::LW | InsnKind::SW) {
+            writeln!(file, "    movl %edx, %r8d")?;
+            writeln!(file, "    andl $3, %r8d")?;
+            writeln!(file, "    shll $3, %r8d")?;
+        }
         writeln!(file, "    shrl $2, %edx")?;
-        if tracks_mmio_bounds || trace_style.stage_enabled(PreflightAotStage::Full) {
+        if tracks_mmio_bounds
+            || (trace_style.stage_enabled(PreflightAotStage::Full) && !emits_memory_event_early)
+        {
             writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
         }
         if let Some(region_index) = encoded_memory_region {
             emit_preflight_direct_encoded_memory_region(&mut file, pc, region_index, &body_label)?;
-        } else {
-            writeln!(file, "    jmp {body_label}")?;
         }
     }
 
     writeln!(file, "{body_label}:")?;
-    if !trace_style.is_pure() {
+    if !trace_style.is_pure() && !memory_cells_resident {
         writeln!(
             file,
             "    subl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %edx"
@@ -6069,10 +6183,26 @@ fn emit_native_memory(
         writeln!(file, "    movq ({memory_cells},%rsi,8), %rax")?;
         writeln!(file, "    movq %rax, %rcx")?;
         writeln!(file, "    shrq $32, %rcx")?;
-        writeln!(
-            file,
-            "    movq %rcx, {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12)"
-        )?;
+        if emits_memory_event_early {
+            emit_preflight_direct_memory_access_cached(
+                &mut file,
+                pc,
+                "%esi",
+                reserved_block_step
+                    .map(|step| step.cycle_offset)
+                    .unwrap_or(0),
+                Some("%rcx"),
+                "%rcx",
+                &format!("{AOT_CTX_PREFLIGHT_MEMORY_SHARD_START_ORDINAL_OFFSET}(%r12)"),
+                true,
+                !memory_cells_resident,
+            )?;
+        } else {
+            writeln!(
+                file,
+                "    movq %rcx, {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12)"
+            )?;
+        }
     } else {
         writeln!(file, "    movl ({memory_cells},%rsi,8), %eax")?;
     }
@@ -6168,13 +6298,21 @@ fn emit_native_memory(
             writeln!(file, "    movl %eax, ({memory_cells},%rsi,{scale})")?;
         }
     } else {
-        writeln!(
-            file,
-            "    movq {AOT_CTX_MEMORY_START_ORDINAL_OFFSET}(%r12), %rcx"
-        )?;
-        writeln!(file, "    addq 0(%rsp), %rcx")?;
-        if let Some(step) = reserved_block_step {
-            writeln!(file, "    subq ${}, %rcx", step.remaining_after + 1)?;
+        if memory_ordinal_resident {
+            let instruction_index = reserved_block_step
+                .expect("resident memory ordinal requires a reserved block")
+                .cycle_offset
+                / PC_STEP_SIZE as u64;
+            writeln!(file, "    leaq {instruction_index}(%r15), %rcx")?;
+        } else {
+            writeln!(
+                file,
+                "    movq {AOT_CTX_MEMORY_START_ORDINAL_OFFSET}(%r12), %rcx"
+            )?;
+            writeln!(file, "    addq 0(%rsp), %rcx")?;
+            if let Some(step) = reserved_block_step {
+                writeln!(file, "    subq ${}, %rcx", step.remaining_after + 1)?;
+            }
         }
         writeln!(file, "    shlq $32, %rcx")?;
         if native_step_loads_memory(insn.kind) {
@@ -6190,6 +6328,7 @@ fn emit_native_memory(
         insn,
         trace_style,
         tracks_mmio_bounds,
+        emits_memory_event_early,
         reserved_block_step,
     )?;
     // Keep the valid-access path contiguous. The per-PC callback stub lives in
@@ -6400,6 +6539,7 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
         if shard_start != context.preflight_register_shard_start {
             context.preflight_register_touched_mask = 0;
             context.preflight_register_shard_start = shard_start;
+            context.preflight_memory_shard_start_ordinal = shard_start >> 2;
         }
     }
 
@@ -6552,45 +6692,49 @@ unsafe extern "C" fn ceno_aot_preflight_fallback_callback(
         if let (Some(index), Some(plan)) = (
             pure_ecall_index(code),
             crate::syscalls::pure::access_plan(code, arg0, arg1),
-        ) && unsafe {
-            crate::syscalls::pure::execute(
-                code,
-                context.registers,
-                context.memory_cells,
-                context.memory_base_word,
-                context.memory_end_word,
-                context.pure_double_cache,
-            )
-        } {
-            let pc = ByteAddr(pc);
-            vm.set_pc(pc);
-            let insn = vm
-                .fetch(pc.waddr())
-                .expect("direct syscall PC must belong to the compiled program");
-            debug_assert_eq!(insn.kind, InsnKind::ECALL);
-            let loaded_code = vm
-                .load_register(Platform::reg_ecall())
-                .expect("register load cannot fail");
-            debug_assert_eq!(loaded_code, code);
-            vm.finish_direct_preflight_syscall(plan);
+        ) {
+            let executed = unsafe {
+                crate::syscalls::pure::execute(
+                    code,
+                    context.registers,
+                    context.memory_cells,
+                    context.memory_base_word,
+                    context.memory_end_word,
+                    context.pure_double_cache,
+                )
+            };
+            if executed {
+                let pc = ByteAddr(pc);
+                vm.set_pc(pc);
+                let insn = vm
+                    .fetch(pc.waddr())
+                    .expect("direct syscall PC must belong to the compiled program");
+                debug_assert_eq!(insn.kind, InsnKind::ECALL);
+                let loaded_code = vm
+                    .load_register(Platform::reg_ecall())
+                    .expect("register load cannot fail");
+                debug_assert_eq!(loaded_code, code);
+                vm.finish_direct_preflight_syscall(plan);
 
-            context.fallback_steps += 1;
-            context.fallback_ecall += 1;
-            unsafe {
-                (*context.pure_ecall_counts)[index] += 1;
-                *next_pc = vm.get_pc().0;
+                context.fallback_steps += 1;
+                context.fallback_ecall += 1;
+                unsafe {
+                    (*context.pure_ecall_counts)[index] += 1;
+                    *next_pc = vm.get_pc().0;
+                }
+                (context.preflight_event_cursor, context.preflight_event_end) =
+                    vm.tracer_mut().native_next_access_ptrs();
+                let shard_start = unsafe { *context.preflight_current_shard_start };
+                if shard_start != context.preflight_register_shard_start {
+                    context.preflight_register_touched_mask = 0;
+                    context.preflight_register_shard_start = shard_start;
+                    context.preflight_memory_shard_start_ordinal = shard_start >> 2;
+                }
+                context.fallback_time_ns = context
+                    .fallback_time_ns
+                    .saturating_add(fallback_started.elapsed().as_nanos() as u64);
+                return AOT_STATUS_CONTINUE;
             }
-            (context.preflight_event_cursor, context.preflight_event_end) =
-                vm.tracer_mut().native_next_access_ptrs();
-            let shard_start = unsafe { *context.preflight_current_shard_start };
-            if shard_start != context.preflight_register_shard_start {
-                context.preflight_register_touched_mask = 0;
-                context.preflight_register_shard_start = shard_start;
-            }
-            context.fallback_time_ns = context
-                .fallback_time_ns
-                .saturating_add(fallback_started.elapsed().as_nanos() as u64);
-            return AOT_STATUS_CONTINUE;
         }
     }
     unsafe { aot_exec_one::<PreflightTracer>(raw_context, pc, next_pc) }
@@ -6917,6 +7061,7 @@ unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntime
     if shard_start != context.preflight_register_shard_start {
         context.preflight_register_touched_mask = 0;
         context.preflight_register_shard_start = shard_start;
+        context.preflight_memory_shard_start_ordinal = shard_start >> 2;
     }
     status
 }
@@ -7411,6 +7556,10 @@ mod tests {
         assert_eq!(
             std::mem::offset_of!(AotRuntimeContext, preflight_pending_tower),
             AOT_CTX_PREFLIGHT_PENDING_TOWER_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_memory_shard_start_ordinal),
+            AOT_CTX_PREFLIGHT_MEMORY_SHARD_START_ORDINAL_OFFSET
         );
     }
 
@@ -9098,6 +9247,14 @@ mod tests {
 
         let full = assembly(PreflightAotStage::Full);
         assert!(full.contains("preflight_memory_event_"));
+        assert!(
+            !full.contains("    jmp .L_memory_body_8000004\n.L_memory_body_8000004:"),
+            "a memory body that already falls through must not retire an adjacent-target jump"
+        );
+        assert!(
+            !full.contains("    jmp .L_memory_body_8000008\n.L_memory_body_8000008:"),
+            "a memory body that already falls through must not retire an adjacent-target jump"
+        );
     }
 
     #[test]
