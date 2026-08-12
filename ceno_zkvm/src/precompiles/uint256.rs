@@ -233,15 +233,13 @@ impl<E: ExtensionField> ProtocolBuilder<E> for Uint256MulLayout<E> {
         coeff_2_256.push(Expression::ONE);
         let modulus_polynomial: Polynomial<Expression<E>> = (*modulus_limbs).into();
         let modulus_is_zero_expr = modulus_is_zero.expr();
-        // modulus_is_zero is constrained iff every modulus limb is zero, so
-        // adding 2^256 in that case is equivalent to conditionally selecting
-        // between modulus and 2^256 without multiplying every modulus limb by
-        // the selector.
-        let p_modulus: Polynomial<Expression<E>> = modulus_polynomial
-            + poly_scale_expr(
-                &Polynomial::from_coefficients(&coeff_2_256),
-                modulus_is_zero_expr.clone(),
-            );
+        let p_modulus: Polynomial<Expression<E>> = poly_scale_expr(
+            &modulus_polynomial,
+            Expression::ONE - modulus_is_zero_expr.clone(),
+        ) + poly_scale_expr(
+            &Polynomial::from_coefficients(&coeff_2_256),
+            modulus_is_zero_expr.clone(),
+        );
 
         // Evaluate the uint256 multiplication
         wits.output

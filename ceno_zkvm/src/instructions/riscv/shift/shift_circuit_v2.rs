@@ -37,12 +37,6 @@ pub struct ShiftBaseConfig<E: ExtensionField, const NUM_LIMBS: usize, const LIMB
 
     // Part of each x[i] that gets bit shifted to the next limb
     pub bit_shift_carry: [WitIn; NUM_LIMBS],
-
-    // Products reused under limb-selection markers. For left shifts this is
-    // b[i] * bit_multiplier_left; for right shifts it is
-    // a[i] * bit_multiplier_right.
-    pub scaled_limbs: [WitIn; NUM_LIMBS],
-    pub sign_fill: Option<WitIn>,
     pub phantom: PhantomData<E>,
 }
 
@@ -65,30 +59,6 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         let b_sign = circuit_builder.create_bit(|| "b_sign")?;
         let bit_shift_carry =
             array::from_fn(|i| circuit_builder.create_witin(|| format!("bit_shift_carry_{}", i)));
-        let scaled_limbs =
-            array::from_fn(|i| circuit_builder.create_witin(|| format!("scaled_shift_limb_{i}")));
-        for i in 0..NUM_LIMBS {
-            let product = match kind {
-                InsnKind::SLL | InsnKind::SLLI => b[i].expr() * bit_multiplier_left.expr(),
-                InsnKind::SRL | InsnKind::SRLI | InsnKind::SRA | InsnKind::SRAI => {
-                    a[i].expr() * bit_multiplier_right.expr()
-                }
-                _ => unreachable!(),
-            };
-            circuit_builder.require_equal(
-                || format!("scaled_shift_limb_{i}"),
-                scaled_limbs[i].expr(),
-                product,
-            )?;
-        }
-        let sign_fill = if matches!(kind, InsnKind::SRA | InsnKind::SRAI) {
-            Some(circuit_builder.flatten_expr(
-                || "sign_fill",
-                b_sign.expr() * (bit_multiplier_right.expr() - Expression::ONE),
-            )?)
-        } else {
-            None
-        };
 
         // Constrain that bit_shift, bit_multiplier are correct, i.e. that bit_multiplier =
         // 1 << bit_shift. Because the sum of all bit_shift_marker[i] is constrained to be
@@ -150,7 +120,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                                 Expression::ZERO
                             } else {
                                 bit_shift_carry[j - i - 1].expr()
-                            } + scaled_limbs[j - i].expr()
+                            } + b[j - i].expr() * bit_multiplier_left.expr()
                                 - E::BaseField::from_usize(1 << LIMB_BITS).expr()
                                     * bit_shift_carry[j - i].expr();
                             circuit_builder.condition_require_zero(
@@ -172,7 +142,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                             )?;
                         } else {
                             let expected_a_right = if j + i == NUM_LIMBS - 1 {
-                                sign_fill.map_or(Expression::ZERO, |wit| wit.expr())
+                                b_sign.expr() * (bit_multiplier_right.expr() - Expression::ONE)
                             } else {
                                 bit_shift_carry[j + i + 1].expr()
                             } * E::BaseField::from_usize(1 << LIMB_BITS)
@@ -182,7 +152,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                             circuit_builder.condition_require_zero(
                                 || format!("limb_shift_marker_a_expected_a_right_{i}_{j}",),
                                 limb_shift_marker[i].expr(),
-                                scaled_limbs[j].expr() - expected_a_right,
+                                a[j].expr() * bit_multiplier_right.expr() - expected_a_right,
                             )?;
                         }
                     }
@@ -229,8 +199,6 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
             bit_multiplier_right,
             limb_shift_marker,
             bit_shift_carry,
-            scaled_limbs,
-            sign_fill,
             b_sign,
             phantom: PhantomData,
         })
@@ -281,7 +249,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
     ) {
         let b: [u32; NUM_LIMBS] = split_to_limb::<u32, LIMB_BITS>(b).try_into().unwrap();
         let c: [u32; NUM_LIMBS] = split_to_limb::<u32, LIMB_BITS>(c).try_into().unwrap();
-        let (a, limb_shift, bit_shift) = run_shift::<NUM_LIMBS, LIMB_BITS>(kind, &b, &c);
+        let (_, limb_shift, bit_shift) = run_shift::<NUM_LIMBS, LIMB_BITS>(kind, &b, &c);
 
         match kind {
             InsnKind::SLL | InsnKind::SLLI => set_val!(
@@ -295,16 +263,6 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                 E::BaseField::from_usize(1 << bit_shift)
             ),
         };
-
-        let multiplier = E::BaseField::from_usize(1 << bit_shift);
-        for (i, witin) in self.scaled_limbs.iter().enumerate() {
-            let limb = if matches!(kind, InsnKind::SLL | InsnKind::SLLI) {
-                b[i]
-            } else {
-                a[i]
-            };
-            set_val!(instance, witin, E::BaseField::from_u32(limb) * multiplier);
-        }
 
         let bit_shift_carry: [u32; NUM_LIMBS] = array::from_fn(|i| match kind {
             InsnKind::SLL | InsnKind::SLLI => b[i] >> (LIMB_BITS - bit_shift),
@@ -332,13 +290,6 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
             lk_multiplicity.lookup_xor_byte(b[NUM_LIMBS - 1] as u64, 1 << (LIMB_BITS - 1));
         }
         set_val!(instance, self.b_sign, E::BaseField::from_bool(b_sign != 0));
-        if let Some(sign_fill) = self.sign_fill {
-            set_val!(
-                instance,
-                sign_fill,
-                E::BaseField::from_u32(b_sign) * (multiplier - E::BaseField::ONE)
-            );
-        }
     }
 }
 

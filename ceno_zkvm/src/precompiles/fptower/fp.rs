@@ -171,17 +171,14 @@ impl<E: ExtensionField, P: FpOpField> FpOpLayout<E, P> {
         cols.output_range_check
             .populate(lk_multiplicity, &output, &modulus);
     }
+}
 
-    pub fn build_fixed_op(
-        cb: &mut CircuitBuilder<E>,
-        op: FieldOperation,
-    ) -> Result<Self, CircuitBuilderError> {
-        Self::build_with_op(cb, Some(op))
-    }
+impl<E: ExtensionField, P: FpOpField> ProtocolBuilder<E> for FpOpLayout<E, P> {
+    type Params = ();
 
-    fn build_with_op(
+    fn build_layer_logic(
         cb: &mut CircuitBuilder<E>,
-        op: Option<FieldOperation>,
+        _params: Self::Params,
     ) -> Result<Self, CircuitBuilderError> {
         let mut layout = FpOpLayout::new(cb);
         let wits = &layout.layer_exprs.wits;
@@ -195,36 +192,18 @@ impl<E: ExtensionField, P: FpOpField> FpOpLayout<E, P> {
         )?;
 
         let modulus: Polynomial<Expression<E>> = P::to_limbs_expr::<E>(&P::modulus()).into();
-        if let Some(op) = op {
-            cb.require_equal(
-                || "fp_op_fixed_add",
-                wits.is_add.expr(),
-                E::BaseField::from_bool(op == FieldOperation::Add).expr(),
-            )?;
-            cb.require_equal(
-                || "fp_op_fixed_sub",
-                wits.is_sub.expr(),
-                E::BaseField::from_bool(op == FieldOperation::Sub).expr(),
-            )?;
-            cb.require_equal(
-                || "fp_op_fixed_mul",
-                wits.is_mul.expr(),
-                E::BaseField::from_bool(op == FieldOperation::Mul).expr(),
-            )?;
-            wits.output
-                .eval_with_modulus(cb, &wits.x_limbs, &wits.y_limbs, &modulus, op)?;
-        } else {
-            wits.output.eval_variable(
-                cb,
-                &wits.x_limbs,
-                &wits.y_limbs,
-                &modulus,
-                wits.is_add.expr(),
-                wits.is_sub.expr(),
-                wits.is_mul.expr(),
-                E::BaseField::ZERO.expr(),
-            )?;
-        }
+        let zero = E::BaseField::ZERO.expr();
+
+        wits.output.eval_variable(
+            cb,
+            &wits.x_limbs,
+            &wits.y_limbs,
+            &modulus,
+            wits.is_add.expr(),
+            wits.is_sub.expr(),
+            wits.is_mul.expr(),
+            zero,
+        )?;
         wits.output_range_check
             .eval(cb, &wits.output.result, &modulus)?;
 
@@ -244,17 +223,6 @@ impl<E: ExtensionField, P: FpOpField> FpOpLayout<E, P> {
         layout.output32_exprs = output32;
 
         Ok(layout)
-    }
-}
-
-impl<E: ExtensionField, P: FpOpField> ProtocolBuilder<E> for FpOpLayout<E, P> {
-    type Params = ();
-
-    fn build_layer_logic(
-        cb: &mut CircuitBuilder<E>,
-        _params: Self::Params,
-    ) -> Result<Self, CircuitBuilderError> {
-        Self::build_with_op(cb, None)
     }
 
     fn finalize(&mut self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E> {

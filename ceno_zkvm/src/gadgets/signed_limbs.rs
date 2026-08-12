@@ -28,10 +28,6 @@ pub struct UIntLimbsLTConfig<E: ExtensionField> {
     pub diff_marker: [WitIn; UINT_LIMBS],
     pub diff_val: WitIn,
 
-    // Oriented limb differences. Materializing these products keeps the
-    // marker-gated comparison constraints quadratic.
-    pub oriented_diff: [WitIn; UINT_LIMBS],
-
     // 1 if a < b, 0 otherwise.
     pub cmp_lt: WitIn,
     phantom: PhantomData<E>,
@@ -68,8 +64,6 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
                 .expect("create_bit_error")
         });
         let diff_val = circuit_builder.create_witin(|| "diff_val");
-        let oriented_diff =
-            array::from_fn(|i| circuit_builder.create_witin(|| format!("oriented_diff_{i}")));
 
         // Check if a_msb_f and b_msb_f are signed values of a[NUM_LIMBS - 1] and b[NUM_LIMBS - 1] in prime field F.
         let a_diff = a_expr[UINT_LIMBS - 1].expr() - a_msb_f.expr();
@@ -87,18 +81,12 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
         let mut prefix_sum = Expression::ZERO;
 
         for i in (0..UINT_LIMBS).rev() {
-            let raw_diff = if i == UINT_LIMBS - 1 {
+            let diff = (if i == UINT_LIMBS - 1 {
                 b_msb_f.expr() - a_msb_f.expr()
             } else {
                 b_expr[i].expr() - a_expr[i].expr()
-            };
-            circuit_builder.require_equal(
-                || format!("oriented_diff_{i}"),
-                oriented_diff[i].expr(),
-                raw_diff
-                    * (E::BaseField::from_u8(2).expr() * cmp_lt.expr() - E::BaseField::ONE.expr()),
-            )?;
-            let diff = oriented_diff[i].expr();
+            }) * (E::BaseField::from_u8(2).expr() * cmp_lt.expr()
+                - E::BaseField::ONE.expr());
             prefix_sum += diff_marker[i].expr();
             circuit_builder.require_zero(
                 || format!("prefix_diff_zero_{i}"),
@@ -154,7 +142,6 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
             b_msb_f,
             diff_marker,
             diff_val,
-            oriented_diff,
             cmp_lt,
             phantom: PhantomData,
         })
@@ -221,20 +208,6 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
             a[diff_idx] - b[diff_idx]
         };
         set_val!(instance, config.diff_val, diff_val as u64);
-        for (i, witin) in config.oriented_diff.iter().enumerate() {
-            let oriented_diff = if i == UINT_LIMBS - 1 {
-                if cmp_lt {
-                    b_msb_f - a_msb_f
-                } else {
-                    a_msb_f - b_msb_f
-                }
-            } else if cmp_lt {
-                E::BaseField::from_u16(b[i]) - E::BaseField::from_u16(a[i])
-            } else {
-                E::BaseField::from_u16(a[i]) - E::BaseField::from_u16(b[i])
-            };
-            set_val!(instance, witin, oriented_diff);
-        }
 
         if diff_idx != UINT_LIMBS {
             lkm.assert_ux::<LIMB_BITS>((diff_val - 1) as u64);

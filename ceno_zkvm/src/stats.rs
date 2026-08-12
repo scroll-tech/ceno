@@ -148,83 +148,6 @@ where
 }
 pub type StaticReport = Report<CircuitStats>;
 
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct DegreeAuditStats {
-    pub chip: String,
-    pub max_constraint_degree: usize,
-    pub max_main_sumcheck_degree: usize,
-    pub cubic_constraints: usize,
-    pub witness_columns: usize,
-    pub trace_weighted_witness_cells: usize,
-}
-
-pub fn degree_audit<E: ExtensionField>(
-    zkvm_system: &ZKVMConstraintSystem<E>,
-    num_instances: &BTreeMap<String, usize>,
-) -> Vec<DegreeAuditStats> {
-    zkvm_system
-        .get_css()
-        .iter()
-        .map(|(name, composed)| {
-            let cs = &composed.zkvm_v1_css;
-            let constraints = cs
-                .assert_zero_expressions
-                .iter()
-                .chain(&cs.assert_zero_sumcheck_expressions);
-            let max_constraint_degree = constraints
-                .clone()
-                .map(Expression::degree)
-                .max()
-                .unwrap_or(0);
-            let cubic_constraints = constraints.filter(|expr| expr.degree() == 3).count();
-            let selected_degree = |expressions: &[Expression<E>], has_selector: bool| {
-                expressions
-                    .iter()
-                    .map(Expression::degree)
-                    .max()
-                    .unwrap_or(0)
-                    + usize::from(has_selector && !expressions.is_empty())
-            };
-            let zero_expressions = cs
-                .assert_zero_expressions
-                .iter()
-                .chain(&cs.assert_zero_sumcheck_expressions)
-                .cloned()
-                .collect_vec();
-            let selector_gated_degree = [
-                selected_degree(&cs.r_expressions, cs.r_selector.is_some()),
-                selected_degree(&cs.w_expressions, cs.w_selector.is_some()),
-                selected_degree(&cs.lk_expressions, cs.lk_selector.is_some()),
-                selected_degree(&zero_expressions, cs.zero_selector.is_some()),
-            ]
-            .into_iter()
-            .max()
-            .unwrap_or(0);
-            let max_main_sumcheck_degree = composed
-                .gkr_circuit
-                .as_ref()
-                .and_then(|gkr| {
-                    gkr.layers
-                        .iter()
-                        .map(|layer| layer.max_expr_degree + 1)
-                        .max()
-                })
-                .map(|gkr_degree| gkr_degree.max(selector_gated_degree))
-                .unwrap_or(selector_gated_degree);
-            let witness_columns = cs.num_witin as usize;
-            DegreeAuditStats {
-                chip: name.clone(),
-                max_constraint_degree,
-                max_main_sumcheck_degree,
-                cubic_constraints,
-                witness_columns,
-                trace_weighted_witness_cells: witness_columns
-                    * num_instances.get(name).copied().unwrap_or(0),
-            }
-        })
-        .collect()
-}
-
 impl Report<CircuitStats> {
     pub fn new<E: ExtensionField>(zkvm_system: &ZKVMConstraintSystem<E>) -> Self {
         Report {
@@ -359,40 +282,5 @@ impl Report<CircuitStatsTrace> {
         let mut file = File::create(filename).expect("Unable to create file");
         _ = opcodes_table.print(&mut file);
         _ = tables_table.print(&mut file);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::instructions::riscv::{MmuConfig, Rv32imConfig};
-    use ff_ext::BabyBearExt4;
-
-    #[test]
-    fn production_riscv_constraints_are_at_most_quadratic() {
-        let audit = std::thread::Builder::new()
-            .stack_size(64 * 1024 * 1024)
-            .spawn(|| {
-                let mut zkvm_cs = ZKVMConstraintSystem::<BabyBearExt4>::default();
-                Rv32imConfig::<BabyBearExt4>::construct_circuits(&mut zkvm_cs);
-                MmuConfig::<BabyBearExt4>::construct_circuits(&mut zkvm_cs);
-                degree_audit(&zkvm_cs, &BTreeMap::new())
-            })
-            .unwrap()
-            .join()
-            .unwrap();
-        let offenders = audit
-            .iter()
-            .filter(|row| {
-                row.max_constraint_degree > 2
-                    || row.max_main_sumcheck_degree > 3
-                    || row.cubic_constraints != 0
-            })
-            .collect_vec();
-
-        assert!(
-            offenders.is_empty(),
-            "degree audit found non-quadratic constraints: {offenders:?}"
-        );
     }
 }
