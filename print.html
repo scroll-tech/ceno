@@ -46,10 +46,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-8b66f622.js";
+            window.path_to_searchindex_js = "searchindex-c8d13cd0.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-cd86a274.js"></script>
+        <script src="toc-8023f840.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -787,18 +787,33 @@ fn black_box&lt;T&gt;(x: *const T) -&gt; T {
 //! Iterate multiple times and log the state after each iteration.
 
 extern crate ceno_rt;
+use ceno_serde::from_slice;
 use ceno_syscall::syscall_keccak_permute;
 
-const ITERATIONS: usize = 100;
+const DEFAULT_ITERATIONS: usize = 100;
 
 fn main() {
+    let iterations = iteration_hint();
     let mut state = [0_u64; 25];
 
-    for i in 0..ITERATIONS {
+    for i in 0..iterations {
         syscall_keccak_permute(&amp;mut state);
         if i == 0 {
             log_state(&amp;state);
         }
+    }
+}
+
+fn iteration_hint() -&gt; usize {
+    let hint = ceno_rt::read_slice();
+    if hint.is_empty() {
+        return DEFAULT_ITERATIONS;
+    }
+
+    let iterations: u32 = from_slice(hint).expect("keccak_syscall iteration hint must be a u32");
+    match iterations {
+        0 =&gt; DEFAULT_ITERATIONS,
+        iterations =&gt; iterations as usize,
     }
 }
 
@@ -1428,6 +1443,92 @@ $\sum_{\text{shard}} \Sigma_{\text{shard}} = \mathcal{O}$
 in the hundreds, so this is a few hundred EC additions.</p>
 </li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="aot-execution-architecture"><a class="header" href="#aot-execution-architecture">AOT Execution Architecture</a></h1>
+<p>Ceno’s x86-64 AOT backend has two user-visible execution paths:</p>
+<ul>
+<li><strong>Pure</strong> executes guest values for diagnostics and benchmarking. It preserves
+guest registers, memory, output, exit status, traps, syscalls, and retired
+instruction count, but does not produce proof-compatible access accounting.</li>
+<li><strong>Full</strong> runs the production preflight path, then replays the finalized plan
+with <code>FullTracer</code> to produce step records and syscall witnesses.</li>
+</ul>
+<p>Both paths compile statically reachable RISC-V basic blocks into a shared
+object. Unsupported instructions, guarded memory cases, dynamic targets,
+interior block entry, capacity proximity, and exceptional transitions return
+to the scalar Rust path.</p>
+<h2 id="training-and-cache-identity"><a class="header" href="#training-and-cache-identity">Training and cache identity</a></h2>
+<p><code>cargo ceno build</code> asks LLVM to emit <code>.llvm_bb_addr_map</code>. The ELF loader
+validates its version, features, addresses, alignment, block sizes, metadata,
+and callsite return PCs. These workload-independent roots are always admitted
+as possible AOT entries, including blocks that the training input does not
+execute.</p>
+<p>Coverage training still interprets the program once to discover dynamic
+targets and post-syscall continuations, count block and branch frequency, and
+choose a stable block layout. Production training also sizes the next-access
+tape and binds the artifact to the active shard-cost model. The cache key
+includes the program and static-root digest, target, AOT ABI, emission style,
+layout digest, shard limits, and planner fingerprint where applicable.</p>
+<p>Generated-code changes must update the private cache identity or ABI metadata.
+On a cache hit, Ceno validates metadata, the shared-object digest, block layout,
+and planner identity before loading it. Missing, corrupt, or incompatible
+artifacts are rebuilt rather than executed.</p>
+<h2 id="runtime-abi-and-block-admission"><a class="header" href="#runtime-abi-and-block-admission">Runtime ABI and block admission</a></h2>
+<p>The generated object receives a versioned runtime context containing the guest
+register file, packed dense memory, program and dispatch state, tracing state,
+planner tables, next-access tape cursors, and fallback counters. Offset tests
+keep handwritten assembly synchronized with the Rust layout.</p>
+<p>Production preflight admits a block only when its complete transition is safe:</p>
+<ul>
+<li>the instruction budget covers the whole block;</li>
+<li>planner descriptors remain in the current generation and below their bucket
+ceilings;</li>
+<li>the block stays within shard cell and cycle limits;</li>
+<li>the next-access tape has enough capacity;</li>
+<li>affine memory accesses do not wrap, are aligned, and remain inside one valid
+region; and</li>
+<li>execution enters at the block leader through a supported transition.</li>
+</ul>
+<p>An admission failure does not weaken validation. It selects exact scalar
+execution, which handles bucket crossings, shard splits, memory slow paths,
+syscalls, traps, and dynamic control flow.</p>
+<h2 id="resident-state-and-planner-accounting"><a class="header" href="#resident-state-and-planner-accounting">Resident state and planner accounting</a></h2>
+<p>After admission, generated code may keep the register base, dense-memory base,
+and memory ordinal base in callee-saved host registers. The block cannot call
+Rust before its guarded exit, so this state remains valid. Cold exits and
+fallbacks publish the guest PC and refresh shard-local resident state before
+native execution resumes.</p>
+<p>Planner table bases are loaded once per admitted accounting sequence. Every
+descriptor still checks its generation, adds its exact instance delta, checks
+the cached bucket ceiling, and rolls back before the slow path if admission
+fails. Shard boundaries remain owned by the preflight planner.</p>
+<h2 id="memory-events-and-shard-capacity-handoff"><a class="header" href="#memory-events-and-shard-capacity-handoff">Memory events and shard-capacity handoff</a></h2>
+<p>Packed dense-memory cells store the guest value with its latest-access
+instruction ordinal. Native loads and stores reconstruct exact subcycles,
+update latest access state, and append cross-shard register and memory events
+in canonical order. Heap, stack, and hint extrema are reconstructed from the
+validated access stream after production execution.</p>
+<p>Finalized preflight boundaries determine both the shard count and the maximum
+number of steps in any shard. That maximum is carried as <code>FullTracerConfig</code>
+with the emulation result. Replay validates boundary ordering, alignment,
+coverage, shard count, and maximum size before allocating exactly one pending
+record beyond the largest shard. This prevents one-step-buffer exhaustion
+without allocating for the entire execution.</p>
+<h2 id="replay-and-syscalls"><a class="header" href="#replay-and-syscalls">Replay and syscalls</a></h2>
+<p>Full replay reuses the trained block layout but has a distinct cache entry. It
+emits canonical <code>StepRecord</code>s and latest-access state directly, while Rust owns
+unsupported transitions and syscall witness construction. Public-data crypto
+kernels may execute in the host fast path, but their memory-operation order,
+witnesses, invalid-input behavior, infinity and parity rules, and overlapping
+buffer fallback must match the generic syscall implementation.</p>
+<h2 id="benchmarking-requirements"><a class="header" href="#benchmarking-requirements">Benchmarking requirements</a></h2>
+<p>Benchmark only warm cached artifacts, pin comparable runs to the same CPU, and
+use separate cache identities for control and candidate binaries. Report
+training, compilation, loading, native execution, and fallback time separately.
+Alternate control and candidate samples and require identical guest output,
+instruction and cycle totals, full boundary vectors, event order, witnesses,
+and replay results. Pure numbers are diagnostic and must never be presented as
+proof-compatible Full results.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="recursion-v2-design-principles"><a class="header" href="#recursion-v2-design-principles">Recursion V2 Design Principles</a></h1>
 <p>This document is a working design wiki for <code>ceno_recursion_v2</code>. The goal is to bridge the gap between the native <code>ceno_zkvm</code> Rust verifier and the recursion-v2 AIR, trace, transcript, and bus-message style.</p>

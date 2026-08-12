@@ -45,10 +45,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-8b66f622.js";
+            window.path_to_searchindex_js = "searchindex-c8d13cd0.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-cd86a274.js"></script>
+        <script src="toc-8023f840.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -390,18 +390,33 @@ fn black_box&lt;T&gt;(x: *const T) -&gt; T {
 //! Iterate multiple times and log the state after each iteration.
 
 extern crate ceno_rt;
+use ceno_serde::from_slice;
 use ceno_syscall::syscall_keccak_permute;
 
-const ITERATIONS: usize = 100;
+const DEFAULT_ITERATIONS: usize = 100;
 
 fn main() {
+    let iterations = iteration_hint();
     let mut state = [0_u64; 25];
 
-    for i in 0..ITERATIONS {
+    for i in 0..iterations {
         syscall_keccak_permute(&amp;mut state);
         if i == 0 {
             log_state(&amp;state);
         }
+    }
+}
+
+fn iteration_hint() -&gt; usize {
+    let hint = ceno_rt::read_slice();
+    if hint.is_empty() {
+        return DEFAULT_ITERATIONS;
+    }
+
+    let iterations: u32 = from_slice(hint).expect("keccak_syscall iteration hint must be a u32");
+    match iterations {
+        0 =&gt; DEFAULT_ITERATIONS,
+        iterations =&gt; iterations as usize,
     }
 }
 
