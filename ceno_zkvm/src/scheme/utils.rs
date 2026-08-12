@@ -664,7 +664,7 @@ pub fn infer_tower_product_witness<E: ExtensionField>(
     fields(profiling_2),
     level = "trace"
 )]
-pub fn build_main_witness<
+pub(crate) fn build_main_witness<
     'a,
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,

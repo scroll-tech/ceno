@@ -78,6 +78,7 @@ pub struct Poseidon2Config<
 > {
     pub(crate) p3_cols: Vec<WitIn>, // columns in the plonky3-air
     pub(crate) post_linear_layer_cols: Vec<WitIn>, /* additional columns to hold the state after linear layers */
+    pub(crate) sbox_aux_cols: Vec<WitIn>,
     constants: RoundConstants<E::BaseField, STATE_WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>,
 }
 
@@ -113,6 +114,7 @@ where
         sbox: &SBox<Expression<E>, SBOX_DEGREE, SBOX_REGISTERS>,
         x: &mut Expression<E>,
         cb: &mut CircuitBuilder<E>,
+        sbox_aux_cols: &mut Vec<WitIn>,
     ) -> Result<(), CircuitBuilderError> {
         *x = match (SBOX_DEGREE, SBOX_REGISTERS) {
             (3, 0) => x.cube(),
@@ -129,8 +131,14 @@ where
             }
             (7, 1) => {
                 let committed_x3: Expression<E> = sbox.0[0].clone();
-                cb.require_zero(|| "x3 = x.cube()", committed_x3.clone() - x.cube())?;
-                committed_x3.square() * x.clone()
+                let x2 = cb.flatten_expr(|| "x2 = x.square()", x.square())?;
+                cb.require_zero(
+                    || "x3 = x2 * x",
+                    committed_x3.clone() - x2.expr() * x.clone(),
+                )?;
+                let x6 = cb.flatten_expr(|| "x6 = x3.square()", committed_x3.square())?;
+                sbox_aux_cols.extend([x2, x6]);
+                x6.expr() * x.clone()
             }
             _ => panic!(
                 "Unexpected (SBOX_DEGREE, SBOX_REGISTERS) of ({}, {})",
@@ -146,10 +154,11 @@ where
         full_round: &FullRound<Expression<E>, STATE_WIDTH, SBOX_DEGREE, SBOX_REGISTERS>,
         round_constants: &[E::BaseField],
         cb: &mut CircuitBuilder<E>,
+        sbox_aux_cols: &mut Vec<WitIn>,
     ) -> Result<(), CircuitBuilderError> {
         for (i, (s, r)) in state.iter_mut().zip_eq(round_constants.iter()).enumerate() {
             *s = s.clone() + r.expr();
-            Self::eval_sbox(&full_round.sbox[i], s, cb)?;
+            Self::eval_sbox(&full_round.sbox[i], s, cb, sbox_aux_cols)?;
         }
         Self::external_linear_layer(state);
         for (state_i, post_i) in state.iter_mut().zip_eq(full_round.post.iter()) {
@@ -166,6 +175,7 @@ where
         partial_round: &PartialRound<Expression<E>, STATE_WIDTH, SBOX_DEGREE, SBOX_REGISTERS>,
         round_constant: &E::BaseField,
         cb: &mut CircuitBuilder<E>,
+        sbox_aux_cols: &mut Vec<WitIn>,
     ) -> Result<(), CircuitBuilderError> {
         cb.require_equal(
             || "post_linear_layer[0] = state[0]",
@@ -174,7 +184,7 @@ where
         )?;
         state[0] = post_linear_layer.expr();
 
-        Self::eval_sbox(&partial_round.sbox, &mut state[0], cb)?;
+        Self::eval_sbox(&partial_round.sbox, &mut state[0], cb, sbox_aux_cols)?;
 
         cb.require_zero(
             || "state[0] = post_sbox",
@@ -261,6 +271,7 @@ where
             HALF_FULL_ROUNDS,
             PARTIAL_ROUNDS,
         > = col_exprs.as_mut_slice().borrow_mut();
+        let mut sbox_aux_cols = Vec::new();
 
         // external linear layer
         Self::external_linear_layer(&mut poseidon2_cols.inputs);
@@ -289,6 +300,7 @@ where
                 &poseidon2_cols.beginning_full_rounds[round],
                 &round_constants.beginning_full_round_constants[round],
                 cb,
+                &mut sbox_aux_cols,
             )
             .unwrap();
         }
@@ -301,6 +313,7 @@ where
                 &poseidon2_cols.partial_rounds[round],
                 &round_constants.partial_round_constants[round],
                 cb,
+                &mut sbox_aux_cols,
             )
             .unwrap();
         }
@@ -326,6 +339,7 @@ where
                 &poseidon2_cols.ending_full_rounds[round],
                 &round_constants.ending_full_round_constants[round],
                 cb,
+                &mut sbox_aux_cols,
             )
             .unwrap();
         }
@@ -333,6 +347,7 @@ where
         Poseidon2Config {
             p3_cols,
             post_linear_layer_cols,
+            sbox_aux_cols,
             constants: round_constants,
         }
     }
@@ -376,7 +391,7 @@ where
     }
 
     pub fn num_cols(&self) -> usize {
-        self.p3_cols.len() + self.post_linear_layer_cols.len()
+        self.p3_cols.len() + self.post_linear_layer_cols.len() + self.sbox_aux_cols.len()
     }
 
     pub fn assign_instance(
@@ -384,7 +399,10 @@ where
         instance: &mut [E::BaseField],
         state: [E::BaseField; STATE_WIDTH],
     ) {
-        let (p3_cols, post_linear_layer_cols) = instance.split_at_mut(self.num_p3_cols());
+        let (p3_cols, remaining_cols) = instance.split_at_mut(self.num_p3_cols());
+        let (post_linear_layer_cols, remaining_cols) =
+            remaining_cols.split_at_mut(self.post_linear_layer_cols.len());
+        let (sbox_aux_cols, _) = remaining_cols.split_at_mut(self.sbox_aux_cols.len());
 
         let poseidon2_cols: &mut Poseidon2Cols<
             E::BaseField,
@@ -406,6 +424,7 @@ where
         >(
             poseidon2_cols,
             post_linear_layer_cols,
+            sbox_aux_cols,
             state,
             &self.constants,
         );
@@ -433,9 +452,11 @@ fn generate_trace_rows_for_perm<
         PARTIAL_ROUNDS,
     >,
     post_linear_layers: &mut [F],
+    sbox_aux_cols: &mut [F],
     mut state: [F; WIDTH],
     constants: &RoundConstants<F, WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>,
 ) {
+    let mut sbox_aux_idx = 0;
     perm.export = F::ONE;
     perm.inputs
         .iter_mut()
@@ -461,7 +482,11 @@ fn generate_trace_rows_for_perm<
         .zip(&constants.beginning_full_round_constants)
     {
         generate_full_round::<F, LinearLayers, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>(
-            &mut state, full_round, constants,
+            &mut state,
+            full_round,
+            constants,
+            sbox_aux_cols,
+            &mut sbox_aux_idx,
         );
     }
 
@@ -476,6 +501,8 @@ fn generate_trace_rows_for_perm<
             &mut post_linear_layers[WIDTH + i],
             partial_round,
             *constant,
+            sbox_aux_cols,
+            &mut sbox_aux_idx,
         );
     }
 
@@ -494,9 +521,14 @@ fn generate_trace_rows_for_perm<
         .zip(&constants.ending_full_round_constants)
     {
         generate_full_round::<F, LinearLayers, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>(
-            &mut state, full_round, constants,
+            &mut state,
+            full_round,
+            constants,
+            sbox_aux_cols,
+            &mut sbox_aux_idx,
         );
     }
+    debug_assert_eq!(sbox_aux_idx, sbox_aux_cols.len());
 }
 
 #[inline]
@@ -510,12 +542,14 @@ fn generate_full_round<
     state: &mut [F; WIDTH],
     full_round: &mut FullRound<F, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>,
     round_constants: &[F; WIDTH],
+    sbox_aux_cols: &mut [F],
+    sbox_aux_idx: &mut usize,
 ) {
     for (state_i, const_i) in state.iter_mut().zip(round_constants) {
         *state_i += *const_i;
     }
     for (state_i, sbox_i) in state.iter_mut().zip(full_round.sbox.iter_mut()) {
-        generate_sbox(sbox_i, state_i);
+        generate_sbox(sbox_i, state_i, sbox_aux_cols, sbox_aux_idx);
     }
     LinearLayers::external_linear_layer(state);
     full_round
@@ -539,10 +573,17 @@ fn generate_partial_round<
     post_linear_layer: &mut F,
     partial_round: &mut PartialRound<F, WIDTH, SBOX_DEGREE, SBOX_REGISTERS>,
     round_constant: F,
+    sbox_aux_cols: &mut [F],
+    sbox_aux_idx: &mut usize,
 ) {
     state[0] += round_constant;
     *post_linear_layer = state[0];
-    generate_sbox(&mut partial_round.sbox, &mut state[0]);
+    generate_sbox(
+        &mut partial_round.sbox,
+        &mut state[0],
+        sbox_aux_cols,
+        sbox_aux_idx,
+    );
     partial_round.post_sbox = state[0];
     LinearLayers::internal_linear_layer(state);
 }
@@ -551,6 +592,8 @@ fn generate_partial_round<
 fn generate_sbox<F: PrimeField, const DEGREE: u64, const REGISTERS: usize>(
     sbox: &mut SBox<F, DEGREE, REGISTERS>,
     x: &mut F,
+    sbox_aux_cols: &mut [F],
+    sbox_aux_idx: &mut usize,
 ) {
     *x = match (DEGREE, REGISTERS) {
         (3, 0) => x.cube(),
@@ -563,8 +606,12 @@ fn generate_sbox<F: PrimeField, const DEGREE: u64, const REGISTERS: usize>(
             x3 * x2
         }
         (7, 1) => {
+            let x2 = x.square();
             let x3 = x.cube();
             sbox.0[0] = x3;
+            sbox_aux_cols[*sbox_aux_idx] = x2;
+            sbox_aux_cols[*sbox_aux_idx + 1] = x3.square();
+            *sbox_aux_idx += 2;
             x3 * x3 * *x
         }
         (11, 2) => {

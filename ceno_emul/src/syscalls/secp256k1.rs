@@ -2,9 +2,9 @@ use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 use crate::{
     Change, EmuContext, Platform, Tracer, VMState, WORD_SIZE, Word, WriteOp, utils::MemoryView,
 };
+use halo2curves_axiom::{ff::PrimeField as HaloPrimeField, secq256k1::Fq as HaloSecpFq};
 use itertools::Itertools;
-use k256::{FieldBytes, elliptic_curve::PrimeField};
-use std::iter;
+use ruint::aliases::U256;
 
 pub struct Secp256k1AddSpec;
 
@@ -56,9 +56,11 @@ pub struct SecpPoint(pub secp::Point);
 impl From<[Word; SECP256K1_ARG_WORDS]> for SecpPoint {
     fn from(words: [Word; SECP256K1_ARG_WORDS]) -> Self {
         // Prepend the "tag" byte as expected by secp
-        let mut bytes = iter::once(4u8)
-            .chain(words.iter().flat_map(|word| word.to_le_bytes()))
-            .collect_vec();
+        let mut bytes = [0u8; 65];
+        bytes[0] = 4;
+        for (chunk, word) in bytes[1..].chunks_exact_mut(4).zip(words) {
+            chunk.copy_from_slice(&word.to_le_bytes());
+        }
 
         // The call-site uses "little endian", while secp uses "big endian"
         // We need to reverse the coordinate representations
@@ -94,13 +96,96 @@ impl From<SecpMaybePoint> for [Word; SECP256K1_ARG_WORDS] {
         bytes[..32].reverse();
         // Reverse Y coordinate
         bytes[32..].reverse();
-        bytes
-            .chunks_exact(4)
-            .map(|chunk| Word::from_le_bytes(chunk.try_into().unwrap()))
-            .collect_vec()
-            .try_into()
-            .unwrap()
+        std::array::from_fn(|index| {
+            Word::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into().unwrap())
+        })
     }
+}
+
+#[inline(never)]
+pub(crate) fn add_words(
+    p: [Word; SECP256K1_ARG_WORDS],
+    q: [Word; SECP256K1_ARG_WORDS],
+) -> [Word; SECP256K1_ARG_WORDS] {
+    let (x1, y1) = words_to_halo2_point(p);
+    let (x2, y2) = words_to_halo2_point(q);
+
+    if x1 == x2 {
+        if y1 != y2 {
+            return [0; SECP256K1_ARG_WORDS];
+        }
+        return halo2_double(x1, y1);
+    }
+
+    // This is the same native affine formula used by OpenVM's K256 host
+    // preflight executor. The syscall points are public, so the local
+    // variable-time inversion below is appropriate here.
+    let lambda = (y2 - y1) * halo2_invert_vartime(x2 - x1);
+    let x3 = lambda.square() - x1 - x2;
+    let y3 = lambda * (x1 - x3) - y1;
+    halo2_point_to_words(x3, y3)
+}
+
+#[inline(never)]
+pub(crate) fn double_words(words: [Word; SECP256K1_ARG_WORDS]) -> [Word; SECP256K1_ARG_WORDS] {
+    let (x, y) = words_to_halo2_point(words);
+    halo2_double(x, y)
+}
+
+#[inline(always)]
+fn halo2_double(x: HaloSecpFq, y: HaloSecpFq) -> [Word; SECP256K1_ARG_WORDS] {
+    let x_squared = x.square();
+    let lambda = (x_squared + x_squared.double()) * halo2_invert_vartime(y.double());
+    let x3 = lambda.square() - x.double();
+    let y3 = lambda * (x - x3) - y;
+    halo2_point_to_words(x3, y3)
+}
+
+#[inline(always)]
+fn halo2_invert_vartime(value: HaloSecpFq) -> HaloSecpFq {
+    // Keep this helper private to public-data host syscalls. `inv_mod` uses a
+    // variable-time Lehmer extended-GCD implementation and must not be reused
+    // for secret scalar arithmetic.
+    const MODULUS: U256 = U256::from_limbs([
+        0xffff_fffe_ffff_fc2f,
+        0xffff_ffff_ffff_ffff,
+        0xffff_ffff_ffff_ffff,
+        0xffff_ffff_ffff_ffff,
+    ]);
+    let repr = value.to_repr();
+    let value = U256::from_limbs(std::array::from_fn(|index| {
+        u64::from_le_bytes(repr[index * 8..index * 8 + 8].try_into().unwrap())
+    }));
+    HaloSecpFq::from_repr(value.inv_mod(MODULUS).unwrap().to_le_bytes()).unwrap()
+}
+
+#[inline(always)]
+fn words_to_halo2_point(words: [Word; SECP256K1_ARG_WORDS]) -> (HaloSecpFq, HaloSecpFq) {
+    let coordinate = |offset: usize| {
+        let mut repr = [0u8; 32];
+        for (chunk, word) in repr.chunks_exact_mut(4).zip(&words[offset..offset + 8]) {
+            chunk.copy_from_slice(&word.to_le_bytes());
+        }
+        HaloSecpFq::from_repr(repr).unwrap()
+    };
+    let x = coordinate(0);
+    let y = coordinate(8);
+    assert_eq!(y.square(), x.square() * x + HaloSecpFq::from(7));
+    (x, y)
+}
+
+#[inline(always)]
+fn halo2_point_to_words(x: HaloSecpFq, y: HaloSecpFq) -> [Word; SECP256K1_ARG_WORDS] {
+    let x = x.to_repr();
+    let y = y.to_repr();
+    std::array::from_fn(|index| {
+        let bytes = if index < 8 {
+            &x[index * 4..index * 4 + 4]
+        } else {
+            &y[(index - 8) * 4..(index - 8) * 4 + 4]
+        };
+        Word::from_le_bytes(bytes.try_into().unwrap())
+    })
 }
 
 /// Trace the execution of a secp256k1_add call
@@ -127,11 +212,7 @@ pub fn secp256k1_add<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
         [p_ptr, q_ptr].map(|start| MemoryView::<_, SECP256K1_ARG_WORDS>::new(vm, start));
 
     // Read P and Q from words via wrapper type
-    let [p, q] = [&p_view, &q_view].map(|view| SecpPoint::from(view.words()));
-
-    // Compute the sum and convert back to words
-    let sum = SecpMaybePoint(p.0 + q.0);
-    let output_words: [Word; SECP256K1_ARG_WORDS] = sum.into();
+    let output_words = add_words(p_view.words(), q_view.words());
 
     p_view.write(output_words);
 
@@ -161,12 +242,7 @@ pub fn secp256k1_double<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
 
     // P's memory segment
     let mut p_view = MemoryView::<_, SECP256K1_ARG_WORDS>::new(vm, p_ptr);
-    // Create point from words via wrapper type
-    let p = SecpPoint::from(p_view.words());
-
-    // Compute result and convert back into words
-    let result = SecpMaybePoint(p.0 + p.0);
-    let output_words: [Word; SECP256K1_ARG_WORDS] = result.into();
+    let output_words = double_words(p_view.words());
 
     p_view.write(output_words);
 
@@ -191,10 +267,7 @@ pub fn secp256k1_invert<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
 
     // P's memory segment
     let mut p_view = MemoryView::<_, COORDINATE_WORDS>::new(vm, p_ptr);
-    let p = k256::Scalar::from_repr(*FieldBytes::from_slice(&p_view.bytes())).expect("illegal p");
-    let p_inv = p.invert().unwrap();
-    let bytes: [u8; 32] = p_inv.to_bytes().into();
-    let output_words: [Word; COORDINATE_WORDS] = unsafe { std::mem::transmute(bytes) };
+    let output_words = invert_words(p_view.words());
 
     p_view.write(output_words);
     let mem_ops = p_view.mem_ops().to_vec();
@@ -206,6 +279,14 @@ pub fn secp256k1_invert<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     }
 }
 
+#[inline(never)]
+pub(crate) fn invert_words(words: [Word; COORDINATE_WORDS]) -> [Word; COORDINATE_WORDS] {
+    let bytes: [u8; 32] = unsafe { std::mem::transmute(words) };
+    let scalar = k256::Scalar::from_repr(bytes.into()).expect("illegal p");
+    let inverted: [u8; 32] = scalar.invert().unwrap().to_bytes().into();
+    unsafe { std::mem::transmute(inverted) }
+}
+
 pub const COORDINATE_WORDS: usize = SECP256K1_ARG_WORDS / 2;
 
 /// Wrapper type for a single coordinate of a point on the secp256k1 curve.
@@ -215,24 +296,36 @@ pub struct SecpCoordinate(pub [u8; COORDINATE_WORDS * WORD_SIZE]);
 
 impl From<[Word; COORDINATE_WORDS]> for SecpCoordinate {
     fn from(words: [Word; COORDINATE_WORDS]) -> Self {
-        let bytes = (words.iter().flat_map(|word| word.to_le_bytes()))
-            .collect_vec()
-            .try_into()
-            .unwrap();
-        SecpCoordinate(bytes)
+        SecpCoordinate(unsafe {
+            std::mem::transmute::<[Word; COORDINATE_WORDS], [u8; COORDINATE_WORDS * WORD_SIZE]>(
+                words,
+            )
+        })
     }
 }
 
 impl From<SecpCoordinate> for [Word; COORDINATE_WORDS] {
     fn from(coord: SecpCoordinate) -> [Word; COORDINATE_WORDS] {
-        coord
-            .0
-            .chunks_exact(4)
-            .map(|chunk| Word::from_le_bytes(chunk.try_into().unwrap()))
-            .collect_vec()
-            .try_into()
-            .unwrap()
+        unsafe { std::mem::transmute(coord.0) }
     }
+}
+
+#[inline(never)]
+pub(crate) fn decompress_words(
+    x_words: [Word; COORDINATE_WORDS],
+    y_is_odd: Word,
+) -> [Word; COORDINATE_WORDS] {
+    let parity_byte = match y_is_odd {
+        0 => 2,
+        1 => 3,
+        _ => panic!("y_is_odd should be 0/1"),
+    };
+    let mut bytes = [0u8; 33];
+    bytes[0] = parity_byte;
+    bytes[1..].copy_from_slice(&SecpCoordinate::from(x_words).0);
+    let point = secp::Point::from_slice(&bytes).unwrap();
+    let serialized = point.serialize_uncompressed();
+    SecpCoordinate(serialized[33..65].try_into().unwrap()).into()
 }
 
 /// Trace the execution of a secp256k1_decompress call
@@ -260,31 +353,7 @@ pub fn secp256k1_decompress<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let mut output_view =
         MemoryView::<_, COORDINATE_WORDS>::new(vm, ptr + (COORDINATE_WORDS * WORD_SIZE) as u32);
 
-    let point = {
-        // Encode parity byte according to secp spec
-        let parity_byte = match y_is_odd {
-            0 => 2,
-            1 => 3,
-            _ => panic!("y_is_odd should be 0/1"),
-        };
-        // Read bytes of the X coordinate
-        let coordinate_bytes = SecpCoordinate::from(input_view.words()).0;
-        // Prepend parity byte to complete compressed repr.
-        let bytes = iter::once(parity_byte)
-            .chain(coordinate_bytes.iter().cloned())
-            .collect::<Vec<u8>>();
-
-        secp::Point::from_slice(&bytes).unwrap()
-    };
-
-    // Get uncompressed repr. of the point and extract the Y-coordinate bytes
-    // Y-coordinate is the second half after eliminating the "tag" byte
-    let y_bytes: [u8; 32] = point.serialize_uncompressed()[1..][32..]
-        .try_into()
-        .unwrap();
-
-    // Convert into words via the internal wrapper type
-    let output_words: [Word; COORDINATE_WORDS] = SecpCoordinate(y_bytes).into();
+    let output_words = decompress_words(input_view.words(), y_is_odd);
 
     output_view.write(output_words);
 
@@ -304,6 +373,12 @@ pub fn secp256k1_decompress<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
 mod tests {
     use super::*;
 
+    fn point_from_seed(seed: u64) -> secp::Point {
+        let mut scalar = [0u8; 32];
+        scalar[24..].copy_from_slice(&seed.max(1).to_be_bytes());
+        secp::Scalar::from_slice(&scalar).unwrap().base_point_mul()
+    }
+
     #[test]
     fn direct_point_double_matches_scalar_multiplication() {
         let mut point = secp::Point::generator();
@@ -315,6 +390,62 @@ mod tests {
                 <[Word; SECP256K1_ARG_WORDS]>::from(scalar),
             );
             point = (point + secp::Point::generator()).into_option().unwrap();
+        }
+    }
+
+    #[test]
+    fn halo2_word_kernels_match_existing_backend() {
+        let mut seed = 0x243f_6a88_85a3_08d3u64;
+        for _ in 0..256 {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let p = point_from_seed(seed);
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let q = point_from_seed(seed);
+            let p_words: [Word; SECP256K1_ARG_WORDS] = SecpPoint(p).into();
+            let q_words: [Word; SECP256K1_ARG_WORDS] = SecpPoint(q).into();
+            let expected_add: [Word; SECP256K1_ARG_WORDS] = SecpMaybePoint(p + q).into();
+            let expected_double: [Word; SECP256K1_ARG_WORDS] = SecpMaybePoint(p + p).into();
+            assert_eq!(add_words(p_words, q_words), expected_add);
+            assert_eq!(double_words(p_words), expected_double);
+            assert_eq!(add_words(p_words, p_words), expected_double);
+        }
+
+        let p = point_from_seed(seed);
+        let p_words: [Word; SECP256K1_ARG_WORDS] = SecpPoint(p).into();
+        let neg_p_words: [Word; SECP256K1_ARG_WORDS] = SecpPoint(-p).into();
+        assert_eq!(add_words(p_words, neg_p_words), [0; SECP256K1_ARG_WORDS]);
+    }
+
+    #[test]
+    fn unchanged_secp_edge_behavior() {
+        let invalid = [0; SECP256K1_ARG_WORDS];
+        assert!(std::panic::catch_unwind(|| SecpPoint::from(invalid)).is_err());
+        assert!(std::panic::catch_unwind(|| add_words(invalid, invalid)).is_err());
+        assert!(std::panic::catch_unwind(|| double_words(invalid)).is_err());
+
+        for seed in [1, 2, 3, 17, 255, u32::MAX as u64, u64::MAX] {
+            let point = point_from_seed(seed);
+            let serialized = point.serialize_uncompressed();
+            let x_words = SecpCoordinate(serialized[1..33].try_into().unwrap()).into();
+            let y_words = decompress_words(x_words, Word::from(serialized[64] & 1));
+            assert_eq!(SecpCoordinate::from(y_words).0, serialized[33..65]);
+        }
+
+        for value in [1u32, 2, 3, 17, 255, u32::MAX] {
+            let scalar = k256::Scalar::from(value);
+            let input = unsafe {
+                std::mem::transmute::<[u8; 32], [Word; COORDINATE_WORDS]>(scalar.to_bytes().into())
+            };
+            let expected = unsafe {
+                std::mem::transmute::<[u8; 32], [Word; COORDINATE_WORDS]>(
+                    scalar.invert().unwrap().to_bytes().into(),
+                )
+            };
+            assert_eq!(invert_words(input), expected);
         }
     }
 }

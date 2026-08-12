@@ -6,6 +6,8 @@ pub mod keccak_permute;
 pub mod keccak_xorin;
 pub mod phantom;
 pub mod pubio_commit;
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub(crate) mod pure;
 pub mod secp256k1;
 pub(crate) mod secp256r1;
 pub mod sha256;
@@ -112,13 +114,15 @@ impl SyscallEffects {
             .map(|op| (op.addr, op.value.after))
     }
 
-    /// Keep track of the cycles of registers and memory accesses.
+    pub(crate) fn iter_mem_ops_mut(&mut self) -> impl Iterator<Item = &mut WriteOp> {
+        self.witness.mem_ops.iter_mut()
+    }
+
+    /// Keep track of register cycles. Memory cycles are finalized by `VMState`
+    /// while it updates the packed memory cells.
     pub fn finalize<T: Tracer>(mut self, tracer: &mut T) -> SyscallWitness {
         for op in &mut self.witness.reg_ops {
             op.previous_cycle = tracer.track_access(op.addr, T::SUBCYCLE_RD);
-        }
-        for op in &mut self.witness.mem_ops {
-            op.previous_cycle = tracer.track_access(op.addr, T::SUBCYCLE_MEM);
         }
         self.witness
     }

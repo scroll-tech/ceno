@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use substrate_bn::{AffineG1, Fq, Fq2, Fr, G1};
 
 use crate::Word;
@@ -11,11 +10,8 @@ pub struct Bn254Fp(substrate_bn::Fq);
 
 impl From<[Word; BN254_FP_WORDS]> for Bn254Fp {
     fn from(value: [Word; BN254_FP_WORDS]) -> Self {
-        let bytes_be = value
-            .iter()
-            .flat_map(|word| word.to_le_bytes())
-            .rev()
-            .collect_vec();
+        let mut bytes_be: [u8; 32] = unsafe { std::mem::transmute(value) };
+        bytes_be.reverse();
         Bn254Fp(Fq::from_slice(&bytes_be).expect("cannot parse Fq"))
     }
 }
@@ -29,12 +25,7 @@ impl From<Bn254Fp> for [Word; BN254_FP_WORDS] {
             .expect("cannot serialize Fq");
         bytes_be.reverse();
 
-        bytes_be
-            .chunks_exact(4)
-            .map(|chunk| Word::from_le_bytes(chunk.try_into().unwrap()))
-            .collect_vec()
-            .try_into()
-            .unwrap()
+        unsafe { std::mem::transmute(bytes_be) }
     }
 }
 
@@ -71,7 +62,10 @@ impl From<Bn254Fp2> for [Word; BN254_FP2_WORDS] {
         let first_half: [Word; BN254_FP_WORDS] = Bn254Fp(value.0.real()).into();
         let second_half: [Word; BN254_FP_WORDS] = Bn254Fp(value.0.imaginary()).into();
 
-        [first_half, second_half].concat().try_into().unwrap()
+        let mut words = [0; BN254_FP2_WORDS];
+        words[..BN254_FP_WORDS].copy_from_slice(&first_half);
+        words[BN254_FP_WORDS..].copy_from_slice(&second_half);
+        words
     }
 }
 
@@ -108,7 +102,10 @@ impl From<Bn254Point> for [Word; BN254_POINT_WORDS] {
         let first_half: [Word; BN254_FP_WORDS] = Bn254Fp(affine.x()).into();
         let second_half: [Word; BN254_FP_WORDS] = Bn254Fp(affine.y()).into();
 
-        [first_half, second_half].concat().try_into().unwrap()
+        let mut words = [0; BN254_POINT_WORDS];
+        words[..BN254_FP_WORDS].copy_from_slice(&first_half);
+        words[BN254_FP_WORDS..].copy_from_slice(&second_half);
+        words
     }
 }
 

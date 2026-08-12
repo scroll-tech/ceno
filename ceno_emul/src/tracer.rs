@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 use strum::EnumCount;
+use tiny_keccak::{Hasher, Keccak};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -161,6 +162,7 @@ pub struct ShardCostModel {
     main_cost_table: Vec<u64>,
     tower_cost_table: Vec<u64>,
     extension_field_degree: u64,
+    fingerprint: [u8; 32],
 }
 
 impl ShardCostModel {
@@ -181,7 +183,7 @@ impl ShardCostModel {
                 .all(|&chip| chip < chip_specs.len()),
             "shard cost mapping references an unknown chip"
         );
-        let opcode_chips = opcode_chips
+        let opcode_chips: Vec<Vec<u32>> = opcode_chips
             .into_iter()
             .map(|chips| chips.into_iter().map(|chip| chip as u32).collect())
             .collect();
@@ -222,6 +224,15 @@ impl ShardCostModel {
                 tower_cost_table.push(tower_peak);
             }
         }
+        let fingerprint = shard_cost_model_fingerprint(
+            &opcode_chips,
+            &ecall_chips,
+            &chip_specs,
+            &trace_cost_table,
+            &main_cost_table,
+            &tower_cost_table,
+            extension_field_degree,
+        );
         Self {
             opcode_chips,
             ecall_chips,
@@ -230,6 +241,7 @@ impl ShardCostModel {
             main_cost_table,
             tower_cost_table,
             extension_field_degree,
+            fingerprint,
         }
     }
 
@@ -289,6 +301,68 @@ impl ShardCostModel {
     pub fn extension_field_degree(&self) -> u64 {
         self.extension_field_degree
     }
+
+    pub fn fingerprint(&self) -> [u8; 32] {
+        self.fingerprint
+    }
+}
+
+fn shard_cost_model_fingerprint(
+    opcode_chips: &[Vec<u32>],
+    ecall_chips: &BTreeMap<Word, Vec<u32>>,
+    chip_specs: &[ChipCostSpec],
+    trace_cost_table: &[u64],
+    main_cost_table: &[u64],
+    tower_cost_table: &[u64],
+    extension_field_degree: u64,
+) -> [u8; 32] {
+    fn update_u64(hasher: &mut Keccak, value: u64) {
+        hasher.update(&value.to_le_bytes());
+    }
+    fn update_u32_slice(hasher: &mut Keccak, values: &[u32]) {
+        update_u64(hasher, values.len() as u64);
+        for &value in values {
+            hasher.update(&value.to_le_bytes());
+        }
+    }
+    fn update_u64_slice(hasher: &mut Keccak, values: &[u64]) {
+        update_u64(hasher, values.len() as u64);
+        for &value in values {
+            update_u64(hasher, value);
+        }
+    }
+
+    let mut hasher = Keccak::v256();
+    hasher.update(b"ceno-shard-cost-model-v1");
+    update_u64(&mut hasher, opcode_chips.len() as u64);
+    for chips in opcode_chips {
+        update_u32_slice(&mut hasher, chips);
+    }
+    update_u64(&mut hasher, ecall_chips.len() as u64);
+    for (&code, chips) in ecall_chips {
+        hasher.update(&code.to_le_bytes());
+        update_u32_slice(&mut hasher, chips);
+    }
+    update_u64(&mut hasher, chip_specs.len() as u64);
+    for spec in chip_specs {
+        hasher.update(&[spec.rotation]);
+        update_u64(&mut hasher, spec.trace_cells_per_row);
+        update_u64(&mut hasher, spec.tower_peak_cells_per_row);
+        match &spec.tower_peak_cells_by_bucket {
+            Some(costs) => {
+                hasher.update(&[1]);
+                update_u64_slice(&mut hasher, costs);
+            }
+            None => hasher.update(&[0]),
+        }
+    }
+    update_u64_slice(&mut hasher, trace_cost_table);
+    update_u64_slice(&mut hasher, main_cost_table);
+    update_u64_slice(&mut hasher, tower_cost_table);
+    update_u64(&mut hasher, extension_field_degree);
+    let mut fingerprint = [0u8; 32];
+    hasher.finalize(&mut fingerprint);
+    fingerprint
 }
 
 #[inline(always)]
@@ -489,6 +563,14 @@ pub trait Tracer {
     type Record;
     type Config;
 
+    /// Whether VM memory operations update packed latest-access stamps.
+    /// Diagnostic execution tracers may disable this while preserving values.
+    const TRACK_MEMORY_ACCESSES: bool = true;
+
+    fn track_memory_accesses(&self) -> bool {
+        Self::TRACK_MEMORY_ACCESSES
+    }
+
     const SUBCYCLE_RS1: Cycle = 0;
     const SUBCYCLE_RS2: Cycle = 1;
     const SUBCYCLE_RD: Cycle = 2;
@@ -525,15 +607,15 @@ pub trait Tracer {
 
     fn store_register(&mut self, idx: RegIdx, value: Change<Word>);
 
-    fn load_memory(&mut self, addr: WordAddr, value: Word);
+    fn load_memory(&mut self, addr: WordAddr, value: Word, previous_cycle: Cycle);
 
-    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>);
+    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>, previous_cycle: Cycle);
 
     fn track_syscall(&mut self, effects: SyscallEffects);
 
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle;
 
-    fn final_accesses(&self) -> &LatestAccesses;
+    fn final_register_accesses(&self) -> &LatestAccesses;
 
     fn into_next_accesses(self) -> NextCycleAccess
     where
@@ -588,12 +670,11 @@ pub struct LatestAccesses {
 }
 
 impl LatestAccesses {
-    fn new(platform: &Platform) -> Self {
+    fn new(_platform: &Platform) -> Self {
+        let last_register: WordAddr = Platform::register_vma(32).into();
         Self {
-            store: DenseAddrSpace::new(
-                WordAddr::from(0u32),
-                ByteAddr::from(platform.stack.end).waddr(),
-            ),
+            // Include the internal x0 sink at register slot 32.
+            store: DenseAddrSpace::new(WordAddr::from(0u32), last_register + 1usize),
             len: 0,
             #[cfg(any(test, debug_assertions))]
             touched: Vec::new(),
@@ -666,13 +747,13 @@ impl LatestAccesses {
     }
 
     #[cfg(any(test, debug_assertions))]
-    pub fn addresses(&self) -> impl Iterator<Item = &WordAddr> + '_ {
-        self.touched.iter()
+    pub fn addresses(&self) -> impl Iterator<Item = WordAddr> + '_ {
+        self.touched.iter().copied()
     }
 
     #[cfg(not(any(test, debug_assertions)))]
-    pub fn addresses(&self) -> std::iter::Empty<&WordAddr> {
-        unimplemented!("no track touched address in release build")
+    pub fn addresses(&self) -> impl Iterator<Item = WordAddr> + '_ {
+        self.store.non_default_addresses()
     }
 }
 
@@ -1392,7 +1473,8 @@ impl StepRecord {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FullTracerConfig {
     /// Maximum number of completed steps per shard. Internally, `FullTracer`
-    /// reserves one extra slot to hold the pending (in-progress) record.
+    /// reserves one extra slot to hold the pending (in-progress) record. A zero
+    /// value leaves the buffer dynamically sized for standalone VM execution.
     pub max_step_shard: usize,
 }
 
@@ -1402,6 +1484,7 @@ pub struct FullTracer {
     len: usize,
     pending_index: usize,
     pending_cycle: Cycle,
+    allow_step_buffer_growth: bool,
 
     /// Syscall witnesses stored separately (StepRecord references by index).
     syscall_witnesses: Vec<SyscallWitness>,
@@ -1461,6 +1544,7 @@ impl FullTracer {
             len: 0,
             pending_index: 0,
             pending_cycle: Self::SUBCYCLES_PER_INSN,
+            allow_step_buffer_growth: config.max_step_shard == 0 || cfg!(debug_assertions),
             syscall_witnesses: Vec::new(),
             mmio_min_max_access: Some(mmio_max_access),
             platform: platform.clone(),
@@ -1479,9 +1563,9 @@ impl FullTracer {
     #[inline(always)]
     fn reset_pending_slot(&mut self) {
         if self.pending_index >= self.records.len() {
-            if cfg!(debug_assertions) {
-                // Allow unit/integration tests (which always build with debug assertions)
-                // to auto-grow so they don't have to plumb accurate shard sizes.
+            if self.allow_step_buffer_growth {
+                // Standalone VM execution and debug tests do not need to plumb
+                // an accurate shard capacity.
                 self.records.push(StepRecord::default());
             } else {
                 panic!(
@@ -1632,12 +1716,12 @@ impl FullTracer {
     }
 
     #[inline(always)]
-    pub fn load_memory(&mut self, addr: WordAddr, value: Word) {
-        self.store_memory(addr, Change::new(value, value));
+    pub fn load_memory(&mut self, addr: WordAddr, value: Word, previous_cycle: Cycle) {
+        self.store_memory(addr, Change::new(value, value), previous_cycle);
     }
 
     #[inline(always)]
-    pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
+    pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>, previous_cycle: Cycle) {
         if self.records[self.pending_index].has_memory_op {
             unimplemented!("Only one memory access is supported");
         }
@@ -1671,7 +1755,6 @@ impl FullTracer {
             }
         }
 
-        let previous_cycle = self.track_access(addr, Self::SUBCYCLE_MEM);
         self.records[self.pending_index].memory_op = WriteOp {
             addr,
             value,
@@ -1702,7 +1785,7 @@ impl FullTracer {
         self.latest_accesses.track(addr, cur_cycle)
     }
 
-    pub fn final_accesses(&self) -> &LatestAccesses {
+    pub fn final_register_accesses(&self) -> &LatestAccesses {
         &self.latest_accesses
     }
 
@@ -1879,6 +1962,7 @@ pub struct PreflightTracer {
     register_reads_tracked: u8,
     planner: Option<ShardPlanBuilder>,
     current_shard_start_cycle: Cycle,
+    defer_mmio_bounds: bool,
     config: PreflightTracerConfig,
 }
 
@@ -1921,6 +2005,7 @@ pub(crate) struct NativeTraceStep {
     pub rs2_idx: RegIdx,
     pub rd_idx: RegIdx,
     pub memory_addr: WordAddr,
+    pub memory_previous_cycle: Cycle,
 }
 
 #[cfg_attr(
@@ -2046,6 +2131,10 @@ impl PreflightTracer {
         self.last_kind
     }
 
+    pub fn last_pc_change(&self) -> Change<ByteAddr> {
+        self.pc
+    }
+
     pub fn last_rs1_value(&self) -> Option<Word> {
         self.last_rs1
     }
@@ -2081,6 +2170,7 @@ impl PreflightTracer {
                 cost_model,
             )),
             current_shard_start_cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
+            defer_mmio_bounds: false,
             config,
         };
         tracer.reset_register_tracking();
@@ -2106,6 +2196,15 @@ impl PreflightTracer {
     )]
     pub(crate) fn supports_direct_native_trace(&self) -> bool {
         self.planner.is_some()
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    #[inline(always)]
+    pub(crate) fn track_direct_syscall_memory(&mut self, addr: WordAddr, previous_cycle: Cycle) {
+        self.record_memory_access(addr, previous_cycle);
     }
 
     #[cfg_attr(
@@ -2208,6 +2307,48 @@ impl PreflightTracer {
     }
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn begin_deferred_mmio_bounds(&mut self) {
+        assert!(
+            self.config.record_next_accesses,
+            "deferred MMIO bounds require first-access events"
+        );
+        self.defer_mmio_bounds = true;
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn finish_deferred_mmio_bounds(&mut self) {
+        if !self.defer_mmio_bounds {
+            return;
+        }
+        self.defer_mmio_bounds = false;
+
+        let Some(regions) = self.mmio_min_max_access.as_mut() else {
+            return;
+        };
+        let mut bounds = regions.values().copied().collect::<Vec<_>>();
+        for (start_addr, end_addr, min_addr, max_addr) in &mut bounds {
+            *min_addr = *end_addr;
+            *max_addr = *start_addr;
+        }
+        for event in self
+            .next_access_events
+            .iter()
+            .filter(|event| event.source_cycle == 0)
+        {
+            for (start_addr, end_addr, min_addr, max_addr) in &mut bounds {
+                if event.address >= *start_addr && event.address < *end_addr {
+                    *min_addr = (*min_addr).min(event.address);
+                    *max_addr = (*max_addr).max(event.address + 1usize);
+                    break;
+                }
+            }
+        }
+        for ((_, region), bounds) in regions.iter_mut().zip(bounds) {
+            *region = bounds;
+        }
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub(crate) fn record_native_first_touch(&mut self, addr: WordAddr) {
         self.latest_accesses.record_native_first_touch(addr);
     }
@@ -2220,6 +2361,14 @@ impl PreflightTracer {
             );
         }
         self.next_access_events.push(event);
+    }
+
+    #[inline(always)]
+    fn record_memory_access(&mut self, addr: WordAddr, previous_cycle: Cycle) {
+        let current_cycle = self.cycle + Self::SUBCYCLE_MEM;
+        if self.config.record_next_accesses && previous_cycle < self.current_shard_start_cycle {
+            self.push_next_access_event(NextAccessEvent::new(previous_cycle, current_cycle, addr));
+        }
     }
 
     fn grow_next_access_tape(&mut self) -> (usize, usize) {
@@ -2315,6 +2464,9 @@ impl PreflightTracer {
 
     #[inline(always)]
     fn update_mmio_bounds(&mut self, addr: WordAddr) {
+        if self.defer_mmio_bounds {
+            return;
+        }
         if let Some((_, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
             .as_mut()
@@ -2367,10 +2519,10 @@ impl PreflightTracer {
             );
         }
         if step.flags & NATIVE_TRACE_LOAD_MEM != 0 {
-            self.track_access(step.memory_addr, Self::SUBCYCLE_MEM);
+            self.record_memory_access(step.memory_addr, step.memory_previous_cycle);
         } else if step.flags & NATIVE_TRACE_STORE_MEM != 0 {
             self.update_mmio_bounds(step.memory_addr);
-            self.track_access(step.memory_addr, Self::SUBCYCLE_MEM);
+            self.record_memory_access(step.memory_addr, step.memory_previous_cycle);
         }
 
         self.pc.after = step.pc_after;
@@ -2382,6 +2534,10 @@ impl PreflightTracer {
 impl Tracer for PreflightTracer {
     type Record = ();
     type Config = PreflightTracerConfig;
+
+    fn track_memory_accesses(&self) -> bool {
+        true
+    }
 
     fn new(platform: &Platform, config: Self::Config) -> Self {
         PreflightTracer::new(platform, config)
@@ -2441,18 +2597,21 @@ impl Tracer for PreflightTracer {
     }
 
     #[inline(always)]
-    fn load_memory(&mut self, addr: WordAddr, value: Word) {
-        self.store_memory(addr, Change::new(value, value));
+    fn load_memory(&mut self, addr: WordAddr, value: Word, previous_cycle: Cycle) {
+        self.store_memory(addr, Change::new(value, value), previous_cycle);
     }
 
     #[inline(always)]
-    fn store_memory(&mut self, addr: WordAddr, _value: Change<Word>) {
+    fn store_memory(&mut self, addr: WordAddr, _value: Change<Word>, previous_cycle: Cycle) {
         self.update_mmio_bounds(addr);
-        self.track_access(addr, Self::SUBCYCLE_MEM);
+        self.record_memory_access(addr, previous_cycle);
     }
 
     #[inline(always)]
-    fn track_syscall(&mut self, effects: SyscallEffects) {
+    fn track_syscall(&mut self, mut effects: SyscallEffects) {
+        for op in effects.iter_mem_ops_mut() {
+            self.record_memory_access(op.addr, op.previous_cycle);
+        }
         let _ = effects.finalize(self);
     }
 
@@ -2466,7 +2625,7 @@ impl Tracer for PreflightTracer {
         prev_cycle
     }
 
-    fn final_accesses(&self) -> &LatestAccesses {
+    fn final_register_accesses(&self) -> &LatestAccesses {
         &self.latest_accesses
     }
 
@@ -2566,13 +2725,13 @@ impl Tracer for FullTracer {
     }
 
     #[inline(always)]
-    fn load_memory(&mut self, addr: WordAddr, value: Word) {
-        FullTracer::load_memory(self, addr, value)
+    fn load_memory(&mut self, addr: WordAddr, value: Word, previous_cycle: Cycle) {
+        FullTracer::load_memory(self, addr, value, previous_cycle)
     }
 
     #[inline(always)]
-    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
-        FullTracer::store_memory(self, addr, value)
+    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>, previous_cycle: Cycle) {
+        FullTracer::store_memory(self, addr, value, previous_cycle)
     }
 
     #[inline(always)]
@@ -2585,8 +2744,8 @@ impl Tracer for FullTracer {
         FullTracer::track_access(self, addr, subcycle)
     }
 
-    fn final_accesses(&self) -> &LatestAccesses {
-        FullTracer::final_accesses(self)
+    fn final_register_accesses(&self) -> &LatestAccesses {
+        FullTracer::final_register_accesses(self)
     }
 
     fn into_next_accesses(self) -> NextCycleAccess {
@@ -2655,6 +2814,49 @@ mod tests {
         assert_eq!(model.shard_cost(&[3]), 48);
         assert_eq!(model.shard_cost(&[4]), 48);
         assert_eq!(model.shard_cost(&[5]), 96);
+    }
+
+    #[test]
+    fn shard_cost_model_fingerprint_covers_planner_inputs() {
+        let spec = ChipCostSpec {
+            rotation: 1,
+            trace_cells_per_row: 2,
+            tower_peak_cells_per_row: 3,
+            tower_peak_cells_by_bucket: None,
+        };
+        let base = cost_model(vec![spec.clone()]);
+        let duplicate = cost_model(vec![spec.clone()]);
+        assert_eq!(base.fingerprint(), duplicate.fingerprint());
+
+        let mut opcodes = vec![Vec::new(); InsnKind::COUNT];
+        opcodes[InsnKind::SUB as usize] = vec![0];
+        let mut ecalls = BTreeMap::new();
+        ecalls.insert(7, vec![0]);
+        let remapped = ShardCostModel::new(opcodes, ecalls.clone(), vec![spec.clone()], 4);
+        assert_ne!(base.fingerprint(), remapped.fingerprint());
+
+        let changed_spec = ShardCostModel::new(
+            vec![Vec::new(); InsnKind::COUNT],
+            ecalls.clone(),
+            vec![ChipCostSpec {
+                trace_cells_per_row: 4,
+                ..spec.clone()
+            }],
+            4,
+        );
+        assert_ne!(base.fingerprint(), changed_spec.fingerprint());
+
+        let changed_ecall = ShardCostModel::new(
+            vec![Vec::new(); InsnKind::COUNT],
+            BTreeMap::from([(8, vec![0])]),
+            vec![spec.clone()],
+            4,
+        );
+        assert_ne!(base.fingerprint(), changed_ecall.fingerprint());
+
+        let changed_extension =
+            ShardCostModel::new(vec![Vec::new(); InsnKind::COUNT], ecalls, vec![spec], 2);
+        assert_ne!(base.fingerprint(), changed_extension.fingerprint());
     }
 
     #[test]
@@ -2880,6 +3082,48 @@ mod tests {
         assert_eq!(
             tracer.next_access_capacity,
             Some(tracer.next_access_events.capacity())
+        );
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    #[test]
+    fn deferred_mmio_bounds_rebuild_from_first_access_events() {
+        let mut tracer = PreflightTracer::new(
+            &CENO_PLATFORM,
+            PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX),
+        );
+        let heap_start = ByteAddr(CENO_PLATFORM.heap.start).waddr();
+        let stack_start = ByteAddr(CENO_PLATFORM.stack.start).waddr();
+        let hints_start = ByteAddr(CENO_PLATFORM.hints.start).waddr();
+        let accesses = [
+            heap_start + 3usize,
+            heap_start + 9usize,
+            stack_start + 2usize,
+            stack_start + 7usize,
+            hints_start + 5usize,
+        ];
+
+        tracer.begin_deferred_mmio_bounds();
+        for (index, address) in accesses.into_iter().enumerate() {
+            tracer.push_next_access_event(NextAccessEvent::new(
+                0,
+                8 + index as Cycle * PreflightTracer::SUBCYCLES_PER_INSN,
+                address,
+            ));
+        }
+        tracer.finish_deferred_mmio_bounds();
+
+        assert_eq!(
+            tracer.probe_min_max_address_by_start_addr(heap_start),
+            Some((heap_start + 3usize, heap_start + 10usize))
+        );
+        assert_eq!(
+            tracer.probe_min_max_address_by_start_addr(stack_start),
+            Some((stack_start + 2usize, stack_start + 8usize))
+        );
+        assert_eq!(
+            tracer.probe_min_max_address_by_start_addr(hints_start),
+            Some((hints_start + 5usize, hints_start + 6usize))
         );
     }
 

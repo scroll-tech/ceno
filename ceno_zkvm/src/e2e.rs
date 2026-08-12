@@ -49,6 +49,7 @@ use std::{
     marker::PhantomData,
     ops::Range,
     sync::Arc,
+    time::Duration,
 };
 use tiny_keccak::{Hasher, Keccak};
 use tracing::info_span;
@@ -148,11 +149,31 @@ pub struct EmulationResult<'a> {
     pub shard_ctx_builder: ShardContextBuilder,
     pub shard_cycle_boundaries: Arc<Vec<Cycle>>,
     pub executed_steps: usize,
-    pub max_step_shard: usize,
+    /// Native AOT executor timing, excluding shard-plan finalization and replay
+    /// artifact preparation. Present on the x86_64 AOT production path.
+    pub preflight_execution: Option<PreflightExecutionReport>,
+    /// FullTracer capacity computed by the finalized preflight shard plan.
+    /// Keep this as the tracer configuration so replay cannot fall back to
+    /// `FullTracerConfig::default()` and allocate only its pending slot.
+    pub full_tracer_config: FullTracerConfig,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub replay_aot_program: Arc<ceno_emul::aot::AotProgram>,
     pub phantom: PhantomData<&'a ()>,
     // pub shard_ctxs: Vec<ShardContext<'a>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreflightExecutionReport {
+    pub executed_steps: usize,
+    pub fallback_steps: usize,
+    pub execute_time: Duration,
+    pub fallback_time: Duration,
+}
+
+impl PreflightExecutionReport {
+    pub fn native_time(&self) -> Duration {
+        self.execute_time.saturating_sub(self.fallback_time)
+    }
 }
 
 pub struct RAMRecord {
@@ -864,22 +885,54 @@ struct StepReplay {
 }
 
 impl StepReplay {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         platform: Platform,
         program: Arc<Program>,
         init_mem_state: &InitMemState,
         remaining_steps: usize,
-        max_step_shard: usize,
+        expected_shards: usize,
+        full_tracer_config: FullTracerConfig,
         next_accesses: Arc<NextCycleAccess>,
         shard_cycle_boundaries: Arc<Vec<Cycle>>,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))] aot: Arc<
             ceno_emul::aot::AotProgram,
         >,
     ) -> Self {
+        assert_eq!(
+            shard_cycle_boundaries.len(),
+            expected_shards.saturating_add(1),
+            "preflight shard count does not match the shard boundary plan"
+        );
+        let shard_step_counts = shard_cycle_boundaries
+            .windows(2)
+            .map(|range| {
+                let cycle_count = range[1]
+                    .checked_sub(range[0])
+                    .expect("preflight shard boundaries must be increasing");
+                assert_eq!(
+                    cycle_count % FullTracer::SUBCYCLES_PER_INSN,
+                    0,
+                    "preflight shard boundary is not instruction-aligned"
+                );
+                usize::try_from(cycle_count / FullTracer::SUBCYCLES_PER_INSN)
+                    .expect("shard step count does not fit usize")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shard_step_counts.iter().sum::<usize>(),
+            remaining_steps,
+            "preflight shard boundaries do not cover the executed steps"
+        );
+        let boundary_max_step_shard = shard_step_counts.iter().copied().max().unwrap_or(0);
+        assert_eq!(
+            full_tracer_config.max_step_shard, boundary_max_step_shard,
+            "preflight FullTracer capacity does not match the shard boundary plan"
+        );
         let mut vm: VMState<FullTracer> = VMState::new_with_tracer_config_and_next_accesses(
             platform,
             program,
-            FullTracerConfig { max_step_shard },
+            full_tracer_config,
             Some(next_accesses),
         );
         for record in init_mem_state.hints.iter() {
@@ -887,16 +940,9 @@ impl StepReplay {
         }
         tracing::info!(
             "FullTracer record buffer records={} bytes={}",
-            max_step_shard.saturating_add(1),
+            full_tracer_config.max_step_shard.saturating_add(1),
             vm.tracer().record_buffer_bytes(),
         );
-        let shard_step_counts = shard_cycle_boundaries
-            .windows(2)
-            .map(|range| {
-                usize::try_from((range[1] - range[0]) / FullTracer::SUBCYCLES_PER_INSN)
-                    .expect("shard step count does not fit usize")
-            })
-            .collect();
         StepReplay {
             vm,
             remaining_steps,
@@ -1068,6 +1114,85 @@ impl StepSource for StepReplay {
     }
 }
 
+/// Summary of a bounded FullTracer replay performed from a finalized preflight plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FullTraceReplayReport {
+    pub executed_steps: usize,
+    pub replayed_shards: usize,
+    pub syscall_witnesses: usize,
+    pub exit_code: Option<u32>,
+    pub committed_public_io: Option<[u32; 8]>,
+}
+
+/// Replay every preflight shard with FullTracer without assigning circuit witnesses.
+///
+/// This is the narrow production replay boundary used by execution benchmarks. It
+/// consumes the finalized shard plan, next-access tape, replay program, and exact
+/// FullTracer capacity carried by [`EmulationResult`].
+pub fn replay_full_trace(
+    mut emul_result: EmulationResult<'_>,
+    program: Arc<Program>,
+    platform: &Platform,
+    init_mem_state: &InitMemState,
+) -> FullTraceReplayReport {
+    assert!(
+        emul_result.executed_steps > 0,
+        "execution trace must contain at least one step"
+    );
+
+    let expected_steps = emul_result.executed_steps;
+    let expected_exit_code = emul_result.exit_code;
+    let mut shard_ctx_builder = std::mem::take(&mut emul_result.shard_ctx_builder);
+    let expected_shards = shard_ctx_builder.total_shards();
+    let mut step_iter = StepReplay::new(
+        platform.clone(),
+        program,
+        init_mem_state,
+        expected_steps,
+        expected_shards,
+        emul_result.full_tracer_config,
+        shard_ctx_builder.next_accesses(),
+        emul_result.shard_cycle_boundaries,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        emul_result.replay_aot_program,
+    );
+    let mut replayed_steps = 0usize;
+    let mut replayed_shards = 0usize;
+    let mut syscall_witnesses = 0usize;
+    while let Some((_shard_ctx, summary)) =
+        shard_ctx_builder.position_next_shard(&mut step_iter, |_, _| {})
+    {
+        replayed_steps += summary.step_count;
+        replayed_shards += 1;
+        syscall_witnesses += step_iter.syscall_witnesses().len();
+    }
+
+    assert_eq!(
+        replayed_steps, expected_steps,
+        "FullTracer replay step mismatch"
+    );
+    assert_eq!(
+        replayed_shards, expected_shards,
+        "FullTracer replay shard mismatch"
+    );
+    let exit_code = step_iter
+        .vm
+        .halted_state()
+        .map(|halt_state| halt_state.exit_code);
+    assert_eq!(
+        exit_code, expected_exit_code,
+        "FullTracer replay exit code differs from preflight"
+    );
+
+    FullTraceReplayReport {
+        executed_steps: replayed_steps,
+        replayed_shards,
+        syscall_witnesses,
+        exit_code,
+        committed_public_io: step_iter.vm.committed_public_io(),
+    }
+}
+
 pub fn emulate_program<'a>(
     program: Arc<Program>,
     max_steps: usize,
@@ -1132,6 +1257,10 @@ pub fn emulate_program<'a>(
         }
     };
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let mut preflight_execution = None;
+    #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
+    let preflight_execution = None;
     let exit_code = info_span!("[ceno] preflight-execute").in_scope(|| {
         #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
         {
@@ -1155,9 +1284,11 @@ pub fn emulate_program<'a>(
                 .run_to_halt(&mut vm, max_steps)
                 .unwrap_or_else(|err| panic!("AOT emulator trapped before halt: {err}"));
             tracing::info!(
-                "AOT preflight executed {} instructions in {:?}; fallback_steps={} ({:.2}%); dynamic_pc={} memory_guard={} ecall_by_code={:?} exceptional={}",
+                "AOT preflight executed {} instructions in {:?}; native={:?} fallback={:?}; fallback_steps={} ({:.2}%); dynamic_pc={} memory_guard={} ecall_by_code={:?} exceptional={}",
                 report.executed_steps,
                 report.execute_time,
+                report.native_time(),
+                report.fallback_time,
                 report.fallback_steps,
                 report.fallback_steps as f64 * 100.0 / report.executed_steps.max(1) as f64,
                 report.fallback.dynamic_pc_miss,
@@ -1165,6 +1296,12 @@ pub fn emulate_program<'a>(
                 report.fallback.ecall_by_code,
                 report.fallback.exceptional_jump_or_trap,
             );
+            preflight_execution = Some(PreflightExecutionReport {
+                executed_steps: report.executed_steps,
+                fallback_steps: report.fallback_steps,
+                execute_time: report.execute_time,
+                fallback_time: report.fallback_time,
+            });
         }
         vm.halted_state().map(|halt_state| halt_state.exit_code)
     });
@@ -1183,7 +1320,6 @@ pub fn emulate_program<'a>(
             tracing::info!("========= END: I/O from guest =========");
         }
     }
-    let final_access = vm.tracer().final_accesses();
     let end_cycle = vm.tracer().cycle();
     let insts = vm.tracer().executed_insts();
     tracing::info!("program executed {insts} instructions in {end_cycle} cycles");
@@ -1201,7 +1337,7 @@ pub fn emulate_program<'a>(
                     addr: rec.addr,
                     value: vm.peek_register(index),
                     init_value: rec.value,
-                    cycle: final_access.cycle(vma),
+                    cycle: vm.final_access_cycle(vma),
                 }
             } else {
                 // The table is padded beyond the number of registers.
@@ -1226,7 +1362,7 @@ pub fn emulate_program<'a>(
                 addr: rec.addr,
                 value: vm.peek_memory(vma),
                 init_value: rec.value,
-                cycle: final_access.cycle(vma),
+                cycle: vm.final_access_cycle(vma),
             }
         })
         .collect_vec();
@@ -1242,7 +1378,7 @@ pub fn emulate_program<'a>(
             addr: rec.addr,
             value: rec.value,
             init_value: rec.value,
-            cycle: final_access.cycle(rec.addr.into()),
+            cycle: vm.final_access_cycle(rec.addr.into()),
         })
         .collect_vec();
 
@@ -1261,7 +1397,7 @@ pub fn emulate_program<'a>(
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
                     init_value: 0,
-                    cycle: final_access.cycle(vma),
+                    cycle: vm.final_access_cycle(vma),
                 }
             })
             .collect_vec()
@@ -1286,7 +1422,7 @@ pub fn emulate_program<'a>(
                     addr: byte_addr.0,
                     value: vm.peek_memory(vma),
                     init_value: 0,
-                    cycle: final_access.cycle(vma),
+                    cycle: vm.final_access_cycle(vma),
                 }
             })
             .collect_vec()
@@ -1331,7 +1467,9 @@ pub fn emulate_program<'a>(
     );
     let tracer = vm.take_tracer();
     let (plan_builder, next_accesses) = tracer.into_shard_plan();
-    let max_step_shard = plan_builder.max_step_shard();
+    let full_tracer_config = FullTracerConfig {
+        max_step_shard: plan_builder.max_step_shard(),
+    };
     let shard_cycle_boundaries = Arc::new(plan_builder.into_cycle_boundaries());
     let shard_ctx_builder = ShardContextBuilder::from_plan(
         multi_prover,
@@ -1353,7 +1491,8 @@ pub fn emulate_program<'a>(
         shard_ctx_builder,
         shard_cycle_boundaries: shard_cycle_boundaries.clone(),
         executed_steps: insts,
-        max_step_shard,
+        preflight_execution,
+        full_tracer_config,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         replay_aot_program,
         final_mem_state: FinalMemState {
@@ -1551,7 +1690,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
         program.clone(),
         init_mem_state,
         emul_result.executed_steps,
-        emul_result.max_step_shard,
+        shard_ctx_builder.total_shards(),
+        emul_result.full_tracer_config,
         shard_ctx_builder.next_accesses(),
         emul_result.shard_cycle_boundaries.clone(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -2121,7 +2261,8 @@ pub fn analyze_shard_ram_light<E: ExtensionField>(
         program_ctx.program.clone(),
         init_mem_state,
         emul_result.executed_steps,
-        emul_result.max_step_shard,
+        shard_ctx_builder.total_shards(),
+        emul_result.full_tracer_config,
         shard_ctx_builder.next_accesses(),
         emul_result.shard_cycle_boundaries.clone(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -3209,11 +3350,10 @@ fn debug_memory_ranges<'a, T: Tracer, I: Iterator<Item = &'a MemFinalRecord>>(
     mem_final: I,
 ) {
     let accessed_addrs = vm
-        .tracer()
-        .final_accesses()
-        .iter()
-        .filter(|&(_, cycle)| *cycle != 0)
-        .map(|(&addr, _)| addr.baddr())
+        .final_access_addresses()
+        .into_iter()
+        .filter(|&addr| vm.final_access_cycle(addr) != 0)
+        .map(|addr| addr.baddr())
         .filter(|addr| vm.platform().can_read(addr.0))
         .collect_vec();
 

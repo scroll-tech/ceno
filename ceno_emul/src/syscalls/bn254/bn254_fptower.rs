@@ -99,6 +99,42 @@ fn bn254_fptower_binary_op<
     }
 }
 
+#[inline(never)]
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub(crate) fn fp_add_words(
+    p: [Word; BN254_FP_WORDS],
+    q: [Word; BN254_FP_WORDS],
+) -> [Word; BN254_FP_WORDS] {
+    (Bn254Fp::from(p) + Bn254Fp::from(q)).into()
+}
+
+#[inline(never)]
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub(crate) fn fp_mul_words(
+    p: [Word; BN254_FP_WORDS],
+    q: [Word; BN254_FP_WORDS],
+) -> [Word; BN254_FP_WORDS] {
+    (Bn254Fp::from(p) * Bn254Fp::from(q)).into()
+}
+
+#[inline(never)]
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub(crate) fn fp2_add_words(
+    p: [Word; BN254_FP2_WORDS],
+    q: [Word; BN254_FP2_WORDS],
+) -> [Word; BN254_FP2_WORDS] {
+    (Bn254Fp2::from(p) + Bn254Fp2::from(q)).into()
+}
+
+#[inline(never)]
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub(crate) fn fp2_mul_words(
+    p: [Word; BN254_FP2_WORDS],
+    q: [Word; BN254_FP2_WORDS],
+) -> [Word; BN254_FP2_WORDS] {
+    (Bn254Fp2::from(p) * Bn254Fp2::from(q)).into()
+}
+
 pub fn bn254_fp_add<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     bn254_fptower_binary_op::<BN254_FP_WORDS, true, Bn254Fp, T>(vm)
 }

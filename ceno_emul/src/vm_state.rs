@@ -2,7 +2,7 @@ use super::rv32im::EmuContext;
 use crate::{
     PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
-    dense_addr_space::DenseAddrSpace,
+    dense_addr_space::PackedMemory,
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
@@ -24,10 +24,11 @@ pub struct VMState<T: Tracer = FullTracer> {
     pc: Word,
     /// Emulated main memory backed by a pre-allocated vector covering the
     /// platform layout in `memory.x`.
-    memory: DenseAddrSpace<Word>,
+    memory: PackedMemory,
     registers: [Word; VM_REG_COUNT],
     // Termination.
     halt_state: Option<HaltState>,
+    committed_public_io: Option<[Word; 8]>,
     tracer: T,
 }
 
@@ -49,6 +50,47 @@ impl VMState<PreflightTracer> {
     pub(crate) fn trace_preflight_native_step(&mut self, step: NativeTraceStep) -> bool {
         self.pc = step.pc_after.0;
         self.tracer.trace_native_step(step)
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn finish_direct_preflight_syscall(
+        &mut self,
+        plan: crate::syscalls::pure::AccessPlan,
+    ) {
+        if self.tracer.track_memory_accesses() {
+            let cycle = self.tracer.cycle() + PreflightTracer::SUBCYCLE_MEM;
+            for region in &plan.regions[..plan.region_count] {
+                let start = ByteAddr(region.byte_addr).waddr();
+                for offset in 0..region.words {
+                    let addr = start + offset;
+                    let value = self.memory.read(addr).unwrap_or_else(|| {
+                        panic!("addr {addr:?} outside dense memory layout after direct syscall")
+                    });
+                    let previous_cycle = self
+                        .memory
+                        .access(addr, cycle, Some(value))
+                        .expect("direct syscall range was validated before mutation")
+                        .1;
+                    self.tracer
+                        .track_direct_syscall_memory(addr, previous_cycle);
+                }
+            }
+        }
+
+        self.tracer.track_access(
+            Platform::register_vma(Platform::reg_arg0()).into(),
+            PreflightTracer::SUBCYCLE_RD,
+        );
+        if plan.register_count == 2 {
+            self.tracer.track_access(
+                Platform::register_vma(Platform::reg_arg1()).into(),
+                PreflightTracer::SUBCYCLE_RD,
+            );
+        }
+
+        self.pc = self.pc.wrapping_add(PC_STEP_SIZE as u32);
+        self.tracer.store_pc(ByteAddr(self.pc));
+        self.tracer.advance();
     }
 }
 
@@ -84,7 +126,7 @@ impl<T: Tracer> VMState<T> {
             pc,
             platform: platform.clone(),
             program: program.clone(),
-            memory: DenseAddrSpace::new(
+            memory: PackedMemory::new(
                 ByteAddr::from(platform.rom.start).waddr(),
                 ByteAddr::from(
                     platform
@@ -97,6 +139,7 @@ impl<T: Tracer> VMState<T> {
             ),
             registers: [0; VM_REG_COUNT],
             halt_state: None,
+            committed_public_io: None,
             tracer: T::with_next_accesses(&platform, config, next_accesses),
         };
 
@@ -127,6 +170,11 @@ impl<T: Tracer> VMState<T> {
         self.halt_state.as_ref()
     }
 
+    /// The last digest passed to the guest public-I/O commit syscall.
+    pub fn committed_public_io(&self) -> Option<[Word; 8]> {
+        self.committed_public_io
+    }
+
     pub fn tracer(&self) -> &T {
         &self.tracer
     }
@@ -150,8 +198,37 @@ impl<T: Tracer> VMState<T> {
     /// Set a word in memory without side effects.
     pub fn init_memory(&mut self, addr: WordAddr, value: Word) {
         self.memory
-            .write(addr, value)
+            .write_value(addr, value)
             .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
+    }
+
+    /// Return the latest exact global access cycle for a register or memory word.
+    pub fn final_access_cycle(&self, addr: WordAddr) -> crate::Cycle {
+        self.memory
+            .latest_cycle(addr)
+            .unwrap_or_else(|| self.tracer.final_register_accesses().cycle(addr))
+    }
+
+    pub fn final_access_count(&self) -> usize {
+        self.memory.len() + self.tracer.final_register_accesses().len()
+    }
+
+    #[cfg(all(
+        any(test, debug_assertions),
+        feature = "aot-x86_64",
+        target_arch = "x86_64",
+        target_os = "linux"
+    ))]
+    pub(crate) fn record_native_memory_first_touch(&mut self, addr: WordAddr) {
+        self.memory.record_native_first_touch(addr);
+    }
+
+    pub fn final_access_addresses(&self) -> Vec<WordAddr> {
+        self.tracer
+            .final_register_accesses()
+            .addresses()
+            .chain(self.memory.addresses())
+            .collect()
     }
 
     pub fn iter_until_halt(&mut self) -> impl Iterator<Item = Result<T::Record>> + '_ {
@@ -205,7 +282,7 @@ impl<T: Tracer> VMState<T> {
         not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
         allow(dead_code)
     )]
-    pub(crate) fn memory_cells_mut_ptr(&mut self) -> *mut Word {
+    pub(crate) fn memory_cells_mut_ptr(&mut self) -> *mut u64 {
         self.memory.cells_mut_ptr()
     }
 
@@ -239,11 +316,22 @@ impl<T: Tracer> VMState<T> {
         self.halt_state = Some(HaltState { exit_code });
     }
 
-    fn apply_syscall(&mut self, effects: SyscallEffects) -> Result<()> {
-        for (addr, value) in effects.iter_mem_values() {
-            self.memory
-                .write(addr, value)
-                .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
+    fn apply_syscall(&mut self, mut effects: SyscallEffects) -> Result<()> {
+        let cycle = self.tracer.cycle() + T::SUBCYCLE_MEM;
+        for op in effects.iter_mem_ops_mut() {
+            let addr = op.addr;
+            let previous_cycle = if self.tracer.track_memory_accesses() {
+                self.memory
+                    .access(addr, cycle, Some(op.value.after))
+                    .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"))
+                    .1
+            } else {
+                self.memory
+                    .write_value(addr, op.value.after)
+                    .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
+                0
+            };
+            op.previous_cycle = previous_cycle;
         }
 
         for (idx, value) in effects.iter_reg_values() {
@@ -268,6 +356,12 @@ impl<T: Tracer> EmuContext for VMState<T> {
             self.halt(exit_code);
             Ok(true)
         } else {
+            if function == ceno_syscall::PUB_IO_COMMIT {
+                let digest_ptr = self.peek_register(Platform::reg_arg0());
+                self.committed_public_io = Some(std::array::from_fn(|index| {
+                    self.peek_memory(ByteAddr(digest_ptr).waddr() + index)
+                }));
+            }
             match handle_syscall(self, function) {
                 Ok(effects) => {
                     self.apply_syscall(effects)?;
@@ -335,18 +429,33 @@ impl<T: Tracer> EmuContext for VMState<T> {
 
     /// Load a memory word and record this operation.
     fn load_memory(&mut self, addr: WordAddr) -> Result<Word> {
-        let value = self.peek_memory(addr);
-        self.tracer.load_memory(addr, value);
+        if !self.tracer.track_memory_accesses() {
+            return Ok(self.peek_memory(addr));
+        }
+        let cycle = self.tracer.cycle() + T::SUBCYCLE_MEM;
+        let (value, previous_cycle) = self
+            .memory
+            .access(addr, cycle, None)
+            .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
+        self.tracer.load_memory(addr, value, previous_cycle);
         Ok(value)
     }
 
     /// Store a memory word and record this operation.
     fn store_memory(&mut self, addr: WordAddr, after: Word) -> Result<()> {
-        let before = self.peek_memory(addr);
-        self.tracer.store_memory(addr, Change { after, before });
-        self.memory
-            .write(addr, after)
+        if !self.tracer.track_memory_accesses() {
+            self.memory
+                .write_value(addr, after)
+                .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
+            return Ok(());
+        }
+        let cycle = self.tracer.cycle() + T::SUBCYCLE_MEM;
+        let (before, previous_cycle) = self
+            .memory
+            .access(addr, cycle, Some(after))
             .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"));
+        self.tracer
+            .store_memory(addr, Change { after, before }, previous_cycle);
         Ok(())
     }
 

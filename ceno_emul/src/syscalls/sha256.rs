@@ -22,6 +22,21 @@ impl SyscallSpec for Sha256ExtendSpec {
 /// from and to VM word-representations according to the syscall spec
 pub struct ShaExtendWords(pub [Word; SHA_EXTEND_WORDS]);
 
+#[inline(always)]
+pub(crate) fn extend_word(
+    w_i_minus_2: Word,
+    w_i_minus_7: Word,
+    w_i_minus_15: Word,
+    w_i_minus_16: Word,
+) -> Word {
+    let s0 = w_i_minus_15.rotate_right(7) ^ w_i_minus_15.rotate_right(18) ^ (w_i_minus_15 >> 3);
+    let s1 = w_i_minus_2.rotate_right(17) ^ w_i_minus_2.rotate_right(19) ^ (w_i_minus_2 >> 10);
+    w_i_minus_16
+        .wrapping_add(s0)
+        .wrapping_add(w_i_minus_7)
+        .wrapping_add(s1)
+}
+
 impl From<[Word; SHA_EXTEND_WORDS]> for ShaExtendWords {
     fn from(value: [Word; SHA_EXTEND_WORDS]) -> Self {
         ShaExtendWords(value)
@@ -49,12 +64,7 @@ pub fn extend<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
     let w_i_minus_16 = MemoryView::<_, 1>::new(vm, state_ptr - 16 * WORD_SIZE as u32).words()[0];
     let old_word = MemoryView::<_, 1>::new(vm, state_ptr).words()[0];
 
-    let s0 = w_i_minus_15.rotate_right(7) ^ w_i_minus_15.rotate_right(18) ^ (w_i_minus_15 >> 3);
-    let s1 = w_i_minus_2.rotate_right(17) ^ w_i_minus_2.rotate_right(19) ^ (w_i_minus_2 >> 10);
-    let new_word = w_i_minus_16
-        .wrapping_add(s0)
-        .wrapping_add(w_i_minus_7)
-        .wrapping_add(s1);
+    let new_word = extend_word(w_i_minus_2, w_i_minus_7, w_i_minus_15, w_i_minus_16);
 
     let base = ByteAddr::from(state_ptr).waddr();
     let mem_ops = vec![
