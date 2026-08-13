@@ -28,7 +28,7 @@ use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipSchedulerMode> = OnceLock::new();
 
 #[cfg(feature = "gpu")]
-const DEFAULT_CHIP_PROVING_LANES: usize = 2;
+const DEFAULT_CHIP_PROVING_LANES: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChipProvingMode {
@@ -39,15 +39,14 @@ pub enum ChipProvingMode {
 pub fn get_chip_proving_mode() -> ChipProvingMode {
     match get_chip_scheduler_mode() {
         ChipSchedulerMode::Sequential => ChipProvingMode::Sequential,
-        ChipSchedulerMode::Concurrent | ChipSchedulerMode::TwoStream => ChipProvingMode::Concurrent,
+        ChipSchedulerMode::Lanes => ChipProvingMode::Concurrent,
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ChipSchedulerMode {
     Sequential,
-    Concurrent,
-    TwoStream,
+    Lanes,
 }
 
 fn get_chip_scheduler_mode() -> ChipSchedulerMode {
@@ -67,13 +66,14 @@ fn parse_chip_proving_mode(
 ) -> ChipSchedulerMode {
     match mode {
         Some("sequential") => ChipSchedulerMode::Sequential,
-        Some("concurrent" | "current-concurrent") => ChipSchedulerMode::Concurrent,
-        Some("two-stream" | "two_stream") => ChipSchedulerMode::TwoStream,
+        Some("concurrent" | "current-concurrent" | "two-stream" | "two_stream") => {
+            ChipSchedulerMode::Lanes
+        }
         Some(mode) => panic!(
             "invalid CENO_CHIP_PROVING_MODE={mode:?}; expected sequential, concurrent, or two-stream"
         ),
         None if legacy_concurrent == Some("0") => ChipSchedulerMode::Sequential,
-        None => ChipSchedulerMode::Concurrent,
+        None => ChipSchedulerMode::Lanes,
     }
 }
 
@@ -84,11 +84,11 @@ fn parse_chip_proving_lanes(value: Option<&str>) -> Result<usize, String> {
         None => return Ok(DEFAULT_CHIP_PROVING_LANES),
     };
     let lanes = value.parse::<usize>().map_err(|_| {
-        format!("invalid CENO_CHIP_PROVING_LANES={value:?}; expected an integer from 1 through 4")
+        format!("invalid CENO_CHIP_PROVING_LANES={value:?}; expected an integer from 1 through 8")
     })?;
-    if !(1..=4).contains(&lanes) {
+    if !(1..=8).contains(&lanes) {
         return Err(format!(
-            "invalid CENO_CHIP_PROVING_LANES={value:?}; expected an integer from 1 through 4"
+            "invalid CENO_CHIP_PROVING_LANES={value:?}; expected an integer from 1 through 8"
         ));
     }
     Ok(lanes)
@@ -221,10 +221,10 @@ impl ChipScheduler {
 
     /// Unified entry point for chip proof execution.
     ///
-    /// On GPU: uses current concurrent scheduling by default. Set
-    /// `CENO_CHIP_PROVING_MODE` to `sequential`, `concurrent`, or `two-stream`.
-    /// In `two-stream` mode, `CENO_CHIP_PROVING_LANES` selects 1 through 4 lanes
-    /// and defaults to 2.
+    /// On GPU: uses four memory-aware CUDA lanes by default. Set
+    /// `CENO_CHIP_PROVING_MODE=sequential` for the control path. The legacy
+    /// `concurrent` and `two-stream` values both select the bounded lane scheduler.
+    /// `CENO_CHIP_PROVING_LANES` selects 1 through 8 lanes and defaults to 4.
     /// The legacy `CENO_CONCURRENT_CHIP_PROVING=0` sequential control remains supported.
     /// On CPU: always executes sequentially.
     ///
@@ -246,21 +246,11 @@ impl ChipScheduler {
         #[cfg(feature = "gpu")]
         {
             match get_chip_scheduler_mode() {
-                ChipSchedulerMode::Concurrent => {
-                    return self.execute_concurrently(tasks, transcript, execute_task, None);
-                }
-                ChipSchedulerMode::TwoStream => {
+                ChipSchedulerMode::Lanes => {
                     // Resolve benchmark configuration before touching the CUDA stream pool.
                     let lane_count = configured_chip_proving_lanes();
-                    tracing::info!(
-                        "[scheduler] resolved CENO_CHIP_PROVING_LANES={lane_count} for two-stream mode"
-                    );
-                    return self.execute_concurrently(
-                        tasks,
-                        transcript,
-                        execute_task,
-                        Some(lane_count),
-                    );
+                    tracing::info!("[scheduler] resolved CENO_CHIP_PROVING_LANES={lane_count}");
+                    return self.execute_concurrently(tasks, transcript, execute_task, lane_count);
                 }
                 ChipSchedulerMode::Sequential => {}
             }
@@ -272,7 +262,7 @@ impl ChipScheduler {
     /// Check if concurrent mode is enabled (GPU only).
     #[cfg(feature = "gpu")]
     pub(crate) fn is_concurrent_mode() -> bool {
-        get_chip_scheduler_mode() != ChipSchedulerMode::Sequential
+        get_chip_scheduler_mode() == ChipSchedulerMode::Lanes
     }
 
     /// Execute tasks sequentially with automatic transcript forking and sampling.
@@ -346,7 +336,7 @@ impl ChipScheduler {
         mut tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
         execute_task: F,
-        explicit_lane_count: Option<usize>,
+        lane_count: usize,
     ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
@@ -359,9 +349,7 @@ impl ChipScheduler {
         }
 
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
-        let stream_pool_size = cuda_hal.inner().stream_pool_size();
-        let worker_limit = explicit_lane_count.unwrap_or(stream_pool_size);
-        let use_explicit_lanes = explicit_lane_count.is_some();
+        let worker_limit = lane_count;
 
         // must call `init_booking_baseline` before concurrent execution
         let mem_pool = cuda_hal.inner().mem_pool();
@@ -369,16 +357,6 @@ impl ChipScheduler {
             .init_booking_baseline()
             .expect("Failed to init booking baseline");
         let booking_baseline = mem_pool.get_booked_total();
-
-        // Preserve the legacy fast path. Two-stream mode still routes one task through a lane,
-        // so default-stream fallback is rejected consistently.
-        if tasks.len() == 1 && !use_explicit_lanes {
-            let task = tasks.remove(0);
-            let mut fork = transcript.clone();
-            let result = execute_task(task, &mut fork)?;
-            let sample = fork.sample_vec(1)[0];
-            return Ok((vec![result], vec![sample]));
-        }
 
         // 1. Sort by memory descending (big rocks first)
         tasks.sort_by(|a, b| b.estimated_memory_bytes.cmp(&a.estimated_memory_bytes));
@@ -388,11 +366,7 @@ impl ChipScheduler {
         tracing::info!(
             "[scheduler] Starting {} tasks, mode={}, workers={}, booking_baseline={:.2}MB, mem_pool_max={}GB",
             total_tasks,
-            if use_explicit_lanes {
-                "two-stream"
-            } else {
-                "concurrent"
-            },
+            "lanes",
             worker_limit,
             booking_baseline as f64 / (1024.0 * 1024.0),
             mem_pool.get_max_size() / (1024 * 1024 * 1024)
@@ -471,48 +445,43 @@ impl ChipScheduler {
         // worker gives each lane a stable stream and makes duplicate/default assignment fatal.
         let mut lane_streams = Vec::with_capacity(worker_limit.min(total_tasks));
         let mut stream_ids = Vec::with_capacity(worker_limit.min(total_tasks));
-        if use_explicit_lanes {
-            for lane_id in 0..worker_limit.min(total_tasks) {
-                let stream = cuda_hal.inner().get_pool_stream().map_err(|err| {
-                    mem_pool.reset_booking();
-                    ZKVMError::BackendError(BackendError::CircuitError(
-                        format!("failed to acquire CUDA stream for lane {lane_id}: {err}")
-                            .into_boxed_str(),
-                    ))
-                })?;
-                let raw_stream = stream.stream().cu_stream();
-                if raw_stream.is_null() {
-                    mem_pool.reset_booking();
-                    return Err(ZKVMError::BackendError(BackendError::CircuitError(
-                        format!("two-stream scheduler lane {lane_id} acquired the default stream")
-                            .into_boxed_str(),
-                    )));
-                }
-                let mut stream_id = 0u64;
-                let status =
-                    unsafe { cudarc::driver::sys::cuStreamGetId(raw_stream, &mut stream_id) };
-                if status != cudarc::driver::sys::CUresult::CUDA_SUCCESS {
-                    mem_pool.reset_booking();
-                    return Err(ZKVMError::BackendError(BackendError::CircuitError(
-                        format!("failed to query CUDA stream ID for lane {lane_id}: {status:?}")
-                            .into_boxed_str(),
-                    )));
-                }
-                if let Err(message) = validate_unique_stream_id(&stream_ids, stream_id) {
-                    mem_pool.reset_booking();
-                    return Err(ZKVMError::BackendError(BackendError::CircuitError(
-                        message.into_boxed_str(),
-                    )));
-                }
-                stream_ids.push(stream_id);
-                lane_streams.push((Some(stream), Some(stream_id)));
+        for lane_id in 0..worker_limit.min(total_tasks) {
+            let stream = cuda_hal.inner().get_pool_stream().map_err(|err| {
+                mem_pool.reset_booking();
+                ZKVMError::BackendError(BackendError::CircuitError(
+                    format!("failed to acquire CUDA stream for lane {lane_id}: {err}")
+                        .into_boxed_str(),
+                ))
+            })?;
+            let raw_stream = stream.stream().cu_stream();
+            if raw_stream.is_null() {
+                mem_pool.reset_booking();
+                return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                    format!("chip scheduler lane {lane_id} acquired the default stream")
+                        .into_boxed_str(),
+                )));
             }
-        } else {
-            lane_streams.resize_with(worker_limit.min(total_tasks), || (None, None));
+            let mut stream_id = 0u64;
+            let status = unsafe { cudarc::driver::sys::cuStreamGetId(raw_stream, &mut stream_id) };
+            if status != cudarc::driver::sys::CUresult::CUDA_SUCCESS {
+                mem_pool.reset_booking();
+                return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                    format!("failed to query CUDA stream ID for lane {lane_id}: {status:?}")
+                        .into_boxed_str(),
+                )));
+            }
+            if let Err(message) = validate_unique_stream_id(&stream_ids, stream_id) {
+                mem_pool.reset_booking();
+                return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                    message.into_boxed_str(),
+                )));
+            }
+            stream_ids.push(stream_id);
+            lane_streams.push((Some(stream), Some(stream_id)));
         }
 
         // 4. Use thread::scope for borrowing references
-        let _fallback_guard = use_explicit_lanes.then(gkr_iop::gpu::forbid_default_stream_fallback);
+        let _fallback_guard = gkr_iop::gpu::forbid_default_stream_fallback();
         let scope_result: Result<(), ZKVMError> = std::thread::scope(|s| {
             for (lane_id, (lane_stream, stream_id)) in lane_streams.drain(..).enumerate() {
                 let rx = Arc::clone(&task_rx);
@@ -818,18 +787,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chip_proving_modes_preserve_controls_and_add_two_stream() {
+    fn chip_proving_modes_use_bounded_lanes_by_default() {
         assert_eq!(
             parse_chip_proving_mode(Some("sequential"), None),
             ChipSchedulerMode::Sequential
         );
         assert_eq!(
             parse_chip_proving_mode(Some("concurrent"), Some("0")),
-            ChipSchedulerMode::Concurrent
+            ChipSchedulerMode::Lanes
         );
         assert_eq!(
             parse_chip_proving_mode(Some("two-stream"), None),
-            ChipSchedulerMode::TwoStream
+            ChipSchedulerMode::Lanes
         );
         assert_eq!(
             parse_chip_proving_mode(None, Some("0")),
@@ -837,7 +806,7 @@ mod tests {
         );
         assert_eq!(
             parse_chip_proving_mode(None, None),
-            ChipSchedulerMode::Concurrent
+            ChipSchedulerMode::Lanes
         );
     }
 
@@ -856,15 +825,15 @@ mod tests {
 
     #[cfg(feature = "gpu")]
     #[test]
-    fn chip_proving_lane_configuration_accepts_only_one_through_four() {
-        assert_eq!(parse_chip_proving_lanes(None), Ok(2));
-        for lanes in 1..=4 {
+    fn chip_proving_lane_configuration_accepts_only_one_through_eight() {
+        assert_eq!(parse_chip_proving_lanes(None), Ok(4));
+        for lanes in 1..=8 {
             assert_eq!(
                 parse_chip_proving_lanes(Some(&lanes.to_string())),
                 Ok(lanes)
             );
         }
-        for invalid in ["0", "not-a-number", "5"] {
+        for invalid in ["0", "not-a-number", "9"] {
             assert!(parse_chip_proving_lanes(Some(invalid)).is_err());
         }
     }

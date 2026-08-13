@@ -50,7 +50,7 @@ When nothing fits, it blocks until a running task completes and frees memory.
 │  │ Task A (800MB) > Task B (400MB) > Task C (200MB) > Task D ... │       │
 │  └───────────────────────────────────────────────────────────────┘       │
 │                                                                          │
-│  Step 2: Spawn N worker threads (N = min(stream_pool_size, #tasks))      │
+│  Step 2: Spawn N workers (N = min(CENO_CHIP_PROVING_LANES, #tasks))     │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐                          │
 │  │ Worker 0   │  │ Worker 1   │  │ Worker 2   │  ...                     │
 │  │ (stream)   │  │ (stream)   │  │ (stream)   │  ...                     │
@@ -172,8 +172,8 @@ The formula computes **resident** (always occupied) + **max(stage temporaries)**
 
 ### Dev-Mode Validation
 
-Set `CENO_GPU_MEM_TRACKING=1 CENO_CONCURRENT_CHIP_PROVING=0` to enable
-estimation validation. Each proving stage compares estimated vs actual GPU
+Set `CENO_GPU_MEM_TRACKING=1 CENO_CHIP_PROVING_MODE=sequential` to enable
+single-task estimation validation. Each proving stage compares estimated vs actual GPU
 memory, asserting:
 - Under-estimate tolerance: 1MB (actual may exceed estimate by at most 1MB)
 - Over-estimate margin: 5MB (estimate may exceed actual by at most 5MB)
@@ -297,8 +297,8 @@ begins executing a task. This reduces peak VRAM usage.
 
 | Environment Variable | Default | Description |
 |---|---|---|
-| `CENO_CONCURRENT_CHIP_PROVING` | `1` (enabled) | Set to `0` for sequential execution |
-| `CENO_SCHEDULER_WORKERS_NUM` | `64` | Number of concurrent CUDA streams |
+| `CENO_CHIP_PROVING_MODE` | bounded lanes | Set to `sequential` for the control path; legacy `concurrent` and `two-stream` values select bounded lanes |
+| `CENO_CHIP_PROVING_LANES` | `4` | Maximum concurrent CUDA lanes; valid values are `1..=8` |
 | `CENO_GPU_MEM_TRACKING` | `0` (disabled) | Set to `1` to enable memory estimation validation |
 | `RUST_MIN_STACK` | — | Set to `16777216` (16MB) for multi-threaded execution |
 
