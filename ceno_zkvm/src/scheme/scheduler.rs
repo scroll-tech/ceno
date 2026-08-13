@@ -22,8 +22,13 @@ use ff_ext::ExtensionField;
 use gkr_iop::hal::ProverBackend;
 use mpcs::Point;
 use std::sync::OnceLock;
+#[cfg(feature = "gpu")]
+use std::time::Instant;
 use transcript::Transcript;
-static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();
+static CHIP_PROVING_MODE: OnceLock<ChipSchedulerMode> = OnceLock::new();
+
+#[cfg(feature = "gpu")]
+const TWO_STREAM_LANES: usize = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChipProvingMode {
@@ -32,12 +37,44 @@ pub enum ChipProvingMode {
 }
 
 pub fn get_chip_proving_mode() -> ChipProvingMode {
+    match get_chip_scheduler_mode() {
+        ChipSchedulerMode::Sequential => ChipProvingMode::Sequential,
+        ChipSchedulerMode::Concurrent | ChipSchedulerMode::TwoStream => ChipProvingMode::Concurrent,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ChipSchedulerMode {
+    Sequential,
+    Concurrent,
+    TwoStream,
+}
+
+fn get_chip_scheduler_mode() -> ChipSchedulerMode {
     *CHIP_PROVING_MODE.get_or_init(|| {
-        match std::env::var("CENO_CONCURRENT_CHIP_PROVING").as_deref() {
-            Ok("0") => ChipProvingMode::Sequential,
-            _ => ChipProvingMode::Concurrent,
-        }
+        parse_chip_proving_mode(
+            std::env::var("CENO_CHIP_PROVING_MODE").ok().as_deref(),
+            std::env::var("CENO_CONCURRENT_CHIP_PROVING")
+                .ok()
+                .as_deref(),
+        )
     })
+}
+
+fn parse_chip_proving_mode(
+    mode: Option<&str>,
+    legacy_concurrent: Option<&str>,
+) -> ChipSchedulerMode {
+    match mode {
+        Some("sequential") => ChipSchedulerMode::Sequential,
+        Some("concurrent" | "current-concurrent") => ChipSchedulerMode::Concurrent,
+        Some("two-stream" | "two_stream") => ChipSchedulerMode::TwoStream,
+        Some(mode) => panic!(
+            "invalid CENO_CHIP_PROVING_MODE={mode:?}; expected sequential, concurrent, or two-stream"
+        ),
+        None if legacy_concurrent == Some("0") => ChipSchedulerMode::Sequential,
+        None => ChipSchedulerMode::Concurrent,
+    }
 }
 
 #[cfg(feature = "gpu")]
@@ -103,8 +140,39 @@ struct CompletionMessage<'a, PB: ProverBackend> {
     memory_reserved: u64,
     /// Task ID for ordering
     task_id: usize,
+    /// Circuit name for telemetry
+    circuit_name: String,
     /// Sampled value from the forked transcript (for gather phase)
     forked_sample: PB::E,
+    lane_id: usize,
+    stream_id: Option<u64>,
+    queue_delay_ms: f64,
+    host_execution_ms: f64,
+    event_wait_ms: f64,
+    completion_ms: f64,
+}
+
+#[cfg(feature = "gpu")]
+struct ScheduledTask<'a, PB: ProverBackend> {
+    task: ChipTask<'a, PB>,
+    queued_at: Instant,
+}
+
+#[cfg(feature = "gpu")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SchedulerWaitReason {
+    WorkerLimit,
+    MemoryLimit,
+    CompletionDrain,
+}
+
+#[cfg(feature = "gpu")]
+fn scheduler_wait_reason(tasks_inflight: usize, worker_limit: usize) -> SchedulerWaitReason {
+    if tasks_inflight >= worker_limit {
+        SchedulerWaitReason::WorkerLimit
+    } else {
+        SchedulerWaitReason::MemoryLimit
+    }
 }
 
 /// Memory-aware parallel chip proof scheduler
@@ -119,8 +187,9 @@ impl ChipScheduler {
 
     /// Unified entry point for chip proof execution.
     ///
-    /// On GPU: uses concurrent scheduling by default. Set
-    /// `CENO_CONCURRENT_CHIP_PROVING=0` to force sequential execution.
+    /// On GPU: uses current concurrent scheduling by default. Set
+    /// `CENO_CHIP_PROVING_MODE` to `sequential`, `concurrent`, or `two-stream`.
+    /// The legacy `CENO_CONCURRENT_CHIP_PROVING=0` sequential control remains supported.
     /// On CPU: always executes sequentially.
     ///
     /// Handles transcript forking internally. Returns `(results, forked_samples)`
@@ -140,12 +209,16 @@ impl ChipScheduler {
     {
         #[cfg(feature = "gpu")]
         {
-            if get_chip_proving_mode() == ChipProvingMode::Concurrent {
-                return self.execute_concurrently(tasks, transcript, execute_task);
+            match get_chip_scheduler_mode() {
+                ChipSchedulerMode::Concurrent => {
+                    return self.execute_concurrently(tasks, transcript, execute_task, false);
+                }
+                ChipSchedulerMode::TwoStream => {
+                    return self.execute_concurrently(tasks, transcript, execute_task, true);
+                }
+                ChipSchedulerMode::Sequential => {}
             }
-            tracing::info!(
-                "[scheduler] CENO_CONCURRENT_CHIP_PROVING=0, using sequential execution"
-            );
+            tracing::info!("[scheduler] using sequential chip proving");
         }
         self.execute_sequentially(tasks, transcript, execute_task)
     }
@@ -153,7 +226,7 @@ impl ChipScheduler {
     /// Check if concurrent mode is enabled (GPU only).
     #[cfg(feature = "gpu")]
     pub(crate) fn is_concurrent_mode() -> bool {
-        get_chip_proving_mode() == ChipProvingMode::Concurrent
+        get_chip_scheduler_mode() != ChipSchedulerMode::Sequential
     }
 
     /// Execute tasks sequentially with automatic transcript forking and sampling.
@@ -227,6 +300,7 @@ impl ChipScheduler {
         mut tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
         execute_task: F,
+        use_two_stream_lanes: bool,
     ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
@@ -240,15 +314,22 @@ impl ChipScheduler {
 
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
         let stream_pool_size = cuda_hal.inner().stream_pool_size();
+        let worker_limit = if use_two_stream_lanes {
+            TWO_STREAM_LANES
+        } else {
+            stream_pool_size
+        };
 
         // must call `init_booking_baseline` before concurrent execution
         let mem_pool = cuda_hal.inner().mem_pool();
         mem_pool
             .init_booking_baseline()
             .expect("Failed to init booking baseline");
+        let booking_baseline = mem_pool.get_booked_total();
 
-        // For single task, just execute directly (no threading overhead)
-        if tasks.len() == 1 {
+        // Preserve the legacy fast path. Two-stream mode still routes one task through a lane,
+        // so default-stream fallback is rejected consistently.
+        if tasks.len() == 1 && !use_two_stream_lanes {
             let task = tasks.remove(0);
             let mut fork = transcript.clone();
             let result = execute_task(task, &mut fork)?;
@@ -262,9 +343,15 @@ impl ChipScheduler {
         let total_tasks = tasks.len();
 
         tracing::info!(
-            "[scheduler] Starting {} tasks, workers={}, mem_pool_max={}GB",
+            "[scheduler] Starting {} tasks, mode={}, workers={}, booking_baseline={:.2}MB, mem_pool_max={}GB",
             total_tasks,
-            stream_pool_size,
+            if use_two_stream_lanes {
+                "two-stream"
+            } else {
+                "concurrent"
+            },
+            worker_limit,
+            booking_baseline as f64 / (1024.0 * 1024.0),
             mem_pool.get_max_size() / (1024 * 1024 * 1024)
         );
 
@@ -280,7 +367,7 @@ impl ChipScheduler {
         // 2. Create channels
         //    Scheduler -> Worker: task only (transcript is cloned inside worker)
         //    Worker -> Scheduler: CompletionMessage (includes sampled value)
-        let (task_tx, task_rx) = mpsc::channel::<ChipTask<'a, PB>>();
+        let (task_tx, task_rx) = mpsc::channel::<ScheduledTask<'a, PB>>();
         let task_rx = Arc::new(Mutex::new(task_rx));
         let (done_tx, done_rx) = mpsc::channel::<CompletionMessage<'a, PB>>();
 
@@ -297,10 +384,22 @@ impl ChipScheduler {
          -> Result<(), ZKVMError> {
             mem_pool.unbook_capacity(msg.memory_reserved);
             *tasks_inflight -= 1;
+            let pool_used = mem_pool.get_used_size().unwrap_or(0);
+            let pool_reserved = mem_pool.get_reserved_size().unwrap_or(0);
             tracing::info!(
-                "[scheduler] Task completed{}, unbooked={:.2}MB, pool_booked={:.2}MB, inflight={}",
+                "[scheduler] Task completed{}, task_id={}, circuit={}, lane={}, stream_id={:?}, queue_delay={:.3}ms, host_execution={:.3}ms, event_wait={:.3}ms, completion={:.3}ms, unbooked={:.2}MB, pool_used={:.2}MB, pool_reserved={:.2}MB, pool_booked={:.2}MB, inflight={}",
                 label,
+                msg.task_id,
+                msg.circuit_name,
+                msg.lane_id,
+                msg.stream_id,
+                msg.queue_delay_ms,
+                msg.host_execution_ms,
+                msg.event_wait_ms,
+                msg.completion_ms,
                 msg.memory_reserved as f64 / (1024.0 * 1024.0),
+                pool_used as f64 / (1024.0 * 1024.0),
+                pool_reserved as f64 / (1024.0 * 1024.0),
                 mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
                 *tasks_inflight
             );
@@ -323,11 +422,58 @@ impl ChipScheduler {
         // Workers never mutate the shared reference; each clone is thread-local.
         use crate::scheme::utils::SyncRef;
         let transcript_ref = SyncRef(transcript);
+        let scheduler_start = Instant::now();
+
+        // Acquire the two non-default streams before admitting work. Holding one guard per
+        // worker gives each lane a stable stream and makes duplicate/default assignment fatal.
+        let mut lane_streams = Vec::with_capacity(worker_limit.min(total_tasks));
+        let mut stream_ids = Vec::with_capacity(worker_limit.min(total_tasks));
+        if use_two_stream_lanes {
+            for lane_id in 0..worker_limit.min(total_tasks) {
+                let stream = cuda_hal.inner().get_pool_stream().map_err(|err| {
+                    mem_pool.reset_booking();
+                    ZKVMError::BackendError(BackendError::CircuitError(
+                        format!("failed to acquire CUDA stream for lane {lane_id}: {err}")
+                            .into_boxed_str(),
+                    ))
+                })?;
+                let raw_stream = stream.stream().cu_stream();
+                if raw_stream.is_null() {
+                    mem_pool.reset_booking();
+                    return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                        format!("two-stream scheduler lane {lane_id} acquired the default stream")
+                            .into_boxed_str(),
+                    )));
+                }
+                let mut stream_id = 0u64;
+                let status =
+                    unsafe { cudarc::driver::sys::cuStreamGetId(raw_stream, &mut stream_id) };
+                if status != cudarc::driver::sys::CUresult::CUDA_SUCCESS {
+                    mem_pool.reset_booking();
+                    return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                        format!("failed to query CUDA stream ID for lane {lane_id}: {status:?}")
+                            .into_boxed_str(),
+                    )));
+                }
+                if stream_ids.contains(&stream_id) {
+                    mem_pool.reset_booking();
+                    return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                        format!("CUDA stream ID {stream_id} was assigned to multiple lanes")
+                            .into_boxed_str(),
+                    )));
+                }
+                stream_ids.push(stream_id);
+                lane_streams.push((Some(stream), Some(stream_id)));
+            }
+        } else {
+            lane_streams.resize_with(worker_limit.min(total_tasks), || (None, None));
+        }
 
         // 4. Use thread::scope for borrowing references
+        let _fallback_guard =
+            use_two_stream_lanes.then(gkr_iop::gpu::forbid_default_stream_fallback);
         let scope_result: Result<(), ZKVMError> = std::thread::scope(|s| {
-            let num_workers = stream_pool_size.min(total_tasks);
-            for _worker_id in 0..num_workers {
+            for (lane_id, (lane_stream, stream_id)) in lane_streams.drain(..).enumerate() {
                 let rx = Arc::clone(&task_rx);
                 let tx = done_tx.clone();
                 let execute_fn = &execute_task;
@@ -335,22 +481,28 @@ impl ChipScheduler {
 
                 s.spawn(move || {
                     loop {
-                        let task = {
+                        let scheduled = {
                             let lock = rx.lock().unwrap();
                             match lock.recv() {
                                 Ok(t) => t,
                                 Err(_) => break,
                             }
                         };
+                        let queue_delay_ms = scheduled.queued_at.elapsed().as_secs_f64() * 1000.0;
+                        let task = scheduled.task;
                         let memory = task.estimated_memory_bytes;
                         let booked_memory = task.booked_memory_bytes;
                         let task_id = task.task_id;
                         let circuit_name = task.circuit_name.clone();
                         tracing::info!(
-                            "[scheduler] worker starting task {} ({}), estimated={:.2}MB",
+                            "[scheduler] worker starting task {} ({}), lane={}, stream_id={:?}, queue_delay={:.3}ms, estimated={:.2}MB, reserved={:.2}MB",
                             task_id,
                             circuit_name,
-                            memory as f64 / (1024.0 * 1024.0)
+                            lane_id,
+                            stream_id,
+                            queue_delay_ms,
+                            memory as f64 / (1024.0 * 1024.0),
+                            booked_memory as f64 / (1024.0 * 1024.0)
                         );
                         crate::scheme::gpu::log_gpu_device_state(&format!(
                             "task_start:{}:{}",
@@ -360,8 +512,12 @@ impl ChipScheduler {
                         // Catch panics so a single worker crash doesn't deadlock
                         // the scheduler (which would block forever on done_rx.recv()
                         // waiting for a CompletionMessage that never arrives).
+                        let host_start = Instant::now();
                         let outcome =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                let _lane_binding = lane_stream.as_ref().map(|stream| {
+                                    gkr_iop::gpu::bind_thread_stream(stream.stream().clone())
+                                });
                                 // Fork locally: clone parent transcript template.
                                 let mut local_transcript = tr.0.clone();
                                 let result = execute_fn(task, &mut local_transcript);
@@ -370,6 +526,7 @@ impl ChipScheduler {
                                 let forked_sample = local_transcript.sample_vec(1)[0];
                                 (result, forked_sample)
                             }));
+                        let host_execution_ms = host_start.elapsed().as_secs_f64() * 1000.0;
 
                         let (result, forked_sample) = match outcome {
                             Ok((r, s)) => (r, s),
@@ -395,11 +552,40 @@ impl ChipScheduler {
                             }
                         };
 
+                        // The scheduler may release neither the reservation nor this lane until
+                        // all work submitted by the chip reaches a stream-local completion event.
+                        let event_wait_start = Instant::now();
+                        let completion_error = lane_stream.as_ref().and_then(|stream| {
+                            stream
+                                .stream()
+                                .record_event(None)
+                                .and_then(|event| event.synchronize())
+                                .err()
+                        });
+                        let event_wait_ms = event_wait_start.elapsed().as_secs_f64() * 1000.0;
+                        let result = match completion_error {
+                            Some(err) => Err(ZKVMError::BackendError(BackendError::CircuitError(
+                                format!(
+                                    "CUDA completion event failed for task {task_id} ({circuit_name}) on lane {lane_id}: {err}"
+                                )
+                                .into_boxed_str(),
+                            ))),
+                            None => result,
+                        };
+                        let completion_ms = queue_delay_ms + host_execution_ms + event_wait_ms;
+
                         let _ = tx.send(CompletionMessage {
                             result,
                             memory_reserved: booked_memory,
                             task_id,
+                            circuit_name,
                             forked_sample,
+                            lane_id,
+                            stream_id,
+                            queue_delay_ms,
+                            host_execution_ms,
+                            event_wait_ms,
+                            completion_ms,
                         });
                     }
                 });
@@ -421,7 +607,7 @@ impl ChipScheduler {
                 }
 
                 // Launch the first pending task whose memory fits; otherwise fall through to wait.
-                if tasks_inflight < stream_pool_size
+                if tasks_inflight < worker_limit
                     && let Some(vec_idx) = pending.iter().position(|task| {
                         mem_pool
                             .try_book_capacity(task.booked_memory_bytes)
@@ -430,12 +616,16 @@ impl ChipScheduler {
                 {
                     let task = pending.remove(vec_idx);
                     let booked_mem = task.booked_memory_bytes;
+                    let pool_used = mem_pool.get_used_size().unwrap_or(0);
+                    let pool_reserved = mem_pool.get_reserved_size().unwrap_or(0);
                     tracing::info!(
-                        "[scheduler] Launching task_id={}, circuit={}, estimated_mem={:.2}MB, booked_mem={:.2}MB, pool_booked={:.2}MB",
+                        "[scheduler] Launching task_id={}, circuit={}, estimated_mem={:.2}MB, booked_mem={:.2}MB, pool_used={:.2}MB, pool_reserved={:.2}MB, pool_booked={:.2}MB",
                         task.task_id,
                         task.circuit_name,
                         task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
                         booked_mem as f64 / (1024.0 * 1024.0),
+                        pool_used as f64 / (1024.0 * 1024.0),
+                        pool_reserved as f64 / (1024.0 * 1024.0),
                         mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0)
                     );
                     crate::scheme::gpu::log_gpu_device_state(&format!(
@@ -443,7 +633,13 @@ impl ChipScheduler {
                         task.task_id, task.circuit_name
                     ));
                     tasks_inflight += 1;
-                    if task_tx.send(task).is_err() {
+                    if task_tx
+                        .send(ScheduledTask {
+                            task,
+                            queued_at: scheduler_start,
+                        })
+                        .is_err()
+                    {
                         mem_pool.unbook_capacity(booked_mem);
                         tasks_inflight -= 1;
                         drop(task_tx);
@@ -510,10 +706,17 @@ impl ChipScheduler {
                     )));
                 }
 
+                let wait_reason = if pending.is_empty() {
+                    SchedulerWaitReason::CompletionDrain
+                } else {
+                    scheduler_wait_reason(tasks_inflight, worker_limit)
+                };
                 tracing::info!(
-                    "[scheduler] Pool full, waiting for task completion... pool_booked={:.2}MB, inflight={}",
+                    "[scheduler] Waiting for task completion, reason={:?}, pool_booked={:.2}MB, inflight={}, worker_limit={}",
+                    wait_reason,
                     mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
-                    tasks_inflight
+                    tasks_inflight,
+                    worker_limit,
                 );
                 crate::scheme::gpu::log_gpu_device_state("pool_full_wait");
 
@@ -555,5 +758,47 @@ impl ChipScheduler {
         let forked_samples: Vec<PB::E> = samples.into_iter().map(|(_, s)| s).collect();
 
         Ok((results, forked_samples))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chip_proving_modes_preserve_controls_and_add_two_stream() {
+        assert_eq!(
+            parse_chip_proving_mode(Some("sequential"), None),
+            ChipSchedulerMode::Sequential
+        );
+        assert_eq!(
+            parse_chip_proving_mode(Some("concurrent"), Some("0")),
+            ChipSchedulerMode::Concurrent
+        );
+        assert_eq!(
+            parse_chip_proving_mode(Some("two-stream"), None),
+            ChipSchedulerMode::TwoStream
+        );
+        assert_eq!(
+            parse_chip_proving_mode(None, Some("0")),
+            ChipSchedulerMode::Sequential
+        );
+        assert_eq!(
+            parse_chip_proving_mode(None, None),
+            ChipSchedulerMode::Concurrent
+        );
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn scheduler_wait_reasons_distinguish_worker_and_memory_limits() {
+        assert_eq!(
+            scheduler_wait_reason(TWO_STREAM_LANES, TWO_STREAM_LANES),
+            SchedulerWaitReason::WorkerLimit
+        );
+        assert_eq!(
+            scheduler_wait_reason(1, TWO_STREAM_LANES),
+            SchedulerWaitReason::MemoryLimit
+        );
     }
 }

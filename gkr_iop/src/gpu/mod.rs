@@ -69,7 +69,12 @@ pub mod gpu_prover {
 use crate::{evaluation::EvalExpression, gkr::layer::Layer};
 pub use gpu_prover::*;
 
-use std::cell::RefCell;
+use std::{
+    cell::RefCell,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
+static DEFAULT_STREAM_FALLBACK_FORBIDDEN: AtomicUsize = AtomicUsize::new(0);
 
 thread_local! {
     static THREAD_CUDA_STREAM: RefCell<Option<Arc<CudaStream>>> = const { RefCell::new(None) };
@@ -103,17 +108,40 @@ impl Drop for ThreadStreamGuard {
     }
 }
 
+/// Reject unbound GPU work while a scheduler owns explicit streams.
+///
+/// This is process-wide so nested Rayon workers cannot silently escape onto the default stream.
+#[doc(hidden)]
+pub fn forbid_default_stream_fallback() -> DefaultStreamFallbackGuard {
+    DEFAULT_STREAM_FALLBACK_FORBIDDEN.fetch_add(1, Ordering::SeqCst);
+    DefaultStreamFallbackGuard
+}
+
+#[doc(hidden)]
+pub struct DefaultStreamFallbackGuard;
+
+impl Drop for DefaultStreamFallbackGuard {
+    fn drop(&mut self) {
+        let previous = DEFAULT_STREAM_FALLBACK_FORBIDDEN.fetch_sub(1, Ordering::SeqCst);
+        debug_assert!(previous > 0, "default-stream fallback guard underflow");
+    }
+}
+
 /// Get the current thread's CUDA stream.
 ///
 /// Returns the stream bound via `bind_thread_stream` for worker threads.
 /// For sub-threads (e.g., Rayon workers) without a bound stream, binds the
-/// CUDA context and returns the HAL default stream so GPU operations succeed.
+/// CUDA context and returns the HAL default stream unless explicit-stream mode forbids fallback.
 pub fn get_thread_stream() -> Option<Arc<CudaStream>> {
     THREAD_CUDA_STREAM.with(|cell| {
         let stream = cell.borrow().clone();
         if stream.is_some() {
             return stream;
         }
+        assert!(
+            DEFAULT_STREAM_FALLBACK_FORBIDDEN.load(Ordering::SeqCst) == 0,
+            "unbound GPU work attempted default-stream fallback while explicit scheduler streams are required"
+        );
         // Sub-thread (Rayon etc.): bind CUDA context and use the default stream.
         // HalInner::default_stream() calls ctx.bind_to_thread() internally.
         if let Ok(hal) = get_cuda_hal() {
