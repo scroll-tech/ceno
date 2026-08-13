@@ -212,9 +212,9 @@ impl<Expr: Clone, P: FieldParameters> FieldLtCols<Expr, P> {
             // Add the flag to the sum.
             sum_flags = sum_flags.clone() + flag.expr();
         }
-        // Exactly one flag is active when the condition is active, and none are
-        // active otherwise.
-        builder.require_equal(|| "sum_flags", sum_flags.expr(), cond.expr())?;
+        // Assert that the sum is equal to one.
+        builder.condition_require_one(|| "sum_flags", cond.expr(), sum_flags.expr())?;
+        builder.condition_require_zero(|| "sum_flags", 1 - cond.expr(), sum_flags.expr())?;
 
         // Check the less-than condition.
 
@@ -239,22 +239,22 @@ impl<Expr: Clone, P: FieldParameters> FieldLtCols<Expr, P> {
             lhs_comparison_byte = lhs_comparison_byte.expr() + lhs_byte.expr() * flag.expr();
             rhs_comparison_byte = rhs_comparison_byte.expr() + flag.expr() * rhs_byte.expr();
 
-            builder.require_zero(
+            builder.condition_require_zero(
                 || "if cond, when not inequality visited, assert lhs_byte == rhs_byte",
-                (cond.expr() - is_inequality_visited.clone())
-                    * (lhs_byte.clone() - rhs_byte.clone()),
+                cond.expr(),
+                (1 - is_inequality_visited.clone()) * (lhs_byte.clone() - rhs_byte.clone()),
             )?;
         }
 
-        builder.require_equal(
+        builder.condition_require_zero(
             || "if cond, lhs_comparison_byte == lhs_comparison_byte",
-            self.lhs_comparison_byte.expr() * cond.expr(),
-            lhs_comparison_byte,
+            cond.expr(),
+            self.lhs_comparison_byte.expr() - lhs_comparison_byte,
         )?;
-        builder.require_equal(
+        builder.condition_require_zero(
             || "if cond, rhs_comparison_byte == rhs_comparison_byte",
-            self.rhs_comparison_byte.expr() * cond.expr(),
-            rhs_comparison_byte,
+            cond.expr(),
+            self.rhs_comparison_byte.expr() - rhs_comparison_byte,
         )?;
 
         // Send the comparison interaction.

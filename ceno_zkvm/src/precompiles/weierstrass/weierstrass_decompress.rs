@@ -95,7 +95,6 @@ use p3::field::PrimeCharacteristicRing;
 #[repr(C)]
 pub struct WeierstrassDecompressWitCols<WitT, P: FieldParameters + NumLimbs + NumWords> {
     pub sign_bit: WitT,
-    pub sign_matches_lsb: WitT,
     pub(crate) x_limbs: Limbs<WitT, P::Limbs>,
     pub(crate) y_limbs: Limbs<WitT, P::Limbs>,
     pub(crate) old_output32: GenericArray<[WitT; UINT_LIMBS], P::WordsFieldElement>,
@@ -113,7 +112,6 @@ pub struct WeierstrassDecompressWitCols<WitT, P: FieldParameters + NumLimbs + Nu
 #[repr(C)]
 pub struct CompactSecp256k1DecompressWitCols<WitT, P: FieldParameters + NumLimbs + NumWords> {
     pub sign_bit: WitT,
-    pub sign_matches_lsb: WitT,
     pub(crate) x_limbs: Limbs<WitT, P::Limbs>,
     pub(crate) y_limbs: Limbs<WitT, P::Limbs>,
     pub(crate) old_output32: GenericArray<[WitT; UINT_LIMBS], P::WordsFieldElement>,
@@ -170,7 +168,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
             CurveType::Secp256k1 => {
                 WeierstrassDecompressLayer::CompactSecp256k1(CompactSecp256k1DecompressWitCols {
                     sign_bit: cb.create_bit(|| "sign_bit").unwrap(),
-                    sign_matches_lsb: cb.create_witin(|| "sign_matches_lsb"),
                     x_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "x"))),
                     y_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "y"))),
                     old_output32: GenericArray::generate(|i| {
@@ -189,7 +186,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
             CurveType::Secp256r1 => {
                 WeierstrassDecompressLayer::Generic(WeierstrassDecompressWitCols {
                     sign_bit: cb.create_bit(|| "sign_bit").unwrap(),
-                    sign_matches_lsb: cb.create_witin(|| "sign_matches_lsb"),
                     x_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "x"))),
                     y_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "y"))),
                     old_output32: GenericArray::generate(|i| {
@@ -279,8 +275,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
         };
 
         let y = cols.pos_y.populate(record, &x_3_plus_b_plus_ax, sqrt_fn);
-        cols.sign_matches_lsb =
-            E::BaseField::from_bool(cols.pos_y.lsb.to_canonical_u64() == instance.sign_bit as u64);
 
         let zero = BigUint::zero();
         let neg_y = cols.neg_y.populate(record, &zero, &y, FieldOperation::Sub);
@@ -342,8 +336,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
         );
 
         let y = cols.pos_y.populate(record, &rhs, secp256k1_sqrt);
-        cols.sign_matches_lsb =
-            E::BaseField::from_bool(cols.pos_y.lsb.to_canonical_u64() == instance.sign_bit as u64);
 
         let zero = BigUint::zero();
         let neg_y = cols.neg_y.populate(record, &zero, &y, FieldOperation::Sub);
@@ -409,12 +401,9 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
                 wits.pos_y
                     .eval(cb, &wits.x_3_plus_b_plus_ax.result, wits.pos_y.lsb)?;
 
-                cb.require_equal(
-                    || "sign_matches_lsb",
-                    wits.sign_matches_lsb.expr(),
-                    1 - (wits.pos_y.lsb.expr() + wits.sign_bit.expr()
-                        - 2 * wits.pos_y.lsb.expr() * wits.sign_bit.expr()),
-                )?;
+                let cond: Expression<E> = 1
+                    - (wits.pos_y.lsb.expr() + wits.sign_bit.expr()
+                        - 2 * wits.pos_y.lsb.expr() * wits.sign_bit.expr());
                 for (y, sqrt_y, neg_sqrt_y) in izip!(
                     wits.y_limbs.0.iter(),
                     wits.pos_y.multiplication.result.0.iter(),
@@ -422,7 +411,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
                 ) {
                     cb.condition_require_equal(
                         || "when lsb == sign_bit, y_limbs = sqrt(y), otherwise y_limbs = -sqrt(y)",
-                        wits.sign_matches_lsb.expr(),
+                        cond.expr(),
                         y.expr(),
                         sqrt_y.expr(),
                         neg_sqrt_y.expr(),
@@ -464,12 +453,9 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
 
                 wits.pos_y.eval(cb, &wits.rhs, wits.pos_y.lsb)?;
 
-                cb.require_equal(
-                    || "sign_matches_lsb",
-                    wits.sign_matches_lsb.expr(),
-                    1 - (wits.pos_y.lsb.expr() + wits.sign_bit.expr()
-                        - 2 * wits.pos_y.lsb.expr() * wits.sign_bit.expr()),
-                )?;
+                let cond: Expression<E> = 1
+                    - (wits.pos_y.lsb.expr() + wits.sign_bit.expr()
+                        - 2 * wits.pos_y.lsb.expr() * wits.sign_bit.expr());
                 for (y, sqrt_y, neg_sqrt_y) in izip!(
                     wits.y_limbs.0.iter(),
                     wits.pos_y.multiplication.result.0.iter(),
@@ -477,7 +463,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
                 ) {
                     cb.condition_require_equal(
                         || "when lsb == sign_bit, y_limbs = sqrt(y), otherwise y_limbs = -sqrt(y)",
-                        wits.sign_matches_lsb.expr(),
+                        cond.expr(),
                         y.expr(),
                         sqrt_y.expr(),
                         neg_sqrt_y.expr(),

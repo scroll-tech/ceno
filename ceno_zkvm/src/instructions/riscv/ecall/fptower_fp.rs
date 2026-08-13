@@ -97,7 +97,7 @@ impl<E: ExtensionField, P: FpOpField + FpAddSpec + NumWords> Instruction<E>
         cb: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
-        build_fp_op_circuit::<E, P>(cb, P::SYSCALL_CODE, "fp_add", FieldOperation::Add)
+        build_fp_op_circuit::<E, P>(cb, P::SYSCALL_CODE, "fp_add")
     }
 
     fn generate_fixed_traces(
@@ -167,7 +167,7 @@ impl<E: ExtensionField, P: FpOpField + FpMulSpec + NumWords> Instruction<E>
         cb: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
-        build_fp_op_circuit::<E, P>(cb, P::SYSCALL_CODE, "fp_mul", FieldOperation::Mul)
+        build_fp_op_circuit::<E, P>(cb, P::SYSCALL_CODE, "fp_mul")
     }
 
     fn generate_fixed_traces(
@@ -214,7 +214,6 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
     cb: &mut CircuitBuilder<E>,
     syscall_code: u32,
     layer_name: &str,
-    op: FieldOperation,
 ) -> Result<(EcallFpOpConfig<E, P>, GKRCircuit<E>), ZKVMError> {
     let vm_state = StateInOut::construct_circuit(cb, false)?;
 
@@ -254,7 +253,7 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
         0.into(),
     ))?;
 
-    let mut layout = FpOpLayout::<E, P>::build_fixed_op(cb, op)?;
+    let mut layout = <FpOpLayout<E, P> as ProtocolBuilder<E>>::build_layer_logic(cb, ())?;
 
     let mut mem_rw = izip!(&layout.input32_exprs[0], &layout.output32_exprs)
         .enumerate()
