@@ -28,7 +28,7 @@ use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipSchedulerMode> = OnceLock::new();
 
 #[cfg(feature = "gpu")]
-const TWO_STREAM_LANES: usize = 2;
+const DEFAULT_CHIP_PROVING_LANES: usize = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChipProvingMode {
@@ -74,6 +74,40 @@ fn parse_chip_proving_mode(
         ),
         None if legacy_concurrent == Some("0") => ChipSchedulerMode::Sequential,
         None => ChipSchedulerMode::Concurrent,
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn parse_chip_proving_lanes(value: Option<&str>) -> Result<usize, String> {
+    let value = match value {
+        Some(value) => value,
+        None => return Ok(DEFAULT_CHIP_PROVING_LANES),
+    };
+    let lanes = value.parse::<usize>().map_err(|_| {
+        format!("invalid CENO_CHIP_PROVING_LANES={value:?}; expected an integer from 1 through 4")
+    })?;
+    if !(1..=4).contains(&lanes) {
+        return Err(format!(
+            "invalid CENO_CHIP_PROVING_LANES={value:?}; expected an integer from 1 through 4"
+        ));
+    }
+    Ok(lanes)
+}
+
+#[cfg(feature = "gpu")]
+fn configured_chip_proving_lanes() -> usize {
+    parse_chip_proving_lanes(std::env::var("CENO_CHIP_PROVING_LANES").ok().as_deref())
+        .unwrap_or_else(|message| panic!("{message}"))
+}
+
+#[cfg(feature = "gpu")]
+fn validate_unique_stream_id(stream_ids: &[u64], stream_id: u64) -> Result<(), String> {
+    if stream_ids.contains(&stream_id) {
+        Err(format!(
+            "CUDA stream ID {stream_id} was assigned to multiple lanes"
+        ))
+    } else {
+        Ok(())
     }
 }
 
@@ -189,6 +223,8 @@ impl ChipScheduler {
     ///
     /// On GPU: uses current concurrent scheduling by default. Set
     /// `CENO_CHIP_PROVING_MODE` to `sequential`, `concurrent`, or `two-stream`.
+    /// In `two-stream` mode, `CENO_CHIP_PROVING_LANES` selects 1 through 4 lanes
+    /// and defaults to 2.
     /// The legacy `CENO_CONCURRENT_CHIP_PROVING=0` sequential control remains supported.
     /// On CPU: always executes sequentially.
     ///
@@ -211,10 +247,20 @@ impl ChipScheduler {
         {
             match get_chip_scheduler_mode() {
                 ChipSchedulerMode::Concurrent => {
-                    return self.execute_concurrently(tasks, transcript, execute_task, false);
+                    return self.execute_concurrently(tasks, transcript, execute_task, None);
                 }
                 ChipSchedulerMode::TwoStream => {
-                    return self.execute_concurrently(tasks, transcript, execute_task, true);
+                    // Resolve benchmark configuration before touching the CUDA stream pool.
+                    let lane_count = configured_chip_proving_lanes();
+                    tracing::info!(
+                        "[scheduler] resolved CENO_CHIP_PROVING_LANES={lane_count} for two-stream mode"
+                    );
+                    return self.execute_concurrently(
+                        tasks,
+                        transcript,
+                        execute_task,
+                        Some(lane_count),
+                    );
                 }
                 ChipSchedulerMode::Sequential => {}
             }
@@ -300,7 +346,7 @@ impl ChipScheduler {
         mut tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
         execute_task: F,
-        use_two_stream_lanes: bool,
+        explicit_lane_count: Option<usize>,
     ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
@@ -314,11 +360,8 @@ impl ChipScheduler {
 
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
         let stream_pool_size = cuda_hal.inner().stream_pool_size();
-        let worker_limit = if use_two_stream_lanes {
-            TWO_STREAM_LANES
-        } else {
-            stream_pool_size
-        };
+        let worker_limit = explicit_lane_count.unwrap_or(stream_pool_size);
+        let use_explicit_lanes = explicit_lane_count.is_some();
 
         // must call `init_booking_baseline` before concurrent execution
         let mem_pool = cuda_hal.inner().mem_pool();
@@ -329,7 +372,7 @@ impl ChipScheduler {
 
         // Preserve the legacy fast path. Two-stream mode still routes one task through a lane,
         // so default-stream fallback is rejected consistently.
-        if tasks.len() == 1 && !use_two_stream_lanes {
+        if tasks.len() == 1 && !use_explicit_lanes {
             let task = tasks.remove(0);
             let mut fork = transcript.clone();
             let result = execute_task(task, &mut fork)?;
@@ -345,7 +388,7 @@ impl ChipScheduler {
         tracing::info!(
             "[scheduler] Starting {} tasks, mode={}, workers={}, booking_baseline={:.2}MB, mem_pool_max={}GB",
             total_tasks,
-            if use_two_stream_lanes {
+            if use_explicit_lanes {
                 "two-stream"
             } else {
                 "concurrent"
@@ -424,11 +467,11 @@ impl ChipScheduler {
         let transcript_ref = SyncRef(transcript);
         let scheduler_start = Instant::now();
 
-        // Acquire the two non-default streams before admitting work. Holding one guard per
+        // Acquire the explicit non-default streams before admitting work. Holding one guard per
         // worker gives each lane a stable stream and makes duplicate/default assignment fatal.
         let mut lane_streams = Vec::with_capacity(worker_limit.min(total_tasks));
         let mut stream_ids = Vec::with_capacity(worker_limit.min(total_tasks));
-        if use_two_stream_lanes {
+        if use_explicit_lanes {
             for lane_id in 0..worker_limit.min(total_tasks) {
                 let stream = cuda_hal.inner().get_pool_stream().map_err(|err| {
                     mem_pool.reset_booking();
@@ -455,11 +498,10 @@ impl ChipScheduler {
                             .into_boxed_str(),
                     )));
                 }
-                if stream_ids.contains(&stream_id) {
+                if let Err(message) = validate_unique_stream_id(&stream_ids, stream_id) {
                     mem_pool.reset_booking();
                     return Err(ZKVMError::BackendError(BackendError::CircuitError(
-                        format!("CUDA stream ID {stream_id} was assigned to multiple lanes")
-                            .into_boxed_str(),
+                        message.into_boxed_str(),
                     )));
                 }
                 stream_ids.push(stream_id);
@@ -470,8 +512,7 @@ impl ChipScheduler {
         }
 
         // 4. Use thread::scope for borrowing references
-        let _fallback_guard =
-            use_two_stream_lanes.then(gkr_iop::gpu::forbid_default_stream_fallback);
+        let _fallback_guard = use_explicit_lanes.then(gkr_iop::gpu::forbid_default_stream_fallback);
         let scope_result: Result<(), ZKVMError> = std::thread::scope(|s| {
             for (lane_id, (lane_stream, stream_id)) in lane_streams.drain(..).enumerate() {
                 let rx = Arc::clone(&task_rx);
@@ -480,6 +521,7 @@ impl ChipScheduler {
                 let tr = &transcript_ref;
 
                 s.spawn(move || {
+                    nvtx::name_thread!("ceno-chip-lane-{}", lane_id);
                     loop {
                         let scheduled = {
                             let lock = rx.lock().unwrap();
@@ -508,6 +550,14 @@ impl ChipScheduler {
                             "task_start:{}:{}",
                             task_id, circuit_name
                         ));
+                        let _chip_range = nvtx::range!(
+                            "ceno.chip circuit={} lane={} stream_id={}",
+                            circuit_name,
+                            lane_id,
+                            stream_id
+                                .map(|id| id.to_string())
+                                .unwrap_or_else(|| "default".to_string())
+                        );
 
                         // Catch panics so a single worker crash doesn't deadlock
                         // the scheduler (which would block forever on done_rx.recv()
@@ -555,6 +605,7 @@ impl ChipScheduler {
                         // The scheduler may release neither the reservation nor this lane until
                         // all work submitted by the chip reaches a stream-local completion event.
                         let event_wait_start = Instant::now();
+                        let _event_wait_range = nvtx::range!("ceno.phase.completion-event-wait");
                         let completion_error = lane_stream.as_ref().and_then(|stream| {
                             stream
                                 .stream()
@@ -563,6 +614,7 @@ impl ChipScheduler {
                                 .err()
                         });
                         let event_wait_ms = event_wait_start.elapsed().as_secs_f64() * 1000.0;
+                        drop(_event_wait_range);
                         let result = match completion_error {
                             Some(err) => Err(ZKVMError::BackendError(BackendError::CircuitError(
                                 format!(
@@ -793,12 +845,38 @@ mod tests {
     #[test]
     fn scheduler_wait_reasons_distinguish_worker_and_memory_limits() {
         assert_eq!(
-            scheduler_wait_reason(TWO_STREAM_LANES, TWO_STREAM_LANES),
+            scheduler_wait_reason(DEFAULT_CHIP_PROVING_LANES, DEFAULT_CHIP_PROVING_LANES),
             SchedulerWaitReason::WorkerLimit
         );
         assert_eq!(
-            scheduler_wait_reason(1, TWO_STREAM_LANES),
+            scheduler_wait_reason(1, DEFAULT_CHIP_PROVING_LANES),
             SchedulerWaitReason::MemoryLimit
         );
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn chip_proving_lane_configuration_accepts_only_one_through_four() {
+        assert_eq!(parse_chip_proving_lanes(None), Ok(2));
+        for lanes in 1..=4 {
+            assert_eq!(
+                parse_chip_proving_lanes(Some(&lanes.to_string())),
+                Ok(lanes)
+            );
+        }
+        for invalid in ["0", "not-a-number", "5"] {
+            assert!(parse_chip_proving_lanes(Some(invalid)).is_err());
+        }
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn explicit_lane_stream_ids_must_be_unique() {
+        let mut stream_ids = Vec::new();
+        for stream_id in 17..=20 {
+            validate_unique_stream_id(&stream_ids, stream_id).unwrap();
+            stream_ids.push(stream_id);
+        }
+        assert!(validate_unique_stream_id(&stream_ids, 18).is_err());
     }
 }

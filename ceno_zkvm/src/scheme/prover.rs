@@ -89,6 +89,7 @@ fn prepare_gpu_chip_input<E, PCS>(
     let num_vars = task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
 
     if let Some(trace_idx) = task.witness_trace_idx {
+        let _range = nvtx::range!("ceno.phase.input-extraction");
         task.input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
             crate::scheme::gpu::extract_witness_mles_for_trace::<E, PCS>(
                 pcs_data,
@@ -100,6 +101,7 @@ fn prepare_gpu_chip_input<E, PCS>(
     }
 
     if let Some(rmm) = task.structural_rmm.as_ref() {
+        let _range = nvtx::range!("ceno.phase.structural-transfer");
         let num_structural_witin = task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize;
         task.input.structural_witness =
             info_span!("[ceno] transport_structural_witness").in_scope(|| {
@@ -129,6 +131,7 @@ where
     let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
     let input_num_instances = input.num_instances;
 
+    let _main_witness_range = nvtx::range!("ceno.phase.main-witness-build");
     let records = info_span!("[ceno] build_main_witness").in_scope(|| {
         build_main_witness::<
             E,
@@ -142,15 +145,18 @@ where
             crate::scheme::utils::WitnessBuildStage::Tower,
         )
     });
+    drop(_main_witness_range);
 
     let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
     let span = entered_span!("prove_tower_relation", profiling_2 = true);
+    let _tower_range = nvtx::range!("ceno.phase.tower-build-prove");
     let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
         info_span!("[ceno] prove_tower_relation").in_scope(|| {
             crate::scheme::gpu::prove_tower_relation_impl::<E, PCS>(
                 cs, input, &records, challenges, transcript, &cuda_hal,
             )
         })?;
+    drop(_tower_range);
     exit_span!(span);
 
     assert!(
@@ -163,17 +169,21 @@ where
     drop(records);
 
     let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
+    let _ecc_range = nvtx::range!("ceno.phase.ecc");
     let ecc_proof = info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
         crate::scheme::gpu::prove_ec_sum_quark_impl::<E, PCS>(cs, input, transcript)
     })?;
+    drop(_ecc_range);
     exit_span!(span);
 
     let span = entered_span!("prove_rotation", profiling_2 = true);
+    let _rotation_range = nvtx::range!("ceno.phase.rotation");
     let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
         crate::scheme::gpu::prove_rotation_impl::<E, PCS>(
             cs, input, &rt_main, challenges, transcript,
         )
     })?;
+    drop(_rotation_range);
     exit_span!(span);
 
     let mut main_input = input.clone();

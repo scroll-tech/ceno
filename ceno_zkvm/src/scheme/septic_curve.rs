@@ -1346,7 +1346,7 @@ mod tests {
             test_impl::{SPONGE_WIDTH, run_gpu_poseidon2_sponge},
         };
         use ff_ext::{PoseidonField, SmallField};
-        use p3::{field::FieldAlgebra, symmetric::Permutation};
+        use p3::{field::PrimeCharacteristicRing, symmetric::Permutation};
 
         let hal = CudaHalBB31::new(0).unwrap();
         let perm = F::get_default_perm();
