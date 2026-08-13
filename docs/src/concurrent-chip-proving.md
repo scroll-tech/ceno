@@ -297,7 +297,7 @@ begins executing a task. This reduces peak VRAM usage.
 
 | Environment Variable | Default | Description |
 |---|---|---|
-| `CENO_CHIP_PROVING_MODE` | bounded lanes | Set to `sequential` for the control path; legacy `concurrent` and `two-stream` values select bounded lanes |
+| `CENO_CHIP_PROVING_MODE` | `lanes` | Set to `sequential` for the control path or `lanes` for bounded concurrent proving |
 | `CENO_CHIP_PROVING_LANES` | `4` | Maximum concurrent CUDA lanes; valid values are `1..=8` |
 | `CENO_GPU_MEM_TRACKING` | `0` (disabled) | Set to `1` to enable memory estimation validation |
 | `RUST_MIN_STACK` | — | Set to `16777216` (16MB) for multi-threaded execution |

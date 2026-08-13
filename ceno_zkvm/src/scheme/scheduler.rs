@@ -51,28 +51,17 @@ enum ChipSchedulerMode {
 
 fn get_chip_scheduler_mode() -> ChipSchedulerMode {
     *CHIP_PROVING_MODE.get_or_init(|| {
-        parse_chip_proving_mode(
-            std::env::var("CENO_CHIP_PROVING_MODE").ok().as_deref(),
-            std::env::var("CENO_CONCURRENT_CHIP_PROVING")
-                .ok()
-                .as_deref(),
-        )
+        parse_chip_proving_mode(std::env::var("CENO_CHIP_PROVING_MODE").ok().as_deref())
     })
 }
 
-fn parse_chip_proving_mode(
-    mode: Option<&str>,
-    legacy_concurrent: Option<&str>,
-) -> ChipSchedulerMode {
+fn parse_chip_proving_mode(mode: Option<&str>) -> ChipSchedulerMode {
     match mode {
         Some("sequential") => ChipSchedulerMode::Sequential,
-        Some("concurrent" | "current-concurrent" | "two-stream" | "two_stream") => {
-            ChipSchedulerMode::Lanes
+        Some("lanes") => ChipSchedulerMode::Lanes,
+        Some(mode) => {
+            panic!("invalid CENO_CHIP_PROVING_MODE={mode:?}; expected sequential or lanes")
         }
-        Some(mode) => panic!(
-            "invalid CENO_CHIP_PROVING_MODE={mode:?}; expected sequential, concurrent, or two-stream"
-        ),
-        None if legacy_concurrent == Some("0") => ChipSchedulerMode::Sequential,
         None => ChipSchedulerMode::Lanes,
     }
 }
@@ -222,10 +211,9 @@ impl ChipScheduler {
     /// Unified entry point for chip proof execution.
     ///
     /// On GPU: uses four memory-aware CUDA lanes by default. Set
-    /// `CENO_CHIP_PROVING_MODE=sequential` for the control path. The legacy
-    /// `concurrent` and `two-stream` values both select the bounded lane scheduler.
+    /// `CENO_CHIP_PROVING_MODE=sequential` for the control path or `lanes` to
+    /// select the bounded lane scheduler explicitly.
     /// `CENO_CHIP_PROVING_LANES` selects 1 through 8 lanes and defaults to 4.
-    /// The legacy `CENO_CONCURRENT_CHIP_PROVING=0` sequential control remains supported.
     /// On CPU: always executes sequentially.
     ///
     /// Handles transcript forking internally. Returns `(results, forked_samples)`
@@ -789,25 +777,14 @@ mod tests {
     #[test]
     fn chip_proving_modes_use_bounded_lanes_by_default() {
         assert_eq!(
-            parse_chip_proving_mode(Some("sequential"), None),
+            parse_chip_proving_mode(Some("sequential")),
             ChipSchedulerMode::Sequential
         );
         assert_eq!(
-            parse_chip_proving_mode(Some("concurrent"), Some("0")),
+            parse_chip_proving_mode(Some("lanes")),
             ChipSchedulerMode::Lanes
         );
-        assert_eq!(
-            parse_chip_proving_mode(Some("two-stream"), None),
-            ChipSchedulerMode::Lanes
-        );
-        assert_eq!(
-            parse_chip_proving_mode(None, Some("0")),
-            ChipSchedulerMode::Sequential
-        );
-        assert_eq!(
-            parse_chip_proving_mode(None, None),
-            ChipSchedulerMode::Lanes
-        );
+        assert_eq!(parse_chip_proving_mode(None), ChipSchedulerMode::Lanes);
     }
 
     #[cfg(feature = "gpu")]
