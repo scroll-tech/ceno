@@ -1203,6 +1203,8 @@ pub fn emulate_program<'a>(
     step_cell_extractor: Arc<dyn StepCellExtractor>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     precompiled_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    precompiled_fulltracer_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
 ) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
@@ -1460,11 +1462,7 @@ pub fn emulate_program<'a>(
     }
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    let replay_aot_program = Arc::new(
-        aot_program
-            .load_or_compile_fulltracer_replay()
-            .unwrap_or_else(|err| panic!("FullTracer AOT replay compile failed: {err}")),
-    );
+    let replay_aot_program = require_fulltracer_aot_program(precompiled_fulltracer_aot);
     let tracer = vm.take_tracer();
     let (plan_builder, next_accesses) = tracer.into_shard_plan();
     let full_tracer_config = FullTracerConfig {
@@ -2235,6 +2233,8 @@ pub fn analyze_shard_ram_light<E: ExtensionField>(
     top_pc_limit: usize,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     precompiled_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    precompiled_fulltracer_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
 ) -> Vec<ShardRamLightReport> {
     let raw_step_cell_extractor = Arc::clone(&program_ctx.system_config.config);
     let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
@@ -2248,6 +2248,8 @@ pub fn analyze_shard_ram_light<E: ExtensionField>(
         step_cell_extractor,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         precompiled_aot,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        precompiled_fulltracer_aot,
     );
 
     assert!(
@@ -2662,6 +2664,31 @@ pub fn prepare_preflight_aot_program(
     Arc::new(aot)
 }
 
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub fn prepare_fulltracer_aot_program(
+    preflight_aot_program: &ceno_emul::aot::AotProgram,
+) -> Arc<ceno_emul::aot::AotProgram> {
+    Arc::new(
+        preflight_aot_program
+            .load_or_compile_fulltracer_replay()
+            .unwrap_or_else(|err| panic!("FullTracer AOT replay preparation failed: {err}")),
+    )
+}
+
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+fn require_fulltracer_aot_program(
+    fulltracer_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
+) -> Arc<ceno_emul::aot::AotProgram> {
+    fulltracer_aot_program.unwrap_or_else(|| {
+        tracing::error!(
+            "FullTracer AOT replay artifact was not prepared; explicitly prepare it before proving"
+        );
+        panic!(
+            "FullTracer AOT replay artifact was not prepared; explicitly prepare it before proving"
+        )
+    })
+}
+
 // Encodes useful early return points of the e2e pipeline
 #[derive(Default, Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub enum Checkpoint {
@@ -2688,6 +2715,8 @@ pub struct E2EProgramCtx<E: ExtensionField> {
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub preflight_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub fulltracer_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
 }
 
 /// end-to-end pipeline result, stopping at a certain checkpoint
@@ -2730,6 +2759,8 @@ pub fn setup_program<E: ExtensionField>(
     let program = Arc::new(program);
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let preflight_aot_program = None;
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let fulltracer_aot_program = None;
 
     E2EProgramCtx {
         program,
@@ -2742,6 +2773,8 @@ pub fn setup_program<E: ExtensionField>(
         zkvm_fixed_traces,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         preflight_aot_program,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        fulltracer_aot_program,
     }
 }
 
@@ -2898,6 +2931,14 @@ pub fn run_e2e_with_checkpoint<
             .unwrap()
             .preflight_aot_program
             .clone(),
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        prover
+            .pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .fulltracer_aot_program
+            .clone(),
     );
     tracing::debug!("emulate done in {:?}", start.elapsed());
 
@@ -3011,6 +3052,14 @@ pub fn run_e2e_proof<
             .unwrap()
             .preflight_aot_program
             .clone(),
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        prover
+            .pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .fulltracer_aot_program
+            .clone(),
     )
 }
 
@@ -3031,6 +3080,8 @@ pub fn run_e2e_proof_with_precompiled_aot<
     target_shard_id: Option<usize>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     precompiled_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    precompiled_fulltracer_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
     // Emulate program
@@ -3046,6 +3097,8 @@ pub fn run_e2e_proof_with_precompiled_aot<
         step_cell_extractor,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         precompiled_aot,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        precompiled_fulltracer_aot,
     );
     create_proofs_streaming(
         emul_result,
@@ -3429,6 +3482,13 @@ mod tests {
     use itertools::Itertools;
     use std::sync::Arc;
     use tiny_keccak::{Hasher, Keccak};
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    #[test]
+    #[should_panic(expected = "FullTracer AOT replay artifact was not prepared")]
+    fn missing_fulltracer_aot_artifact_panics() {
+        let _ = super::require_fulltracer_aot_program(None);
+    }
 
     #[test]
     fn test_single_prover_shard_ctx() {
