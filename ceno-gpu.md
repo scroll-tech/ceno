@@ -80,13 +80,78 @@ recorded below before M0 is accepted.
 
 ### M1 — Eliminate redundant output initialization
 
-Status: pending.
+Status: rejected/rolled back on 2026-08-14.
 
 - Prove which witness columns are completely overwritten by expansion kernels.
 - Remove or narrow device memset operations only for those ranges.
 - Keep explicit initialization for sparse or conditionally written columns.
 - Measure memset time, total bytes written, witness time, and application proof
   time.
+
+#### Experiment record
+
+- Hypothesis: ordinary instruction expansion kernels overwrite every logical
+  witness cell, so zero-initializing their output allocations is redundant.
+- Isolated change: make only the ordinary shared witness allocation
+  uninitialized. Keccak and ShardRAM allocations remained zero-initialized
+  because they contain padding or conditionally written columns. A temporary
+  `CENO_GPU_WITGEN_ZERO_OUTPUT={1,0}` switch allowed interleaved control and
+  candidate runs from one binary.
+- Revisions: Ceno `095d3adb6e89fdc4e5bc5f51e43da9b24ead30c1`
+  (source parent `bb73003f7031f5498b6a2b3b177d54b1d9489fd7`), ceno-gpu
+  `996ef2a1c1f5648d8ae42b085f630ec84a514d7b`, and benchmark
+  `904990f18627f51e85a3a7ed1a364150b3a797d6`. The unrelated ceno-gpu
+  sumcheck worktree changes were preserved and excluded from the experiment.
+- Build and workload: release `jemalloc,gpu`; `GPU_WITGEN=1`; cached block
+  `23587691`; `--chain-id 1`; cost limit `2684354560`; cache level 1; `h=23`;
+  lane scheduling with four lanes. Each trial ran `prove-stark --shard-id 0`
+  and wrote to a distinct output directory.
+- Interleaved order: control 1, candidate 1, control 2, candidate 2, control 3,
+  candidate 3. Logs are
+  `m1_zero_output_{control,candidate}_{1,2,3}_20260814.log` in the benchmark
+  worktree.
+
+| Trial | Control witness | Candidate witness | Control HAL expansion | Candidate HAL expansion | Control app proof | Candidate app proof |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.80s | 1.81s | 39.29ms | 39.04ms | 6.2328s | 6.3742s |
+| 2 | 1.85s | 1.83s | 39.43ms | 37.58ms | 6.3197s | 6.3334s |
+| 3 | 1.85s | 1.85s | 39.30ms | 37.65ms | 6.4276s | 6.4568s |
+| Median | 1.85s | 1.83s | 39.30ms | 37.65ms | 6.3197s | 6.3742s |
+
+The trace did not expose the allocation memset as a separate timer, so summed
+ordinary `hal_witgen_*` spans are the narrowest observable targeted-phase
+proxy. Their median improved 4.20%, below the 5% targeted-phase gate. Median
+total witness generation improved 1.08%, below the 2% total gate. Median
+application proof time was 0.86% slower, within the 1% noise band. Median
+opcode assignment moved from 815ms to 812ms; median FullTracer positioning
+regressed from 618ms to 629ms, consistent with run-to-run noise outside the
+isolated mechanism.
+
+Correctness and resource checks:
+
+- All 22 ordinary-instruction direct CUDA/CPU witness comparisons passed with
+  uninitialized output. The broader environment-enabled test helper has a
+  pre-existing device-backed-host-placeholder limitation, and the sequential
+  debug-compare suite later hit a pre-existing harness segmentation fault;
+  neither failure was introduced by this allocation change.
+- Every trial reported `CUDA Backend Enabled`, 19,184,568 instructions,
+  76,738,276 cycles, exactly two shards, and boundaries
+  `[4, 54691232, 76738276]`.
+- All six shard-0 application proofs completed and recursion verification
+  succeeded. The candidate was rejected at the performance gate, so the
+  acceptance-only complete two-shard proof run was not performed.
+- Witness cleanup reported a clean 485 MiB baseline. Peak allocation was
+  12,746 MiB of 15,850 MiB, leaving approximately 3.0 GiB headroom. No OOM,
+  CUDA, kernel, proof, verification, transfer, or application-witness fallback
+  anomaly appeared. Existing recursion row-major CPU fallback messages were
+  unchanged and outside this experiment.
+
+Decision: reject and roll back. There is no intrinsic tuning parameter for a
+boolean initialization removal, so no tuning iteration was justified. No
+ceno-gpu implementation commit was created; the temporary switch and
+uninitialized allocation were removed. The parent for the next independent
+experiment remains ceno-gpu `996ef2a1c1f5648d8ae42b085f630ec84a514d7b`
+with the pre-existing unrelated sumcheck changes preserved.
 
 ### M2 — Coalesced column-oriented expansion
 
@@ -190,4 +255,3 @@ After every milestone, append a record containing:
   internal GPU witness interfaces and retain a CPU reference path.
 - The unanswered performance-gate preference defaults to the noise-aware
   acceptance thresholds above.
-
