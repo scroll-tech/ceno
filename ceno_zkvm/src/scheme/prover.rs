@@ -8,7 +8,12 @@ use gkr_iop::{
 use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
 #[cfg(feature = "gpu")]
-use crate::scheme::gpu::{estimate_chip_proof_memory, is_babybear_jagged_pcs};
+use std::collections::HashMap;
+
+#[cfg(feature = "gpu")]
+use crate::scheme::gpu::{
+    estimate_chip_proof_memory, estimate_chip_proof_reservations, is_babybear_jagged_pcs,
+};
 use crate::scheme::{
     hal::{MainConstraintJob, MainConstraintResult, MainSumcheckEvals},
     scheduler::{ChipScheduler, ChipTask, ChipTaskResult},
@@ -167,6 +172,15 @@ where
     );
     let rt_main = rt_tower[rt_tower.len() - num_var_with_rotation..].to_vec();
     drop(records);
+    crate::scheme::scheduler::notify_tower_deallocation_enqueued().map_err(|err| {
+        ZKVMError::BackendError(BackendError::CircuitError(
+            format!(
+                "failed to publish tower phase boundary for {}: {err}",
+                task.circuit_name
+            )
+            .into_boxed_str(),
+        ))
+    })?;
 
     let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
     let _ecc_range = nvtx::range!("ceno.phase.ecc");
@@ -641,37 +655,63 @@ impl<
                 use crate::scheme::utils::SyncRef;
                 let gpu_wd = SyncRef(gpu_witness_data);
 
-                return scheduler.execute(tasks, transcript, |task, transcript| {
-                    // Bind global challenges and metadata in the same order as verifier.
-                    transcript.append_field_element_ext(&task.challenges[0]);
-                    transcript.append_field_element_ext(&task.challenges[1]);
-                    transcript.append_field_element(&E::BaseField::from_usize(task.task_id));
-                    // Append circuit_idx to per-task forked transcript (matching verifier)
-                    transcript
-                        .append_field_element(&E::BaseField::from_u64(task.circuit_idx as u64));
-                    for num_instance in task.input.num_instances {
-                        transcript.append_field_element(&E::BaseField::from_usize(num_instance));
-                    }
+                let phase_releasable_by_task = tasks
+                    .iter()
+                    .map(|task| {
+                        let gpu_task: &ChipTask<'_, gkr_iop::gpu::GpuBackend<E, PCS>> =
+                            unsafe { std::mem::transmute(task) };
+                        let structural_cached_on_device = gpu_task
+                            .structural_rmm
+                            .as_ref()
+                            .is_some_and(|rmm| rmm.has_device_backing());
+                        let reservation = estimate_chip_proof_reservations::<E, PCS>(
+                            gpu_task.pk.get_cs(),
+                            &gpu_task.input,
+                            &gpu_task.circuit_name,
+                            gpu_task.witness_trace_rows,
+                            structural_cached_on_device,
+                        );
+                        (gpu_task.task_id, reservation.releasable_bytes)
+                    })
+                    .collect::<HashMap<_, _>>();
 
-                    let mut gpu_task = cast_gpu_chip_task::<E, PCS, PB>(task);
-                    prepare_gpu_chip_input(&mut gpu_task, gpu_wd.0);
-                    let (proof, main_constraint_job) =
-                        create_gpu_chip_proof::<E, PCS>(&mut gpu_task, transcript)?;
-                    let gpu_result = ChipTaskResult {
-                        task_id: gpu_task.task_id,
-                        circuit_idx: gpu_task.circuit_idx,
-                        proof,
-                        opening_evals: MainSumcheckEvals {
-                            wits_in_evals: vec![],
-                            fixed_in_evals: vec![],
-                        },
-                        input_opening_point: vec![],
-                        main_constraint_job: Some(main_constraint_job),
-                        has_witness_or_fixed: gpu_task.has_witness_or_fixed,
-                    };
+                return scheduler.execute_with_phase_reservations(
+                    tasks,
+                    transcript,
+                    |task, transcript| {
+                        // Bind global challenges and metadata in the same order as verifier.
+                        transcript.append_field_element_ext(&task.challenges[0]);
+                        transcript.append_field_element_ext(&task.challenges[1]);
+                        transcript.append_field_element(&E::BaseField::from_usize(task.task_id));
+                        // Append circuit_idx to per-task forked transcript (matching verifier)
+                        transcript
+                            .append_field_element(&E::BaseField::from_u64(task.circuit_idx as u64));
+                        for num_instance in task.input.num_instances {
+                            transcript
+                                .append_field_element(&E::BaseField::from_usize(num_instance));
+                        }
 
-                    Ok(cast_gpu_chip_result::<E, PCS, PB>(gpu_result))
-                });
+                        let mut gpu_task = cast_gpu_chip_task::<E, PCS, PB>(task);
+                        prepare_gpu_chip_input(&mut gpu_task, gpu_wd.0);
+                        let (proof, main_constraint_job) =
+                            create_gpu_chip_proof::<E, PCS>(&mut gpu_task, transcript)?;
+                        let gpu_result = ChipTaskResult {
+                            task_id: gpu_task.task_id,
+                            circuit_idx: gpu_task.circuit_idx,
+                            proof,
+                            opening_evals: MainSumcheckEvals {
+                                wits_in_evals: vec![],
+                                fixed_in_evals: vec![],
+                            },
+                            input_opening_point: vec![],
+                            main_constraint_job: Some(main_constraint_job),
+                            has_witness_or_fixed: gpu_task.has_witness_or_fixed,
+                        };
+
+                        Ok(cast_gpu_chip_result::<E, PCS, PB>(gpu_result))
+                    },
+                    phase_releasable_by_task,
+                );
             }
         }
 
