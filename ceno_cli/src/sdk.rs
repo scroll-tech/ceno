@@ -13,7 +13,7 @@ use ceno_recursion_v2::{
     },
 };
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-use ceno_zkvm::e2e::prepare_preflight_aot_program;
+use ceno_zkvm::e2e::{prepare_fulltracer_aot_program, prepare_preflight_aot_program};
 use ceno_zkvm::{
     e2e::{MultiProver, run_e2e_proof_with_precompiled_aot, setup_program},
     scheme::{
@@ -82,6 +82,8 @@ where
     pub zkvm_prover: Option<ZKVMProver<E, PCS, PB, PD>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub preflight_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub fulltracer_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
 
     aggregation_options: Option<AggregationOptions>,
     _phantom: PhantomData<(SC, VC)>,
@@ -105,6 +107,8 @@ where
             zkvm_prover: None,
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             preflight_aot_program: None,
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            fulltracer_aot_program: None,
             aggregation_options: None,
             _phantom: PhantomData,
         }
@@ -125,6 +129,8 @@ where
             zkvm_prover: None,
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             preflight_aot_program: None,
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            fulltracer_aot_program: None,
             aggregation_options: None,
             _phantom: PhantomData,
         }
@@ -179,7 +185,7 @@ where
     }
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    pub fn prepare_preflight_aot(&mut self, hints: &CenoStdin) {
+    pub fn prepare_preflight_aot(&mut self, hints: &CenoStdin, prepare_fulltracer: bool) {
         let Some(zkvm_prover) = self.zkvm_prover.as_ref() else {
             panic!("ZKVMProver is not initialized")
         };
@@ -187,13 +193,16 @@ where
         let ctx = zkvm_prover.pk.program_ctx.as_ref().unwrap();
         let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
         let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
-        self.preflight_aot_program = Some(prepare_preflight_aot_program(
+        let preflight_aot_program = prepare_preflight_aot_program(
             ctx.program.clone(),
             &ctx.platform,
             &ctx.multi_prover,
             step_cell_extractor,
             &init_full_mem,
-        ));
+        );
+        self.fulltracer_aot_program = prepare_fulltracer
+            .then(|| prepare_fulltracer_aot_program(preflight_aot_program.as_ref()));
+        self.preflight_aot_program = Some(preflight_aot_program);
     }
 
     pub fn generate_base_proof(
@@ -214,6 +223,8 @@ where
                 shard_id,
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
                 self.preflight_aot_program.clone(),
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                self.fulltracer_aot_program.clone(),
             )
         } else {
             panic!("ZKVMProver is not initialized")

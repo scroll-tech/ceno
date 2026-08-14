@@ -301,12 +301,14 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
     let (point, proof, lk_out_evals, w_out_evals, r_out_evals) = {
         // build_tower_witness_gpu builds compact GPU specs directly.
         let span = entered_span!("build_tower_witness", profiling_2 = true);
+        let _tower_build_range = nvtx::range!("ceno.phase.tower-build");
         let (prod_gpu, logup_gpu) =
             info_span!("[ceno] build_tower_witness_gpu").in_scope(|| {
                 build_tower_witness_gpu(composed_cs, input, records, challenges, cuda_hal)
                     .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
                     .map_err(|e| ZKVMError::InvalidWitness(e.into()))
             })?;
+        drop(_tower_build_range);
         exit_span!(span);
 
         // GPU optimization: Extract out_evals from GPU-built towers before consuming them
@@ -337,6 +339,7 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
         };
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
+        let _tower_prove_range = nvtx::range!("ceno.phase.tower-prove");
         let (point_gl, proof_gpu) =
             info_span!("[ceno] prove_tower_relation_gpu").in_scope(|| {
                 cuda_hal
@@ -348,6 +351,7 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
                         ))
                     })
             })?;
+        drop(_tower_prove_range);
         exit_span!(span);
 
         // TowerProofs
