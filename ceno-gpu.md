@@ -46,7 +46,7 @@ ingestion, 825ms opcode assignment, and 507ms ordinary GPU witness expansion.
 
 ### M0 — Reproducible baseline
 
-Status: measured; milestone record pending.
+Status: accepted on 2026-08-15.
 
 - Commit this plan as the initial milestone.
 - Recalibrate the two-shard execution boundaries because Ceno is now at
@@ -73,10 +73,97 @@ Initial GPU-witgen measurement identity:
   ingestion, 825ms opcode assignment, 507ms summed ordinary GPU expansion,
   140ms initial `StepRecord` H2D, and 301ms address sort/dedup.
 
-The existing measurement is evidence for prioritization, not a completed M0
-gate: the required interleaved three-run controls, isolated AOT control, full
-profiler inventory, and complete two-shard proof validation must still be
-recorded below before M0 is accepted.
+#### Acceptance record
+
+- Revisions: Ceno `a6c01deb344a440c8f7da4de1dfd6f5aa69f776c`
+  (code parent `bb73003f7031f5498b6a2b3b177d54b1d9489fd7`), ceno-gpu
+  `996ef2a1c1f5648d8ae42b085f630ec84a514d7b`, and benchmark
+  `904990f18627f51e85a3a7ed1a364150b3a797d6`. Pre-existing ceno-gpu
+  sumcheck worktree changes were preserved and excluded.
+- Configuration: release `jemalloc,gpu`; cached block `23587691`;
+  `--chain-id 1`; cost limit `2684354560`; cache level 1; `h=23`; lane
+  scheduling with four lanes; memory tracking enabled. The AOT control added
+  only the `aot` feature.
+- The execute calibration reproduced 19,184,568 instructions, 76,738,276
+  cycles, exactly two shards, and boundaries `[4, 54691232, 76738276]`.
+
+GPU witness generation was compared with CPU witness generation in the
+interleaved order CPU 1, GPU 1, CPU 2, GPU 2, CPU 3, GPU 3. Logs are
+`m0_witgen{0,1}_{1,2,3}_20260815.log` in the benchmark worktree.
+
+| Trial | CPU witness | GPU witness | CPU app proof | GPU app proof |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 2.58s | 1.80s | 7.3167s | 6.3632s |
+| 2 | 2.78s | 1.84s | 7.5571s | 6.2075s |
+| 3 | 2.68s | 1.83s | 7.3886s | 6.1947s |
+| Median | 2.68s | 1.83s | 7.3886s | 6.2075s |
+
+The accepted GPU configuration improves median shard-0 witness generation by
+31.72% and median application proving by 15.99%. Median FullTracer positioning
+is 626ms, opcode assignment is 817ms, initial `StepRecord` H2D is 139ms, and
+address sort/dedup is 285ms. It uploads 13,672,807 records, 1,773.36 MiB, and
+retains the 1,859,501,888-byte host record buffer.
+
+The AOT feature was then tested independently, using separate AOT and non-AOT
+binaries from the same sources in the interleaved order control 1, AOT 1,
+control 2, AOT 2, control 3, AOT 3. Logs are
+`m0_aot_{noaot,aot}_proof_{1,2,3}_20260815.log`.
+
+| Trial | Control witness | AOT witness | Control app proof | AOT app proof | AOT preparation |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.91s | 1.64s | 6.5346s | 5.1608s | 2.50s |
+| 2 | 1.82s | 1.65s | 6.4682s | 5.2267s | 2.52s |
+| 3 | 1.81s | 1.65s | 6.4252s | 5.1278s | 2.63s |
+| Median | 1.82s | 1.65s | 6.4682s | 5.1608s | 2.52s |
+
+AOT improves median witness generation by 9.34%, its FullTracer positioning
+target from 630ms to 460ms (26.98%), and application proving by 20.21%, so it
+passes the formal gate. It is retained as a warmed/reused-SDK throughput mode.
+Its median 2.52s per-process preparation cost makes a single cold proof slower
+overall, so non-AOT remains the controlled baseline for kernel experiments;
+AOT will not be combined with M2.
+
+Profiler and resource inventory:
+
+- The largest per-chip assignment spans in the representative GPU run were ADD
+  150ms, secp256k1 double 128ms, KeccakCore 90.8ms, secp256k1 add 79.8ms,
+  ADDI 51.2ms, SW 42.4ms, and LW 33.3ms.
+- The shard-0 Nsight profile's hottest kernels were
+  `squeeze_challenge_duplex` (13.2%, 432.5ms),
+  `eval_mixed_poly_internal_k_per_term_v2` (12.0%, 392.3ms),
+  `fold_virtual_poly_v2_and_eval_next_tower_small_mle` (11.2%, 365.1ms),
+  BN254 row hashing (9.7%, 317.9ms), virtual-poly evaluation (8.3%,
+  272.1ms), and Poseidon2 row hashing (5.7%, 185.2ms). The profile artifacts
+  are `scheduler_redesign_shard0_20260813.{nsys-rep,sqlite}` and use the same
+  code revisions and workload.
+- Nsight recorded 3,677.989 MB H2D, 1,720.870 MB D2D, 108.867 MB D2H, and
+  7,417.543 MB of device memset operations for the complete shard-0 profile.
+  CUDA API time was dominated by asynchronous H2D calls (60.3%), kernel launch
+  calls (21.8%), and asynchronous D2H calls (7.8%).
+- One-second `nvidia-smi dmon` sampling peaked at 99% SM and 68% memory-engine
+  utilization; active samples averaged 40.1% SM and 13.3% memory utilization.
+  This coarse sample is retained in
+  `gpu_dmon_fulltracer_witgen1_shard0_23587691_20260814.log`.
+- Across the accepted trials, witness cleanup returned to the clean 485 MiB
+  baseline. The highest observed peak was 13,245 MiB of 15,850 MiB, leaving
+  approximately 2.5 GiB headroom.
+
+Correctness and final decision:
+
+- Every CPU/GPU and AOT/control trial reported `CUDA Backend Enabled`, the
+  calibrated instruction count and shard boundaries, successful application
+  proof generation, and successful recursion root verification.
+- A complete AOT-enabled two-shard proof generated and verified successfully in
+  `m0_aot_twoshard_20260815.log`: shard witness times were 1.67s and 553ms,
+  application proving was 7.3382s, recursion proving was 2.4007s, root
+  verification was 25.0ms, and total proving was 9.7696s.
+- No OOM, CUDA, kernel, proof, verification, allocation, transfer, or new
+  application-witness fallback anomaly appeared. Existing recursion
+  row-major CPU fallbacks were unchanged and outside this milestone.
+
+Decision: accept M0. The parent for M2 remains ceno-gpu
+`996ef2a1c1f5648d8ae42b085f630ec84a514d7b` with non-AOT `GPU_WITGEN=1` as
+the isolated kernel baseline.
 
 ### M1 — Eliminate redundant output initialization
 
