@@ -721,25 +721,36 @@ under the current synchronous-emission design; no production code was retained.
 
 The corrected ABI removed the static volume contradiction, but production AOT
 uses block-atomic access tracking and does not materialize every predecessor or
-operand value. The first isolated mechanism temporarily selected the existing
-exact scalar preflight, which supplies all required per-step semantics without
-a FullTracer replay. Three warm execute-only trials on cached block `23587691`
-reported 1.15s, 1.11s, and 1.10s for `preflight-execute` (1.11s median), versus
-the accepted 126.31ms production median. This is a 778.8% regression and exceeds
-the allowed 138.94ms total by approximately 971ms. All trials preserved
-19,184,568 instructions, 76,738,276 cycles, exactly two shards, and boundaries
-`[4, 54691232, 76738276]`. Logs for the retained warm repetitions are
-`m2_scalar_exact_trim_{2,3}_20260815.log` in the benchmark worktree. The scalar
-selector was reverted and the benchmark `Cargo.lock` was restored.
+operand value. The isolated mechanism temporarily selected the existing exact
+scalar AOT preflight, which supplies the required per-step access semantics
+without a FullTracer replay. The cached production `aot-full` control completed
+19,184,568 instructions in 128.305ms of AOT preflight execution. Two scalar
+`aot-full` attempts took 205.953ms and 204.173ms (205.063ms median), a 59.8%
+regression that exceeds the 141.135ms acceptance ceiling by 63.928ms. Both
+scalar attempts also failed before completing replay with `preflight FullTracer
+capacity does not match the shard boundary plan` (exit 101), so the mechanism
+fails correctness independently of timing. Instruction count, cycle count, two
+planned shards, and boundaries `[4, 54691232, 76738276]` remained stable through
+preflight. Evidence is in `m2_production_aot_full_1_20260815.log` and
+`m2_scalar_aot_full_{1,2}_20260815.log` in the benchmark worktree.
+
+Earlier `--mode execute` trim logs measured the interpreter and are explicitly
+excluded from the decision; that mode does not exercise the AOT trace-style
+selector. The scalar selector was reverted after the corrected `aot-full`
+experiment.
+
+The rebuilt production selector then completed `aot-full` successfully at
+129.042ms with the same block hash, instruction count, shard count, and
+boundaries (`m2_production_aot_full_restored_20260815.log`).
 
 A store-only lower-bound check then wrote the minimum 40-byte ordinary payload
 for all 19,184,568 instructions: 767,382,720 bytes. Five warmed, CPU-affined
 `memset` trials took 26.911, 26.884, 26.811, 26.939, and 26.877ms (26.884ms
-median, 26.58GiB/s). That is already 2.13 times the entire 12.63ms preflight
+median, 26.58GiB/s). That is already 2.10 times the entire 12.831ms preflight
 regression allowance before predecessor derivation, operand capture, syscall
 packing, boundary sealing, or pinned-memory effects. This is a causal warning,
 not a proof against an asynchronously overlapped producer, because independent
-store work could overlap the existing 126ms execution on another core.
+store work could overlap the existing 128ms execution on another core.
 
 Decision: reject both synchronous exact-scalar emission and a same-thread
 block-local store emitter. A viable M2 redesign must preserve production
