@@ -762,9 +762,11 @@ postponed and is unrelated to this blocker.
 
 ### M3 — Compact GPU ingress and ordinary expansion
 
-Status: active as a co-designed M2+M3 experiment from 2026-08-15. The user
-authorized combining the producer and consumer after the standalone exact
-scalar producer was rejected.
+Status: rejected and rolled back on 2026-08-15. The combined M2+M3 experiment
+is terminally complete as a failed mechanism; no producer, GPU ingress, or
+ordinary-expansion production code was retained. The user authorized combining
+the producer and consumer after the standalone exact scalar producer was
+rejected, but did not relax either acceptance gate.
 
 The revised experiment preserves `PreflightProduction` block admission and its
 block-atomic shard accounting. Generated native instructions may append compact
@@ -789,6 +791,45 @@ Upload compact arenas, run device count/scan/scatter into chip-family ranges,
 pass device offsets directly to ordinary kernels, and remove host
 `step_indices` allocation/upload. Keep ordinary matrices and lookup outputs on
 device; unsupported families retain visible legacy fallback.
+
+The isolated producer added one fixed-width 48-byte ordinary record to the
+block-admitted production AOT path. It preserved global ordinals across the
+fallback/syscall lane and deliberately omitted predecessors for later GPU
+derivation. For this workload, 19,135,399 native instructions would emit
+918,499,152 bytes, or 47.877 bytes per guest instruction, satisfying the static
+48-byte volume gate. Compact records were compared against the corresponding
+legacy `StepRecord` during replay before any CUDA consumer was introduced.
+
+Two code-generation shapes were measured on cached block `23587691`. The
+per-instruction inline store took 548.944ms of AOT preflight execution. Tuning
+iteration one moved the store into a single shared generated leaf; it took
+551.860ms (516.680ms native plus 35.181ms fallback). Against the accepted
+128.305ms production control and 141.135ms ceiling, the shared form regressed
+330.1% and exceeded the ceiling by 410.725ms. Both candidates failed exact
+comparison at native ordinal 13 with `native access value mismatch` (exit 101).
+The nearly identical timings disprove generated code duplication as the
+dominant cause and show that this synchronous record lane cannot meet the
+unchanged preflight budget. Evidence is in
+`m23_compact_native_1_20260815.log` and
+`m23_compact_native_shared_1_20260815.log` in the benchmark worktree.
+
+After rollback and rebuilding ABI 67, the restored production `aot-full` run
+completed successfully (exit 0) with the same 19,184,568 instructions, two
+shards, and boundaries `[4, 54691232, 76738276]`. AOT preflight execution was
+127.511ms (93.614ms native plus 33.897ms fallback). Evidence is in
+`m23_production_restored_20260815.log` in the benchmark worktree.
+
+Decision: reject the synchronous block-admitted compact producer after one
+tuning iteration. CUDA M3 work was intentionally not retained: without a
+correct producer inside the preflight gate, a compact consumer would have no
+valid production input and could only optimize a replay-derived lane that the
+milestone forbids. Focused compact-journal, AOT context-layout, production
+block-emitter, and `ceno_zkvm` AOT checks passed after rollback. A future retry
+needs either an asynchronously drained producer co-designed with the device
+consumer, or an explicitly revised combined preflight+witness acceptance
+budget. M4 remains blocked on an accepted M3 parent. Multi-GPU implementation
+remains postponed; the existing whole-shard/device-lease design reservation is
+unchanged.
 
 ### M4 — Address and local-slot pipelines
 
