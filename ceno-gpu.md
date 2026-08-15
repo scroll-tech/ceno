@@ -578,14 +578,51 @@ the missing shard-aware profiling labels are accepted.
 
 ### M1 — Compact journal ABI and dual recording
 
-Status: blocked on acceptance of P0's revised target and profiling-label gap.
+Status: accepted as the device-neutral ABI foundation on 2026-08-15. The user
+accepted P0's 200ms engineering target and explicitly deferred real multi-GPU
+scheduling; M1 therefore reserves future device adaptation without adding a
+fleet, leases, CUDA contexts, or device selection.
 
-Add `CompactShardJournalV1`, its fingerprint, explicit device discriminants,
-arena descriptors, and `WitnessRecordSink`. Add legacy and compact interpreter
-and AOT sinks. In validation mode emit both formats and compare every consumed
-field, count, ordering rule, syscall association, predecessor, shard summary,
-and public value. Bump the private AOT cache ABI and instrument journal bytes
-and packing time.
+Implemented `CompactShardJournalV1` with magic/version, a layout fingerprint,
+explicit integer arena tags, relocatable offset/count/stride descriptors, a
+56-byte typed opcode record, and a 32-byte access-edge record containing the
+predecessor cycle. The host owner contains vectors, but every device-facing
+record is fixed-layout `repr(C)` data with no enum, pointer, allocation, or
+device identity. A future device lease can bind the same relative descriptors
+to any device allocation without changing the journal ABI.
+
+`WitnessRecordSink` now has legacy and compact implementations. Setting
+`CENO_COMPACT_JOURNAL_VALIDATE=1` dual-records at the shared `StepSource` seam,
+which covers interpreter and native AOT replay, and rejects opcode-field,
+ordering, access-field, predecessor, summary-count, descriptor, fingerprint,
+and syscall-association mismatches. It reports total bytes, bytes per step, and
+packing time per shard. The production path does not construct either sink
+when validation is disabled, and no preflight code path changed; consequently
+the preflight overhead is structurally zero for this milestone. The private
+AOT ABI version moved from 65 to 66.
+
+Validation:
+
+- `cargo test -p ceno_emul compact_journal --lib`: 3 passed, covering fixed
+  sizes/alignment/fingerprint, compact-versus-legacy field equality, access
+  predecessor packing, and malformed descriptors.
+- `cargo check -p ceno_zkvm --features aot-x86_64`: passed.
+- `cargo check -p ceno_zkvm --features gpu,aot-x86_64`: blocked before the M1
+  code by the checkout's existing `ceno-gpu-mock` API mismatch (`common`,
+  `CudaHal`, and buffer APIs are absent). This is not treated as GPU runtime
+  validation.
+- A focused `ceno_zkvm` lib-test link was attempted but exhausted the full
+  filesystem. Only Cargo-generated `ceno_zkvm`/`ceno_emul` artifacts were
+  cleaned (1.5GiB); the smaller checks above then passed.
+
+Implementation commit: `0ae2c20006b13ee3945ef28c35f209b58605e72a`
+(`perf(witgen): add compact shard journal ABI`).
+
+Decision: retain the ABI and dual recorder. Public-value serialization and
+typed precompile payload expansion remain deliberately reserved in their arena
+descriptors until their first consumers are implemented; M2 must fill and
+compare those payloads before removing any legacy replay semantics. M2's parent
+is the M1 implementation commit recorded below.
 
 ### M2 — Single-pass AOT journal emission
 
