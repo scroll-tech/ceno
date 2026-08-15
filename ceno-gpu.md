@@ -762,7 +762,28 @@ postponed and is unrelated to this blocker.
 
 ### M3 — Compact GPU ingress and ordinary expansion
 
-Status: blocked on M2 acceptance.
+Status: active as a co-designed M2+M3 experiment from 2026-08-15. The user
+authorized combining the producer and consumer after the standalone exact
+scalar producer was rejected.
+
+The revised experiment preserves `PreflightProduction` block admission and its
+block-atomic shard accounting. Generated native instructions may append compact
+ordinary opcode/access payloads, but they must not enable scalar latest-access
+accounting. GPU ingress must consume those payloads directly; a replay-derived
+packing pass is not an acceptable producer because it retains the dominant
+FullTracer replay. Fallback/syscall records remain an explicit legacy lane until
+their families migrate, and the production path may cut over only when every
+active shard-0 family is covered.
+
+This co-design does not weaken the existing gates: AOT preflight must remain
+within 10%, the journal must average at most 48 bytes per guest instruction,
+and combined preflight plus witness must improve. The first implementation
+slice is deliberately ordinary-only: direct block-admitted record stores,
+device-owned ordinary dispatch metadata, and direct ordinary expansion. It is
+accepted only if compact-versus-legacy equality passes and the raw
+`StepRecord`/host-index lane is absent for migrated families. Otherwise the
+slice is rolled back and recorded as a rejected mechanism before another
+design is attempted.
 
 Upload compact arenas, run device count/scan/scatter into chip-family ranges,
 pass device offsets directly to ordinary kernels, and remove host
