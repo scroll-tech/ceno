@@ -656,8 +656,63 @@ The attempted cached-Reth measurement could not use the existing release
 binary because it predates `CENO_COMPACT_JOURNAL_VALIDATE`; rebuilding was not
 started with only 1.3GiB filesystem headroom. This does not weaken the rejection
 because the zero-access lower bound alone exceeds the target. The next accepted
-parent is `374fb922`; the next task is the compact typed-family ABI correction,
-not AOT emission.
+parent was `374fb922`; the required compact typed-family correction is recorded
+below.
+
+#### M1.1 — Typed journal ABI correction
+
+Status: accepted as prerequisite infrastructure on 2026-08-15.
+
+The rejected generic opcode/access pair was replaced by seven explicit,
+relocatable arenas: opcode routes, register reads, register writes, memory
+accesses, syscall associations, syscall accesses, and public-value words. The
+device layouts contain only fixed-width integers. No host pointer, Rust enum,
+slice, vector, CUDA identity, or device ownership crosses an arena descriptor.
+
+Record sizes are now:
+
+| Record | Bytes | Derivation removed from payload |
+| --- | ---: | --- |
+| Opcode route | 12 | cycle from shard start/index; `pc_after` from next route or shard summary |
+| Register read | 8 | register and subcycle from decoded instruction/order |
+| Register write | 12 | register and subcycle from decoded instruction/order |
+| Memory access | 16 | cycle/subcycle from opcode index |
+| Syscall association | 24 | payload stored once in syscall-access arena |
+| Syscall access | 16 | syscall phase from association range |
+| Public value word | 4 | fixed ordered word tape |
+
+The future-access bit is packed with a bounded 31-bit predecessor cycle. The
+packer rejects overflow instead of truncating; M2 must retain an explicit
+legacy fallback for executions outside that bound. Ordinary opcode families
+now fit the volume gate individually: the tested load path is exactly 48 bytes,
+an R-type instruction is 40 bytes, and a two-read store is 44 bytes. Syscall and
+public-value overhead is retained in the measured whole-journal average rather
+than hidden outside it.
+
+Dual validation reconstructs opcode order and `pc_after`, checks derived
+cycles, predecessors, future flags, values, addresses, typed arena counts,
+syscall associations/accesses, descriptors, fingerprint, shard summary, and
+the public-value word tape. The private AOT ABI advanced from 66 to 67. This
+correction still runs only under `CENO_COMPACT_JOURNAL_VALIDATE`, so production
+preflight remains unchanged and has structurally zero added work.
+
+Validation:
+
+- `cargo test -p ceno_emul compact_journal --lib`: 4 passed.
+- The ABI tests assert 12/8/12/16-byte ordinary records, exact legacy equality,
+  malformed-descriptor rejection, and a 48-byte load-path volume ceiling.
+- `cargo check -p ceno_zkvm --features aot-x86_64`: passed.
+- A cached block-wide average was not rerun because only 1.2GiB filesystem
+  headroom remained and the existing release binary predates this ABI.
+
+Implementation commit: `6f8cc89c2e0cd14d574e831ea9dfaea7f114ecee`
+(`perf(witgen): compact typed journal arenas`).
+
+Decision: retain the corrected ABI. Retry M2 from `6f8cc89c`; generated AOT
+stores must use these typed arenas directly and must measure the complete
+journal, including syscall and public-value records, before acceptance. Actual
+multi-GPU implementation remains postponed; the relative descriptors preserve
+future per-device binding without constraining the current single-device path.
 
 ### M3 — Compact GPU ingress and ordinary expansion
 
