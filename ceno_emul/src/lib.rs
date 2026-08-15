@@ -18,9 +18,10 @@ pub use tracer::{
 
 mod compact_journal;
 pub use compact_journal::{
-    COMPACT_SHARD_JOURNAL_MAGIC, COMPACT_SHARD_JOURNAL_VERSION, CompactAccessEdgeV1,
-    CompactArenaDescriptorV1, CompactArenaKind, CompactOpcodeRecordV1, CompactShardJournalV1,
-    CompactShardSummaryV1, CompactWitnessRecordSink, JournalValidationError,
+    COMPACT_SHARD_JOURNAL_MAGIC, COMPACT_SHARD_JOURNAL_VERSION, CompactArenaDescriptorV1,
+    CompactArenaKind, CompactMemoryAccessV1, CompactOpcodeRecordV1, CompactRegisterReadV1,
+    CompactRegisterWriteV1, CompactShardJournalV1, CompactShardSummaryV1, CompactSyscallAccessV1,
+    CompactSyscallRecordV1, CompactWitnessRecordSink, JournalValidationError,
     LegacyWitnessRecordSink, WitnessRecordSink, compact_journal_layout_fingerprint,
 };
 

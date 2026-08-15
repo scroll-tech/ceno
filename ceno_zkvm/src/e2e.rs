@@ -86,6 +86,27 @@ pub fn public_io_words_to_digest_words(words: &[u32]) -> [u32; 8] {
     unsafe { core::mem::transmute::<[u8; 32], [u32; 8]>(digest) }
 }
 
+fn compact_public_value_words(pi: &PublicValues) -> Vec<u32> {
+    let mut words = Vec::with_capacity(12 + pi.public_io_digest.len() + pi.shard_rw_sum.len());
+    words.extend([
+        pi.exit_code,
+        pi.init_pc,
+        pi.init_cycle as u32,
+        (pi.init_cycle >> 32) as u32,
+        pi.end_pc,
+        pi.end_cycle as u32,
+        (pi.end_cycle >> 32) as u32,
+        pi.shard_id,
+        pi.heap_start_addr,
+        pi.heap_shard_len,
+        pi.hint_start_addr,
+        pi.hint_shard_len,
+    ]);
+    words.extend(pi.public_io_digest);
+    words.extend(pi.shard_rw_sum);
+    words
+}
+
 // define a relative small number to make first shard handle much less instruction
 /// The polynomial commitment scheme kind
 #[derive(
@@ -1732,21 +1753,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // Must be called before shard_steps() to avoid borrow conflict.
             shard_ctx.syscall_witnesses = Arc::new(step_iter.take_syscall_witnesses());
             if validate_compact_journal {
-                legacy_sink.finish_shard();
-                compact_sink.finish_shard();
-                compact_sink
-                    .journal
-                    .validate_against(&legacy_sink, shard_ctx.syscall_witnesses.len())
-                    .unwrap_or_else(|err| panic!("compact journal validation failed: {err}"));
-                tracing::info!(
-                    shard_id = shard_ctx.shard_id,
-                    steps = compact_sink.journal.summary.step_count,
-                    bytes = compact_sink.journal.byte_len(),
-                    bytes_per_step = compact_sink.journal.byte_len() as f64
-                        / compact_sink.journal.summary.step_count.max(1) as f64,
-                    packing_time = ?compact_sink.journal.packing_time,
-                    "compact witness journal validated"
-                );
+                compact_sink.record_syscalls(&shard_ctx.syscall_witnesses);
             }
             let shard_steps = step_iter.shard_steps();
 
@@ -1786,6 +1793,26 @@ pub fn generate_witness<'a, E: ExtensionField>(
             pi.hint_shard_len = (shard_ctx.shard_hint_addr_range.end
                 - shard_ctx.shard_hint_addr_range.start)
                 / (WORD_SIZE as u32);
+
+            if validate_compact_journal {
+                let public_value_words = compact_public_value_words(&pi);
+                compact_sink.record_public_values(&public_value_words);
+                legacy_sink.finish_shard();
+                compact_sink.finish_shard();
+                compact_sink
+                    .journal
+                    .validate_against(&legacy_sink, &shard_ctx.syscall_witnesses)
+                    .unwrap_or_else(|err| panic!("compact journal validation failed: {err}"));
+                assert_eq!(compact_sink.journal.public_values, public_value_words);
+                tracing::info!(
+                    shard_id = shard_ctx.shard_id,
+                    steps = compact_sink.journal.summary.step_count,
+                    bytes = compact_sink.journal.byte_len(),
+                    bytes_per_step = compact_sink.journal.bytes_per_step(),
+                    packing_time = ?compact_sink.journal.packing_time,
+                    "compact witness journal validated"
+                );
+            }
 
             if let Some(target_shard_id) = target_shard_id {
                 if shard_ctx.shard_id < target_shard_id {
