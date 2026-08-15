@@ -1,58 +1,62 @@
-# AOT FullTracer + GPU Witness 10x Co-Design Plan
+# FullTracer + GPU Witness Incremental Optimization Plan
 
-Date: 2026-08-14 (Asia/Singapore)
+Date: 2026-08-15 (Asia/Singapore)
 
 ## Summary and acceptance target
 
-Redesign shard-0 witness generation around one warmed AOT preflight execution
-that emits compact, versioned shard journals directly for GPU consumption. The
-production GPU path must ultimately remove the second FullTracer replay, the
-1.77 GiB `StepRecord` upload, CPU positioning and per-chip index construction,
-repeated lookup D2H, and the 33.8M-entry duplicated-address sort.
+Retain warmed AOT preflight and FullTracer replay as the correctness source.
+Optimize the measured FullTracer-positioning plus GPU-assignment span in
+independent, revertible increments. Direct AOT journal emission and the former
+10x single-pass objective are rejected: their synchronous record stores
+regressed preflight and did not produce an exact journal.
 
-The accepted warm AOT shard-0 baseline is approximately 1.65s. P0 found that
-the original milestone budgets do not fit within 165ms, so the committed
-engineering target is revised to a three-trial interleaved median of at most
-200ms for the `generate_witness` span. 165ms remains a stretch goal and may not
-be restored as a gate without a measured mechanism that closes the remaining
-budget. AOT compilation, setup, preflight, witness generation, and proving
-remain separately reported. Preflight may regress by at most 10%, combined
-preflight plus witness time must materially improve, and application proving
-may regress by at most 1%. No proof, AIR, transcript, public-value,
-shard-boundary, instruction-count, or witness semantics may change.
+The accepted planning baseline is approximately 465ms for FullTracer
+positioning and 800ms for GPU witness assignment, or 1,265ms combined. Packing,
+transfer, routing, and synchronization stay inside this span and may not be
+moved into preflight. Every retained replay/assignment mechanism must improve
+the combined median by more than 5% relative to its latest accepted parent.
+Continuation mechanisms instead target their named continuation phase and must
+improve that phase by more than 5% and total witness by at least 2%.
+
+For every retained milestone, median total `generate_witness` must improve by
+at least 2%, warmed AOT preflight may not regress by more than 1%, and
+application proving may not regress by more than 1%. Proof, AIR, transcript,
+public-value, shard-boundary, instruction-count, and witness semantics remain
+exact.
 
 ## CPU/GPU boundary
 
-The CPU executes the guest through warmed AOT; enforces traps, branches,
-syscalls, memory semantics, and shard planning; maintains only the latest-access
-state required during execution; emits compact typed records and deterministic
-shard descriptors; preserves the FullTracer/CPU path as the correctness
-reference and explicit fallback; and restores completed shard proofs to shard
-order.
+The CPU executes warmed AOT preflight, preserves shard planning, and replays
+each accepted shard through FullTracer. The existing `position_next_shard`
+callback is the sole production compact-packing seam. It appends typed records
+in canonical replay order and finalizes syscall/public-value arenas after the
+replay. Preflight performs no journal packing.
 
-The GPU consumes opcode, access-edge, and syscall arenas; derives chip counts,
-offsets, row placement, access-chain annotations, and future-access flags;
-expands ordinary, Keccak, secp256k1, continuation, and table witnesses;
-aggregates lookup multiplicities; builds ShardRAM inputs without duplicate
-per-chip address lists; and keeps witness matrices device-resident through
-proving.
+The GPU consumes only the typed arenas required by migrated families. It may
+derive chip routes, expand rows, build access chains, and aggregate lookups.
+Unsupported families retain a visibly measured legacy lane. The CPU witness
+path and legacy FullTracer-to-`StepRecord` GPU ingress remain correctness
+references and explicit fallbacks.
 
 ## Compact journal ABI
 
-`CompactShardJournalV1` is an internal, versioned device interface containing:
+The accepted `CompactShardJournalV1` remains the internal, versioned device
+interface containing:
 
 - shard identity, cycle range, step count, public-value inputs, layout
   fingerprint, and typed arena descriptors;
 - opcode-family records containing only fields consumed by their GPU kernels;
-- one access edge for each actual RS1, RS2, RD, or memory access, with its
-  predecessor cycle or slot;
+- one typed record for each actual RS1, RS2, RD, or memory access, with its
+  predecessor cycle and future-access flag;
 - compact syscall and precompile records; and
 - explicit fixed-width device discriminants and no Rust enum, pointer, nested
   `Vec`, serialized proof, or raw `StepRecord` ABI.
 
-AOT and CPU fallback must emit the identical ABI. The target staging design is
-two 64 MiB pinned slabs per active device under a 512 MiB global pinned-memory
-cap. Slabs seal only at deterministic step boundaries or when full.
+Its relative descriptors remain device-neutral. A private layout change bumps
+the version and fingerprint. A shard-scoped compact device owner binds one
+validated journal generation to a device ID and shard ID and owns the uploaded
+typed arena buffers. Debug checks reject stale generations, mixed shards,
+malformed descriptors, and cross-device binding.
 
 ## Address-chain design
 
@@ -66,28 +70,22 @@ local-slot privatization remain independent experiments.
 
 ## Device ownership and scheduling
 
-`GpuFleet` owns one HAL, memory pool, stream set, and cache set per device. A
-`DeviceShardLease` exclusively owns one device from journal ingestion through
-proof completion. The same device may not enqueue any H2D, witness,
-continuation, or proving work for shard N+1 before shard N releases its lease;
-different devices may process different shards concurrently.
-
-Shard `s` is assigned to device `s % device_count`, with proofs collected in
-shard order. The default has one CPU AOT emission permit, one global H2D ingress
-permit, and device queue depth one. The first release neither splits a shard
-across devices nor uses peer-to-peer transfers. NVTX metadata includes device,
-shard, journal chunk, and phase. Debug builds reject mixed-shard buffers,
-cross-device pointers, and overlapping leases.
+Multi-GPU execution is postponed. The compact owner records shard/device
+metadata, relative arena descriptors, and a generation token so a future
+exclusive-device lease does not require an ABI change. A single device never
+stages the next shard while the current shard is active. M7R may use at most one
+ingress stream and one witness stream, joined by events, and only after profiling
+shows at least a 5% removable transfer/synchronization ceiling.
 
 ## Experiment and rollback contract
 
 - Run every experiment in a clean worktree branched from the latest accepted
   milestone. Preserve the existing unrelated `ceno-gpu` sumcheck changes.
-- Use three interleaved warm control/candidate trials with `GPU_WITGEN=1`,
+- Use three interleaved warm control/candidate trials with AOT, `GPU_WITGEN=1`,
   `jemalloc,gpu`, lane scheduling, cached block data, and `--chain-id 1`.
 - Accept an experiment only when:
   - Median total witness generation improves by at least 2%.
-  - Its targeted phase improves by at least 5%.
+  - Its targeted phase improves by more than 5%.
   - Median application proving time is no more than 1% slower, treating that
     band as measurement noise.
   - Execution produces exactly two shards with stable boundaries and
@@ -106,13 +104,13 @@ cross-device pointers, and overlapping leases.
   - Never merge a failed implementation or base another optimization on it. If
     an already-published commit must be removed, use `git revert`, not history
     rewriting.
-- Infrastructure milestones may be accepted without a speedup only when they
-  are required by the next measured milestone, fully tested, and no more than
-  1% slower.
+- Infrastructure that cannot independently pass the applicable gate is not a
+  primary accepted performance milestone.
 - Change one mechanism per experiment and allow at most two tuning iterations
   intrinsic to that mechanism.
-- Treat AOT, scheduler, incremental PCS, stream-count, address-chain, and
-  local-slot changes as separate controlled experiments.
+- Treat replay packing, compact ingress, device routing, special families,
+  stream count, address chains, and lookup accumulation as separate controlled
+  experiments.
 - Update this document before implementation and after every milestone with
   exact revisions, commands, timings, correctness, memory, profiler evidence,
   tuning, decision, resulting commits, and the next accepted parent.
@@ -429,7 +427,7 @@ the temporary block-size selector was removed. M3 must start from ceno-gpu
 `996ef2a1c1f5648d8ae42b085f630ec84a514d7b`, with only the pre-existing
 unrelated sumcheck changes preserved.
 
-## Co-design milestones
+## Historical co-design milestones (superseded)
 
 | Milestone | Deliverable | Gate |
 | --- | --- | --- |
@@ -760,7 +758,120 @@ budget. Neither change is authorized by the current plan, so M3 and later
 dependent milestones cannot start from a valid parent. Multi-GPU remains
 postponed and is unrelated to this blocker.
 
-### M3 — Compact GPU ingress and ordinary expansion
+## Active incremental milestones
+
+### D1 — Baseline and instrumentation
+
+Status: accepted from the three valid warmed P0 controls recorded above. The
+`p0_aot_warm_control_{1,2,3}_20260815.log` trials are the D1 controls on cached
+block `23587691`. They record FullTracer positioning, raw H2D, host index
+construction, ordinary and special
+assignment, continuation, lookup D2H, total witness, application proof, peak
+VRAM, instruction count, shard count, and shard boundaries. The required
+identity is 19,184,568 instructions, exactly two shards, and boundaries
+`[4, 54691232, 76738276]`.
+
+The median is 465ms positioning, 800ms assignment, 1,265ms combined, 346ms
+continuation, 1.66s total shard-0 witness, 126.31ms preflight, and 5.2123s
+application proof. Raw `StepRecord` ingress is 1,773.36MiB and 139ms. Summed
+host `indices_u32` construction is 17.90, 17.42, and 17.36ms; summed lookup D2H
+is 80.23, 75.24, and 73.66ms. The representative ordinary expansion sum is
+approximately 507ms, secp256k1 add/double is approximately 205ms, and Keccak is
+approximately 103ms. Peak framebuffer use is 13,449.69MiB of 15,850.56MiB,
+leaving 2,400.87MiB. Compact packing, compact H2D, and device routing are zero
+because the accepted parent has no production compact lane.
+
+Keep the rejected output-initialization, 128/256-thread, generic-journal, and
+synchronous-AOT-emission implementations rolled back.
+
+### M2R — Replay-derived compact GPU ingress
+
+Enable `CompactWitnessRecordSink` in production in `position_next_shard`, with
+capacity reserved from the planned shard size and logical lengths reused across
+shards. Finalize syscall and public-value records after replay. Upload typed
+arenas only for migrated ordinary kernels. Keccak may temporarily use a
+filtered legacy record buffer; CPU-only families must not force upload of the
+complete 136-byte `StepRecord` array.
+
+Add a shard-scoped device owner for typed arena buffers, validated journal
+magic/version/fingerprint, shard identity, relative descriptors, device ID, and
+generation. `CENO_GPU_LEGACY_STEP_INGRESS=1` selects the explicit legacy/debug
+lane. Validation mode dual-runs compact and legacy consumed fields and ordering.
+
+Accept only if the candidate has no complete 1.77GiB raw upload and improves
+the latest-parent positioning-plus-assignment median by more than 5%, total
+witness by at least 2%, and does not regress preflight or proving by more than
+1%.
+
+### M3R — Device chip routing
+
+Decode opcode routes on device and run family count, exclusive scan, and stable
+scatter. Keep per-family route arrays device-resident in canonical replay order
+and pass their offsets directly to ordinary expansion kernels. Remove migrated
+host `step_indices` construction and H2D; retain and measure the legacy lane
+only for unsupported families.
+
+Validate row counts, required heights, padding, lookup order, and full CPU/GPU
+witness equality for every migrated chip. Accept only if routing independently
+improves the latest-parent combined positioning-plus-assignment median by more
+than 5% while passing the global witness/proving gates.
+
+### M4R — Fused positioning and packing
+
+Append compact records directly in the positioning callback without also
+populating migrated host dispatch indices. Decode each record once and append
+accesses in deterministic RS1, RS2, RD, memory order. Preserve summaries and
+syscall associations exactly. Production stops making validation-only legacy
+copies; debug dual recording remains available. Reuse arena allocation across
+shards by clearing lengths, and reject overflow without truncation.
+
+Accept only if this isolated fusion independently improves the latest-parent
+combined median by more than 5% and passes the global gates.
+
+### M5R — Special-chip assignment
+
+Run secp256k1 add/double and Keccak as separate experiments from the latest
+accepted parent. For secp256k1, pack operations once during replay and expand
+rows plus associated lookup/ShardRAM outputs on device, removing CPU EC row
+construction. For Keccak, replace the filtered legacy lane with compact syscall
+records, retain packed state and intermediate lookup data on device, and remove
+intermediate synchronization only where exactness permits.
+
+Each family must independently improve the current combined median by more than
+5%. Reject and remove a family that misses the gate without affecting already
+accepted families.
+
+### M6R — Continuation and lookup
+
+After replay and assignment milestones, target continuation phases separately.
+For address chains, consume each compact access once, derive successor and
+future-access data by predecessor scatter, and replace the 33.8M-entry
+duplicated-address global sort with block-local aggregation plus one compact
+pass. For lookups, compare atomic reduction with sort/merge independently,
+retain the faster exact form, merge multiplicities once per shard, and feed the
+final device tables directly to continuation/proving.
+
+Address-chain and lookup changes remain independently revertible. Each must
+improve its targeted phase by more than 5% and total witness by at least 2%.
+
+### M7R — Bounded pipeline and cutover
+
+Double-buffer compact chunks only when profiling proves at least a 5% removable
+synchronization/transfer ceiling. Use at most one ingress stream and one witness
+stream synchronized by events. Never stage the next shard on the active device.
+Make compact replay ingress the default only after every active shard-0 GPU
+family is covered. Preserve legacy FullTracer-to-`StepRecord` GPU ingress behind
+`CENO_GPU_LEGACY_STEP_INGRESS=1`.
+
+Do not implement a multi-GPU fleet. Retain relative descriptors and shard/device
+metadata for future exclusive device leases.
+
+## Historical rejected direct-emission milestones
+
+The following M3-M10 text records the superseded direct-AOT design and its
+rollback. It is evidence only and does not constrain the active M2R-M7R order.
+
+### Historical M3 — Compact GPU ingress and ordinary expansion
 
 Status: rejected and rolled back on 2026-08-15. The combined M2+M3 experiment
 is terminally complete as a failed mechanism; no producer, GPU ingress, or
@@ -918,41 +1029,36 @@ After every milestone, append a record containing:
 
 ## Commit policy
 
-- D0: `docs(gpu): add AOT FullTracer GPU co-design plan`.
-- P0 evidence: `docs(gpu): record AOT witgen causal profile`.
-- Accepted implementations use the milestone-specific commit subject recorded
-  in the plan; each owning repository receives a separate commit.
-- Accepted milestone record: `docs(gpu): record <mechanism> milestone`.
-- Rejected experiment: no code commit is merged; commit only the evidence with
-  `docs(gpu): record rejected <mechanism> experiment`.
-- Cross-repository changes receive separate owning-repository commits, with the
-  final Ceno documentation commit referencing all exact hashes.
+- D1 plan and baseline: `docs(gpu): adopt incremental FullTracer GPU optimization plan`.
+- M2R implementation: `perf(witgen): consume replay compact journals on GPU`.
+- M3R implementation: `perf(witgen): route compact opcode journals on device`.
+- M4R implementation: `perf(witgen): fuse FullTracer positioning with journal packing`.
+- M5R families and M6R mechanisms receive separate implementation commits.
+- Each accepted implementation is followed by a documentation commit with
+  exact Ceno, ceno-gpu, and benchmark hashes and three-trial evidence.
+- A rejected experiment leaves no code on the accepted parent; commit evidence
+  only. Cross-repository changes are committed in their owning repositories.
 
 ## Tests and assumptions
 
 - Test ABI size, alignment, version, fingerprint, malformed descriptors, and
   cross-device pointers.
-- Test interpreter/AOT journal equality and compact/legacy consumed-field
-  equality.
+- Test replay compact/legacy consumed-field equality and ordering.
 - Test CPU/GPU witness, lookup, ShardRAM, continuation, public values, and proof
   equality.
 - Cover empty, maximum, boundary-exact, and buffer-full shards; cross-shard
   future accesses; register aliases; first-touch memory; syscalls; traps; and
   dynamic fallback.
 - Test required heights and padding rows for every migrated chip.
-- Test lease exclusivity, queue depth, proof ordering, single-device fallback,
-  and multi-device context isolation.
+- Test shard/device/generation validation and the explicit legacy fallback.
 - Confirm logs contain `CUDA Backend Enabled` and do not contain fallback, OOM,
   kernel, proof, or verification errors.
 - Use block `23587691`, cost limit `2684354560`, cache level 1, `h=23`,
   `CENO_CHIP_PROVING_MODE=lanes`, and `LANES=4`.
 - Use cached inputs and `--chain-id 1`; never print or pass a raw RPC URL.
 - Revert benchmark-only `Cargo.lock` changes after validation.
-- The 10x target covers warmed shard-0 witness generation, not compilation or
-  end-to-end proving.
-- One GPU never overlaps two shards; separate devices may prove separate
-  whole shards concurrently.
-- The host is scarce, so one CPU emission/replay permit and one global H2D
-  permit are the defaults.
+- The primary target is incremental throughput improvement while retaining
+  FullTracer replay, not eliminating replay or achieving a 10x result.
+- One GPU never overlaps two shards; multi-GPU scheduling is postponed.
 - No public proof, AIR, transcript, public-value, shard, or witness semantics
   change. All layouts and scheduling interfaces remain internal.
