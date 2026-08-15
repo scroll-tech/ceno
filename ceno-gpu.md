@@ -626,12 +626,38 @@ is the M1 implementation commit recorded below.
 
 ### M2 — Single-pass AOT journal emission
 
-Status: blocked on M1 acceptance.
+Status: rejected at the parent-layout gate on 2026-08-15; no AOT emitter code
+was retained.
 
-Emit journals during the existing preflight at actual planner boundaries and
-finalize cross-shard future-access predecessor data after full preflight. Keep
-FullTracer replay only for comparison and fallback. Measure DSO instruction
-count, IPC, packing time, bytes per instruction, and preflight overhead.
+Before adding generated-DSO stores, the accepted M1 layouts were checked
+against M2's volume requirement. `CompactOpcodeRecordV1` is 56 bytes and
+`CompactAccessEdgeV1` is 32 bytes. Consequently the journal is at least 56
+bytes per guest instruction with no architectural accesses and
+`56 + 32 * accesses` bytes for ordinary instructions. It cannot meet the
+committed average target of at most 48 bytes per guest instruction under any
+workload. Emitting this layout directly from AOT would add large preflight
+memory traffic for a mechanism that is statically unable to pass acceptance.
+
+The gate also confirmed that M1 only reserved the syscall arena and public
+value serialization; those payloads are not yet sufficient for exact
+production replay removal. Adding assembly emission before defining them would
+freeze another incomplete ABI revision.
+
+Decision: do not implement or commit native emission for the rejected layout.
+Reopen the private ABI before retrying M2 with typed opcode-family records,
+separate compact register and memory access records, and predecessor slots
+rather than repeated 64-bit cycles where the bounded execution permits it. The
+replacement must prove its worst-case overflow/fallback semantics and measured
+average volume before touching generated assembly. Actual multi-GPU contexts,
+leases, and scheduling remain postponed; descriptors continue to use relative
+offsets so the corrected ABI stays device-neutral.
+
+The attempted cached-Reth measurement could not use the existing release
+binary because it predates `CENO_COMPACT_JOURNAL_VALIDATE`; rebuilding was not
+started with only 1.3GiB filesystem headroom. This does not weaken the rejection
+because the zero-access lower bound alone exceeds the target. The next accepted
+parent is `374fb922`; the next task is the compact typed-family ABI correction,
+not AOT emission.
 
 ### M3 — Compact GPU ingress and ordinary expansion
 
