@@ -786,6 +786,35 @@ synchronous-AOT-emission implementations rolled back.
 
 ### M2R — Replay-derived compact GPU ingress
 
+Status: rejected after production implementation and three interleaved warmed
+control/candidate shard-0 proof trials. The experiment recorded compact records
+inside the existing FullTracer positioning callback, uploaded typed opcode and
+access arenas through a validated shard-scoped device owner, reconstructed
+ordinary `StepRecord` inputs in CUDA, and retained
+`CENO_GPU_LEGACY_STEP_INGRESS=1` as the control lane. Focused ADD and LW tests
+matched compact and legacy device witnesses exactly, and every application run
+in the retained three-pair series completed recursion aggregation verification
+with clean post-witgen VRAM.
+
+The logs are `m2r_{control,candidate}_{1,2,3}_20260815.log` in the benchmark
+worktree. Controls measured positioning/assignment of 469/811, 476/815, and
+469/814ms. Candidates measured positioning/compact-H2D/assignment of
+836/59.4/671, 838/59.4/679, and 844/59.3/667ms. The median targeted span
+therefore regressed from 1,283ms to 1,570.3ms (22.4%), and median total shard-0
+witness regressed from 1.66s to 1.97s (18.7%). Median application proving also
+regressed from 4.82s to 5.27s (9.3%), while AOT preflight improved from
+128.70ms to 126.75ms. The complete 1,773.36MiB raw upload was absent and the
+replacement compact upload was 770.98MiB, but callback packing raised replay
+positioning by 375ms at the median; reduced assignment and transfer could not
+recover that cost.
+
+This misses every positive acceptance gate and the proving guard. Even a
+zero-cost packer would leave only about 5% theoretical improvement at the
+observed assignment and transfer times, so another intrinsic tuning iteration
+has no credible margin under the required callback-packing mechanism. The
+implementation is removed, legacy ingress remains production, and M3R and later
+dependent milestones do not start without an accepted M2R parent.
+
 Enable `CompactWitnessRecordSink` in production in `position_next_shard`, with
 capacity reserved from the planned shard size and logical lengths reused across
 shards. Finalize syscall and public-value records after replay. Upload typed
