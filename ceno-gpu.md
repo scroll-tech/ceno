@@ -10,12 +10,15 @@ production GPU path must ultimately remove the second FullTracer replay, the
 1.77 GiB `StepRecord` upload, CPU positioning and per-chip index construction,
 repeated lookup D2H, and the 33.8M-entry duplicated-address sort.
 
-The accepted warm AOT shard-0 baseline is approximately 1.65s. Final acceptance
-requires a three-trial interleaved median of at most 165ms for the
-`generate_witness` span. AOT compilation, setup, preflight, witness generation,
-and proving remain separately reported. Preflight may regress by at most 10%,
-combined preflight plus witness time must materially improve, and application
-proving may regress by at most 1%. No proof, AIR, transcript, public-value,
+The accepted warm AOT shard-0 baseline is approximately 1.65s. P0 found that
+the original milestone budgets do not fit within 165ms, so the committed
+engineering target is revised to a three-trial interleaved median of at most
+200ms for the `generate_witness` span. 165ms remains a stretch goal and may not
+be restored as a gate without a measured mechanism that closes the remaining
+budget. AOT compilation, setup, preflight, witness generation, and proving
+remain separately reported. Preflight may regress by at most 10%, combined
+preflight plus witness time must materially improve, and application proving
+may regress by at most 1%. No proof, AIR, transcript, public-value,
 shard-boundary, instruction-count, or witness semantics may change.
 
 ## CPU/GPU boundary
@@ -431,7 +434,7 @@ unrelated sumcheck changes preserved.
 | Milestone | Deliverable | Gate |
 | --- | --- | --- |
 | D0 | Replace the kernel-first pending plan with this co-design | Reviewed documentation commit |
-| P0 | Causal profile, independent trims, and replacement budget | At least 1.485s shown removable with replacements plausibly within 165ms |
+| P0 | Causal profile and replacement budget | Stop/go gate; revise the target if replacements do not fit within 165ms |
 | M1 | Compact journal ABI and dual recording | Exact equality; warm preflight overhead at most 1% |
 | M2 | Single-pass AOT journal emission | At most 48 bytes/instruction; preflight regression at most 10% |
 | M3 | Compact GPU ingress and ordinary expansion | H2D at most 40ms; dispatch plus expansion at most 40ms |
@@ -441,7 +444,7 @@ unrelated sumcheck changes preserved.
 | M7 | Device-resident continuation and production cutover | Full warm witness at most 220ms before pipelining |
 | M8 | Bounded within-shard pipeline | Exposed staging/synchronization at most 20ms |
 | M9 | Explicit multi-GPU fleet and leases | One-GPU equivalence, then measured multi-device proof |
-| M10 | Final interleaved validation | Warm shard-0 witness median at most 165ms |
+| M10 | Final interleaved validation | Warm shard-0 witness median at most 200ms; 165ms stretch |
 
 ### D0 — Plan replacement
 
@@ -453,7 +456,7 @@ milestone sequence before production changes.
 
 ### P0 — Profiling and causal ceilings
 
-Status: pending; this is a hard stop/go gate for M1.
+Status: stop/go gate failed for 165ms on 2026-08-15; target revised to 200ms.
 
 - Run three interleaved warmed AOT shard-0 controls and report preflight,
   replay, positioning, raw upload, per-chip assignment, continuation, lookup,
@@ -472,9 +475,110 @@ Status: pending; this is a hard stop/go gate for M1.
   replacement work plausibly fits within 165ms. If the measurements do not
   support that budget, revise the target instead of implementing M1.
 
+#### Measurement record
+
+Revisions were Ceno `7210dc0431aa353e1ea18dbd459286a6541c95ad`,
+ceno-gpu `996ef2a1c1f5648d8ae42b085f630ec84a514d7b`, and benchmark
+`904990f18627f51e85a3a7ed1a364150b3a797d6`. The ceno-gpu worktree's
+pre-existing sumcheck changes were preserved and excluded. The release build
+used `jemalloc,gpu,aot`, local Cargo path patches, cached block `23587691`,
+`--chain-id 1`, cost limit `2684354560`, cache level 1, `h=23`, four proving
+lanes, and memory tracking. Benchmark-only `Cargo.lock` changes were restored.
+
+The first three attempted controls were invalid for P0 because the cached
+binary had last been built without `aot`; their logs are
+`p0_aot_control_{1,2,3}_20260815.log` and are not included below. Rebuilding
+with the explicit `aot` feature produced AOT artifact cache hits in all three
+accepted controls. Logs are `p0_aot_warm_control_{1,2,3}_20260815.log` in the
+benchmark checkout.
+
+| Trial | Preflight | Witness | Replay/position | Opcode assignment | Continuation | Address sort | App proof |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 126.05ms | 1.66s | 460ms | 809ms | 346ms | 296ms | 5.1895s |
+| 2 | 126.31ms | 1.67s | 465ms | 800ms | 359ms | 311ms | 5.2123s |
+| 3 | 127.96ms | 1.64s | 467ms | 798ms | 328ms | 283ms | 5.3031s |
+| Median | 126.31ms | 1.66s | 465ms | 800ms | 346ms | 296ms | 5.2123s |
+
+Every accepted control reported 19,184,568 guest instructions, 76,738,276
+cycles, exactly two shards, boundaries `[4, 54691232, 76738276]`, successful
+shard-0 application proving, successful recursion verification, and exit code
+0. Median CPU utilization was 414% and median maximum RSS was 12,335,280 KiB.
+The FullTracer buffer contained 13,672,808 slots and 1,859,501,888 bytes. Peak
+framebuffer use was 13,449.69 MiB of 15,850.56 MiB, leaving 2,400.87 MiB.
+There is no compact-journal pinned allocator yet, so pinned-slab use is zero;
+the current process instrumentation does not expose CUDA driver's incidental
+host pinning separately.
+
+Nested phase evidence gives independent removable ceilings without adding
+their overlapping parents: the first shard-session upload was 1,773.36 MiB in
+139ms; lookup D2H summed to 79.39, 71.90, and 71.12ms; secp256k1 add/double
+assignment was approximately 205ms; and the Keccak family was approximately
+103ms. The 296ms address sort processed 33,764,071 duplicated addresses into
+418,956 unique addresses. These are observed phase ceilings, not claims that
+all can be removed simultaneously.
+
+Nsight Systems artifact `p0_aot_warm_shard0_20260815.nsys-rep` and its SQLite
+export recorded 3,548.438 MB H2D, 446.919 MB D2H, 2,063.934 MB D2D, and
+13,097.216 MB memset for the full profile. H2D consumed 284.66ms and D2H
+94.80ms. The largest witness kernel was `witgen_keccak` at 39.08ms. Existing
+NVTX ranges identify proving chip, lane, and stream, but do not carry shard ID
+or journal chunk; adding that metadata remains required before pipeline or
+lease validation.
+
+Nsight Compute initially failed because CUDA-12.8 `cudarc` eagerly resolved
+`cuTensorMapEncodeIm2colWide`, which the 2025.1.1 injection library did not
+export. A diagnostic rebuild with `CUDARC_CUDA_VERSION=12050` repaired the
+injection mismatch without a source change. The resulting report
+`p0_aot_addi_ncu_20260815.ncu-rep` measured `witgen_addi` at 4.82ms, 30.91%
+achieved occupancy, 96 registers per thread, 19.95% memory throughput, and
+17.06% DRAM throughput. NCU-instrumented end-to-end timing is not used as a
+control.
+
+`perf stat` and `perf record` artifacts are retained for the execute-only AOT
+run and two delayed proof windows. The whole execute run reported 78.09B
+instructions, 27.51B cycles, IPC 2.84, 5.998B branches, 0.65% branch misses,
+and 167.05M cache misses, but setup dominated it and the generated preflight
+DSO was only 0.10% of samples. The first delayed proof window captured AOT
+artifact preparation, not replay. The shifted window reached witness
+assignment but the forced stop prevented the tracing tree from proving the
+replay boundary. Both delayed windows are invalid as replay-scoped PMU
+evidence and are not used for attribution. No lost samples were reported.
+
+#### Replacement budget and decision
+
+The 1.66s median decomposes into the three serial parents: 465ms replay,
+800ms opcode assignment, 346ms continuation, and approximately 49ms residual
+framework work. Removing those parents is sufficient in principle, but the
+proposed replacement caps do not fit the original target:
+
+| Replacement | Optimistic exposed budget |
+| --- | ---: |
+| Fully overlapped compact H2D and ordinary expansion | 40ms |
+| Address and continuation preparation | 30ms |
+| Lookup finalization | 10ms |
+| secp256k1 expansion | 25ms |
+| Keccak expansion | 20ms |
+| Existing residual framework work | 49ms |
+| Optimistic total before M8 synchronization allowance | 174ms |
+| Total with the allowed 20ms pipeline/synchronization budget | 194ms |
+
+Thus the architecture can plausibly remove 1.466s and reach approximately
+194ms, but it does not demonstrate the required 1.485s removal or a credible
+165ms result. The contradiction comes from the plan's own accepted phase caps,
+not uncertainty about one suspect, so destructive trim builds would not make
+the replacement work fit. No trim code was merged. The independent observed
+ceilings above remain the experiment priorities once the revised target is
+accepted.
+
+Decision: stop before M1, as required by the P0 gate. Revise the committed
+target to 200ms, which leaves only 6ms margin over the measured replacement
+budget; retain 165ms as a stretch goal requiring a new measured overlap or
+framework-removal mechanism. M1 remains blocked until this revised target and
+the missing shard-aware profiling labels are accepted.
+
 ### M1 — Compact journal ABI and dual recording
 
-Status: blocked on P0 acceptance.
+Status: blocked on acceptance of P0's revised target and profiling-label gap.
 
 Add `CompactShardJournalV1`, its fingerprint, explicit device discriminants,
 arena descriptors, and `WitnessRecordSink`. Add legacy and compact interpreter
@@ -562,8 +666,9 @@ latency loss and at least 1.6x two-GPU multi-shard throughput.
 Status: blocked on M9 acceptance.
 
 Run three interleaved accepted-baseline/candidate trials and one complete
-two-shard proof. Require at most 165ms median warm shard-0 witness, at most 10%
-preflight regression, materially lower combined preflight plus witness time,
+two-shard proof. Require at most 200ms median warm shard-0 witness, report the
+165ms stretch result, at most 10% preflight regression, materially lower
+combined preflight plus witness time,
 at most 1% application-proving regression, exactly two stable shards, complete
 CPU/GPU equivalence and proof verification, at least 1 GiB VRAM headroom, no
 fallback or runtime anomaly, and no same-device next-shard overlap.
