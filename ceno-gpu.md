@@ -242,7 +242,7 @@ with the pre-existing unrelated sumcheck changes preserved.
 
 ### M2 — Coalesced column-oriented expansion
 
-Status: pending.
+Status: rejected/rolled back on 2026-08-15.
 
 - Assign each CUDA block exclusive ownership of a `(chip, record chunk, column
   group)` output tile.
@@ -255,6 +255,104 @@ Status: pending.
   the same output cache line.
 - Compare effective write bandwidth, store efficiency, occupancy, atomic
   traffic, and expansion time.
+
+#### Experiment record
+
+- Inspection found that ordinary witness expansion already uses a column-major
+  layout: `WIT_SET_COL` writes `output[column_offset + row]`, adjacent warp
+  lanes write consecutive rows, every thread exclusively owns its row, and
+  fixed-multiplicity offsets are algebraic. No variable-multiplicity ordinary
+  expansion path or per-row output atomic was present. Replacing this with a
+  second tiled implementation would duplicate the intended ownership model
+  without first establishing a distinct bottleneck.
+- Hypothesis: the existing 512-thread launch shape may limit occupancy for
+  register-heavy expansion kernels. The isolated candidate added a temporary
+  `CENO_GPU_WITGEN_BLOCK_SIZE` launch selector and changed only ordinary
+  witness expansion blocks from 512 to 256 threads. The first intrinsic tuning
+  iteration used 128 threads. The same binary was used for every control and
+  candidate process.
+- Revisions: Ceno `c5cdfaaca16d441cbb634e2ba4158606217eb65d`, ceno-gpu
+  `996ef2a1c1f5648d8ae42b085f630ec84a514d7b`, and benchmark
+  `904990f18627f51e85a3a7ed1a364150b3a797d6`. Pre-existing unrelated
+  ceno-gpu sumcheck worktree changes were preserved and excluded.
+- Build and workload: release `jemalloc,gpu`; `GPU_WITGEN=1`; cached block
+  `23587691`; `--chain-id 1`; cost limit `2684354560`; cache level 1; `h=23`;
+  lane scheduling with four lanes; memory tracking enabled. Every trial ran
+  `prove-stark --shard-id 0` with a distinct output directory.
+- Build command, from the benchmark worktree:
+  `cargo build --release --features jemalloc,gpu --config
+  .codex-results/fulltracer_local_patches.toml --bin
+  ceno-reth-benchmark-bin`. Trial command, with `$BLOCK` set to 512, 256, or
+  128 and distinct `$OUT`/`$LOG` values:
+  `CENO_GPU_ENABLE_WITGEN=1 CENO_GPU_WITGEN=1
+  CENO_GPU_WITGEN_BLOCK_SIZE=$BLOCK CENO_GPU_CACHE_LEVEL=1
+  CENO_GPU_MEM_TRACKING=1 CENO_GPU_LARGE_TASK_BOOKING_MARGIN_MB=0
+  CENO_GPU_JAGGED_RESHAPE_LOG_HEIGHT=23
+  CENO_MAX_CELL_PER_SHARD=2684354560 CENO_CHIP_PROVING_MODE=lanes
+  CENO_CHIP_PROVING_LANES=4 LANES=4 RUST_MIN_STACK=536870912
+  ./target/release/ceno-reth-benchmark-bin --block-number 23587691
+  --chain-id 1 --cache-dir block_data --mode prove-stark --shard-id 0
+  --output-dir $OUT >$LOG 2>&1`.
+- The primary interleaved order was control 1, 256 candidate 1, control 2,
+  candidate 2, control 3, candidate 3. Logs are
+  `m2_block{512_control,256_candidate}_{1,2,3}_20260815.log` in the benchmark
+  worktree.
+
+| Trial | 512 witness | 256 witness | 512 HAL expansion | 256 HAL expansion | 512 app proof | 256 app proof |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.82s | 1.80s | 48.639ms | 47.932ms | 5.26s | 5.03s |
+| 2 | 1.84s | 1.81s | 49.221ms | 47.447ms | 5.21s | 5.19s |
+| 3 | 1.83s | 1.79s | 49.629ms | 47.441ms | 5.18s | 5.10s |
+| Median | 1.83s | 1.80s | 49.221ms | 47.447ms | 5.21s | 5.10s |
+
+The 256-thread candidate improves median total witness generation by 1.64%,
+below the 2% gate, and summed ordinary `hal_witgen_*` expansion by 3.60%,
+below the 5% targeted-phase gate. Median opcode assignment improves from
+822ms to 804ms (2.19%) and positioning from 633ms to 621ms. Application proof
+time improves by 2.11%, so it does not violate the proving-time guard, but
+passing that guard does not compensate for missing both positive gates.
+
+The permitted 128-thread tuning iteration used fresh interleaved controls.
+Logs are `m2_block512_control_{4,5,6}_20260815.log` and
+`m2_block128_tune1_{1,2,3}_20260815.log`.
+
+| Trial | 512 witness | 128 witness | 512 HAL expansion | 128 HAL expansion | 512 app proof | 128 app proof |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.94s | 1.84s | 48.580ms | 49.503ms | 5.20s | 5.28s |
+| 2 | 1.80s | 1.86s | 48.798ms | 48.605ms | 5.04s | 5.13s |
+| 3 | 1.80s | 1.96s | 48.656ms | 50.072ms | 5.13s | 5.32s |
+| Median | 1.80s | 1.86s | 48.656ms | 49.503ms | 5.13s | 5.28s |
+
+At 128 threads, median witness generation regresses 3.33%, HAL expansion
+regresses 1.74%, opcode assignment regresses 2.61%, and application proof time
+regresses 2.92%. The monotonic reversal after 256 threads gave no basis for a
+second tuning iteration.
+
+Correctness, resource, and profiler checks:
+
+- With the 256-thread selector, all 22 ordinary-instruction direct CUDA/CPU
+  comparisons passed. The separately routed Keccak helper failed before its
+  comparison because it requires full GPU-witgen enablement; this is the same
+  known helper limitation recorded for M1, not a mismatch. End-to-end trials
+  exercised Keccak successfully.
+- All twelve end-to-end trials reported `CUDA Backend Enabled`, 19,184,568
+  instructions, exactly two execution shards, boundaries
+  `[4, 54691232, 76738276]`, a successful shard-0 application proof, and
+  successful recursion root verification. No new application-witness fallback,
+  OOM, allocation, transfer, CUDA, kernel, proof, or verification anomaly
+  appeared. Existing recursion row-major CPU fallbacks were unchanged.
+- Minimum observed device headroom was 1,600.88 MiB, above the 1 GiB gate.
+- Nsight Compute could not collect store-efficiency, bandwidth, occupancy, or
+  atomic counters on this CUDA installation: injection failed before program
+  execution with missing symbol `cuTensorMapEncodeIm2colWide`. The failure is
+  recorded in `m2_baseline_addi_ncu_20260815.log`; no candidate code was active
+  in that attempt. Timing and source-level ownership evidence therefore remain
+  the available targeted measurements.
+
+Decision: reject and roll back. No ceno-gpu implementation commit was created;
+the temporary block-size selector was removed. M3 must start from ceno-gpu
+`996ef2a1c1f5648d8ae42b085f630ec84a514d7b`, with only the pre-existing
+unrelated sumcheck changes preserved.
 
 ### M3 — Remove cross-thread address and local-slot contention
 
