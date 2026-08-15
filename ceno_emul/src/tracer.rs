@@ -1449,6 +1449,11 @@ impl StepRecord {
         self.syscall_index != Self::NO_SYSCALL
     }
 
+    /// Stable association used by compact witness journals.
+    pub fn syscall_index(&self) -> Option<u32> {
+        (self.syscall_index != Self::NO_SYSCALL).then_some(self.syscall_index)
+    }
+
     /// Look up the syscall witness from a separate store.
     /// The store is typically obtained from `FullTracer::syscall_witnesses()`.
     pub fn syscall<'a>(&self, store: &'a [SyscallWitness]) -> Option<&'a SyscallWitness> {

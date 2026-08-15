@@ -22,10 +22,11 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig, InsnKind,
-    IterAddresses, NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program,
-    RegIdx, ReplayChunk, ReplayEngine, ReplayStopReason, StepCellExtractor, StepIndex, StepRecord,
-    SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
+    Addr, ByteAddr, CENO_PLATFORM, CompactWitnessRecordSink, Cycle, EmuContext, FullTracer,
+    FullTracerConfig, InsnKind, IterAddresses, LegacyWitnessRecordSink, NextCycleAccess, Platform,
+    PreflightTracer, PreflightTracerConfig, Program, RegIdx, ReplayChunk, ReplayEngine,
+    ReplayStopReason, StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer,
+    VM_REG_COUNT, VMState, WORD_SIZE, WitnessRecordSink, Word, WordAddr,
     host_utils::read_all_messages,
 };
 use clap::ValueEnum;
@@ -1683,6 +1684,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
     let mut instrunction_dispatch_ctx = system_config.inst_dispatch_builder.to_dispatch_ctx();
     let pi_template = emul_result.pi.clone();
+    let validate_compact_journal = std::env::var_os("CENO_COMPACT_JOURNAL_VALIDATE").is_some();
     let mut step_iter = StepReplay::new(
         platform.clone(),
         program.clone(),
@@ -1702,11 +1704,23 @@ pub fn generate_witness<'a, E: ExtensionField>(
         )
         .in_scope(|| {
             instrunction_dispatch_ctx.begin_shard();
+            let mut legacy_sink = LegacyWitnessRecordSink::default();
+            let mut compact_sink = CompactWitnessRecordSink::default();
+            if validate_compact_journal {
+                legacy_sink.begin_shard(shard_ctx_builder.cur_shard_id as u32);
+                compact_sink.begin_shard(shard_ctx_builder.cur_shard_id as u32);
+            }
             let (mut shard_ctx, shard_summary) =
                 match info_span!("position_next_shard").in_scope(|| {
                     shard_ctx_builder.position_next_shard(
                         &mut step_iter,
-                        |idx, record| instrunction_dispatch_ctx.ingest_step(idx, record),
+                        |idx, record| {
+                            instrunction_dispatch_ctx.ingest_step(idx, record);
+                            if validate_compact_journal {
+                                legacy_sink.record_step(record);
+                                compact_sink.record_step(record);
+                            }
+                        },
                     )
                 }) {
                     Some(result) => result,
@@ -1717,6 +1731,23 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // take_syscall_witnesses() swaps the tracer's Vec with an empty one — zero copy.
             // Must be called before shard_steps() to avoid borrow conflict.
             shard_ctx.syscall_witnesses = Arc::new(step_iter.take_syscall_witnesses());
+            if validate_compact_journal {
+                legacy_sink.finish_shard();
+                compact_sink.finish_shard();
+                compact_sink
+                    .journal
+                    .validate_against(&legacy_sink, shard_ctx.syscall_witnesses.len())
+                    .unwrap_or_else(|err| panic!("compact journal validation failed: {err}"));
+                tracing::info!(
+                    shard_id = shard_ctx.shard_id,
+                    steps = compact_sink.journal.summary.step_count,
+                    bytes = compact_sink.journal.byte_len(),
+                    bytes_per_step = compact_sink.journal.byte_len() as f64
+                        / compact_sink.journal.summary.step_count.max(1) as f64,
+                    packing_time = ?compact_sink.journal.packing_time,
+                    "compact witness journal validated"
+                );
+            }
             let shard_steps = step_iter.shard_steps();
 
             let mut zkvm_witness = ZKVMWitnesses::default();
