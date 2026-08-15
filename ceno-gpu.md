@@ -714,6 +714,41 @@ journal, including syscall and public-value records, before acceptance. Actual
 multi-GPU implementation remains postponed; the relative descriptors preserve
 future per-device binding without constraining the current single-device path.
 
+#### M2 retry — Exact emission source and store floor
+
+Status: rejected and rolled back on 2026-08-15. M2 is terminally incomplete
+under the current synchronous-emission design; no production code was retained.
+
+The corrected ABI removed the static volume contradiction, but production AOT
+uses block-atomic access tracking and does not materialize every predecessor or
+operand value. The first isolated mechanism temporarily selected the existing
+exact scalar preflight, which supplies all required per-step semantics without
+a FullTracer replay. Three warm execute-only trials on cached block `23587691`
+reported 1.15s, 1.11s, and 1.10s for `preflight-execute` (1.11s median), versus
+the accepted 126.31ms production median. This is a 778.8% regression and exceeds
+the allowed 138.94ms total by approximately 971ms. All trials preserved
+19,184,568 instructions, 76,738,276 cycles, exactly two shards, and boundaries
+`[4, 54691232, 76738276]`. Logs for the retained warm repetitions are
+`m2_scalar_exact_trim_{2,3}_20260815.log` in the benchmark worktree. The scalar
+selector was reverted and the benchmark `Cargo.lock` was restored.
+
+A store-only lower-bound check then wrote the minimum 40-byte ordinary payload
+for all 19,184,568 instructions: 767,382,720 bytes. Five warmed, CPU-affined
+`memset` trials took 26.911, 26.884, 26.811, 26.939, and 26.877ms (26.884ms
+median, 26.58GiB/s). That is already 2.13 times the entire 12.63ms preflight
+regression allowance before predecessor derivation, operand capture, syscall
+packing, boundary sealing, or pinned-memory effects. This is a causal warning,
+not a proof against an asynchronously overlapped producer, because independent
+store work could overlap the existing 126ms execution on another core.
+
+Decision: reject both synchronous exact-scalar emission and a same-thread
+block-local store emitter. A viable M2 redesign must preserve production
+block-atomic accounting and overlap journal stores/packing asynchronously, or
+the preflight regression gate must be revised to a combined preflight+witness
+budget. Neither change is authorized by the current plan, so M3 and later
+dependent milestones cannot start from a valid parent. Multi-GPU remains
+postponed and is unrelated to this blocker.
+
 ### M3 — Compact GPU ingress and ordinary expansion
 
 Status: blocked on M2 acceptance.
