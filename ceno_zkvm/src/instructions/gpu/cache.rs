@@ -7,7 +7,16 @@ use ceno_emul::{StepRecord, WordAddr};
 use ceno_gpu::{
     Buffer, CudaHal, CudaSlice,
     bb31::{CudaHalBB31, ShardDeviceBuffers},
-    common::witgen::types::GpuShardScalars,
+    common::{
+        BufferImpl,
+        witgen::{
+            SharedLkCounterPtrs,
+            types::{
+                GpuLookupCountersResult, GpuShardScalars, LK_DENSE_AND, LK_DENSE_DOUBLE_U8,
+                LK_DENSE_LTU, LK_DENSE_OR, LK_DENSE_POW, LK_DENSE_XOR,
+            },
+        },
+    },
 };
 use rayon::prelude::*;
 use std::cell::RefCell;
@@ -126,6 +135,8 @@ struct ShardMetadataCache {
     shared_addr_buf: Option<ceno_gpu::common::buffer::BufferImpl<'static, u32>>,
     /// Shared addr_accessed count buffer (single u32 counter).
     shared_addr_count: Option<ceno_gpu::common::buffer::BufferImpl<'static, u32>>,
+    /// Lookup counters accumulated by every GPU opcode launch in this shard.
+    shared_lk_counters: Option<GpuLookupCountersResult<BufferImpl<'static, u32>>>,
 }
 
 thread_local! {
@@ -304,7 +315,7 @@ fn convert_compact_shard_records<E: ff_ext::ExtensionField>(
 pub(crate) fn ensure_shard_metadata_cached(
     hal: &CudaHalBB31,
     shard_ctx: &ShardContext,
-    n_total_steps: usize,
+    shard_steps: &[StepRecord],
 ) -> Result<(), ZKVMError> {
     let shard_id = shard_ctx.shard_id;
     SHARD_META_CACHE.with(|cache| {
@@ -393,7 +404,7 @@ pub(crate) fn ensure_shard_metadata_cached(
         // Addr records: every gpu_send() emits one (dense).
         //   4 bytes each (1 u32). Cap at 256M entries ≈ 1 GB.
         let max_ops_per_step = 52u64; // keccak worst case
-        let total_ops_estimate = n_total_steps as u64 * max_ops_per_step;
+        let total_ops_estimate = shard_steps.len() as u64 * max_ops_per_step;
         let ec_capacity = total_ops_estimate.min(16 * 1024 * 1024) as usize;
         let ec_u32s = ec_capacity * 26; // 26 u32s per GpuShardRamRecord (104 bytes)
         let addr_capacity = total_ops_estimate.min(256 * 1024 * 1024) as usize;
@@ -414,10 +425,58 @@ pub(crate) fn ensure_shard_metadata_cached(
             ZKVMError::InvalidWitness(format!("shared_addr_count alloc: {e}").into())
         })?;
 
+        let shared_lk_counters = if super::config::is_shard_lk_accum_enabled() {
+            let (fetch_base_pc, fetch_max_pc) = shard_steps
+                .par_iter()
+                .map(|step| {
+                    let pc = step.pc().before.0;
+                    (pc, pc)
+                })
+                .reduce(|| (u32::MAX, 0), |a, b| (a.0.min(b.0), a.1.max(b.1)));
+            let (fetch_base_pc, fetch_num_slots) = if fetch_base_pc <= fetch_max_pc {
+                (
+                    fetch_base_pc,
+                    ((fetch_max_pc - fetch_base_pc) / 4 + 1) as usize,
+                )
+            } else {
+                (0, 1)
+            };
+            let dense_flags = LK_DENSE_DOUBLE_U8
+                | LK_DENSE_AND
+                | LK_DENSE_OR
+                | LK_DENSE_XOR
+                | LK_DENSE_LTU
+                | LK_DENSE_POW;
+            Some(
+                hal.witgen
+                    .alloc_lk_counters_with_fetch(fetch_base_pc, fetch_num_slots, dense_flags, None)
+                    .map_err(|e| {
+                        ZKVMError::InvalidWitness(
+                            format!("shared lookup counters alloc: {e}").into(),
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+
         let shared_ec_out_ptr = shared_ec_buf.device_ptr() as u64;
         let shared_ec_count_ptr = shared_ec_count.device_ptr() as u64;
         let shared_addr_out_ptr = shared_addr_buf.device_ptr() as u64;
         let shared_addr_count_ptr = shared_addr_count.device_ptr() as u64;
+        let shared_lk = shared_lk_counters
+            .as_ref()
+            .map(|counters| SharedLkCounterPtrs {
+                dynamic: counters.dynamic.device_ptr() as u64,
+                double_u8: counters.double_u8.as_ref().unwrap().device_ptr() as u64,
+                and_table: counters.and_table.as_ref().unwrap().device_ptr() as u64,
+                or_table: counters.or_table.as_ref().unwrap().device_ptr() as u64,
+                xor_table: counters.xor_table.as_ref().unwrap().device_ptr() as u64,
+                ltu_table: counters.ltu_table.as_ref().unwrap().device_ptr() as u64,
+                pow_table: counters.pow_table.as_ref().unwrap().device_ptr() as u64,
+                fetch: counters.fetch.as_ref().unwrap().device_ptr() as u64,
+                fetch_base_pc: counters.fetch_base_pc,
+            });
 
         tracing::info!(
             "[GPU shard] shard_id={}: shared buffers allocated: ec_capacity={}, addr_capacity={}",
@@ -440,11 +499,13 @@ pub(crate) fn ensure_shard_metadata_cached(
                 shared_addr_count_ptr,
                 shared_ec_capacity: ec_capacity as u32,
                 shared_addr_capacity: addr_capacity as u32,
+                shared_lk,
             },
             shared_ec_buf: Some(shared_ec_buf),
             shared_ec_count: Some(shared_ec_count),
             shared_addr_buf: Some(shared_addr_buf),
             shared_addr_count: Some(shared_addr_count),
+            shared_lk_counters,
         });
         Ok(())
     })
@@ -539,6 +600,16 @@ pub fn take_shared_device_buffers() -> Option<SharedDeviceBufferSet> {
             addr_buf,
             addr_count,
         })
+    })
+}
+
+/// Take the lookup counters accumulated by all GPU opcode kernels in this shard.
+pub fn take_shared_lk_counters() -> Option<GpuLookupCountersResult<BufferImpl<'static, u32>>> {
+    SHARD_META_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let c = cache.as_mut()?;
+        c.device_bufs.shared_lk = None;
+        c.shared_lk_counters.take()
     })
 }
 
@@ -696,7 +767,7 @@ pub(crate) fn begin_gpu_shard_session(
     shard_steps: &[StepRecord],
 ) -> Result<GpuShardSession, ZKVMError> {
     upload_shard_steps_cached(hal, shard_steps, shard_ctx.shard_id)?;
-    ensure_shard_metadata_cached(hal, shard_ctx, shard_steps.len())?;
+    ensure_shard_metadata_cached(hal, shard_ctx, shard_steps)?;
     Ok(GpuShardSession {
         shard_id: shard_ctx.shard_id,
     })

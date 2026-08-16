@@ -358,12 +358,32 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
             })
             .collect::<Result<_, _>>()?;
 
-        config.layout.phase1_witness_group(
-            WeierstrassAddAssignTrace { instances },
-            [&mut raw_witin, &mut raw_structural_witin],
-            &mut lk_multiplicity,
-        );
+        let affine_results = if EC::CURVE_TYPE == CurveType::Secp256k1
+            && std::env::var_os("CENO_GPU_LEGACY_SECP_ADD_ASSIGN").is_none()
+        {
+            Some(
+                WeierstrassAddAssignLayout::<E, EC>::compute_compact_secp256k1_affine_results(
+                    &instances,
+                ),
+            )
+        } else {
+            None
+        };
 
+        if let Some(affine_results) = affine_results.as_deref() {
+            config.layout.phase1_witness_group_with_affine_results(
+                WeierstrassAddAssignTrace { instances },
+                affine_results,
+                [&mut raw_witin, &mut raw_structural_witin],
+                &mut lk_multiplicity,
+            );
+        } else {
+            config.layout.phase1_witness_group(
+                WeierstrassAddAssignTrace { instances },
+                [&mut raw_witin, &mut raw_structural_witin],
+                &mut lk_multiplicity,
+            );
+        }
         raw_witin.padding_by_strategy();
         raw_structural_witin.padding_by_strategy();
         Ok((

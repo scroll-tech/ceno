@@ -72,7 +72,10 @@ use crate::{
     precompiles::{
         SelectorTypeLayout,
         utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
-        weierstrass::{EllipticCurveAddInstance, compact_field_relation::CompactFieldRelationCols},
+        weierstrass::{
+            EllipticCurveAddInstance, Secp256k1AffineResult, batch_multiplicative_inverse,
+            compact_field_relation::CompactFieldRelationCols,
+        },
     },
     scheme::utils::gkr_witness,
     structs::PointAndEval,
@@ -133,6 +136,90 @@ pub struct WeierstrassAddAssignLayout<E: ExtensionField, EC: EllipticCurve> {
 }
 
 impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
+    pub(crate) fn compute_compact_secp256k1_affine_results(
+        instances: &[EllipticCurveAddInstance<EC::BaseField>],
+    ) -> Vec<Secp256k1AffineResult> {
+        let modulus = EC::BaseField::modulus();
+        let points = instances
+            .par_iter()
+            .map(|event| {
+                let p = AffinePoint::<EC>::from_words_le(&event.p);
+                let q = AffinePoint::<EC>::from_words_le(&event.q);
+                (p.x, p.y, q.x, q.y)
+            })
+            .collect::<Vec<_>>();
+        points
+            .par_chunks(256)
+            .flat_map_iter(|points| {
+                let denominators = points
+                    .iter()
+                    .map(|(p_x, _, q_x, _)| (q_x + &modulus - p_x) % &modulus)
+                    .collect::<Vec<_>>();
+                let inverse_denominators = batch_multiplicative_inverse(&denominators, &modulus);
+                points
+                    .iter()
+                    .cloned()
+                    .zip(inverse_denominators)
+                    .map(|((p_x, p_y, q_x, q_y), inverse_denominator)| {
+                        let numerator = (&q_y + &modulus - &p_y) % &modulus;
+                        let slope = (numerator * inverse_denominator) % &modulus;
+                        let x3 =
+                            (&slope * &slope + &modulus - ((&p_x + &q_x) % &modulus)) % &modulus;
+                        let y3 = (&slope * ((&p_x + &modulus - &x3) % &modulus) + &modulus - &p_y)
+                            % &modulus;
+                        Secp256k1AffineResult { slope, x3, y3 }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    pub(crate) fn phase1_witness_group_with_affine_results(
+        &self,
+        phase1: WeierstrassAddAssignTrace<EC::BaseField>,
+        affine_results: &[Secp256k1AffineResult],
+        wits: [&mut RowMajorMatrix<E::BaseField>; 2],
+        lk_multiplicity: &mut LkMultiplicity,
+    ) {
+        assert!(matches!(
+            self.layer_exprs,
+            WeierstrassAddAssignLayer::CompactSecp256k1(_)
+        ));
+        assert_eq!(phase1.instances.len(), affine_results.len());
+        let num_instances = wits[0].num_instances();
+        let nthreads = max_usable_threads();
+        let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
+        let first_wit_id = self.first_wit_id();
+        let num_wit_cols = self.num_arithmetic_wit_cols();
+        let [wits, structural_wits] = wits;
+        wits.par_batch_iter_mut(num_instance_per_batch)
+            .zip_eq(structural_wits.par_batch_iter_mut(num_instance_per_batch))
+            .zip_eq(phase1.instances.par_chunks(num_instance_per_batch))
+            .zip_eq(affine_results.par_chunks(num_instance_per_batch))
+            .for_each(|(((rows, eqs), phase1_instances), affine_results)| {
+                let mut lk_multiplicity = lk_multiplicity.clone();
+                rows.chunks_mut(self.n_committed)
+                    .zip_eq(eqs.chunks_mut(self.n_structural_witin))
+                    .zip_eq(phase1_instances)
+                    .zip_eq(affine_results)
+                    .for_each(|(((row, eqs), event), affine)| {
+                        let cols: &mut CompactSecp256k1AddAssignWitCols<
+                            E::BaseField,
+                            EC::BaseField,
+                        > = row[first_wit_id..][..num_wit_cols].borrow_mut();
+                        Self::populate_compact_secp256k1_row_from_affine(
+                            event,
+                            affine,
+                            cols,
+                            &mut lk_multiplicity,
+                        );
+                        for x in eqs.iter_mut() {
+                            *x = E::BaseField::ONE;
+                        }
+                    });
+            });
+    }
+
     fn assert_compact_secp256k1_limb_bytes(
         blu_events: &mut LkMultiplicity,
         cols: &CompactSecp256k1AddAssignWitCols<E::BaseField, EC::BaseField>,
@@ -294,6 +381,25 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
             % &modulus;
         let x3 = (&slope * &slope + &modulus - ((&p_x + &q_x) % &modulus)) % &modulus;
         let y3 = (&slope * ((&p_x + &modulus - &x3) % &modulus) + &modulus - &p_y) % &modulus;
+
+        Self::populate_compact_secp256k1_field_ops_from_values(
+            blu_events, cols, p_x, p_y, q_x, q_y, slope, x3, y3,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn populate_compact_secp256k1_field_ops_from_values(
+        blu_events: &mut LkMultiplicity,
+        cols: &mut CompactSecp256k1AddAssignWitCols<E::BaseField, EC::BaseField>,
+        p_x: BigUint,
+        p_y: BigUint,
+        q_x: BigUint,
+        q_y: BigUint,
+        slope: BigUint,
+        x3: BigUint,
+        y3: BigUint,
+    ) {
+        let modulus = EC::BaseField::modulus();
 
         cols.slope = EC::BaseField::to_limbs_field(&slope);
         cols.x3 = EC::BaseField::to_limbs_field(&x3);
@@ -619,6 +725,33 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
             p_y,
             q_x,
             q_y,
+        );
+        Self::assert_compact_secp256k1_limb_bytes(new_byte_lookup_events, cols);
+    }
+
+    fn populate_compact_secp256k1_row_from_affine(
+        event: &EllipticCurveAddInstance<EC::BaseField>,
+        affine: &Secp256k1AffineResult,
+        cols: &mut CompactSecp256k1AddAssignWitCols<E::BaseField, EC::BaseField>,
+        new_byte_lookup_events: &mut LkMultiplicity,
+    ) {
+        let p = AffinePoint::<EC>::from_words_le(&event.p);
+        let q = AffinePoint::<EC>::from_words_le(&event.q);
+        let (p_x, p_y, q_x, q_y) = (p.x, p.y, q.x, q.y);
+        cols.p_x = EC::BaseField::to_limbs_field(&p_x);
+        cols.p_y = EC::BaseField::to_limbs_field(&p_y);
+        cols.q_x = EC::BaseField::to_limbs_field(&q_x);
+        cols.q_y = EC::BaseField::to_limbs_field(&q_y);
+        Self::populate_compact_secp256k1_field_ops_from_values(
+            new_byte_lookup_events,
+            cols,
+            p_x,
+            p_y,
+            q_x,
+            q_y,
+            affine.slope.clone(),
+            affine.x3.clone(),
+            affine.y3.clone(),
         );
         Self::assert_compact_secp256k1_limb_bytes(new_byte_lookup_events, cols);
     }

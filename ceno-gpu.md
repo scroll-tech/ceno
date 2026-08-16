@@ -1,47 +1,55 @@
-# FullTracer + GPU Witness Incremental Optimization Plan
+# Evidence-Driven FullTracer + GPU Witness Optimization Plan
 
 Date: 2026-08-15 (Asia/Singapore)
 
 ## Summary and acceptance target
 
-Retain warmed AOT preflight and FullTracer replay as the correctness source.
-Optimize the measured FullTracer-positioning plus GPU-assignment span in
-independent, revertible increments. Direct AOT journal emission and the former
-10x single-pass objective are rejected: their synchronous record stores
-regressed preflight and did not produce an exact journal.
+The GPU is not globally saturated and is not near a hardware limit.
+The 1.66s warmed shard-0 witness baseline is dominated by serialized
+algorithmic work and redundant data movement: 465ms of FullTracer
+replay/positioning, 800ms of assignment, 346ms of continuation, and about 49ms
+of residual framework work. Assignment includes a 139ms raw `StepRecord` H2D,
+approximately 205ms of secp256k1 work, approximately 103ms of Keccak work, and
+repeated lookup transfers. Continuation is dominated by a 296ms global sort of
+33,764,071 addresses that produces only 418,956 unique addresses.
 
-The accepted planning baseline is approximately 465ms for FullTracer
-positioning and 800ms for GPU witness assignment, or 1,265ms combined. Packing,
-transfer, routing, and synchronization stay inside this span and may not be
-moved into preflight. Every retained replay/assignment mechanism must improve
-the combined median by more than 5% relative to its latest accepted parent.
-Continuation mechanisms instead target their named continuation phase and must
-improve that phase by more than 5% and total witness by at least 2%.
+The representative ADDI kernel achieved 30.91% occupancy, 17.06% DRAM
+throughput, and 19.95% memory throughput. These counters disprove global GPU
+saturation; they do not prove that ADDI alone is worth optimizing. The rejected
+128/256-thread experiments show only that ordinary launch tuning has reached a
+local plateau under the current kernel design.
 
-For every retained milestone, median total `generate_witness` must improve by
-at least 2%, warmed AOT preflight may not regress by more than 1%, and
-application proving may not regress by more than 1%. Proof, AIR, transcript,
-public-value, shard-boundary, instruction-count, and witness semantics remain
-exact.
+The realistic accumulated target is approximately 1.15–1.25s for warmed
+shard-0 witness generation from the 1.66s baseline. A 200ms witness remains an
+architectural-rewrite research target, not an active engineering commitment.
+The active plan retains warmed AOT preflight, FullTracer, CPU witness
+generation, and legacy GPU ingress as correctness references while attacking
+the largest independently measured serial spans first.
+
+For every retained mechanism, its targeted phase must improve by more than 5%
+and median total `generate_witness` must improve by at least 2%. Warmed AOT
+preflight and application proving may each regress by no more than 1%. Witness,
+lookup, ShardRAM, continuation, proof, verification, instruction count, and
+shard boundaries must remain exact.
 
 ## CPU/GPU boundary
 
 The CPU executes warmed AOT preflight, preserves shard planning, and replays
-each accepted shard through FullTracer. The existing `position_next_shard`
-callback is the sole production compact-packing seam. It appends typed records
-in canonical replay order and finalizes syscall/public-value arenas after the
-replay. Preflight performs no journal packing.
+each accepted shard through FullTracer. Preflight performs no journal packing.
+FullTracer, CPU witness generation, and legacy FullTracer-to-`StepRecord` GPU
+ingress remain correctness references and explicit fallbacks.
 
-The GPU consumes only the typed arenas required by migrated families. It may
-derive chip routes, expand rows, build access chains, and aggregate lookups.
-Unsupported families retain a visibly measured legacy lane. The CPU witness
-path and legacy FullTracer-to-`StepRecord` GPU ingress remain correctness
-references and explicit fallbacks.
+The GPU may aggregate address sets and lookups and expand sparse special-chip
+rows from compact syscall inputs. These mechanisms must be independently
+revertible and must not change AIR, proof, transcript, public-value, syscall,
+instruction-count, or shard-boundary semantics. No public API, multi-GPU
+scheduling, cross-shard overlap, or preflight-journal work is in scope.
 
-## Compact journal ABI
+## Compact ingress research
 
-The accepted `CompactShardJournalV1` remains the internal, versioned device
-interface containing:
+Compact ingress is postponed research, not an active milestone. The accepted
+`CompactShardJournalV1` remains an internal, versioned experimental interface
+containing:
 
 - shard identity, cycle range, step count, public-value inputs, layout
   fingerprint, and typed arena descriptors;
@@ -53,29 +61,20 @@ interface containing:
   `Vec`, serialized proof, or raw `StepRecord` ABI.
 
 Its relative descriptors remain device-neutral. A private layout change bumps
-the version and fingerprint. A shard-scoped compact device owner binds one
-validated journal generation to a device ID and shard ID and owns the uploaded
-typed arena buffers. Debug checks reject stale generations, mixed shards,
-malformed descriptors, and cross-device binding.
+the version and fingerprint. Any future production ingress must replace legacy
+`StepRecord` production for the records it covers, rather than append a second
+journal. Debug-only dual recording may remain available for exact validation.
+The rejected M2R measurements below remain the evidence against callback
+packing layered on top of legacy recording.
 
-## Address-chain design
+## Address-set design
 
-The new path must not sort the 33.8M duplicated per-chip addresses. It emits
-each execution access once, maps cycles to deterministic access slots, and
-scatters each successor into its unique predecessor entry on GPU. Per-block
-counts and exclusive scans provide compact output offsets. Initialization
-addresses are aggregated separately, and only the final unique address set may
-be sorted when canonical order requires it. Address-chain derivation and
-local-slot privatization remain independent experiments.
-
-## Device ownership and scheduling
-
-Multi-GPU execution is postponed. The compact owner records shard/device
-metadata, relative arena descriptors, and a generation token so a future
-exclusive-device lease does not require an ABI change. A single device never
-stages the next shard while the current shard is active. M7R may use at most one
-ingress stream and one witness stream, joined by events, and only after profiling
-shows at least a 5% removable transfer/synchronization ceiling.
+The active path must not sort all 33.8M duplicated per-chip addresses. Insert
+addresses into an explicitly occupied device hash table, compact the unique
+keys, and sort only those final keys when canonical order requires it. Separate
+occupancy metadata is mandatory so every `u32` address remains representable;
+no address value may serve as an empty sentinel. Table overflow or probe
+exhaustion falls back to the existing exact global sort.
 
 ## Experiment and rollback contract
 
@@ -111,6 +110,10 @@ shows at least a 5% removable transfer/synchronization ceiling.
 - Treat replay packing, compact ingress, device routing, special families,
   stream count, address chains, and lookup accumulation as separate controlled
   experiments.
+- Before implementing each production mechanism, run one temporary causal trim
+  or prototype that measures its removable ceiling. Revert it before production
+  implementation. Verifier failure is acceptable only when the target span
+  completes without fallback, panic, CUDA error, or OOM.
 - Update this document before implementation and after every milestone with
   exact revisions, commands, timings, correctness, memory, profiler evidence,
   tuning, decision, resulting commits, and the next accepted parent.
@@ -758,31 +761,240 @@ budget. Neither change is authorized by the current plan, so M3 and later
 dependent milestones cannot start from a valid parent. Multi-GPU remains
 postponed and is unrelated to this blocker.
 
-## Active incremental milestones
+## Why previous attempts failed
+
+- Removing ordinary output initialization had only a 1.08% ceiling for total
+  witness generation, below the standalone acceptance gate.
+- The 128/256-thread experiments tuned roughly 49ms of ordinary HAL kernels.
+  Their local plateau says nothing about the much larger serialized replay,
+  special-chip, lookup-transfer, and continuation spans.
+- Host routing (`indices_u32` construction) costs about 17ms and cannot pass a
+  standalone 5% targeted-phase gate or 2% total-witness gate.
+- M2R added compact packing while retaining legacy recording. It spent about
+  369–375ms on packing to reduce transfer and assignment, so the ordering was
+  structurally regressive. The implementation remains rejected and removed.
+- Available VRAM and isolated occupancy or utilization metrics did not identify
+  the serial pipeline bottlenecks. Capacity headroom is a safety constraint,
+  not evidence that launch tuning is the dominant opportunity.
+
+Compact ingress is therefore postponed research. Its rejected implementation
+instructions are not part of the active plan; the complete M2R measurement
+record remains below as historical evidence.
+
+## Active evidence-driven milestones
 
 ### D1 — Baseline and instrumentation
 
 Status: accepted from the three valid warmed P0 controls recorded above. The
-`p0_aot_warm_control_{1,2,3}_20260815.log` trials are the D1 controls on cached
-block `23587691`. They record FullTracer positioning, raw H2D, host index
-construction, ordinary and special
-assignment, continuation, lookup D2H, total witness, application proof, peak
-VRAM, instruction count, shard count, and shard boundaries. The required
-identity is 19,184,568 instructions, exactly two shards, and boundaries
+`p0_aot_warm_control_{1,2,3}_20260815.log` trials on cached block `23587691`
+are the controls for every next milestone. The required identity is 19,184,568
+instructions, exactly two shards, and boundaries
 `[4, 54691232, 76738276]`.
 
-The median is 465ms positioning, 800ms assignment, 1,265ms combined, 346ms
-continuation, 1.66s total shard-0 witness, 126.31ms preflight, and 5.2123s
-application proof. Raw `StepRecord` ingress is 1,773.36MiB and 139ms. Summed
-host `indices_u32` construction is 17.90, 17.42, and 17.36ms; summed lookup D2H
-is 80.23, 75.24, and 73.66ms. The representative ordinary expansion sum is
-approximately 507ms, secp256k1 add/double is approximately 205ms, and Keccak is
-approximately 103ms. Peak framebuffer use is 13,449.69MiB of 15,850.56MiB,
-leaving 2,400.87MiB. Compact packing, compact H2D, and device routing are zero
-because the accepted parent has no production compact lane.
+The median is 465ms positioning, 800ms assignment, 346ms continuation, 1.66s
+total shard-0 witness, 126.31ms preflight, and 5.2123s application proof. Raw
+`StepRecord` ingress is 1,773.36MiB and 139ms; lookup D2H is 73.66--80.23ms;
+secp256k1 add/double is approximately 205ms; Keccak is approximately 103ms;
+and the 296ms address sort reduces 33,764,071 entries to 418,956 unique
+addresses. Peak framebuffer use leaves 2,400.87MiB headroom.
 
-Keep the rejected output-initialization, 128/256-thread, generic-journal, and
-synchronous-AOT-emission implementations rolled back.
+### E1 — Address-set aggregation
+
+Status: accepted on 2026-08-16. The implementation inserts the dense address
+stream into an explicitly occupied open-addressed GPU hash table, compacts only
+occupied entries, transfers only those keys, and host-sorts the final unique
+set into the canonical order. A packed 64-bit `(key << 1) | occupied` entry
+keeps both zero and `u32::MAX` representable. The original dense device buffer
+is retained until success; probe exhaustion sets a device flag and falls back
+to the previous exact sort. `CENO_GPU_LEGACY_ADDR_SORT=1` selects that control
+path without changing the production default.
+
+The required reverted causal trim skipped only the global address sort. On the
+same cached block it reduced continuation from 339ms to 92.2ms and shard-0
+witness from 2.12s to 1.42s, while completing without fallback, panic, CUDA
+error, or OOM and passing recursion verification. This confirmed the removable
+ceiling before the production mechanism was written; the trim is not present
+in the implementation.
+
+The accepted evidence is a fresh three-pair, interleaved, warmed series. Every
+trial used cached block `23587691`, executed 19,184,568 instructions in exactly
+two shards with boundaries `[4, 54691232, 76738276]`, produced 418,956 unique
+addresses from 33,764,071 inputs, and passed application proof plus recursion
+aggregation verification. Times and VRAM below are medians:
+
+| Metric | Legacy-sort control | Hash-set candidate | Change |
+|---|---:|---:|---:|
+| Preflight | 126.749ms | 126.578ms | -0.13% |
+| Shard-0 witness | 1.67s | 1.40s | -16.2% |
+| Continuation | 333ms | 61.9ms | -81.4% |
+| Address unique phase | 287ms | 13.6ms | -95.3% |
+| Application proof | 5.2253s | 4.9080s | -6.1% |
+| Peak framebuffer use | 13,142MiB | 12,744MiB | -398MiB |
+
+The candidate therefore saves 271.1ms in continuation, clears the 150–200ms
+continuation target, exceeds both performance gates, stays within the preflight
+and proving regression limits, and leaves 3,106MiB VRAM headroom. No candidate
+trial logged hash exhaustion, fallback, panic, CUDA error, OOM, or verification
+failure. The retained logs are `e1_hash_control_{4,5,6}_20260816.log` and
+`e1_hash_candidate_{4,5,6}_20260816.log` in `ceno-reth-benchmark`.
+
+An additional all-chip `CENO_GPU_DEBUG_COMPARE_WITGEN=1` run reached E1 and
+again produced exactly 418,956 canonically sorted addresses, with the per-chip
+witness and lookup comparisons preceding it reporting matches. The run could
+not complete because the existing CPU debug path calls the deliberately
+unimplemented table-circuit `assign_instances`; this is a limitation of that
+debug facility, not an E1 mismatch. The normal proof and recursion-verification
+paths completed in every retained control and candidate trial.
+
+Revisions for this record are Ceno
+`b27ce8a573e3d848c54b6499281c8fc90c48802c`, ceno-gpu
+`996ef2a1c1f5648d8ae42b085f630ec84a514d7b`, and ceno-reth-benchmark
+`06461978a42be749bdb6477722f864c819fe9e07`. Pre-existing ceno-gpu sumcheck
+worktree changes are excluded from this mechanism and were left untouched.
+
+### E2 — Shard-wide lookup accumulation
+
+Status: accepted on 2026-08-16. Every GPU opcode launch, including Keccak, now
+atomically updates one shard-owned dynamic, dense, and instruction-fetch
+counter set. The fetch counter uses one shard-wide PC range. GPU chips return
+empty per-chip maps, while CPU-only chips retain their existing contributions;
+the accumulated GPU counters are transferred once after opcode assignment and
+inserted as one exact multiplicity before the existing final merge. Debug
+comparison automatically retains per-chip counters, and
+`CENO_GPU_LEGACY_LK_ACCUM=1` selects the legacy control path.
+
+The required reverted causal trim removed only per-chip lookup D2H and host map
+construction. It reduced their aggregate span from 76.2ms to 0.073ms, opcode
+assignment from 804ms to 738ms, and shard-0 witness from 1.38s to 1.30s. The
+target completed with no fallback, panic, CUDA error, or OOM and the proof plus
+recursion verification completed. The trim was reverted before production
+implementation.
+
+The production comparison used the existing exact per-chip counter/map merge
+as the merge control and the shard-wide atomic counters as the candidate. The
+bounded lookup domains make the direct atomic representation smaller than an
+event stream that would need sorting; the exact merge control was already the
+lower-volume sort/merge alternative, so no event-journal implementation was
+retained. A canonical Keccak-256 digest over table index, sorted key, and exact
+multiplicity checked equality independently of hash-map iteration order.
+
+The accepted evidence is three fresh interleaved warmed pairs on cached block
+`23587691`. Every trial executed 19,184,568 instructions in exactly two shards
+with boundaries `[4, 54691232, 76738276]`, passed application proof and
+recursion aggregation verification, and produced the identical combined lookup
+digest `[255, 189, 114, 69, 156, 94, 33, 7, 233, 229, 50, 15, 62, 174, 58,
+7, 124, 109, 139, 65, 4, 108, 24, 37, 169, 96, 178, 250, 3, 39, 153, 70]`
+with 453,128 entries and total multiplicity 239,559,425. Median results are:
+
+| Metric | Per-chip merge control | Shard-atomic candidate | Change |
+|---|---:|---:|---:|
+| Preflight | 125.889ms | 126.115ms | +0.18% |
+| Shard-0 witness | 1.41s | 1.37s | -2.84% |
+| Opcode assignment | 802ms | 747ms | -6.86% |
+| Lookup transfer/materialization | 75.0ms | 12.3ms | -83.6% |
+| Application proof | 4.9064s | 4.8716s | -0.71% |
+| Peak framebuffer use | 14,025.69MiB | 13,801.69MiB | -224.00MiB |
+
+The candidate clears the targeted-phase and total-witness gates, stays within
+the preflight and proving limits, and leaves 2,048.31MiB framebuffer headroom.
+No candidate logged panic, CUDA error, OOM, address fallback, or verification
+failure. The retained logs are `e2_shared_lk_control_{1,2,3}_20260816.log` and
+`e2_shared_lk_candidate_{1,2,3}_20260816.log` in `ceno-reth-benchmark`.
+
+### E3 — Sparse secp256k1 assignment
+
+Status: partially accepted on 2026-08-16. The first production stage replaces
+one modular inversion per syscall with exact Montgomery batch inversion over
+parallel 256-operation chunks. Add and double remain independently revertible
+with `CENO_GPU_LEGACY_SECP_ADD_ASSIGN=1` and
+`CENO_GPU_LEGACY_SECP_DOUBLE_ASSIGN=1`. The existing compact field-relation,
+lookup, and ShardRAM row construction is shared by both paths, so this stage
+does not change AIR, syscall semantics, or row ordering.
+
+The required reverted causal trims independently bypassed secp256k1 add and
+double row construction. Add fell from 77.4ms to 8.38ms and double from 125ms
+to 11.0ms; both runs completed without fallback, panic, CUDA error, or OOM and
+passed application proof plus recursion verification. This confirmed removable
+ceilings of about 69ms and 114ms before production work began.
+
+Two prototypes were rejected. A CUDA kernel performing one Fermat inversion
+per row increased base-prover setup/JIT from about 15s to 152.5s. A single
+shard-wide CPU batch inversion serialized the affine pre-stage and produced no
+meaningful improvement (1.35s witness, 75.5ms add, and 137ms double). Neither
+prototype remains in the source. Parallel bounded batches preserve exact
+arithmetic while exposing enough independent work to Rayon.
+
+Three warmed candidate/control pairs on cached block `23587691` each executed
+19,184,568 instructions in exactly two shards with boundaries
+`[4, 54691232, 76738276]` and passed application proof plus recursion
+aggregation verification. Median results are:
+
+| Metric | Legacy control | Parallel-batch candidate | Change |
+|---|---:|---:|---:|
+| Preflight | 127.797ms | 126.873ms | -0.72% |
+| Shard-0 witness | 1.34s | 1.31s | -2.24% |
+| Opcode assignment | 754ms | 712ms | -5.57% |
+| secp256k1 add | 81.7ms | 64.0ms | -21.7% |
+| secp256k1 double | 128ms | 100ms | -21.9% |
+| Application proof | 4.8957s | 4.7744s | -2.48% |
+| Peak framebuffer use | 13,769.69MiB | 13,833.69MiB | +64.00MiB |
+
+The candidate clears both acceptance gates and leaves 2,016.31MiB framebuffer
+headroom. A unit test checks batch inversion against individual inversion,
+including zero denominators; this preserves the legacy exceptional-input
+behavior instead of allowing one zero to contaminate its batch. The retained
+performance logs are `e3_secp_parallel_batch_{candidate,control}_{1,2,3}_20260816.log`
+in `ceno-reth-benchmark`.
+
+A post-correction candidate/control equality run produced the identical
+combined lookup digest `[255, 189, 114, 69, 156, 94, 33, 7, 233, 229, 50, 15,
+62, 174, 58, 7, 124, 109, 139, 65, 4, 108, 24, 37, 169, 96, 178, 250, 3, 39,
+153, 70]`, with 453,128 entries and total multiplicity 239,559,425. Both paths
+again passed application proof and recursion verification. Those logs are
+`e3_secp_parallel_batch_digest_{candidate,control}_20260816.log`.
+
+This is an accepted pre-stage, not completion of E3. It saves about 30ms at the
+total-witness level, below the full 125–155ms E3 target. The active next step is
+still to pack add and double syscall operations once and expand their EC rows
+and associated lookup/ShardRAM outputs on GPU. The CPU batch path remains a
+useful fallback and should be removed only after the GPU expansion passes the
+same exactness and performance gates.
+
+Pack add and double syscall operations once, expand EC rows and associated
+lookup/ShardRAM outputs on GPU, and remove CPU EC row construction without
+changing AIR or syscall semantics. Keep add and double independently revertible
+where practical. A temporary trim or sparse-expansion prototype must first
+confirm the removable ceiling and then be reverted.
+
+Target 125–155ms savings. Preserve the current path as the correctness
+fallback until exact witness, lookup, ShardRAM, proof, and verification equality
+has passed the interleaved trials.
+
+### E4 — Keccak staging
+
+After a reverted causal prototype confirms its ceiling, reuse compact syscall
+inputs, keep intermediate state device-resident, and remove avoidable
+materialization or synchronization. Preserve the current Keccak path as an
+explicit fallback.
+
+Target 40–60ms savings with exact witness, lookup, ShardRAM, proof, and
+verification equality.
+
+### E5 — Reprofile before ingress work
+
+After every accepted milestone, recompute replay, raw H2D, ordinary kernels,
+host routing, special chips, lookup, continuation, proof time, and peak VRAM.
+Revisit compact ingress only if its newly measured removable ceiling exceeds
+5%. Any production ingress must replace legacy `StepRecord` production for the
+records it covers; it must not append a second journal. Debug dual recording
+remains allowed for validation.
+
+Ordinary-kernel work comes last. Investigate the representative 96-register
+footprint only if the remaining ordinary-kernel span can satisfy both the
+targeted-phase and total-witness acceptance gates. The 128/256-thread results
+remain evidence that launch-size tuning alone is not a new mechanism.
+
+## Historical rejected replay-derived ingress
 
 ### M2R — Replay-derived compact GPU ingress
 
@@ -805,100 +1017,18 @@ witness regressed from 1.66s to 1.97s (18.7%). Median application proving also
 regressed from 4.82s to 5.27s (9.3%), while AOT preflight improved from
 128.70ms to 126.75ms. The complete 1,773.36MiB raw upload was absent and the
 replacement compact upload was 770.98MiB, but callback packing raised replay
-positioning by 375ms at the median; reduced assignment and transfer could not
+positioning by about 369–375ms; reduced assignment and transfer could not
 recover that cost.
 
-This misses every positive acceptance gate and the proving guard. Even a
-zero-cost packer would leave only about 5% theoretical improvement at the
-observed assignment and transfer times, so another intrinsic tuning iteration
-has no credible margin under the required callback-packing mechanism. The
-implementation is removed, legacy ingress remains production, and M3R and later
-dependent milestones do not start without an accepted M2R parent.
-
-Enable `CompactWitnessRecordSink` in production in `position_next_shard`, with
-capacity reserved from the planned shard size and logical lengths reused across
-shards. Finalize syscall and public-value records after replay. Upload typed
-arenas only for migrated ordinary kernels. Keccak may temporarily use a
-filtered legacy record buffer; CPU-only families must not force upload of the
-complete 136-byte `StepRecord` array.
-
-Add a shard-scoped device owner for typed arena buffers, validated journal
-magic/version/fingerprint, shard identity, relative descriptors, device ID, and
-generation. `CENO_GPU_LEGACY_STEP_INGRESS=1` selects the explicit legacy/debug
-lane. Validation mode dual-runs compact and legacy consumed fields and ordering.
-
-Accept only if the candidate has no complete 1.77GiB raw upload and improves
-the latest-parent positioning-plus-assignment median by more than 5%, total
-witness by at least 2%, and does not regress preflight or proving by more than
-1%.
-
-### M3R — Device chip routing
-
-Decode opcode routes on device and run family count, exclusive scan, and stable
-scatter. Keep per-family route arrays device-resident in canonical replay order
-and pass their offsets directly to ordinary expansion kernels. Remove migrated
-host `step_indices` construction and H2D; retain and measure the legacy lane
-only for unsupported families.
-
-Validate row counts, required heights, padding, lookup order, and full CPU/GPU
-witness equality for every migrated chip. Accept only if routing independently
-improves the latest-parent combined positioning-plus-assignment median by more
-than 5% while passing the global witness/proving gates.
-
-### M4R — Fused positioning and packing
-
-Append compact records directly in the positioning callback without also
-populating migrated host dispatch indices. Decode each record once and append
-accesses in deterministic RS1, RS2, RD, memory order. Preserve summaries and
-syscall associations exactly. Production stops making validation-only legacy
-copies; debug dual recording remains available. Reuse arena allocation across
-shards by clearing lengths, and reject overflow without truncation.
-
-Accept only if this isolated fusion independently improves the latest-parent
-combined median by more than 5% and passes the global gates.
-
-### M5R — Special-chip assignment
-
-Run secp256k1 add/double and Keccak as separate experiments from the latest
-accepted parent. For secp256k1, pack operations once during replay and expand
-rows plus associated lookup/ShardRAM outputs on device, removing CPU EC row
-construction. For Keccak, replace the filtered legacy lane with compact syscall
-records, retain packed state and intermediate lookup data on device, and remove
-intermediate synchronization only where exactness permits.
-
-Each family must independently improve the current combined median by more than
-5%. Reject and remove a family that misses the gate without affecting already
-accepted families.
-
-### M6R — Continuation and lookup
-
-After replay and assignment milestones, target continuation phases separately.
-For address chains, consume each compact access once, derive successor and
-future-access data by predecessor scatter, and replace the 33.8M-entry
-duplicated-address global sort with block-local aggregation plus one compact
-pass. For lookups, compare atomic reduction with sort/merge independently,
-retain the faster exact form, merge multiplicities once per shard, and feed the
-final device tables directly to continuation/proving.
-
-Address-chain and lookup changes remain independently revertible. Each must
-improve its targeted phase by more than 5% and total witness by at least 2%.
-
-### M7R — Bounded pipeline and cutover
-
-Double-buffer compact chunks only when profiling proves at least a 5% removable
-synchronization/transfer ceiling. Use at most one ingress stream and one witness
-stream synchronized by events. Never stage the next shard on the active device.
-Make compact replay ingress the default only after every active shard-0 GPU
-family is covered. Preserve legacy FullTracer-to-`StepRecord` GPU ingress behind
-`CENO_GPU_LEGACY_STEP_INGRESS=1`.
-
-Do not implement a multi-GPU fleet. Retain relative descriptors and shard/device
-metadata for future exclusive device leases.
+This missed every positive acceptance gate and the proving guard. Even a
+zero-cost packer would have left only about 5% theoretical improvement at the
+observed assignment and transfer times. The implementation was removed and
+legacy ingress remains production. No active milestone depends on M2R.
 
 ## Historical rejected direct-emission milestones
 
 The following M3-M10 text records the superseded direct-AOT design and its
-rollback. It is evidence only and does not constrain the active M2R-M7R order.
+rollback. It is evidence only and does not constrain the active E1-E5 order.
 
 ### Historical M3 — Compact GPU ingress and ordinary expansion
 
@@ -1031,6 +1161,9 @@ latency loss and at least 1.6x two-GPU multi-shard throughput.
 
 Status: blocked on M9 acceptance.
 
+This is a historical architectural-rewrite criterion. Its 200ms target and
+165ms stretch target are not active engineering commitments.
+
 Run three interleaved accepted-baseline/candidate trials and one complete
 two-shard proof. Require at most 200ms median warm shard-0 witness, report the
 165ms stretch result, at most 10% preflight regression, materially lower
@@ -1058,11 +1191,9 @@ After every milestone, append a record containing:
 
 ## Commit policy
 
-- D1 plan and baseline: `docs(gpu): adopt incremental FullTracer GPU optimization plan`.
-- M2R implementation: `perf(witgen): consume replay compact journals on GPU`.
-- M3R implementation: `perf(witgen): route compact opcode journals on device`.
-- M4R implementation: `perf(witgen): fuse FullTracer positioning with journal packing`.
-- M5R families and M6R mechanisms receive separate implementation commits.
+- Plan and baseline: `docs(gpu): adopt evidence-driven GPU optimization plan`.
+- Address-set aggregation, shard-wide lookup accumulation, secp256k1 add,
+  secp256k1 double, and Keccak staging receive separate implementation commits.
 - Each accepted implementation is followed by a documentation commit with
   exact Ceno, ceno-gpu, and benchmark hashes and three-trial evidence.
 - A rejected experiment leaves no code on the accepted parent; commit evidence
@@ -1070,24 +1201,30 @@ After every milestone, append a record containing:
 
 ## Tests and assumptions
 
-- Test ABI size, alignment, version, fingerprint, malformed descriptors, and
-  cross-device pointers.
-- Test replay compact/legacy consumed-field equality and ordering.
-- Test CPU/GPU witness, lookup, ShardRAM, continuation, public values, and proof
-  equality.
-- Cover empty, maximum, boundary-exact, and buffer-full shards; cross-shard
-  future accesses; register aliases; first-touch memory; syscalls; traps; and
-  dynamic fallback.
+- Run three interleaved warm control/candidate trials on cached block
+  `23587691` for each candidate.
+- Require 19,184,568 instructions, exactly two shards, and boundaries
+  `[4, 54691232, 76738276]` in every accepted trial.
+- Require exact CPU/GPU witness, lookup, ShardRAM, continuation, public-value,
+  proof, and verification equality.
+- Cover empty, maximum, boundary-exact, and buffer-full tables; table overflow
+  and probe exhaustion; cross-shard future accesses; first-touch memory;
+  syscalls; traps; and exact fallback.
 - Test required heights and padding rows for every migrated chip.
-- Test shard/device/generation validation and the explicit legacy fallback.
 - Confirm logs contain `CUDA Backend Enabled` and do not contain fallback, OOM,
   kernel, proof, or verification errors.
+- Require more than 5% improvement in the targeted phase, at least 2% in total
+  witness generation, no more than 1% regression in warmed AOT preflight or
+  application proving, and at least 1 GiB peak VRAM headroom.
 - Use block `23587691`, cost limit `2684354560`, cache level 1, `h=23`,
   `CENO_CHIP_PROVING_MODE=lanes`, and `LANES=4`.
 - Use cached inputs and `--chain-id 1`; never print or pass a raw RPC URL.
 - Revert benchmark-only `Cargo.lock` changes after validation.
 - The primary target is incremental throughput improvement while retaining
-  FullTracer replay, not eliminating replay or achieving a 10x result.
-- One GPU never overlaps two shards; multi-GPU scheduling is postponed.
+  FullTracer replay, not eliminating replay or achieving a 200ms result.
+- Preserve FullTracer, CPU witness generation, and legacy GPU ingress as
+  correctness references. Multi-GPU scheduling, cross-shard overlap, and
+  preflight journal work are out of scope.
+- Do not add public APIs to support these experiments.
 - No public proof, AIR, transcript, public-value, shard, or witness semantics
   change. All layouts and scheduling interfaces remain internal.

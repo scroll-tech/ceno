@@ -69,12 +69,22 @@ pub use super::cache::{
     invalidate_shard_steps_cache, take_shared_device_buffers,
 };
 use super::{
-    cache::{begin_gpu_shard_session, with_cached_gpu_ctx_opt},
+    cache::{begin_gpu_shard_session, take_shared_lk_counters, with_cached_gpu_ctx_opt},
     utils::d2h::{
         CompactEcBuf, LkResult, RamBuf, WitResult, gpu_collect_shard_records, gpu_compact_ec_d2h,
         gpu_lk_counters_to_multiplicity, gpu_witness_to_rmm, gpu_witness_to_rmm_d2h,
     },
 };
+
+/// Transfer and materialize the lookup counters accumulated across this shard.
+pub fn flush_shared_lk_counters() -> Result<Option<Multiplicity<u64>>, ZKVMError> {
+    let Some(counters) = take_shared_lk_counters() else {
+        return Ok(None);
+    };
+    info_span!("gpu_shard_lk_d2h")
+        .in_scope(|| gpu_lk_counters_to_multiplicity(counters))
+        .map(Some)
+}
 
 thread_local! {
     /// Thread-local flag to force CPU path (used by debug comparison code).
@@ -207,22 +217,28 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
         || crate::instructions::gpu::config::is_debug_compare_enabled();
 
     // Step 1: GPU fills witness matrix (+ LK counters + shard records for merged kinds)
-    let (gpu_witness, gpu_lk_counters, gpu_ram_slots, gpu_compact_ec, gpu_compact_addr) =
-        info_span!("gpu_kernel").in_scope(|| {
-            let fetch_params = compute_fetch_params(shard_steps, step_indices);
-            gpu_fill_witness::<E, I>(
-                hal,
-                config,
-                Some(shard_ctx),
-                num_witin,
-                Some(shard_steps),
-                step_indices,
-                None,
-                kind,
-                shard_ctx.current_shard_offset_cycle(),
-                fetch_params,
-            )
-        })?;
+    let (
+        gpu_witness,
+        gpu_lk_counters,
+        shard_lk_accumulated,
+        gpu_ram_slots,
+        gpu_compact_ec,
+        gpu_compact_addr,
+    ) = info_span!("gpu_kernel").in_scope(|| {
+        let fetch_params = compute_fetch_params(shard_steps, step_indices);
+        gpu_fill_witness::<E, I>(
+            hal,
+            config,
+            Some(shard_ctx),
+            num_witin,
+            Some(shard_steps),
+            step_indices,
+            None,
+            kind,
+            shard_ctx.current_shard_offset_cycle(),
+            fetch_params,
+        )
+    })?;
 
     // Step 2: Collect lk and shardram
     // Priority: GPU shard records > CPU shard records > full CPU lk and shardram
@@ -232,8 +248,12 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     let is_standard_kind = !matches!(kind, GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam);
 
     let lk_multiplicity = if gpu_lk_counters.is_some() && is_standard_kind {
-        let lk_multiplicity = info_span!("gpu_lk_d2h")
-            .in_scope(|| gpu_lk_counters_to_multiplicity(gpu_lk_counters.unwrap()))?;
+        let lk_multiplicity = if shard_lk_accumulated {
+            Multiplicity::default()
+        } else {
+            info_span!("gpu_lk_d2h")
+                .in_scope(|| gpu_lk_counters_to_multiplicity(gpu_lk_counters.unwrap()))?
+        };
 
         if gpu_compact_ec.is_none() && gpu_compact_addr.is_none() && is_standard_kind {
             // Shared buffer path: EC records + addr_accessed accumulated on device
@@ -460,6 +480,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     (
         WitResult,
         Option<LkResult>,
+        bool,
         Option<RamBuf>,
         Option<CompactEcBuf>,
         Option<CompactEcBuf>,
@@ -481,13 +502,15 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
         Vec::new()
     };
 
-    // Helper to split GpuWitgenFullResult into (witness, Some(lk_counters), ram_slots, compact_ec, compact_addr)
+    // Helper to split GpuWitgenFullResult into witness, lookup ownership,
+    // shard records, and compact outputs.
     macro_rules! split_full {
         ($result:expr) => {{
             let full = $result?;
             Ok((
                 full.witness,
                 Some(full.lk_counters),
+                full.shard_lk_accumulated,
                 full.ram_slots,
                 full.compact_ec,
                 full.compact_addr,

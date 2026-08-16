@@ -985,20 +985,48 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         addr_count,
     );
 
-    // 3. GPU sort addr_accessed + dedup, then D2H sorted unique addrs
+    // 3. Build the unique address set on GPU. Preserve the dense input so hash
+    // overflow or probe exhaustion can fall back to the existing exact sort.
     let addr_accessed: Vec<ceno_emul::WordAddr> = if addr_count > 0 {
-        info_span!("gpu_sort_addr").in_scope(|| {
-            let (deduped, unique_count) = hal
-                .witgen
-                .sort_and_dedup_u32(&mut shared.addr_buf, addr_count, None)
-                .map_err(|e| ZKVMError::InvalidWitness(format!("GPU sort addr: {e}").into()))?;
+        info_span!("gpu_unique_addr").in_scope(|| {
+            let use_legacy_sort = std::env::var_os("CENO_GPU_LEGACY_ADDR_SORT").is_some();
+            let deduped = if use_legacy_sort {
+                hal.witgen
+                    .sort_and_dedup_u32(&mut shared.addr_buf, addr_count, None)
+                    .map_err(|e| {
+                        ZKVMError::InvalidWitness(format!("GPU legacy sort addr: {e}").into())
+                    })?
+                    .0
+            } else {
+                match hal
+                    .witgen
+                    .hash_dedup_u32(&shared.addr_buf, addr_count, None)
+                    .map_err(|e| ZKVMError::InvalidWitness(format!("GPU hash addr: {e}").into()))?
+                {
+                    Some(addrs) => addrs,
+                    None => {
+                        tracing::warn!(
+                            "[GPU full pipeline] address hash table exhausted; falling back to sort"
+                        );
+                        hal.witgen
+                            .sort_and_dedup_u32(&mut shared.addr_buf, addr_count, None)
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU sort addr fallback: {e}").into(),
+                                )
+                            })?
+                            .0
+                    }
+                }
+            };
+            let unique_count = deduped.len();
             if unique_count == 0 {
                 return Ok::<Vec<ceno_emul::WordAddr>, ZKVMError>(vec![]);
             }
             let addrs: Vec<ceno_emul::WordAddr> =
                 deduped.into_iter().map(ceno_emul::WordAddr).collect();
             tracing::info!(
-                "[GPU full pipeline] sorted {} addrs → {} unique",
+                "[GPU full pipeline] aggregated {} addrs → {} unique",
                 addr_count,
                 unique_count,
             );

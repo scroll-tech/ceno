@@ -1886,6 +1886,13 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 )
             }).unwrap();
 
+            #[cfg(feature = "gpu")]
+            if let Some(lk_mlt) = crate::instructions::gpu::dispatch::flush_shared_lk_counters()
+                .unwrap()
+            {
+                zkvm_witness.insert_shard_gpu_lk_multiplicity(lk_mlt);
+            }
+
             info_span!("assign_dummy_circuits").in_scope(|| {
                 system_config
                     .dummy_config
@@ -1940,6 +1947,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
             info_span!("finalize_lk_multiplicities").in_scope(|| {
                 zkvm_witness.finalize_lk_multiplicities();
             });
+            #[cfg(feature = "gpu")]
+            zkvm_witness.log_combined_lk_digest();
 
             // E2E shard-level debug: run all opcode circuits on CPU as baseline,
             // compare aggregated results (all chips combined) against GPU.
