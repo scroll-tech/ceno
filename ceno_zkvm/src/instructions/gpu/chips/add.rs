@@ -53,7 +53,10 @@ mod tests {
         instructions::{Instruction, riscv::arith::AddInstruction},
         structs::ProgramParams,
     };
-    use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, encode_rv32};
+    use ceno_emul::{
+        ByteAddr, Change, GpuReplayOrdinaryRecord, GpuReplayRead, GpuReplayWrite, InsnKind,
+        StepRecord, encode_rv32,
+    };
     use ff_ext::BabyBearExt4;
 
     type E = BabyBearExt4;
@@ -82,7 +85,10 @@ mod tests {
                 let rd_after = rs1.wrapping_add(rs2);
                 let cycle = 4 + (i as u64) * 4;
                 let pc = ByteAddr(pc_start + (i as u32) * 4);
-                let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
+                let mut insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
+                // ADD x4, x2, x3. Compact ingress derives register IDs from
+                // the immutable program encoding, as production replay does.
+                insn_code.raw = (3 << 20) | (2 << 15) | (4 << 7) | 0x33;
                 StepRecord::new_r_instruction(
                     cycle,
                     pc,
@@ -174,7 +180,79 @@ mod tests {
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
             gpu_result.witness.device_buffer.to_vec().unwrap();
+        let gpu_dynamic = gpu_result.lk_counters.dynamic.to_vec().unwrap();
         assert_witness_colmajor_eq(&gpu_data, cpu_witness.values(), n, num_witin);
+
+        // Compact ingress: contiguous records, with cycle/register metadata
+        // derived by CUDA and no per-row StepIndex upload.
+        let compact_records = steps
+            .iter()
+            .enumerate()
+            .map(|(ordinal, step)| GpuReplayOrdinaryRecord {
+                ordinal: ordinal as u32,
+                pc_before: step.pc().before.0,
+                pc_after: step.pc().after.0,
+                raw_instruction: step.insn().raw,
+                rs1: GpuReplayRead {
+                    previous_cycle: step.rs1().unwrap().previous_cycle as u32,
+                    value: step.rs1().unwrap().value,
+                },
+                rs2: GpuReplayRead {
+                    previous_cycle: step.rs2().unwrap().previous_cycle as u32,
+                    value: step.rs2().unwrap().value,
+                },
+                rd: GpuReplayWrite {
+                    previous_cycle: step.rd().unwrap().previous_cycle as u32,
+                    value_before: step.rd().unwrap().value.before,
+                    value_after: step.rd().unwrap().value.after,
+                },
+                flags: GpuReplayOrdinaryRecord::HAS_RS1
+                    | GpuReplayOrdinaryRecord::HAS_RS2
+                    | GpuReplayOrdinaryRecord::HAS_RD
+                    | ((step.future_access_mask() as u32)
+                        << GpuReplayOrdinaryRecord::FUTURE_ACCESS_SHIFT),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(std::mem::size_of::<GpuReplayOrdinaryRecord>(), 64);
+        assert_eq!(std::mem::offset_of!(GpuReplayOrdinaryRecord, ordinal), 0);
+        assert_eq!(std::mem::offset_of!(GpuReplayOrdinaryRecord, rs1), 16);
+        assert_eq!(std::mem::offset_of!(GpuReplayOrdinaryRecord, rs2), 24);
+        assert_eq!(std::mem::offset_of!(GpuReplayOrdinaryRecord, rd), 32);
+        assert_eq!(std::mem::offset_of!(GpuReplayOrdinaryRecord, memory), 44);
+        assert_eq!(std::mem::offset_of!(GpuReplayOrdinaryRecord, flags), 60);
+        let compact_bytes = unsafe {
+            std::slice::from_raw_parts(
+                compact_records.as_ptr() as *const u8,
+                std::mem::size_of_val(compact_records.as_slice()),
+            )
+        };
+        let gpu_compact_records = hal.inner.htod_copy_stream(None, compact_bytes).unwrap();
+        let compact_result = hal
+            .witgen
+            .witgen_add_compact(
+                &col_map,
+                &gpu_compact_records,
+                n,
+                shard_offset,
+                0,
+                0,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        let compact_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
+            compact_result.witness.device_buffer.to_vec().unwrap();
+        let compact_dynamic = compact_result.lk_counters.dynamic.to_vec().unwrap();
+        assert_eq!(
+            compact_data, gpu_data,
+            "compact ADD differs from legacy ADD"
+        );
+        assert_eq!(
+            compact_dynamic, gpu_dynamic,
+            "compact ADD lookup counters differ from legacy ADD"
+        );
 
         assert_full_gpu_pipeline::<E, AddInstruction<E>>(
             &config,

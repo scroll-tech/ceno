@@ -66,7 +66,10 @@ mod tests {
         use crate::{
             e2e::ShardContext, instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq,
         };
-        use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
+        use ceno_emul::{
+            ByteAddr, Change, GpuReplayOrdinaryRecord, GpuReplayRead, GpuReplayWrite, InsnKind,
+            PC_STEP_SIZE, StepRecord, encode_rv32,
+        };
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
         let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
@@ -86,7 +89,8 @@ mod tests {
                 let rd_after = rs1.wrapping_add(imm as u32);
                 let cycle = 4 + (i as u64) * 4;
                 let pc = ByteAddr(0x1000 + (i as u32) * 4);
-                let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm);
+                let mut insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm);
+                insn_code.raw = ((imm as u32 & 0xfff) << 20) | (2 << 15) | (4 << 7) | 0x13;
                 StepRecord::new_i_instruction(
                     cycle,
                     Change::new(pc, pc + PC_STEP_SIZE),
@@ -141,6 +145,64 @@ mod tests {
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
             gpu_result.witness.device_buffer.to_vec().unwrap();
+        let gpu_dynamic = gpu_result.lk_counters.dynamic.to_vec().unwrap();
         assert_witness_colmajor_eq(&gpu_data, cpu_witness.values(), n, num_witin);
+
+        let compact_records = steps
+            .iter()
+            .enumerate()
+            .map(|(ordinal, step)| GpuReplayOrdinaryRecord {
+                ordinal: ordinal as u32,
+                pc_before: step.pc().before.0,
+                pc_after: step.pc().after.0,
+                raw_instruction: step.insn().raw,
+                rs1: GpuReplayRead {
+                    previous_cycle: step.rs1().unwrap().previous_cycle as u32,
+                    value: step.rs1().unwrap().value,
+                },
+                rd: GpuReplayWrite {
+                    previous_cycle: step.rd().unwrap().previous_cycle as u32,
+                    value_before: step.rd().unwrap().value.before,
+                    value_after: step.rd().unwrap().value.after,
+                },
+                flags: GpuReplayOrdinaryRecord::HAS_RS1
+                    | GpuReplayOrdinaryRecord::HAS_RD
+                    | ((step.future_access_mask() as u32)
+                        << GpuReplayOrdinaryRecord::FUTURE_ACCESS_SHIFT),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        let compact_bytes = unsafe {
+            std::slice::from_raw_parts(
+                compact_records.as_ptr() as *const u8,
+                std::mem::size_of_val(compact_records.as_slice()),
+            )
+        };
+        let gpu_compact_records = hal.inner.htod_copy_stream(None, compact_bytes).unwrap();
+        let compact_result = hal
+            .witgen
+            .witgen_addi_compact(
+                &col_map,
+                &gpu_compact_records,
+                n,
+                shard_offset,
+                0,
+                0,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        let compact_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
+            compact_result.witness.device_buffer.to_vec().unwrap();
+        let compact_dynamic = compact_result.lk_counters.dynamic.to_vec().unwrap();
+        assert_eq!(
+            compact_data, gpu_data,
+            "compact ADDI differs from legacy ADDI"
+        );
+        assert_eq!(
+            compact_dynamic, gpu_dynamic,
+            "compact ADDI lookup counters differ from legacy ADDI"
+        );
     }
 }

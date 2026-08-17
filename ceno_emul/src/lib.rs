@@ -10,10 +10,12 @@ pub use platform::{CENO_PLATFORM, Platform};
 
 mod tracer;
 pub use tracer::{
-    Change, ChipCostSpec, FullTracer, FullTracerConfig, LatestAccesses, MemOp, NextAccessEvent,
-    NextAccessPair, NextAccessTape, NextCycleAccess, PreflightTracer, PreflightTracerConfig,
-    ReadOp, ReplayChunk, ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel,
-    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
+    Change, ChipCostSpec, FullTracer, FullTracerConfig, GpuReplayChunk, GpuReplayFallbackRecord,
+    GpuReplayMemory, GpuReplayOrdinaryRecord, GpuReplayRead, GpuReplayStep, GpuReplayTracer,
+    GpuReplayTracerConfig, GpuReplayWrite, LatestAccesses, MemOp, NextAccessEvent, NextAccessPair,
+    NextAccessTape, NextCycleAccess, PreflightTracer, PreflightTracerConfig, ReadOp, ReplayChunk,
+    ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel, ShardPlanBuilder,
+    StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
 };
 
 mod compact_journal;
@@ -23,6 +25,11 @@ pub use compact_journal::{
     CompactRegisterWriteV1, CompactShardJournalV1, CompactShardSummaryV1, CompactSyscallAccessV1,
     CompactSyscallRecordV1, CompactWitnessRecordSink, JournalValidationError,
     LegacyWitnessRecordSink, WitnessRecordSink, compact_journal_layout_fingerprint,
+};
+
+mod gpu_replay;
+pub use gpu_replay::{
+    GpuReplayRoutedChunk, GpuReplayRoutingError, GpuReplayShardArenas, route_gpu_replay_chunks,
 };
 
 mod vm_state;

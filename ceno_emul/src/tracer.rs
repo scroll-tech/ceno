@@ -1507,6 +1507,345 @@ pub struct FullTracer {
     next_access_cursor: usize,
 }
 
+/// Configuration for the compact, chunked witness replay producer.
+///
+/// This tracer is intentionally internal to replay.  It does not replace
+/// [`FullTracer`] as the CPU/debug reference and it does not expose a new
+/// serialized journal format.
+#[derive(Clone, Copy, Debug)]
+pub struct GpuReplayTracerConfig {
+    pub chunk_capacity: usize,
+}
+
+impl Default for GpuReplayTracerConfig {
+    fn default() -> Self {
+        Self {
+            chunk_capacity: 256 * 1024,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct GpuReplayRead {
+    pub previous_cycle: u32,
+    pub value: Word,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct GpuReplayWrite {
+    pub previous_cycle: u32,
+    pub value_before: Word,
+    pub value_after: Word,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct GpuReplayMemory {
+    pub previous_cycle: u32,
+    pub address: Word,
+    pub value_before: Word,
+    pub value_after: Word,
+}
+
+/// Runtime payload for an ordinary instruction.
+///
+/// `cycle` is `shard_start_cycle + ordinal * SUBCYCLES_PER_INSN`. Register
+/// addresses and instruction metadata are derived from `raw_instruction`.
+/// Presence and cross-shard successor bits are held in `flags`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct GpuReplayOrdinaryRecord {
+    pub ordinal: u32,
+    pub pc_before: Word,
+    pub pc_after: Word,
+    pub raw_instruction: Word,
+    pub rs1: GpuReplayRead,
+    pub rs2: GpuReplayRead,
+    pub rd: GpuReplayWrite,
+    pub memory: GpuReplayMemory,
+    pub flags: u32,
+}
+
+impl GpuReplayOrdinaryRecord {
+    pub const HAS_RS1: u32 = 1 << 0;
+    pub const HAS_RS2: u32 = 1 << 1;
+    pub const HAS_RD: u32 = 1 << 2;
+    pub const HAS_MEMORY: u32 = 1 << 3;
+    pub const FUTURE_ACCESS_SHIFT: u32 = 8;
+
+    #[inline(always)]
+    pub fn cycle(&self, shard_start_cycle: Cycle) -> Cycle {
+        shard_start_cycle + self.ordinal as Cycle * FullTracer::SUBCYCLES_PER_INSN
+    }
+
+    #[inline(always)]
+    pub fn future_access_mask(&self) -> u8 {
+        (self.flags >> Self::FUTURE_ACCESS_SHIFT) as u8
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GpuReplayFallbackRecord {
+    pub ordinal: u32,
+    pub record: StepRecord,
+}
+
+/// A sealed producer chunk. Chunks and records are ordered by
+/// `(sequence, ordinal)` and never receive concurrent appends.
+#[derive(Debug)]
+pub struct GpuReplayChunk {
+    pub sequence: u32,
+    pub shard_start_cycle: Cycle,
+    pub ordinary: Vec<GpuReplayOrdinaryRecord>,
+    pub fallback: Vec<GpuReplayFallbackRecord>,
+}
+
+impl GpuReplayChunk {
+    fn with_capacity(sequence: u32, shard_start_cycle: Cycle, capacity: usize) -> Self {
+        Self {
+            sequence,
+            shard_start_cycle,
+            ordinary: Vec::with_capacity(capacity),
+            fallback: Vec::new(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.ordinary.len() + self.fallback.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ordinary.is_empty() && self.fallback.is_empty()
+    }
+}
+
+/// Single-writer compact replay tracer.
+///
+/// Ordinary instructions are emitted directly into compact chunks. ECALLs are
+/// deliberately retained in the sparse fallback lane until their consumers
+/// have compact typed inputs. Queueing/worker ownership lives above this type;
+/// `take_sealed_chunks` is the chunk-boundary handoff seam.
+#[derive(Debug)]
+pub struct GpuReplayTracer {
+    config: GpuReplayTracerConfig,
+    pending: StepRecord,
+    current: GpuReplayChunk,
+    sealed: Vec<GpuReplayChunk>,
+    ordinal: usize,
+    shard_start_cycle: Cycle,
+    latest_accesses: LatestAccesses,
+    next_accesses: Arc<NextAccessTape>,
+    next_access_cursor: usize,
+    syscall_witnesses: Vec<SyscallWitness>,
+    mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
+    max_heap_addr_access: ByteAddr,
+    max_hint_addr_access: ByteAddr,
+    platform: Platform,
+}
+
+impl GpuReplayTracer {
+    pub fn new(platform: &Platform, config: GpuReplayTracerConfig) -> Self {
+        assert!(
+            config.chunk_capacity > 0,
+            "GPU replay chunks cannot be empty"
+        );
+        let shard_start_cycle = FullTracer::SUBCYCLES_PER_INSN;
+        Self {
+            config,
+            pending: StepRecord {
+                cycle: shard_start_cycle,
+                ..StepRecord::default()
+            },
+            current: GpuReplayChunk::with_capacity(0, shard_start_cycle, config.chunk_capacity),
+            sealed: Vec::new(),
+            ordinal: 0,
+            shard_start_cycle,
+            latest_accesses: LatestAccesses::new(platform),
+            next_accesses: Arc::new(NextAccessTape::default()),
+            next_access_cursor: 0,
+            syscall_witnesses: Vec::new(),
+            mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
+            max_heap_addr_access: ByteAddr::from(platform.heap.start),
+            max_hint_addr_access: ByteAddr::from(platform.hints.start),
+            platform: platform.clone(),
+        }
+    }
+
+    fn seal_current(&mut self) {
+        if self.current.is_empty() {
+            return;
+        }
+        let sequence = self.current.sequence + 1;
+        let next = GpuReplayChunk::with_capacity(
+            sequence,
+            self.shard_start_cycle,
+            self.config.chunk_capacity,
+        );
+        self.sealed.push(std::mem::replace(&mut self.current, next));
+    }
+
+    pub fn finish_chunks(&mut self) {
+        self.seal_current();
+    }
+
+    /// Seal the previous shard and start a new ordinal domain while retaining
+    /// predecessor state and the next-access cursor.
+    pub fn start_shard(&mut self) {
+        self.finish_chunks();
+        self.shard_start_cycle = self.pending.cycle;
+        self.ordinal = 0;
+        self.syscall_witnesses.clear();
+        self.current =
+            GpuReplayChunk::with_capacity(0, self.shard_start_cycle, self.config.chunk_capacity);
+    }
+
+    pub fn take_sealed_chunks(&mut self) -> Vec<GpuReplayChunk> {
+        std::mem::take(&mut self.sealed)
+    }
+
+    pub fn syscall_witnesses(&self) -> &[SyscallWitness] {
+        &self.syscall_witnesses
+    }
+
+    fn checked_cycle(cycle: Cycle) -> u32 {
+        u32::try_from(cycle).expect("GPU replay predecessor cycle exceeds u32")
+    }
+
+    fn annotate_pending(&mut self) {
+        let start = self.pending.cycle;
+        let end = start + FullTracer::SUBCYCLES_PER_INSN;
+        while let Some(event) = self
+            .next_accesses
+            .events()
+            .get(self.next_access_cursor)
+            .copied()
+        {
+            assert!(
+                event.source_cycle >= start,
+                "GPU replay skipped next-access event"
+            );
+            if event.source_cycle >= end {
+                break;
+            }
+            let subcycle = event.source_cycle - start;
+            let bit = match subcycle {
+                FullTracer::SUBCYCLE_RS1
+                    if self.pending.has_rs1 && self.pending.rs1.addr == event.address =>
+                {
+                    StepRecord::FUTURE_ACCESS_RS1
+                }
+                FullTracer::SUBCYCLE_RS2
+                    if self.pending.has_rs2 && self.pending.rs2.addr == event.address =>
+                {
+                    StepRecord::FUTURE_ACCESS_RS2
+                }
+                FullTracer::SUBCYCLE_RD
+                    if self.pending.has_rd && self.pending.rd.addr == event.address =>
+                {
+                    StepRecord::FUTURE_ACCESS_RD
+                }
+                FullTracer::SUBCYCLE_MEM
+                    if self.pending.has_memory_op
+                        && self.pending.memory_op.addr == event.address =>
+                {
+                    StepRecord::FUTURE_ACCESS_MEM
+                }
+                FullTracer::SUBCYCLE_RD if self.pending.has_syscall() => {
+                    self.annotate_syscall(event.address, true);
+                    0
+                }
+                FullTracer::SUBCYCLE_MEM if self.pending.has_syscall() => {
+                    self.annotate_syscall(event.address, false);
+                    0
+                }
+                _ => panic!("GPU replay access/tape mismatch"),
+            };
+            self.pending.future_access_mask |= bit;
+            self.next_access_cursor += 1;
+        }
+    }
+
+    fn annotate_syscall(&mut self, address: WordAddr, registers: bool) {
+        let witness = &mut self.syscall_witnesses[self.pending.syscall_index as usize];
+        let (ops, masks) = if registers {
+            (&witness.reg_ops, &mut witness.reg_future_access)
+        } else {
+            (&witness.mem_ops, &mut witness.mem_future_access)
+        };
+        let index = ops
+            .iter()
+            .rposition(|op| op.addr == address)
+            .expect("GPU replay syscall access/tape address mismatch");
+        masks[index] = 1;
+    }
+
+    fn compact_pending(&self) -> GpuReplayOrdinaryRecord {
+        let mut flags = (self.pending.future_access_mask as u32)
+            << GpuReplayOrdinaryRecord::FUTURE_ACCESS_SHIFT;
+        if self.pending.has_rs1 {
+            flags |= GpuReplayOrdinaryRecord::HAS_RS1;
+        }
+        if self.pending.has_rs2 {
+            flags |= GpuReplayOrdinaryRecord::HAS_RS2;
+        }
+        if self.pending.has_rd {
+            flags |= GpuReplayOrdinaryRecord::HAS_RD;
+        }
+        if self.pending.has_memory_op {
+            flags |= GpuReplayOrdinaryRecord::HAS_MEMORY;
+        }
+        GpuReplayOrdinaryRecord {
+            ordinal: u32::try_from(self.ordinal).expect("GPU replay ordinal exceeds u32"),
+            pc_before: self.pending.pc.before.0,
+            pc_after: self.pending.pc.after.0,
+            raw_instruction: self.pending.insn.raw,
+            rs1: GpuReplayRead {
+                previous_cycle: Self::checked_cycle(self.pending.rs1.previous_cycle),
+                value: self.pending.rs1.value,
+            },
+            rs2: GpuReplayRead {
+                previous_cycle: Self::checked_cycle(self.pending.rs2.previous_cycle),
+                value: self.pending.rs2.value,
+            },
+            rd: GpuReplayWrite {
+                previous_cycle: Self::checked_cycle(self.pending.rd.previous_cycle),
+                value_before: self.pending.rd.value.before,
+                value_after: self.pending.rd.value.after,
+            },
+            memory: GpuReplayMemory {
+                previous_cycle: Self::checked_cycle(self.pending.memory_op.previous_cycle),
+                address: self.pending.memory_op.addr.0,
+                value_before: self.pending.memory_op.value.before,
+                value_after: self.pending.memory_op.value.after,
+            },
+            flags,
+        }
+    }
+
+    fn update_mmio_bounds(&mut self, addr: WordAddr) {
+        let Some((start_addr, (_, end_addr, min_addr, max_addr))) = self
+            .mmio_min_max_access
+            .as_mut()
+            .and_then(|bounds| bounds.range_mut(..=addr).next_back())
+        else {
+            return;
+        };
+        if addr >= *end_addr {
+            return;
+        }
+        *min_addr = (*min_addr).min(addr);
+        *max_addr = (*max_addr).max(addr + WordAddr::from(WORD_SIZE as u32));
+        let access_end = (addr + WordAddr::from(WORD_SIZE as u32)).baddr();
+        if start_addr.baddr().0 == self.platform.heap.start {
+            self.max_heap_addr_access = self.max_heap_addr_access.max(access_end);
+        } else if start_addr.baddr().0 == self.platform.hints.start {
+            self.max_hint_addr_access = self.max_hint_addr_access.max(access_end);
+        }
+    }
+}
+
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) struct FullTracerNativeTraceState {
     pub records: *mut StepRecord,
@@ -2773,6 +3112,184 @@ impl Tracer for FullTracer {
     }
 }
 
+impl Tracer for GpuReplayTracer {
+    type Record = GpuReplayStep;
+    type Config = GpuReplayTracerConfig;
+
+    fn new(platform: &Platform, config: Self::Config) -> Self {
+        Self::new(platform, config)
+    }
+
+    fn with_next_accesses(
+        platform: &Platform,
+        config: Self::Config,
+        next_accesses: Option<Arc<NextCycleAccess>>,
+    ) -> Self {
+        let mut tracer = Self::new(platform, config);
+        tracer.next_accesses = next_accesses.unwrap_or_default();
+        tracer
+    }
+
+    #[inline(always)]
+    fn advance(&mut self) -> Self::Record {
+        self.annotate_pending();
+        let busy_loop = self.pending.is_busy_loop();
+        let ordinal = u32::try_from(self.ordinal).expect("GPU replay ordinal exceeds u32");
+        if self.pending.insn.kind == InsnKind::ECALL {
+            self.current.fallback.push(GpuReplayFallbackRecord {
+                ordinal,
+                record: self.pending,
+            });
+        } else {
+            self.current.ordinary.push(self.compact_pending());
+        }
+        self.ordinal += 1;
+        if self.current.len() == self.config.chunk_capacity {
+            self.seal_current();
+        }
+        let cycle = self.shard_start_cycle + self.ordinal as Cycle * FullTracer::SUBCYCLES_PER_INSN;
+        self.pending = StepRecord {
+            cycle,
+            ..StepRecord::default()
+        };
+        GpuReplayStep { ordinal, busy_loop }
+    }
+
+    #[inline(always)]
+    fn is_busy_loop(&self, record: &Self::Record) -> bool {
+        record.busy_loop
+    }
+
+    #[inline(always)]
+    fn store_pc(&mut self, pc: ByteAddr) {
+        self.pending.pc.after = pc;
+    }
+
+    #[inline(always)]
+    fn fetch(&mut self, pc: WordAddr, value: Instruction) {
+        self.pending.pc.before = pc.baddr();
+        self.pending.insn = value;
+    }
+
+    fn track_mmu_maxtouch_before(&mut self) {
+        self.pending.heap_maxtouch_addr.before = self.max_heap_addr_access;
+        self.pending.hint_maxtouch_addr.before = self.max_hint_addr_access;
+    }
+
+    fn track_mmu_maxtouch_after(&mut self) {
+        self.pending.heap_maxtouch_addr.after = self.max_heap_addr_access;
+        self.pending.hint_maxtouch_addr.after = self.max_hint_addr_access;
+    }
+
+    #[inline(always)]
+    fn load_register(&mut self, idx: RegIdx, value: Word) {
+        let addr = Platform::register_vma(idx).into();
+        if !self.pending.has_rs1 {
+            self.pending.rs1 = ReadOp {
+                addr,
+                value,
+                previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS1),
+            };
+            self.pending.has_rs1 = true;
+        } else if !self.pending.has_rs2 {
+            self.pending.rs2 = ReadOp {
+                addr,
+                value,
+                previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS2),
+            };
+            self.pending.has_rs2 = true;
+        } else {
+            unimplemented!("Only two register reads are supported");
+        }
+    }
+
+    #[inline(always)]
+    fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
+        assert!(!self.pending.has_rd, "Only one register write is supported");
+        let addr = Platform::register_vma(idx).into();
+        self.pending.rd = WriteOp {
+            addr,
+            value,
+            previous_cycle: self.track_access(addr, Self::SUBCYCLE_RD),
+        };
+        self.pending.has_rd = true;
+    }
+
+    #[inline(always)]
+    fn load_memory(&mut self, addr: WordAddr, value: Word, previous_cycle: Cycle) {
+        self.store_memory(addr, Change::new(value, value), previous_cycle);
+    }
+
+    #[inline(always)]
+    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>, previous_cycle: Cycle) {
+        assert!(
+            !self.pending.has_memory_op,
+            "Only one memory access is supported"
+        );
+        self.update_mmio_bounds(addr);
+        self.pending.memory_op = WriteOp {
+            addr,
+            value,
+            previous_cycle,
+        };
+        self.pending.has_memory_op = true;
+    }
+
+    #[inline(always)]
+    fn track_syscall(&mut self, effects: SyscallEffects) {
+        let witness = effects.finalize(self);
+        assert!(!self.pending.has_syscall(), "Only one syscall per step");
+        self.pending.syscall_index = u32::try_from(self.syscall_witnesses.len())
+            .expect("GPU replay syscall witness index exceeds u32");
+        self.syscall_witnesses.push(witness);
+    }
+
+    #[inline(always)]
+    fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
+        self.latest_accesses
+            .track(addr, self.pending.cycle + subcycle)
+    }
+
+    fn final_register_accesses(&self) -> &LatestAccesses {
+        &self.latest_accesses
+    }
+
+    fn into_next_accesses(self) -> NextCycleAccess {
+        unimplemented!("GpuReplayTracer consumes next-access metadata")
+    }
+
+    fn cycle(&self) -> Cycle {
+        self.pending.cycle
+    }
+
+    fn executed_insts(&self) -> usize {
+        (self.pending.cycle / Self::SUBCYCLES_PER_INSN)
+            .saturating_sub(1)
+            .try_into()
+            .expect("GPU replay instruction count exceeds usize")
+    }
+
+    fn probe_min_max_address_by_start_addr(
+        &self,
+        start_addr: WordAddr,
+    ) -> Option<(WordAddr, WordAddr)> {
+        self.mmio_min_max_access.as_ref().and_then(|bounds| {
+            bounds.range(..=start_addr).next_back().and_then(
+                |(_, &(expected_start_addr, _, min, max))| {
+                    assert_eq!(start_addr, expected_start_addr);
+                    (min < max).then_some((min, max))
+                },
+            )
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GpuReplayStep {
+    pub ordinal: u32,
+    busy_loop: bool,
+}
+
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct Change<T> {
@@ -3288,5 +3805,135 @@ mod tests {
         );
         assert_eq!(planner.ecall_count(code), 1);
         assert_eq!(planner.cur_cells(), base);
+    }
+
+    fn record_add<T: Tracer>(tracer: &mut T, pc: WordAddr) {
+        tracer.fetch(pc, encode_rv32(InsnKind::ADD, 3, 1, 2, 0));
+        tracer.track_mmu_maxtouch_before();
+        tracer.load_register(1, 7);
+        tracer.load_register(2, 11);
+        tracer.store_register(3, Change::new(5, 18));
+        tracer.store_pc(pc.baddr() + PC_STEP_SIZE);
+        tracer.track_mmu_maxtouch_after();
+        tracer.advance();
+    }
+
+    #[test]
+    fn gpu_replay_ordinary_record_matches_full_tracer() {
+        let mut full = FullTracer::new(&CENO_PLATFORM, FullTracerConfig { max_step_shard: 1 });
+        let mut compact =
+            GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig { chunk_capacity: 1 });
+        let pc = WordAddr(0x1000 / WORD_SIZE as u32);
+        record_add(&mut full, pc);
+        record_add(&mut compact, pc);
+        compact.finish_chunks();
+
+        let chunks = compact.take_sealed_chunks();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].sequence, 0);
+        assert!(chunks[0].fallback.is_empty());
+        let actual = chunks[0].ordinary[0];
+        let expected = full.recorded_steps()[0];
+        assert_eq!(actual.cycle(chunks[0].shard_start_cycle), expected.cycle());
+        assert_eq!(actual.pc_before, expected.pc().before.0);
+        assert_eq!(actual.pc_after, expected.pc().after.0);
+        assert_eq!(actual.raw_instruction, expected.insn().raw);
+        assert_eq!(actual.rs1.value, expected.rs1().unwrap().value);
+        assert_eq!(
+            actual.rs1.previous_cycle as Cycle,
+            expected.rs1().unwrap().previous_cycle
+        );
+        assert_eq!(actual.rs2.value, expected.rs2().unwrap().value);
+        assert_eq!(actual.rd.value_before, expected.rd().unwrap().value.before);
+        assert_eq!(actual.rd.value_after, expected.rd().unwrap().value.after);
+        assert_eq!(
+            actual.flags & 0xf,
+            GpuReplayOrdinaryRecord::HAS_RS1
+                | GpuReplayOrdinaryRecord::HAS_RS2
+                | GpuReplayOrdinaryRecord::HAS_RD
+        );
+    }
+
+    #[test]
+    fn gpu_replay_chunks_are_bounded_and_ordered() {
+        let mut compact =
+            GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig { chunk_capacity: 2 });
+        for i in 0..5 {
+            record_add(&mut compact, WordAddr(0x400 + i));
+        }
+        compact.finish_chunks();
+        let chunks = compact.take_sealed_chunks();
+        assert_eq!(
+            chunks.iter().map(GpuReplayChunk::len).collect::<Vec<_>>(),
+            [2, 2, 1]
+        );
+        assert_eq!(
+            chunks
+                .iter()
+                .map(|chunk| chunk.sequence)
+                .collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        assert_eq!(
+            chunks
+                .iter()
+                .flat_map(|chunk| chunk.ordinary.iter().map(|record| record.ordinal))
+                .collect::<Vec<_>>(),
+            [0, 1, 2, 3, 4]
+        );
+        assert_eq!(std::mem::size_of::<GpuReplayOrdinaryRecord>(), 64);
+        assert!(
+            std::mem::size_of::<GpuReplayOrdinaryRecord>() < std::mem::size_of::<StepRecord>() / 2
+        );
+    }
+
+    #[test]
+    fn gpu_replay_applies_sparse_future_access_tape() {
+        let rd_addr: WordAddr = Platform::register_vma(3).into();
+        let tape = Arc::new(NextAccessTape::from_unsorted(vec![NextAccessEvent::new(
+            FullTracer::SUBCYCLES_PER_INSN + FullTracer::SUBCYCLE_RD,
+            100,
+            rd_addr,
+        )]));
+        let mut full = FullTracer::with_next_accesses(
+            &CENO_PLATFORM,
+            FullTracerConfig { max_step_shard: 1 },
+            Some(tape.clone()),
+        );
+        let mut compact = GpuReplayTracer::with_next_accesses(
+            &CENO_PLATFORM,
+            GpuReplayTracerConfig { chunk_capacity: 1 },
+            Some(tape),
+        );
+        let pc = WordAddr(0x1000 / WORD_SIZE as u32);
+        record_add(&mut full, pc);
+        full.annotate_recorded_steps(0);
+        record_add(&mut compact, pc);
+        compact.finish_chunks();
+        let chunks = compact.take_sealed_chunks();
+        assert_eq!(
+            chunks[0].ordinary[0].future_access_mask(),
+            full.recorded_steps()[0].future_access_mask()
+        );
+        assert_eq!(
+            chunks[0].ordinary[0].future_access_mask(),
+            StepRecord::FUTURE_ACCESS_RD
+        );
+    }
+
+    #[test]
+    fn gpu_replay_routes_ecall_to_explicit_fallback_lane() {
+        let mut compact =
+            GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig { chunk_capacity: 2 });
+        let pc = WordAddr(0x1000 / WORD_SIZE as u32);
+        compact.fetch(pc, encode_rv32(InsnKind::ECALL, 0, 0, 0, 0));
+        compact.store_pc(pc.baddr() + PC_STEP_SIZE);
+        compact.advance();
+        compact.finish_chunks();
+        let chunks = compact.take_sealed_chunks();
+        assert!(chunks[0].ordinary.is_empty());
+        assert_eq!(chunks[0].fallback.len(), 1);
+        assert_eq!(chunks[0].fallback[0].ordinal, 0);
+        assert_eq!(chunks[0].fallback[0].record.insn().kind, InsnKind::ECALL);
     }
 }
