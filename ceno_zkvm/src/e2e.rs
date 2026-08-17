@@ -1972,6 +1972,13 @@ pub fn generate_witness<'a, E: ExtensionField>(
         Option<u64>,
     ),
 > {
+    let validation_manifest_config =
+        crate::validation_manifest::ValidationManifestConfig::from_env()
+            .unwrap_or_else(|err| panic!("invalid validation manifest configuration: {err}"));
+    #[cfg(feature = "gpu")]
+    let log_post_witgen_memory = crate::validation_manifest::post_witgen_memory_enabled(
+        validation_manifest_config.is_some(),
+    );
     let mut shard_ctx_builder = std::mem::take(&mut emul_result.shard_ctx_builder);
     assert!(
         emul_result.executed_steps > 0,
@@ -2221,8 +2228,9 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // This batch-D2Hs accumulated EC records and addr_accessed into shard_ctx.
             #[cfg(feature = "gpu")]
             info_span!("flush_shared_ec").in_scope(|| {
-                crate::instructions::gpu::dispatch::flush_shared_ec_buffers(
+                crate::instructions::gpu::cache::flush_shared_ec_buffers_with_validation(
                     &mut shard_ctx,
+                    validation_manifest_config.is_some(),
                 )
             }).unwrap();
 
@@ -2466,6 +2474,48 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         *v = f.to_canonical_u64() as u32;
                     }
                 });
+            }
+
+            #[cfg(feature = "gpu")]
+            if log_post_witgen_memory
+                && crate::instructions::gpu::config::is_gpu_witgen_enabled()
+            {
+                crate::validation_manifest::log_post_witgen_vram(
+                    shard_ctx.shard_id,
+                    validation_manifest_config.is_some(),
+                )
+                .unwrap_or_else(|err| panic!("post-witgen VRAM observation failed: {err}"));
+            }
+
+            if let Some(report) =
+                crate::validation_manifest::ValidationManifestConfig::with_enabled(
+                    validation_manifest_config.as_ref(),
+                    |config| {
+                        crate::validation_manifest::write_shard(
+                            config,
+                            shard_ctx.shard_id,
+                            &zkvm_witness,
+                            &shard_ctx,
+                            &pi,
+                        )
+                    },
+                )
+            {
+                let report = report.unwrap_or_else(|err| {
+                    panic!("validation manifest generation failed: {err}")
+                });
+                tracing::info!(
+                    target: "ceno_validation",
+                    schema_version = 1u32,
+                    shard_id = shard_ctx.shard_id,
+                    root_digest = %crate::validation_manifest::hex_digest(&report.root_digest),
+                    path = %report.path.display(),
+                    matrix_count = report.matrix_count,
+                    lookup_entry_count = report.lookup_entry_count,
+                    address_count = report.address_count,
+                    elapsed_millis = report.elapsed_millis,
+                    "validation manifest written"
+                );
             }
 
             Some((zkvm_witness, shard_ctx, pi, witgen_mem_baseline))
@@ -3006,28 +3056,28 @@ fn assert_witgen_mem_released(shard_id: usize, baseline: u64) {
     hal.inner
         .synchronize()
         .expect("cuda synchronize before witgen post-check");
-    let post_witgen = hal
+    let post_release = hal
         .inner
         .mem_pool()
         .get_used_size()
         .expect("cudaMemPoolGetAttribute UsedMemCurrent");
-    let delta_bytes = post_witgen as i64 - baseline as i64;
+    let delta_bytes = post_release as i64 - baseline as i64;
     assert_eq!(
-        post_witgen,
+        post_release,
         baseline,
-        "shard {} witgen leaked GPU memory: baseline={} B ({} MB), \
-         post_witgen={} B ({} MB), delta={} B ({:.2} MB)",
+        "shard {} GPU pool usage was not restored: baseline={} B ({} MB), \
+         post_release={} B ({} MB), delta={} B ({:.2} MB)",
         shard_id,
         baseline,
         baseline >> 20,
-        post_witgen,
-        post_witgen >> 20,
+        post_release,
+        post_release >> 20,
         delta_bytes,
         delta_bytes as f64 / (1024.0 * 1024.0),
     );
     println!(
-        "[witgen memcheck] shard {}: VRAM clean, \
-         baseline = post_witgen = {} bytes ({} MB)",
+        "[witgen pool restoration] shard {}: pool used bytes restored, \
+         baseline = post_release = {} bytes ({} MB), delta = 0 bytes",
         shard_id,
         baseline,
         baseline >> 20,
