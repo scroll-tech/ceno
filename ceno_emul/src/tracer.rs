@@ -1520,7 +1520,7 @@ pub struct GpuReplayTracerConfig {
 impl Default for GpuReplayTracerConfig {
     fn default() -> Self {
         Self {
-            chunk_capacity: 256 * 1024,
+            chunk_capacity: 1024 * 1024,
         }
     }
 }

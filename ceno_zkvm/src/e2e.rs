@@ -1167,6 +1167,8 @@ struct CompactStepReplay {
     program: Arc<Program>,
     shard_step_counts: Vec<usize>,
     shard_id: usize,
+    worker_count: usize,
+    queue_depth: usize,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     aot: Arc<ceno_emul::aot::AotProgram>,
 }
@@ -1183,6 +1185,36 @@ impl CompactStepReplay {
             ceno_emul::aot::AotProgram,
         >,
     ) -> Self {
+        let chunk_capacity = std::env::var("CENO_GPU_REPLAY_CHUNK_CAPACITY")
+            .ok()
+            .map(|value| {
+                value
+                    .parse::<usize>()
+                    .expect("CENO_GPU_REPLAY_CHUNK_CAPACITY must be an integer")
+            })
+            .unwrap_or_else(|| GpuReplayTracerConfig::default().chunk_capacity);
+        assert!(
+            (256 * 1024..=1024 * 1024).contains(&chunk_capacity),
+            "CENO_GPU_REPLAY_CHUNK_CAPACITY must be between 256K and 1M records"
+        );
+        let worker_count = std::env::var("CENO_GPU_REPLAY_WORKERS")
+            .ok()
+            .map(|value| {
+                value
+                    .parse::<usize>()
+                    .expect("CENO_GPU_REPLAY_WORKERS must be an integer")
+            })
+            .unwrap_or(3);
+        let queue_depth = std::env::var("CENO_GPU_REPLAY_QUEUE_DEPTH")
+            .ok()
+            .map(|value| {
+                value
+                    .parse::<usize>()
+                    .expect("CENO_GPU_REPLAY_QUEUE_DEPTH must be an integer")
+            })
+            .unwrap_or(3);
+        assert!((2..=4).contains(&worker_count));
+        assert!((2..=4).contains(&queue_depth));
         let shard_step_counts = shard_cycle_boundaries
             .windows(2)
             .map(|range| ((range[1] - range[0]) / FullTracer::SUBCYCLES_PER_INSN) as usize)
@@ -1190,7 +1222,7 @@ impl CompactStepReplay {
         let mut vm = VMState::<GpuReplayTracer>::new_with_tracer_config_and_next_accesses(
             platform,
             program.clone(),
-            GpuReplayTracerConfig::default(),
+            GpuReplayTracerConfig { chunk_capacity },
             Some(next_accesses),
         );
         for record in &init_mem_state.hints {
@@ -1201,6 +1233,8 @@ impl CompactStepReplay {
             program,
             shard_step_counts,
             shard_id: 0,
+            worker_count,
+            queue_depth,
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             aot,
         }
@@ -1215,32 +1249,46 @@ impl CompactStepReplay {
         let first_hint_before = self.vm.tracer().max_hint_addr_access().0;
         let shard_start_cycle = self.vm.tracer().cycle();
         let mut executed = 0usize;
-        while executed < expected_steps {
-            let max_steps =
-                (expected_steps - executed).min(self.vm.tracer().remaining_chunk_capacity());
-            assert!(max_steps > 0, "compact replay chunk made no progress");
-            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-            let ran = self
-                .aot
-                .run_to_halt(&mut self.vm, max_steps)
-                .unwrap_or_else(|err| panic!("AOT compact replay failed: {err:?}"))
-                .executed_steps;
-            #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
-            let ran = {
-                for _ in 0..max_steps {
-                    self.vm
-                        .next_step_record()
-                        .unwrap_or_else(|err| panic!("compact replay failed: {err:?}"));
-                }
-                max_steps
-            };
-            assert_eq!(ran, max_steps);
-            executed += ran;
-            self.vm.tracer_mut().finish_chunks();
-        }
+        info_span!("compact_replay_aot").in_scope(|| {
+            while executed < expected_steps {
+                let max_steps =
+                    (expected_steps - executed).min(self.vm.tracer().remaining_chunk_capacity());
+                assert!(max_steps > 0, "compact replay chunk made no progress");
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                let ran = self
+                    .aot
+                    .run_to_halt(&mut self.vm, max_steps)
+                    .unwrap_or_else(|err| panic!("AOT compact replay failed: {err:?}"))
+                    .executed_steps;
+                #[cfg(not(all(
+                    feature = "aot-x86_64",
+                    target_arch = "x86_64",
+                    target_os = "linux"
+                )))]
+                let ran = {
+                    for _ in 0..max_steps {
+                        self.vm
+                            .next_step_record()
+                            .unwrap_or_else(|err| panic!("compact replay failed: {err:?}"));
+                    }
+                    max_steps
+                };
+                assert_eq!(ran, max_steps);
+                executed += ran;
+                self.vm.tracer_mut().finish_chunks();
+            }
+        });
 
         let chunks = self.vm.tracer_mut().take_sealed_chunks();
-        let mut arenas = route_gpu_replay_chunks(chunks, self.program.clone(), 3, 3);
+        let chunk_count = chunks.len();
+        let mut arenas = info_span!("compact_route", chunks = chunk_count).in_scope(|| {
+            route_gpu_replay_chunks(
+                chunks,
+                self.program.clone(),
+                self.worker_count,
+                self.queue_depth,
+            )
+        });
         arenas
             .validate_supported()
             .unwrap_or_else(|err| panic!("compact replay routing failed: {err}"));

@@ -262,7 +262,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 70;
+const AOT_ABI_VERSION: u32 = 71;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v5";
 const AOT_INITIAL_EVENT_SEED: usize = 20_000_000;
 const AOT_MAX_COMPILE_JOBS: usize = 32;
@@ -3413,6 +3413,7 @@ fn emit_after_native_step(
 
     if trace_style == AssemblyTraceStyle::FullTracerDirect {
         let callback_label = format!(".L_fulltracer_callback_{pc:x}");
+        let fulltracer_label = format!(".L_fulltracer_direct_{pc:x}");
         let done_label = format!(".L_fulltracer_direct_done_{pc:x}");
         writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
         writeln!(file, "    movl %r15d, 8(%rsp)")?;
@@ -3420,7 +3421,7 @@ fn emit_after_native_step(
             file,
             "    cmpl ${AOT_TRACE_MODE_FULLTRACER_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
         )?;
-        writeln!(file, "    je 1f")?;
+        writeln!(file, "    je {fulltracer_label}")?;
         writeln!(
             file,
             "    cmpl ${AOT_TRACE_MODE_GPU_REPLAY_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
@@ -3430,7 +3431,7 @@ fn emit_after_native_step(
         writeln!(file, "    call ceno_aot_gpu_replay_emit_step")?;
         writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
         writeln!(file, "    jmp {done_label}")?;
-        writeln!(file, "1:")?;
+        writeln!(file, "{fulltracer_label}:")?;
         emit_native_trace_metadata(&mut file, pc, program, insn)?;
         writeln!(file, "    call ceno_aot_fulltracer_emit_step")?;
         writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
