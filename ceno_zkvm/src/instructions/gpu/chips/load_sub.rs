@@ -131,7 +131,10 @@ mod tests {
     #[test]
     fn test_gpu_witgen_load_sub_correctness() {
         use crate::{
-            e2e::ShardContext, instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq,
+            e2e::ShardContext,
+            instructions::gpu::utils::test_helpers::{
+                assert_witness_colmajor_eq, compact_records_as_bytes, compact_records_from_steps,
+            },
         };
         use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, WordAddr, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
@@ -323,6 +326,31 @@ mod tests {
             let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
                 gpu_result.witness.device_buffer.to_vec().unwrap();
             assert_witness_colmajor_eq(&gpu_data, cpu_witness.values(), n, num_witin);
+
+            let compact = compact_records_from_steps(&steps);
+            let gpu_compact = hal
+                .inner
+                .htod_copy_stream(None, compact_records_as_bytes(&compact))
+                .unwrap();
+            let compact_result = hal
+                .witgen
+                .witgen_load_sub_compact(
+                    &col_map,
+                    &gpu_compact,
+                    n,
+                    shard_offset,
+                    load_width,
+                    is_signed_u32,
+                    0,
+                    0,
+                    0,
+                    false,
+                    None,
+                    None,
+                )
+                .unwrap();
+            let compact_data = compact_result.witness.device_buffer.to_vec().unwrap();
+            assert_witness_colmajor_eq(&compact_data, cpu_witness.values(), n, num_witin);
             eprintln!("{} GPU vs CPU: PASS ({} instances)", name, n);
         }
     }

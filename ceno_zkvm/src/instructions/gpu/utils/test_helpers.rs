@@ -14,7 +14,7 @@ pub fn compact_records_from_steps(
                 ordinal: ordinal as u32,
                 pc_before: step.pc().before.0,
                 pc_after: step.pc().after.0,
-                raw_instruction: step.insn().raw,
+                raw_instruction: test_raw_instruction(&step.insn()),
                 flags: (step.future_access_mask() as u32)
                     << ceno_emul::GpuReplayOrdinaryRecord::FUTURE_ACCESS_SHIFT,
                 ..Default::default()
@@ -53,6 +53,92 @@ pub fn compact_records_from_steps(
             record
         })
         .collect()
+}
+
+#[cfg(test)]
+fn test_raw_instruction(insn: &ceno_emul::Instruction) -> u32 {
+    use ceno_emul::InsnKind::*;
+    if insn.raw != 0 {
+        return insn.raw;
+    }
+    let rs1 = (insn.rs1 as u32) << 15;
+    let rs2 = (insn.rs2 as u32) << 20;
+    let rd = (insn.rd as u32) << 7;
+    let r = |funct7: u32, funct3: u32| funct7 << 25 | rs2 | rs1 | funct3 << 12 | rd | 0x33;
+    let i = |opcode: u32, funct3: u32| {
+        ((insn.imm as u32) & 0xfff) << 20 | rs1 | funct3 << 12 | rd | opcode
+    };
+    let s = |funct3: u32| {
+        let imm = (insn.imm as u32) & 0xfff;
+        (imm >> 5) << 25 | rs2 | rs1 | funct3 << 12 | (imm & 0x1f) << 7 | 0x23
+    };
+    let b = |funct3: u32| {
+        let imm = (insn.imm as u32) & 0x1fff;
+        ((imm >> 12) & 1) << 31
+            | ((imm >> 5) & 0x3f) << 25
+            | rs2
+            | rs1
+            | funct3 << 12
+            | ((imm >> 1) & 0xf) << 8
+            | ((imm >> 11) & 1) << 7
+            | 0x63
+    };
+    match insn.kind {
+        ADD => r(0, 0),
+        SUB => r(0x20, 0),
+        SLL => r(0, 1),
+        SLT => r(0, 2),
+        SLTU => r(0, 3),
+        XOR => r(0, 4),
+        SRL => r(0, 5),
+        SRA => r(0x20, 5),
+        OR => r(0, 6),
+        AND => r(0, 7),
+        MUL => r(1, 0),
+        MULH => r(1, 1),
+        MULHSU => r(1, 2),
+        MULHU => r(1, 3),
+        DIV => r(1, 4),
+        DIVU => r(1, 5),
+        REM => r(1, 6),
+        REMU => r(1, 7),
+        ADDI => i(0x13, 0),
+        SLTI => i(0x13, 2),
+        SLTIU => i(0x13, 3),
+        XORI => i(0x13, 4),
+        ORI => i(0x13, 6),
+        ANDI => i(0x13, 7),
+        SLLI => i(0x13, 1),
+        SRLI => i(0x13, 5),
+        SRAI => (0x20 << 25) | ((insn.imm as u32) & 0x1f) << 20 | rs1 | 5 << 12 | rd | 0x13,
+        JALR => i(0x67, 0),
+        LW => i(0x03, 2),
+        LH => i(0x03, 1),
+        LHU => i(0x03, 5),
+        LB => i(0x03, 0),
+        LBU => i(0x03, 4),
+        SW => s(2),
+        SH => s(1),
+        SB => s(0),
+        BEQ => b(0),
+        BNE => b(1),
+        BLT => b(4),
+        BGE => b(5),
+        BLTU => b(6),
+        BGEU => b(7),
+        LUI => (insn.imm as u32 & 0xfffff000) | rd | 0x37,
+        AUIPC => (insn.imm as u32 & 0xfffff000) | rd | 0x17,
+        JAL => {
+            let imm = (insn.imm as u32) & 0x1f_ffff;
+            ((imm >> 20) & 1) << 31
+                | ((imm >> 1) & 0x3ff) << 21
+                | ((imm >> 11) & 1) << 20
+                | ((imm >> 12) & 0xff) << 12
+                | rd
+                | 0x6f
+        }
+        _ => panic!("test compact encoder does not support {:?}", insn.kind),
+    }
 }
 
 #[cfg(test)]
