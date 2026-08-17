@@ -262,7 +262,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 67;
+const AOT_ABI_VERSION: u32 = 68;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v5";
 const AOT_INITIAL_EVENT_SEED: usize = 20_000_000;
 const AOT_MAX_COMPILE_JOBS: usize = 32;
@@ -272,6 +272,7 @@ const AOT_TRACE_MODE_NONE: u32 = 0;
 const AOT_TRACE_MODE_CALLBACK: u32 = 1;
 const AOT_TRACE_MODE_PREFLIGHT_DIRECT: u32 = 2;
 const AOT_TRACE_MODE_FULLTRACER_DIRECT: u32 = 3;
+const AOT_TRACE_MODE_GPU_REPLAY_DIRECT: u32 = 4;
 
 const AOT_PREFLIGHT_HELPER_SYNC: u32 = 1;
 const AOT_PREFLIGHT_HELPER_BUSY_LOOP: u32 = 2;
@@ -1222,6 +1223,24 @@ impl AotProgram {
             fulltracer_max_heap = state.max_heap_addr_access;
             fulltracer_max_hint = state.max_hint_addr_access;
         }
+        if trace_native_steps
+            && !cfg!(debug_assertions)
+            && TypeId::of::<T>() == TypeId::of::<crate::GpuReplayTracer>()
+            && self.trace_style == AssemblyTraceStyle::FullTracerDirect
+        {
+            let replay_vm = unsafe { &mut *(vm_ptr as *mut VMState<crate::GpuReplayTracer>) };
+            let state = replay_vm.tracer_mut().native_trace_state();
+            trace_mode = AOT_TRACE_MODE_GPU_REPLAY_DIRECT;
+            fulltracer_records = state.records.cast();
+            fulltracer_len = state.len;
+            fulltracer_pending_index = state.ordinal;
+            fulltracer_pending_cycle = state.pending_cycle;
+            fulltracer_latest_cells = state.latest_cells;
+            fulltracer_latest_base = state.latest_base.0;
+            fulltracer_latest_len = state.latest_len;
+            fulltracer_max_heap = state.max_heap_addr_access;
+            fulltracer_max_hint = state.max_hint_addr_access;
+        }
         let preflight_step_cells_table = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             preflight_step_cells.as_ptr()
         } else {
@@ -1387,7 +1406,10 @@ impl AotProgram {
             preflight_pending_tower: 0,
             preflight_memory_shard_start_ordinal: preflight_register_shard_start >> 2,
         };
-        let trace_fn = if trace_mode == AOT_TRACE_MODE_FULLTRACER_DIRECT {
+        let trace_fn = if matches!(
+            trace_mode,
+            AOT_TRACE_MODE_FULLTRACER_DIRECT | AOT_TRACE_MODE_GPU_REPLAY_DIRECT
+        ) {
             std::ptr::null()
         } else if trace_native_steps {
             if TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
@@ -1428,6 +1450,10 @@ impl AotProgram {
                     .sync_native_next_access_tape(context.preflight_event_cursor)
             };
             preflight_vm.tracer_mut().finish_deferred_mmio_bounds();
+        }
+        if trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT {
+            let replay_vm = unsafe { &mut *(vm_ptr as *mut VMState<crate::GpuReplayTracer>) };
+            replay_vm.tracer_mut().sync_native_replay();
         }
         if native_status == AOT_STATUS_ERROR {
             let err = LAST_AOT_ERROR
@@ -1692,13 +1718,13 @@ fn build_layout_profile(
                     .and_modify(|count: &mut u64| *count = count.saturating_add(counts.taken))
                     .or_insert(counts.taken);
             }
-            if let Some(fallthrough) = fallthrough_pc(program, terminal_pc)
-                && block_by_pc.contains_key(&fallthrough)
-            {
-                edge_counts
-                    .entry((block.start_pc, fallthrough))
-                    .and_modify(|count| *count = count.saturating_add(counts.not_taken))
-                    .or_insert(counts.not_taken);
+            if let Some(fallthrough) = fallthrough_pc(program, terminal_pc) {
+                if block_by_pc.contains_key(&fallthrough) {
+                    edge_counts
+                        .entry((block.start_pc, fallthrough))
+                        .and_modify(|count| *count = count.saturating_add(counts.not_taken))
+                        .or_insert(counts.not_taken);
+                }
             }
         } else {
             for successor in static_successors(program, terminal_pc, insn)? {
@@ -2623,10 +2649,10 @@ fn write_assembly_part(
         if pure_counted_block {
             emit_pure_block_budget_guard(&mut file, block)?;
         }
-        if let Some(kind) = pure_block_plan
-            && kind == PreflightBlockPlanKind::MemoryExactAccess
-        {
-            emit_pure_block_memory_fast_path_guard(&mut file, program, block)?;
+        if let Some(kind) = pure_block_plan {
+            if kind == PreflightBlockPlanKind::MemoryExactAccess {
+                emit_pure_block_memory_fast_path_guard(&mut file, program, block)?;
+            }
         }
         if pure_counted_block {
             writeln!(
@@ -3204,6 +3230,131 @@ ceno_aot_fulltracer_emit_step:
     ret
 "#
     )?;
+    writeln!(
+        file,
+        r#"
+.macro GPU_REPLAY_ACCESS previous_offset, subcycle
+    movq {AOT_CTX_FULLTRACER_LATEST_CELLS_OFFSET}(%r12), %r8
+    movl %edx, %ecx
+    subl {AOT_CTX_FULLTRACER_LATEST_BASE_OFFSET}(%r12), %ecx
+    movq (%r8,%rcx,8), %r9
+    leaq \subcycle(%rax), %rsi
+    movq %rsi, (%r8,%rcx,8)
+    movl %r9d, \previous_offset(%r10)
+    testq %r9, %r9
+    jne 1f
+    movq {AOT_CTX_FULLTRACER_LATEST_LEN_OFFSET}(%r12), %r8
+    incq (%r8)
+1:
+.endm
+
+.globl ceno_aot_gpu_replay_emit_step
+.hidden ceno_aot_gpu_replay_emit_step
+.type ceno_aot_gpu_replay_emit_step, @function
+ceno_aot_gpu_replay_emit_step:
+    movq {AOT_CTX_FULLTRACER_RECORDS_OFFSET}(%r12), %r10
+    movq {AOT_CTX_FULLTRACER_LEN_OFFSET}(%r12), %r8
+    movq (%r8), %rcx
+    shlq $6, %rcx
+    addq %rcx, %r10
+    pxor %xmm0, %xmm0
+    movdqu %xmm0, 0(%r10)
+    movdqu %xmm0, 16(%r10)
+    movdqu %xmm0, 32(%r10)
+    movdqu %xmm0, 48(%r10)
+
+    movq {AOT_CTX_FULLTRACER_PENDING_INDEX_OFFSET}(%r12), %r8
+    movq (%r8), %rcx
+    movl %ecx, 0(%r10)
+    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %ecx
+    movl %ecx, 4(%r10)
+    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %ecx
+    movl %ecx, 8(%r10)
+    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %ecx
+    subl {AOT_CTX_PROGRAM_BASE_OFFSET}(%r12), %ecx
+    shrl $2, %ecx
+    imulq $12, %rcx, %rcx
+    movq {AOT_CTX_INSTRUCTIONS_OFFSET}(%r12), %r8
+    movl 8(%r8,%rcx), %ecx
+    movl %ecx, 12(%r10)
+
+    movq {AOT_CTX_FULLTRACER_PENDING_CYCLE_OFFSET}(%r12), %r8
+    movq (%r8), %rax
+    movl {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12), %edi
+    testl ${NATIVE_TRACE_READ_RS1}, %edi
+    je .L_gpu_replay_rs1_skip
+    orl $1, 60(%r10)
+    movl {AOT_CTX_TRACE_RS1_IDX_OFFSET}(%r12), %edx
+    shll $6, %edx
+    movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %ecx
+    movl %ecx, 20(%r10)
+    GPU_REPLAY_ACCESS 16, 0
+.L_gpu_replay_rs1_skip:
+    testl ${NATIVE_TRACE_READ_RS2}, %edi
+    je .L_gpu_replay_rs2_skip
+    orl $2, 60(%r10)
+    movl {AOT_CTX_TRACE_RS2_IDX_OFFSET}(%r12), %edx
+    shll $6, %edx
+    movl {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12), %ecx
+    movl %ecx, 28(%r10)
+    GPU_REPLAY_ACCESS 24, 1
+.L_gpu_replay_rs2_skip:
+    testl ${NATIVE_TRACE_WRITE_RD}, %edi
+    je .L_gpu_replay_rd_skip
+    orl $4, 60(%r10)
+    movl {AOT_CTX_TRACE_RD_IDX_OFFSET}(%r12), %edx
+    shll $6, %edx
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %ecx
+    movl %ecx, 36(%r10)
+    movl {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12), %ecx
+    movl %ecx, 40(%r10)
+    GPU_REPLAY_ACCESS 32, 2
+.L_gpu_replay_rd_skip:
+    testl $24, %edi
+    je .L_gpu_replay_mem_skip
+    orl $8, 60(%r10)
+    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %edx
+    movl %edx, 48(%r10)
+    movl {AOT_CTX_TRACE_MEM_BEFORE_OFFSET}(%r12), %ecx
+    movl %ecx, 52(%r10)
+    movl {AOT_CTX_TRACE_MEM_AFTER_OFFSET}(%r12), %ecx
+    movl %ecx, 56(%r10)
+    movq {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12), %rcx
+    leal 3(,%ecx,4), %esi
+    testl %ecx, %ecx
+    cmovzl %ecx, %esi
+    movl %esi, 44(%r10)
+
+    leal (,%rdx,4), %esi
+    leal 4(%rsi), %ecx
+    cmpl {AOT_CTX_HEAP_START_OFFSET}(%r12), %esi
+    jb .L_gpu_replay_heap_done
+    cmpl {AOT_CTX_HEAP_END_OFFSET}(%r12), %esi
+    jae .L_gpu_replay_heap_done
+    movq {AOT_CTX_FULLTRACER_MAX_HEAP_OFFSET}(%r12), %r8
+    cmpl (%r8), %ecx
+    jbe .L_gpu_replay_heap_done
+    movl %ecx, (%r8)
+.L_gpu_replay_heap_done:
+    cmpl {AOT_CTX_HINTS_START_OFFSET}(%r12), %esi
+    jb .L_gpu_replay_hint_done
+    cmpl {AOT_CTX_HINTS_END_OFFSET}(%r12), %esi
+    jae .L_gpu_replay_hint_done
+    movq {AOT_CTX_FULLTRACER_MAX_HINT_OFFSET}(%r12), %r8
+    cmpl (%r8), %ecx
+    jbe .L_gpu_replay_hint_done
+    movl %ecx, (%r8)
+.L_gpu_replay_hint_done:
+.L_gpu_replay_mem_skip:
+    movq {AOT_CTX_FULLTRACER_LEN_OFFSET}(%r12), %r8
+    incq (%r8)
+    movq {AOT_CTX_FULLTRACER_PENDING_INDEX_OFFSET}(%r12), %r8
+    incq (%r8)
+    movq {AOT_CTX_FULLTRACER_PENDING_CYCLE_OFFSET}(%r12), %r8
+    addq $4, (%r8)
+    ret
+"#
+    )?;
     Ok(())
 }
 
@@ -3269,7 +3420,17 @@ fn emit_after_native_step(
             file,
             "    cmpl ${AOT_TRACE_MODE_FULLTRACER_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
         )?;
+        writeln!(file, "    je 1f")?;
+        writeln!(
+            file,
+            "    cmpl ${AOT_TRACE_MODE_GPU_REPLAY_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
+        )?;
         writeln!(file, "    jne {callback_label}")?;
+        emit_native_trace_metadata(&mut file, pc, program, insn)?;
+        writeln!(file, "    call ceno_aot_gpu_replay_emit_step")?;
+        writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
+        writeln!(file, "    jmp {done_label}")?;
+        writeln!(file, "1:")?;
         emit_native_trace_metadata(&mut file, pc, program, insn)?;
         writeln!(file, "    call ceno_aot_fulltracer_emit_step")?;
         writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
@@ -5155,11 +5316,11 @@ fn emit_preflight_direct_memory_access_cached(
 ) -> Result<()> {
     let event_label = format!(".L_preflight_memory_event_{pc:x}");
     let done_label = format!(".L_preflight_memory_event_done_{pc:x}");
-    if let Some(prev_stamp_reg) = prev_stamp_reg
-        && prev_stamp_reg != prev_work_reg
-    {
-        writeln!(file, "    movq {prev_stamp_reg}, {prev_work_reg}")?;
-    } else if prev_stamp_reg.is_none() {
+    if let Some(prev_stamp_reg) = prev_stamp_reg {
+        if prev_stamp_reg != prev_work_reg {
+            writeln!(file, "    movq {prev_stamp_reg}, {prev_work_reg}")?;
+        }
+    } else {
         writeln!(
             file,
             "    movq {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12), {prev_work_reg}"
@@ -6491,6 +6652,10 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
 ) -> u32 {
     let fallback_started = Instant::now();
     let context = unsafe { &mut *(context as *mut AotRuntimeContext) };
+    if context.trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT {
+        let replay_vm = unsafe { &mut *(context.vm as *mut VMState<crate::GpuReplayTracer>) };
+        replay_vm.tracer_mut().sync_native_replay();
+    }
     let vm = unsafe { &mut *(context.vm as *mut VMState<T>) };
     context.fallback_steps += 1;
     let reason = if context.fallback_reason == AOT_FALLBACK_DYNAMIC_PC
@@ -6600,8 +6765,8 @@ unsafe extern "C" fn ceno_aot_pure_ecall_callback(
     let context = unsafe { &mut *(raw_context as *mut AotRuntimeContext) };
     if context.fallback_reason == AOT_FALLBACK_ECALL {
         let code = unsafe { *context.registers.add(Platform::reg_ecall() as usize) };
-        if let Some(index) = pure_ecall_index(code)
-            && unsafe {
+        if let Some(index) = pure_ecall_index(code) {
+            if unsafe {
                 crate::syscalls::pure::execute(
                     code,
                     context.registers,
@@ -6610,15 +6775,15 @@ unsafe extern "C" fn ceno_aot_pure_ecall_callback(
                     context.memory_end_word,
                     context.pure_double_cache,
                 )
+            } {
+                context.fallback_steps += 1;
+                context.fallback_ecall += 1;
+                unsafe {
+                    (*context.pure_ecall_counts)[index] += 1;
+                    *next_pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+                }
+                return AOT_STATUS_CONTINUE;
             }
-        {
-            context.fallback_steps += 1;
-            context.fallback_ecall += 1;
-            unsafe {
-                (*context.pure_ecall_counts)[index] += 1;
-                *next_pc = pc.wrapping_add(PC_STEP_SIZE as u32);
-            }
-            return AOT_STATUS_CONTINUE;
         }
     }
     unsafe { aot_exec_one::<PureAotTracer>(raw_context, pc, next_pc) }
@@ -8801,6 +8966,70 @@ mod tests {
             aot_vm.tracer().recorded_steps(),
             interp.tracer().recorded_steps()
         );
+    }
+
+    #[test]
+    fn aot_gpu_replay_direct_matches_fulltracer_runtime_values() {
+        let base = CENO_PLATFORM.heap.start;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 7),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 11),
+            encode_rv32(InsnKind::ADD, 1, 2, 3, 0),
+            encode_rv32(InsnKind::SW, 20, 3, 0, 0),
+            encode_rv32(InsnKind::LW, 20, 0, 4, 0),
+        ]));
+        let aot = AotProgram::compile_fulltracer(program.clone()).unwrap();
+
+        let mut full = VMState::<crate::FullTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            crate::FullTracerConfig { max_step_shard: 5 },
+        );
+        full.init_register_unsafe(20, base);
+        full.init_memory(ByteAddr(base).waddr(), 0);
+        for _ in 0..5 {
+            full.next_step_record().unwrap().unwrap();
+        }
+
+        let mut compact = VMState::<crate::GpuReplayTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            crate::GpuReplayTracerConfig { chunk_capacity: 8 },
+        );
+        compact.init_register_unsafe(20, base);
+        compact.init_memory(ByteAddr(base).waddr(), 0);
+        aot.run_to_halt(&mut compact, 5).unwrap();
+        compact.tracer_mut().finish_chunks();
+        let chunks = compact.tracer_mut().take_sealed_chunks();
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].fallback.is_empty());
+        assert_eq!(chunks[0].ordinary.len(), 5);
+
+        for (actual, expected) in chunks[0]
+            .ordinary
+            .iter()
+            .zip(full.tracer().recorded_steps())
+        {
+            assert_eq!(
+                actual.pc_before,
+                expected.pc().before.0,
+                "ordinal {} compact record: {:?}",
+                actual.ordinal,
+                actual
+            );
+            assert_eq!(actual.pc_after, expected.pc().after.0);
+            assert_eq!(actual.raw_instruction, expected.insn().raw);
+            assert_eq!(actual.rs1.value, expected.rs1().map_or(0, |op| op.value));
+            assert_eq!(actual.rs2.value, expected.rs2().map_or(0, |op| op.value));
+            assert_eq!(
+                actual.rd.value_after,
+                expected.rd().map_or(0, |op| op.value.after)
+            );
+            assert_eq!(
+                actual.memory.value_after,
+                expected.memory_op().map_or(0, |op| op.value.after)
+            );
+        }
     }
 
     #[test]

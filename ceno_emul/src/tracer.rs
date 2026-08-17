@@ -1634,6 +1634,8 @@ pub struct GpuReplayTracer {
     current: GpuReplayChunk,
     sealed: Vec<GpuReplayChunk>,
     ordinal: usize,
+    native_ordinary_len: usize,
+    native_annotated_len: usize,
     shard_start_cycle: Cycle,
     latest_accesses: LatestAccesses,
     next_accesses: Arc<NextAccessTape>,
@@ -1661,6 +1663,8 @@ impl GpuReplayTracer {
             current: GpuReplayChunk::with_capacity(0, shard_start_cycle, config.chunk_capacity),
             sealed: Vec::new(),
             ordinal: 0,
+            native_ordinary_len: 0,
+            native_annotated_len: 0,
             shard_start_cycle,
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: Arc::new(NextAccessTape::default()),
@@ -1674,6 +1678,7 @@ impl GpuReplayTracer {
     }
 
     fn seal_current(&mut self) {
+        self.sync_native_replay();
         if self.current.is_empty() {
             return;
         }
@@ -1684,6 +1689,8 @@ impl GpuReplayTracer {
             self.config.chunk_capacity,
         );
         self.sealed.push(std::mem::replace(&mut self.current, next));
+        self.native_ordinary_len = 0;
+        self.native_annotated_len = 0;
     }
 
     pub fn finish_chunks(&mut self) {
@@ -1696,6 +1703,8 @@ impl GpuReplayTracer {
         self.finish_chunks();
         self.shard_start_cycle = self.pending.cycle;
         self.ordinal = 0;
+        self.native_ordinary_len = 0;
+        self.native_annotated_len = 0;
         self.syscall_witnesses.clear();
         self.current =
             GpuReplayChunk::with_capacity(0, self.shard_start_cycle, self.config.chunk_capacity);
@@ -1707,6 +1716,53 @@ impl GpuReplayTracer {
 
     pub fn syscall_witnesses(&self) -> &[SyscallWitness] {
         &self.syscall_witnesses
+    }
+
+    #[inline(always)]
+    pub(crate) fn sync_native_ordinary(&mut self) {
+        assert!(
+            self.native_ordinary_len <= self.current.ordinary.capacity(),
+            "native GPU replay writer exceeded its chunk capacity"
+        );
+        if self.current.ordinary.len() != self.native_ordinary_len {
+            // The direct AOT recorder initializes every byte of each compact
+            // record before advancing native_ordinary_len.
+            unsafe { self.current.ordinary.set_len(self.native_ordinary_len) };
+        }
+    }
+
+    pub(crate) fn remaining_chunk_capacity(&self) -> usize {
+        self.config
+            .chunk_capacity
+            .saturating_sub(self.current.len())
+    }
+
+    pub(crate) fn sync_native_replay(&mut self) {
+        self.sync_native_ordinary();
+        while self.native_annotated_len < self.current.ordinary.len() {
+            let record = &mut self.current.ordinary[self.native_annotated_len];
+            let start = record.cycle(self.shard_start_cycle);
+            let end = start + FullTracer::SUBCYCLES_PER_INSN;
+            while let Some(event) = self.next_accesses.events().get(self.next_access_cursor) {
+                if event.source_cycle >= end {
+                    break;
+                }
+                assert!(
+                    event.source_cycle >= start,
+                    "GPU replay skipped next-access event"
+                );
+                let bit = match event.source_cycle - start {
+                    FullTracer::SUBCYCLE_RS1 => StepRecord::FUTURE_ACCESS_RS1,
+                    FullTracer::SUBCYCLE_RS2 => StepRecord::FUTURE_ACCESS_RS2,
+                    FullTracer::SUBCYCLE_RD => StepRecord::FUTURE_ACCESS_RD,
+                    FullTracer::SUBCYCLE_MEM => StepRecord::FUTURE_ACCESS_MEM,
+                    _ => panic!("GPU replay access/tape mismatch"),
+                };
+                record.flags |= (bit as u32) << GpuReplayOrdinaryRecord::FUTURE_ACCESS_SHIFT;
+                self.next_access_cursor += 1;
+            }
+            self.native_annotated_len += 1;
+        }
     }
 
     fn checked_cycle(cycle: Cycle) -> u32 {
@@ -1842,6 +1898,42 @@ impl GpuReplayTracer {
             self.max_heap_addr_access = self.max_heap_addr_access.max(access_end);
         } else if start_addr.baddr().0 == self.platform.hints.start {
             self.max_hint_addr_access = self.max_hint_addr_access.max(access_end);
+        }
+    }
+}
+
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub(crate) struct GpuReplayNativeTraceState {
+    pub records: *mut GpuReplayOrdinaryRecord,
+    pub len: *mut usize,
+    pub ordinal: *mut usize,
+    pub pending_cycle: *mut Cycle,
+    pub latest_cells: *mut Cycle,
+    pub latest_base: WordAddr,
+    pub latest_len: *mut usize,
+    pub max_heap_addr_access: *mut ByteAddr,
+    pub max_hint_addr_access: *mut ByteAddr,
+}
+
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+impl GpuReplayTracer {
+    pub(crate) fn native_trace_state(&mut self) -> GpuReplayNativeTraceState {
+        self.sync_native_ordinary();
+        assert_eq!(
+            self.current.ordinary.len(),
+            self.native_ordinary_len,
+            "GPU replay native length is out of sync"
+        );
+        GpuReplayNativeTraceState {
+            records: self.current.ordinary.as_mut_ptr(),
+            len: &mut self.native_ordinary_len,
+            ordinal: &mut self.ordinal,
+            pending_cycle: &mut self.pending.cycle,
+            latest_cells: self.latest_accesses.cells_mut_ptr(),
+            latest_base: self.latest_accesses.base(),
+            latest_len: &mut self.latest_accesses.len,
+            max_heap_addr_access: &mut self.max_heap_addr_access,
+            max_hint_addr_access: &mut self.max_hint_addr_access,
         }
     }
 }
@@ -2076,25 +2168,26 @@ impl FullTracer {
             .mmio_min_max_access
             .as_mut()
             .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
-            && addr < *end_addr
         {
-            if addr >= *max_addr {
-                *max_addr = addr + WordAddr::from(WORD_SIZE as u32);
-            }
-            if addr < *min_addr {
-                *min_addr = addr;
-            }
-            if start_addr.baddr().0 == self.platform.heap.start {
-                let access_end = addr + WordAddr::from(WORD_SIZE as u32);
-                let access_end_baddr = access_end.baddr();
-                if access_end_baddr > self.max_heap_addr_access {
-                    self.max_heap_addr_access = access_end_baddr;
+            if addr < *end_addr {
+                if addr >= *max_addr {
+                    *max_addr = addr + WordAddr::from(WORD_SIZE as u32);
                 }
-            } else if start_addr.baddr().0 == self.platform.hints.start {
-                let access_end = addr + WordAddr::from(WORD_SIZE as u32);
-                let access_end_baddr = access_end.baddr();
-                if access_end_baddr > self.max_hint_addr_access {
-                    self.max_hint_addr_access = access_end_baddr;
+                if addr < *min_addr {
+                    *min_addr = addr;
+                }
+                if start_addr.baddr().0 == self.platform.heap.start {
+                    let access_end = addr + WordAddr::from(WORD_SIZE as u32);
+                    let access_end_baddr = access_end.baddr();
+                    if access_end_baddr > self.max_heap_addr_access {
+                        self.max_heap_addr_access = access_end_baddr;
+                    }
+                } else if start_addr.baddr().0 == self.platform.hints.start {
+                    let access_end = addr + WordAddr::from(WORD_SIZE as u32);
+                    let access_end_baddr = access_end.baddr();
+                    if access_end_baddr > self.max_hint_addr_access {
+                        self.max_hint_addr_access = access_end_baddr;
+                    }
                 }
             }
         }
@@ -2815,8 +2908,10 @@ impl PreflightTracer {
             .mmio_min_max_access
             .as_mut()
             .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
-            && addr < *end_addr
         {
+            if addr >= *end_addr {
+                return;
+            }
             // skip if the target address is not within the range tracked by this MMIO region
             // this condition ensures the address is within the MMIO region's end address
             if addr >= *max_addr {
@@ -3132,6 +3227,7 @@ impl Tracer for GpuReplayTracer {
 
     #[inline(always)]
     fn advance(&mut self) -> Self::Record {
+        self.sync_native_ordinary();
         self.annotate_pending();
         let busy_loop = self.pending.is_busy_loop();
         let ordinal = u32::try_from(self.ordinal).expect("GPU replay ordinal exceeds u32");
@@ -3142,6 +3238,7 @@ impl Tracer for GpuReplayTracer {
             });
         } else {
             self.current.ordinary.push(self.compact_pending());
+            self.native_ordinary_len = self.current.ordinary.len();
         }
         self.ordinal += 1;
         if self.current.len() == self.config.chunk_capacity {
