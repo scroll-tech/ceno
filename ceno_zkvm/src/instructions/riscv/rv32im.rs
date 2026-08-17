@@ -1340,6 +1340,19 @@ impl InstructionDispatchCtx {
         }
     }
 
+    #[inline(always)]
+    pub fn ingest_compact(&mut self, ordinal: StepIndex, kind: InsnKind) {
+        let record_buffer_idx = self.insn_to_record_buffer[kind as usize]
+            .unwrap_or_else(|| panic!("ordinary instruction {kind:?} has no compact GPU circuit"));
+        self.circuit_record_buffers[record_buffer_idx].push(ordinal);
+    }
+
+    pub fn finish_compact_ingest(&mut self) {
+        for records in &mut self.circuit_record_buffers {
+            records.sort_unstable();
+        }
+    }
+
     fn reset_record_buffers(&mut self) {
         for record_buffer in &mut self.circuit_record_buffers {
             record_buffer.clear();

@@ -1718,6 +1718,18 @@ impl GpuReplayTracer {
         &self.syscall_witnesses
     }
 
+    pub fn take_syscall_witnesses(&mut self) -> Vec<SyscallWitness> {
+        std::mem::take(&mut self.syscall_witnesses)
+    }
+
+    pub fn max_heap_addr_access(&self) -> ByteAddr {
+        self.max_heap_addr_access
+    }
+
+    pub fn max_hint_addr_access(&self) -> ByteAddr {
+        self.max_hint_addr_access
+    }
+
     #[inline(always)]
     pub(crate) fn sync_native_ordinary(&mut self) {
         assert!(
@@ -1731,7 +1743,7 @@ impl GpuReplayTracer {
         }
     }
 
-    pub(crate) fn remaining_chunk_capacity(&self) -> usize {
+    pub fn remaining_chunk_capacity(&self) -> usize {
         self.config
             .chunk_capacity
             .saturating_sub(self.current.len())

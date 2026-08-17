@@ -4,7 +4,9 @@
 /// 1. Runs the GPU kernel to fill the witness matrix (fast)
 /// 2. Runs a lightweight CPU loop to collect lk and shardram without witness replay
 /// 3. Returns the GPU-generated witness + CPU-collected lk and shardram
-use ceno_emul::{StepIndex, StepRecord, WordAddr};
+use ceno_emul::{
+    FullTracer, GpuReplayOrdinaryRecord, GpuReplayShardArenas, StepIndex, StepRecord, WordAddr,
+};
 use ceno_gpu::{
     Buffer,
     bb31::CudaHalBB31,
@@ -16,7 +18,7 @@ use ceno_gpu::{
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use p3::field::PrimeCharacteristicRing as FieldAlgebra;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use tracing::info_span;
 use witness::RowMajorMatrix;
 
@@ -69,7 +71,10 @@ pub use super::cache::{
     invalidate_shard_steps_cache, take_shared_device_buffers,
 };
 use super::{
-    cache::{begin_gpu_shard_session, take_shared_lk_counters, with_cached_gpu_ctx_opt},
+    cache::{
+        begin_gpu_shard_session, ensure_compact_shard_metadata_cached, take_shared_lk_counters,
+        upload_compact_steps_cached, with_cached_gpu_ctx_opt,
+    },
     utils::d2h::{
         CompactEcBuf, LkResult, RamBuf, WitResult, gpu_collect_shard_records, gpu_compact_ec_d2h,
         gpu_lk_counters_to_multiplicity, gpu_witness_to_rmm, gpu_witness_to_rmm_d2h,
@@ -89,6 +94,59 @@ pub fn flush_shared_lk_counters() -> Result<Option<Multiplicity<u64>>, ZKVMError
 thread_local! {
     /// Thread-local flag to force CPU path (used by debug comparison code).
     static FORCE_CPU_PATH: Cell<bool> = const { Cell::new(false) };
+    static COMPACT_REPLAY_ARENAS: RefCell<Option<(GpuReplayShardArenas, (u32, usize))>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn install_compact_replay_arenas(arenas: GpuReplayShardArenas) {
+    let mut min_pc = u32::MAX;
+    let mut max_pc = 0;
+    for record in arenas.families.iter().flatten() {
+        min_pc = min_pc.min(record.pc_before);
+        max_pc = max_pc.max(record.pc_before);
+    }
+    let fetch_params = if min_pc <= max_pc {
+        (min_pc, ((max_pc - min_pc) / 4 + 1) as usize)
+    } else {
+        (0, 1)
+    };
+    COMPACT_REPLAY_ARENAS.with(|slot| {
+        assert!(
+            slot.borrow().is_none(),
+            "compact replay arenas already installed"
+        );
+        *slot.borrow_mut() = Some((arenas, fetch_params));
+    });
+}
+
+pub(crate) fn clear_compact_replay_arenas() {
+    COMPACT_REPLAY_ARENAS.with(|slot| {
+        let arenas = slot.borrow_mut().take();
+        if let Some((arenas, _)) = arenas {
+            let remaining: usize = arenas.families.iter().map(Vec::len).sum();
+            assert_eq!(
+                remaining, 0,
+                "compact replay left ordinary records unconsumed"
+            );
+        }
+    });
+}
+
+fn take_compact_records<E: ExtensionField, I: Instruction<E, InsnType = ceno_emul::InsnKind>>()
+-> Option<Vec<GpuReplayOrdinaryRecord>> {
+    COMPACT_REPLAY_ARENAS.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let (arenas, _) = slot.as_mut()?;
+        let mut records = Vec::new();
+        for &kind in I::inst_kinds() {
+            records.append(&mut arenas.families[kind as usize]);
+        }
+        records.sort_unstable_by_key(|record| record.ordinal);
+        Some(records)
+    })
+}
+
+fn compact_shard_fetch_params() -> Option<(u32, usize)> {
+    COMPACT_REPLAY_ARENAS.with(|slot| slot.borrow().as_ref().map(|(_, fetch)| *fetch))
 }
 
 /// Force the current thread to use CPU path for all GPU witgen calls.
@@ -111,7 +169,10 @@ pub(crate) fn is_force_cpu_path() -> bool {
 /// - `GpuWitgenKind::Lw`  requires `I` to be `LoadInstruction`  (config = `LoadConfig<E>`)
 ///
 /// Violating this will cause undefined behavior via pointer cast in [`gpu_fill_witness`].
-pub(crate) fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
+pub(crate) fn try_gpu_assign_instances<
+    E: ExtensionField,
+    I: Instruction<E, InsnType = ceno_emul::InsnKind>,
+>(
     config: &I::InstructionConfig,
     shard_ctx: &mut ShardContext,
     num_witin: usize,
@@ -134,7 +195,13 @@ pub(crate) fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
         return Ok(None);
     }
 
-    let total_instances = step_indices.len();
+    let compact_records = take_compact_records::<E, I>();
+    let total_instances = compact_records
+        .as_ref()
+        .map_or(step_indices.len(), Vec::len);
+    if compact_records.is_some() {
+        assert_eq!(total_instances, step_indices.len());
+    }
     if total_instances == 0 {
         // Empty: just return empty matrices
         let num_witin = num_witin.max(1);
@@ -170,6 +237,7 @@ pub(crate) fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
             num_structural_witin,
             shard_steps,
             step_indices,
+            compact_records.as_deref(),
             kind,
             &hal,
         )
@@ -208,6 +276,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     num_structural_witin: usize,
     shard_steps: &[StepRecord],
     step_indices: &[StepIndex],
+    compact_records: Option<&[GpuReplayOrdinaryRecord]>,
     kind: GpuWitgenKind,
     hal: &CudaHalBB31,
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
@@ -225,7 +294,10 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
         gpu_compact_ec,
         gpu_compact_addr,
     ) = info_span!("gpu_kernel").in_scope(|| {
-        let fetch_params = compute_fetch_params(shard_steps, step_indices);
+        let fetch_params = compact_records.map_or_else(
+            || compute_fetch_params(shard_steps, step_indices),
+            compute_compact_fetch_params,
+        );
         gpu_fill_witness::<E, I>(
             hal,
             config,
@@ -233,6 +305,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
             num_witin,
             Some(shard_steps),
             step_indices,
+            compact_records,
             None,
             kind,
             shard_ctx.current_shard_offset_cycle(),
@@ -463,6 +536,14 @@ pub(crate) fn compute_fetch_params(
     (fetch_base_pc, fetch_num_slots)
 }
 
+fn compute_compact_fetch_params(records: &[GpuReplayOrdinaryRecord]) -> (u32, usize) {
+    let Some(min_pc) = records.iter().map(|record| record.pc_before).min() else {
+        return (0, 0);
+    };
+    let max_pc = records.iter().map(|record| record.pc_before).max().unwrap();
+    (min_pc, ((max_pc - min_pc) / 4 + 1) as usize)
+}
+
 /// GPU kernel dispatch based on instruction kind.
 /// All kinds return witness + LK counters (merged into single GPU kernel).
 fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
@@ -472,6 +553,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     num_witin: usize,
     shard_steps: Option<&[StepRecord]>,
     step_indices: &[StepIndex],
+    compact_records: Option<&[GpuReplayOrdinaryRecord]>,
     cached_step_indices: Option<&BufferImpl<'static, u32>>,
     kind: GpuWitgenKind,
     shard_offset: u64,
@@ -488,14 +570,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     ZKVMError,
 > {
     let fill_mode = GpuFillMode::from_optional_ctx(shard_ctx, shard_steps);
-    if let (Some(shard_ctx), Some(shard_steps)) = (shard_ctx, shard_steps) {
-        // Ensure shard-scoped GPU raw data is ready for this kernel dispatch.
-        let _session = info_span!("begin_shard_session")
-            .in_scope(|| begin_gpu_shard_session(hal, shard_ctx, shard_steps))?;
+    if compact_records.is_none() {
+        if let (Some(shard_ctx), Some(shard_steps)) = (shard_ctx, shard_steps) {
+            // Ensure shard-scoped GPU raw data is ready for this kernel dispatch.
+            let _session = info_span!("begin_shard_session")
+                .in_scope(|| begin_gpu_shard_session(hal, shard_ctx, shard_steps))?;
+        }
+    } else if let (Some(shard_ctx), Some(records)) = (shard_ctx, compact_records) {
+        upload_compact_steps_cached(hal, records, shard_ctx.shard_id)?;
+        let logical_steps = (shard_ctx.cur_shard_cycle_range.end
+            - shard_ctx.cur_shard_cycle_range.start)
+            / FullTracer::SUBCYCLES_PER_INSN as usize;
+        ensure_compact_shard_metadata_cached(
+            hal,
+            shard_ctx,
+            logical_steps,
+            compact_shard_fetch_params().unwrap_or(fetch_params),
+        )?;
     }
 
     // Convert step_indices from usize to u32 for GPU.
-    let indices_u32: Vec<u32> = if cached_step_indices.is_none() {
+    let indices_u32: Vec<u32> = if compact_records.is_some() {
+        vec![0]
+    } else if cached_step_indices.is_none() {
         info_span!("indices_u32", n = step_indices.len())
             .in_scope(|| step_indices.iter().map(|&i| i as u32).collect())
     } else {

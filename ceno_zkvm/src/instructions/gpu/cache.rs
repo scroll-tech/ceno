@@ -94,6 +94,29 @@ pub(crate) fn upload_shard_steps_cached(
     })
 }
 
+pub(crate) fn upload_compact_steps_cached(
+    hal: &CudaHalBB31,
+    records: &[ceno_emul::GpuReplayOrdinaryRecord],
+    shard_id: usize,
+) -> Result<(), ZKVMError> {
+    let ptr = records.as_ptr() as usize;
+    let byte_len = std::mem::size_of_val(records);
+    SHARD_STEPS_DEVICE.with(|cache| {
+        let bytes = unsafe { std::slice::from_raw_parts(records.as_ptr().cast::<u8>(), byte_len) };
+        let device_buf = hal.inner.htod_copy_stream(None, bytes).map_err(|e| {
+            ZKVMError::InvalidWitness(format!("compact replay H2D failed: {e}").into())
+        })?;
+        *cache.borrow_mut() = Some(ShardStepsCache {
+            host_ptr: ptr,
+            byte_len,
+            shard_id,
+            n_steps: records.len(),
+            device_buf,
+        });
+        Ok(())
+    })
+}
+
 /// Borrow the cached device buffer for kernel launch.
 /// Panics if `upload_shard_steps_cached` was not called first.
 pub(crate) fn with_cached_shard_steps<R>(f: impl FnOnce(&CudaSlice<u8>) -> R) -> R {
@@ -317,6 +340,25 @@ pub(crate) fn ensure_shard_metadata_cached(
     shard_ctx: &ShardContext,
     shard_steps: &[StepRecord],
 ) -> Result<(), ZKVMError> {
+    ensure_shard_metadata_cached_inner(hal, shard_ctx, shard_steps.len(), None, shard_steps)
+}
+
+pub(crate) fn ensure_compact_shard_metadata_cached(
+    hal: &CudaHalBB31,
+    shard_ctx: &ShardContext,
+    logical_steps: usize,
+    fetch_params: (u32, usize),
+) -> Result<(), ZKVMError> {
+    ensure_shard_metadata_cached_inner(hal, shard_ctx, logical_steps, Some(fetch_params), &[])
+}
+
+fn ensure_shard_metadata_cached_inner(
+    hal: &CudaHalBB31,
+    shard_ctx: &ShardContext,
+    logical_steps: usize,
+    fetch_params: Option<(u32, usize)>,
+    shard_steps: &[StepRecord],
+) -> Result<(), ZKVMError> {
     let shard_id = shard_ctx.shard_id;
     SHARD_META_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
@@ -404,7 +446,7 @@ pub(crate) fn ensure_shard_metadata_cached(
         // Addr records: every gpu_send() emits one (dense).
         //   4 bytes each (1 u32). Cap at 256M entries ≈ 1 GB.
         let max_ops_per_step = 52u64; // keccak worst case
-        let total_ops_estimate = shard_steps.len() as u64 * max_ops_per_step;
+        let total_ops_estimate = logical_steps as u64 * max_ops_per_step;
         let ec_capacity = total_ops_estimate.min(16 * 1024 * 1024) as usize;
         let ec_u32s = ec_capacity * 26; // 26 u32s per GpuShardRamRecord (104 bytes)
         let addr_capacity = total_ops_estimate.min(256 * 1024 * 1024) as usize;
@@ -426,21 +468,23 @@ pub(crate) fn ensure_shard_metadata_cached(
         })?;
 
         let shared_lk_counters = if super::config::is_shard_lk_accum_enabled() {
-            let (fetch_base_pc, fetch_max_pc) = shard_steps
-                .par_iter()
-                .map(|step| {
-                    let pc = step.pc().before.0;
-                    (pc, pc)
-                })
-                .reduce(|| (u32::MAX, 0), |a, b| (a.0.min(b.0), a.1.max(b.1)));
-            let (fetch_base_pc, fetch_num_slots) = if fetch_base_pc <= fetch_max_pc {
-                (
-                    fetch_base_pc,
-                    ((fetch_max_pc - fetch_base_pc) / 4 + 1) as usize,
-                )
-            } else {
-                (0, 1)
-            };
+            let (fetch_base_pc, fetch_num_slots) = fetch_params.unwrap_or_else(|| {
+                let (fetch_base_pc, fetch_max_pc) = shard_steps
+                    .par_iter()
+                    .map(|step| {
+                        let pc = step.pc().before.0;
+                        (pc, pc)
+                    })
+                    .reduce(|| (u32::MAX, 0), |a, b| (a.0.min(b.0), a.1.max(b.1)));
+                if fetch_base_pc <= fetch_max_pc {
+                    (
+                        fetch_base_pc,
+                        ((fetch_max_pc - fetch_base_pc) / 4 + 1) as usize,
+                    )
+                } else {
+                    (0, 1)
+                }
+            });
             let dense_flags = LK_DENSE_DOUBLE_U8
                 | LK_DENSE_AND
                 | LK_DENSE_OR

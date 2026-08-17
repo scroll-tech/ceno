@@ -189,7 +189,7 @@ pub fn assert_witness_colmajor_eq<F: std::fmt::Debug + PartialEq>(
 #[cfg(test)]
 pub fn assert_full_gpu_pipeline<
     E: ff_ext::ExtensionField,
-    I: crate::instructions::Instruction<E>,
+    I: crate::instructions::Instruction<E, InsnType = ceno_emul::InsnKind>,
 >(
     config: &I::InstructionConfig,
     steps: &[ceno_emul::StepRecord],
