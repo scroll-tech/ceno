@@ -62,9 +62,12 @@ mod tests {
     #[test]
     fn test_gpu_witgen_logic_i_correctness() {
         use crate::{
-            e2e::ShardContext, instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq,
+            e2e::ShardContext,
+            instructions::gpu::utils::test_helpers::{
+                assert_witness_colmajor_eq, compact_records_as_bytes, compact_records_from_steps,
+            },
         };
-        use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32u};
+        use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
         let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
@@ -98,10 +101,12 @@ mod tests {
                         (i as u32) % 4096,
                     )
                 };
-                let rd_after = rs1 & imm; // ANDI
+                let signed_imm = ((imm << 20) as i32) >> 20;
+                let rd_after = rs1 & signed_imm as u32; // ANDI
                 let cycle = 4 + (i as u64) * 4;
                 let pc = ByteAddr(0x1000 + (i as u32) * 4);
-                let insn_code = encode_rv32u(InsnKind::ANDI, 2, 0, 4, imm);
+                let mut insn_code = encode_rv32(InsnKind::ANDI, 2, 0, 4, signed_imm);
+                insn_code.raw = (imm << 20) | (2 << 15) | (7 << 12) | (4 << 7) | 0x13;
                 StepRecord::new_i_instruction(
                     cycle,
                     Change::new(pc, pc + PC_STEP_SIZE),
@@ -157,6 +162,46 @@ mod tests {
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
             gpu_result.witness.device_buffer.to_vec().unwrap();
+        let gpu_dynamic = gpu_result.lk_counters.dynamic.to_vec().unwrap();
+        let gpu_and = gpu_result.lk_counters.and_table.unwrap().to_vec().unwrap();
         assert_witness_colmajor_eq(&gpu_data, cpu_witness.values(), n, num_witin);
+
+        let compact_records = compact_records_from_steps(&steps);
+        let gpu_compact_records = hal
+            .inner
+            .htod_copy_stream(None, compact_records_as_bytes(&compact_records))
+            .unwrap();
+        let compact_result = hal
+            .witgen
+            .witgen_logic_i_compact(
+                &col_map,
+                &gpu_compact_records,
+                n,
+                shard_offset,
+                0,
+                0,
+                0,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            compact_result.witness.device_buffer.to_vec().unwrap(),
+            gpu_data
+        );
+        assert_eq!(
+            compact_result.lk_counters.dynamic.to_vec().unwrap(),
+            gpu_dynamic
+        );
+        assert_eq!(
+            compact_result
+                .lk_counters
+                .and_table
+                .unwrap()
+                .to_vec()
+                .unwrap(),
+            gpu_and
+        );
     }
 }

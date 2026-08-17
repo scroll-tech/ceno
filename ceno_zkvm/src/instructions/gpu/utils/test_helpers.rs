@@ -2,6 +2,69 @@
 // GPU correctness test helpers
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
+pub fn compact_records_from_steps(
+    steps: &[ceno_emul::StepRecord],
+) -> Vec<ceno_emul::GpuReplayOrdinaryRecord> {
+    steps
+        .iter()
+        .enumerate()
+        .map(|(ordinal, step)| {
+            let mut record = ceno_emul::GpuReplayOrdinaryRecord {
+                ordinal: ordinal as u32,
+                pc_before: step.pc().before.0,
+                pc_after: step.pc().after.0,
+                raw_instruction: step.insn().raw,
+                flags: (step.future_access_mask() as u32)
+                    << ceno_emul::GpuReplayOrdinaryRecord::FUTURE_ACCESS_SHIFT,
+                ..Default::default()
+            };
+            if let Some(rs1) = step.rs1() {
+                record.rs1 = ceno_emul::GpuReplayRead {
+                    previous_cycle: rs1.previous_cycle as u32,
+                    value: rs1.value,
+                };
+                record.flags |= ceno_emul::GpuReplayOrdinaryRecord::HAS_RS1;
+            }
+            if let Some(rs2) = step.rs2() {
+                record.rs2 = ceno_emul::GpuReplayRead {
+                    previous_cycle: rs2.previous_cycle as u32,
+                    value: rs2.value,
+                };
+                record.flags |= ceno_emul::GpuReplayOrdinaryRecord::HAS_RS2;
+            }
+            if let Some(rd) = step.rd() {
+                record.rd = ceno_emul::GpuReplayWrite {
+                    previous_cycle: rd.previous_cycle as u32,
+                    value_before: rd.value.before,
+                    value_after: rd.value.after,
+                };
+                record.flags |= ceno_emul::GpuReplayOrdinaryRecord::HAS_RD;
+            }
+            if let Some(memory) = step.memory_op() {
+                record.memory = ceno_emul::GpuReplayMemory {
+                    previous_cycle: memory.previous_cycle as u32,
+                    address: memory.addr.0,
+                    value_before: memory.value.before,
+                    value_after: memory.value.after,
+                };
+                record.flags |= ceno_emul::GpuReplayOrdinaryRecord::HAS_MEMORY;
+            }
+            record
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub fn compact_records_as_bytes(records: &[ceno_emul::GpuReplayOrdinaryRecord]) -> &[u8] {
+    unsafe {
+        std::slice::from_raw_parts(
+            records.as_ptr() as *const u8,
+            std::mem::size_of_val(records),
+        )
+    }
+}
+
 /// Compare GPU column-major witness data against CPU row-major reference.
 /// Panics with detailed mismatch info if any element differs.
 #[cfg(test)]
