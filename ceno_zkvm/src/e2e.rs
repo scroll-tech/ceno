@@ -1249,46 +1249,76 @@ impl CompactStepReplay {
         let first_hint_before = self.vm.tracer().max_hint_addr_access().0;
         let shard_start_cycle = self.vm.tracer().cycle();
         let mut executed = 0usize;
-        info_span!("compact_replay_aot").in_scope(|| {
-            while executed < expected_steps {
-                let max_steps =
-                    (expected_steps - executed).min(self.vm.tracer().remaining_chunk_capacity());
-                assert!(max_steps > 0, "compact replay chunk made no progress");
-                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-                let ran = self
-                    .aot
-                    .run_to_halt(&mut self.vm, max_steps)
-                    .unwrap_or_else(|err| panic!("AOT compact replay failed: {err:?}"))
-                    .executed_steps;
-                #[cfg(not(all(
-                    feature = "aot-x86_64",
-                    target_arch = "x86_64",
-                    target_os = "linux"
-                )))]
-                let ran = {
-                    for _ in 0..max_steps {
-                        self.vm
-                            .next_step_record()
-                            .unwrap_or_else(|err| panic!("compact replay failed: {err:?}"));
+        let program = self.program.clone();
+        let worker_count = self.worker_count;
+        let queue_depth = self.queue_depth;
+        let (mut arenas, replay_elapsed, route_elapsed, chunk_count) =
+            info_span!("compact_replay_and_route").in_scope(|| {
+                let (chunk_tx, chunk_rx) = std::sync::mpsc::sync_channel(queue_depth);
+                std::thread::scope(|scope| {
+                    let route_handle = scope.spawn(move || {
+                        let started = std::time::Instant::now();
+                        let arenas = route_gpu_replay_chunks(
+                            chunk_rx.into_iter(),
+                            program,
+                            worker_count,
+                            queue_depth,
+                        );
+                        (arenas, started.elapsed())
+                    });
+                    let replay_started = std::time::Instant::now();
+                    let mut chunk_count = 0usize;
+                    while executed < expected_steps {
+                        let max_steps = (expected_steps - executed)
+                            .min(self.vm.tracer().remaining_chunk_capacity());
+                        assert!(max_steps > 0, "compact replay chunk made no progress");
+                        #[cfg(all(
+                            feature = "aot-x86_64",
+                            target_arch = "x86_64",
+                            target_os = "linux"
+                        ))]
+                        let ran = self
+                            .aot
+                            .run_to_halt(&mut self.vm, max_steps)
+                            .unwrap_or_else(|err| panic!("AOT compact replay failed: {err:?}"))
+                            .executed_steps;
+                        #[cfg(not(all(
+                            feature = "aot-x86_64",
+                            target_arch = "x86_64",
+                            target_os = "linux"
+                        )))]
+                        let ran = {
+                            for _ in 0..max_steps {
+                                self.vm
+                                    .next_step_record()
+                                    .unwrap_or_else(|err| panic!("compact replay failed: {err:?}"));
+                            }
+                            max_steps
+                        };
+                        assert_eq!(ran, max_steps);
+                        executed += ran;
+                        self.vm.tracer_mut().finish_chunks();
+                        for chunk in self.vm.tracer_mut().take_sealed_chunks() {
+                            chunk_tx
+                                .send(chunk)
+                                .expect("compact replay routing worker stopped");
+                            chunk_count += 1;
+                        }
                     }
-                    max_steps
-                };
-                assert_eq!(ran, max_steps);
-                executed += ran;
-                self.vm.tracer_mut().finish_chunks();
-            }
-        });
-
-        let chunks = self.vm.tracer_mut().take_sealed_chunks();
-        let chunk_count = chunks.len();
-        let mut arenas = info_span!("compact_route", chunks = chunk_count).in_scope(|| {
-            route_gpu_replay_chunks(
-                chunks,
-                self.program.clone(),
-                self.worker_count,
-                self.queue_depth,
-            )
-        });
+                    let replay_elapsed = replay_started.elapsed();
+                    drop(chunk_tx);
+                    let (arenas, route_elapsed) = route_handle
+                        .join()
+                        .expect("compact replay routing worker panicked");
+                    (arenas, replay_elapsed, route_elapsed, chunk_count)
+                })
+            });
+        tracing::info!(
+            chunks = chunk_count,
+            ?replay_elapsed,
+            ?route_elapsed,
+            "compact replay and routing completed"
+        );
         arenas
             .validate_supported()
             .unwrap_or_else(|err| panic!("compact replay routing failed: {err}"));

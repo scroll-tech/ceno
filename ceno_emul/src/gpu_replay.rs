@@ -98,10 +98,20 @@ pub fn route_gpu_replay_chunks(
 
     let mut routed = output_rx.into_iter().collect::<Vec<_>>();
     routed.sort_unstable_by_key(|chunk| chunk.sequence);
+    let mut family_counts = vec![0usize; InsnKind::COUNT];
+    let mut fallback_count = 0usize;
+    let mut unsupported_count = 0usize;
+    for chunk in &routed {
+        for (count, family) in family_counts.iter_mut().zip(&chunk.families) {
+            *count += family.len();
+        }
+        fallback_count += chunk.fallback.len();
+        unsupported_count += chunk.unsupported.len();
+    }
     let mut arenas = GpuReplayShardArenas {
-        families: (0..InsnKind::COUNT).map(|_| Vec::new()).collect(),
-        fallback: Vec::new(),
-        unsupported: Vec::new(),
+        families: family_counts.into_iter().map(Vec::with_capacity).collect(),
+        fallback: Vec::with_capacity(fallback_count),
+        unsupported: Vec::with_capacity(unsupported_count),
     };
     for chunk in routed {
         for (target, source) in arenas.families.iter_mut().zip(chunk.families) {
