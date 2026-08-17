@@ -96,7 +96,10 @@ mod tests {
     #[test]
     fn test_gpu_witgen_mul_correctness() {
         use crate::{
-            e2e::ShardContext, instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq,
+            e2e::ShardContext,
+            instructions::gpu::utils::test_helpers::{
+                assert_witness_colmajor_eq, compact_records_as_bytes, compact_records_from_steps,
+            },
         };
         use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
@@ -181,7 +184,16 @@ mod tests {
                     };
                     let rd_before = (i as u32) % 200;
                     let cycle = 4 + (i as u64) * 4;
-                    let insn_code = encode_rv32(insn_kind, 2, 3, 4, 0);
+                    let mut insn_code = encode_rv32(insn_kind, 2, 3, 4, 0);
+                    let funct3 = match insn_kind {
+                        InsnKind::MUL => 0,
+                        InsnKind::MULH => 1,
+                        InsnKind::MULHSU => 2,
+                        InsnKind::MULHU => 3,
+                        _ => unreachable!(),
+                    };
+                    insn_code.raw =
+                        (1 << 25) | (3 << 20) | (2 << 15) | (funct3 << 12) | (4 << 7) | 0x33;
 
                     StepRecord::new_r_instruction(
                         cycle,
@@ -277,7 +289,36 @@ mod tests {
 
             let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
                 gpu_result.witness.device_buffer.to_vec().unwrap();
+            let gpu_dynamic = gpu_result.lk_counters.dynamic.to_vec().unwrap();
             assert_witness_colmajor_eq(&gpu_data, cpu_witness.values(), n, num_witin);
+            let compact_records = compact_records_from_steps(&steps);
+            let gpu_compact_records = hal
+                .inner
+                .htod_copy_stream(None, compact_records_as_bytes(&compact_records))
+                .unwrap();
+            let compact_result = hal
+                .witgen
+                .witgen_mul_compact(
+                    &col_map,
+                    &gpu_compact_records,
+                    n,
+                    shard_offset,
+                    mul_kind,
+                    0,
+                    0,
+                    false,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                compact_result.witness.device_buffer.to_vec().unwrap(),
+                gpu_data
+            );
+            assert_eq!(
+                compact_result.lk_counters.dynamic.to_vec().unwrap(),
+                gpu_dynamic
+            );
             eprintln!("{} GPU vs CPU: PASS ({} instances)", name, n);
         }
     }
