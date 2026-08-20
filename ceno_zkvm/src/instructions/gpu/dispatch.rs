@@ -238,9 +238,12 @@ pub(crate) fn install_compact_replay_arenas(arenas: GpuReplayShardArenas) {
                         .expect("ordinary address reservation overflow"),
                 )
                 .expect("shard address reservation overflow");
-            for &pc in arena.fields()[1].iter() {
-                min_pc = min_pc.min(pc);
-                max_pc = max_pc.max(pc);
+            if let Some((arena_min, arena_max)) = arena
+                .pc_bounds()
+                .expect("compact replay PC source is malformed")
+            {
+                min_pc = min_pc.min(arena_min);
+                max_pc = max_pc.max(arena_max);
             }
         }
     }
@@ -389,9 +392,15 @@ pub(crate) fn submit_provisional_fused_range(range: &GpuReplayTypedRange) -> Res
             .typed
             .iter()
             .flatten()
-            .flat_map(|arena: &GpuTypedSoaArena| arena.fields().iter())
-            .try_fold(0usize, |sum: usize, field: &Box<[u32]>| {
-                sum.checked_add(field.len().checked_mul(std::mem::size_of::<u32>())?)
+            .try_fold(0usize, |sum: usize, arena: &GpuTypedSoaArena| {
+                let bytes = if arena.is_compact() {
+                    arena.payload_bytes().len()
+                } else {
+                    arena.fields().iter().try_fold(0usize, |sum, field| {
+                        sum.checked_add(field.len().checked_mul(std::mem::size_of::<u32>())?)
+                    })?
+                };
+                sum.checked_add(bytes)
             })
             .ok_or_else(|| ZKVMError::InvalidWitness("typed range byte overflow".into()))?;
         let registrations = &state.registrations;
@@ -410,16 +419,23 @@ pub(crate) fn submit_provisional_fused_range(range: &GpuReplayTypedRange) -> Res
                         assert_ne!(index, usize::MAX, "missing provisional registration");
                         let registration = &registrations[index];
                         let mut offsets = [0u32; 13];
-                        for (field_index, field) in arena.fields().iter().enumerate() {
-                            offsets[field_index] = u32::try_from(cursor).unwrap();
-                            let bytes = unsafe {
-                                std::slice::from_raw_parts(
-                                    field.as_ptr().cast::<u8>(),
-                                    std::mem::size_of_val(field.as_ref()),
-                                )
-                            };
+                        if arena.is_compact() {
+                            offsets[0] = u32::try_from(cursor).unwrap();
+                            let bytes = arena.payload_bytes();
                             stage[cursor..cursor + bytes.len()].copy_from_slice(bytes);
                             cursor += bytes.len();
+                        } else {
+                            for (field_index, field) in arena.fields().iter().enumerate() {
+                                offsets[field_index] = u32::try_from(cursor).unwrap();
+                                let bytes = unsafe {
+                                    std::slice::from_raw_parts(
+                                        field.as_ptr().cast::<u8>(),
+                                        std::mem::size_of_val(field.as_ref()),
+                                    )
+                                };
+                                stage[cursor..cursor + bytes.len()].copy_from_slice(bytes);
+                                cursor += bytes.len();
+                            }
                         }
                         let producer_base = producer_bases[arena.kind() as usize];
                         producer_bases[arena.kind() as usize] += arena.len();
@@ -434,6 +450,14 @@ pub(crate) fn submit_provisional_fused_range(range: &GpuReplayTypedRange) -> Res
                             arg1: registration.arg1,
                             num_col_entries: u32::try_from(registration.num_col_entries).unwrap(),
                             input_fields: offsets,
+                            compact_stride: if arena.is_compact() {
+                                u32::try_from(arena.layout().compact_bytes()).unwrap()
+                            } else {
+                                0
+                            },
+                            range_start: arena.range_start(),
+                            pc_base: arena.pc_base(),
+                            compact_opcode: arena.compact_opcode(),
                             output_ptr: registration.output.as_ref().unwrap().device_ptr() as u64,
                             cols_ptr: registration.cols.device_ptr() as u64,
                         });
@@ -945,12 +969,13 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                 .iter()
                 .flatten()
                 .try_fold(0usize, |sum: usize, arena: &GpuTypedSoaArena| {
-                    arena
-                        .fields()
-                        .iter()
-                        .try_fold(sum, |sum: usize, field: &Box<[u32]>| {
+                    if arena.is_compact() {
+                        sum.checked_add(arena.payload_bytes().len())
+                    } else {
+                        arena.fields().iter().try_fold(sum, |sum, field| {
                             sum.checked_add(field.len().checked_mul(std::mem::size_of::<u32>())?)
                         })
+                    }
                 })
                 .ok_or_else(|| {
                     ZKVMError::InvalidWitness("typed range byte size overflow".into())
@@ -967,17 +992,25 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                             let registration =
                                 &state.registrations[registration_for_kind[arena.kind() as usize]];
                             let mut offsets = [0u32; 13];
-                            for (field_index, field) in arena.fields().iter().enumerate() {
-                                offsets[field_index] =
-                                    u32::try_from(cursor).expect("typed field offset exceeds u32");
-                                let bytes = unsafe {
-                                    std::slice::from_raw_parts(
-                                        field.as_ptr().cast::<u8>(),
-                                        std::mem::size_of_val(field.as_ref()),
-                                    )
-                                };
+                            if arena.is_compact() {
+                                offsets[0] =
+                                    u32::try_from(cursor).expect("compact offset exceeds u32");
+                                let bytes = arena.payload_bytes();
                                 stage[cursor..cursor + bytes.len()].copy_from_slice(bytes);
                                 cursor += bytes.len();
+                            } else {
+                                for (field_index, field) in arena.fields().iter().enumerate() {
+                                    offsets[field_index] = u32::try_from(cursor)
+                                        .expect("typed field offset exceeds u32");
+                                    let bytes = unsafe {
+                                        std::slice::from_raw_parts(
+                                            field.as_ptr().cast::<u8>(),
+                                            std::mem::size_of_val(field.as_ref()),
+                                        )
+                                    };
+                                    stage[cursor..cursor + bytes.len()].copy_from_slice(bytes);
+                                    cursor += bytes.len();
+                                }
                             }
                             let producer_base = producer_bases[arena.kind() as usize];
                             producer_bases[arena.kind() as usize] += arena.len();
@@ -999,6 +1032,14 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                                 num_col_entries: u32::try_from(registration.num_col_entries)
                                     .expect("column map exceeds u32"),
                                 input_fields: offsets,
+                                compact_stride: if arena.is_compact() {
+                                    u32::try_from(arena.layout().compact_bytes()).unwrap()
+                                } else {
+                                    0
+                                },
+                                range_start: arena.range_start(),
+                                pc_base: arena.pc_base(),
+                                compact_opcode: arena.compact_opcode(),
                                 output_ptr: registration.output.as_ref().unwrap().device_ptr()
                                     as u64,
                                 cols_ptr: registration.cols.device_ptr() as u64,
@@ -2436,5 +2477,289 @@ mod i017_tests {
         FUSED_INGRESS.with(|slot| {
             slot.borrow_mut().take();
         });
+    }
+
+    #[cfg(feature = "u16limb_circuit")]
+    #[test]
+    fn i050_compact_and_typed_fused_assignments_match_every_layout() {
+        use ceno_emul::{
+            ByteAddr, Change, GpuReplayTypedRange, ReadOp, WordAddr, WriteOp, encode_rv32,
+        };
+        use ceno_gpu::{Buffer, common::BufferImpl};
+        use ff_ext::BabyBearExt4;
+        use p3::babybear::BabyBear;
+
+        use crate::{
+            instructions::{
+                Instruction,
+                riscv::{
+                    AddInstruction, JalInstruction, JalrInstruction, LwInstruction, SwInstruction,
+                    arith_imm::AddiInstruction, branch::BeqInstruction, lui::LuiInstruction,
+                },
+            },
+            structs::{ProgramParams, ZKVMConstraintSystem, ZKVMWitnesses},
+        };
+
+        type E = BabyBearExt4;
+        type MatrixSnapshot = (String, usize, usize, usize, Vec<BabyBear>);
+
+        assert!(
+            super::super::config::is_gpu_witgen_enabled(),
+            "run with CENO_GPU_ENABLE_WITGEN=1"
+        );
+        assert!(!super::super::config::is_debug_compare_enabled());
+
+        fn with_raw(mut insn: ceno_emul::Instruction, raw: u32) -> ceno_emul::Instruction {
+            insn.raw = raw;
+            insn
+        }
+
+        let steps = vec![
+            StepRecord::new_r_instruction(
+                4,
+                ByteAddr(0x1000),
+                with_raw(encode_rv32(InsnKind::ADD, 1, 2, 3, 0), 0x0020_81b3),
+                0x11,
+                0x22,
+                Change::new(0x33, 0x33),
+                0,
+            ),
+            StepRecord::new_i_instruction(
+                8,
+                Change::new(ByteAddr(0x1004), ByteAddr(0x1008)),
+                with_raw(encode_rv32(InsnKind::ADDI, 1, 0, 3, 9), 0x0090_8193),
+                0x11,
+                Change::new(0x33, 0x1a),
+                0,
+            ),
+            StepRecord::new_b_instruction(
+                12,
+                Change::new(ByteAddr(0x1008), ByteAddr(0x1010)),
+                with_raw(encode_rv32(InsnKind::BEQ, 1, 2, 0, 8), 0x0020_8463),
+                0x22,
+                0x22,
+                0,
+            ),
+            StepRecord::new_j_instruction(
+                16,
+                Change::new(ByteAddr(0x100c), ByteAddr(0x1018)),
+                with_raw(encode_rv32(InsnKind::JAL, 0, 0, 3, 12), 0x00c0_01ef),
+                Change::new(0x33, 0x1010),
+                0,
+            ),
+            StepRecord::new_i_instruction(
+                20,
+                Change::new(ByteAddr(0x1010), ByteAddr(0x1020)),
+                with_raw(encode_rv32(InsnKind::JALR, 1, 0, 3, 8), 0x0080_81e7),
+                0x1018,
+                Change::new(0x33, 0x1014),
+                0,
+            ),
+            StepRecord::new_im_instruction(
+                24,
+                ByteAddr(0x1014),
+                with_raw(encode_rv32(InsnKind::LW, 1, 0, 3, 8), 0x0080_a183),
+                0x0400_0000,
+                Change::new(0x33, 0x4433_2211),
+                ReadOp {
+                    addr: WordAddr(0x0100_0002),
+                    value: 0x4433_2211,
+                    previous_cycle: 0,
+                },
+                0,
+            ),
+            StepRecord::new_s_instruction(
+                28,
+                ByteAddr(0x1018),
+                with_raw(encode_rv32(InsnKind::SW, 1, 2, 0, 12), 0x0020_a623),
+                0x0400_0000,
+                0x8877_6655,
+                WriteOp {
+                    addr: WordAddr(0x0100_0003),
+                    value: Change::new(0, 0x8877_6655),
+                    previous_cycle: 0,
+                },
+                0,
+            ),
+            StepRecord::new_i_instruction(
+                32,
+                Change::new(ByteAddr(0x101c), ByteAddr(0x1020)),
+                with_raw(encode_rv32(InsnKind::LUI, 0, 0, 3, 0x12000), 0x0001_21b7),
+                0,
+                Change::new(0x33, 0x12000),
+                0,
+            ),
+        ];
+
+        fn arenas(steps: &[StepRecord], compact: bool) -> GpuReplayShardArenas {
+            let old_compact = std::env::var_os("CENO_I050_COMPACT_SOURCE");
+            let old_combined = std::env::var_os("CENO_I049_COMBINED_CAPTURE");
+            unsafe {
+                std::env::remove_var("CENO_I049_COMBINED_CAPTURE");
+                if compact {
+                    std::env::set_var("CENO_I050_COMPACT_SOURCE", "1");
+                } else {
+                    std::env::remove_var("CENO_I050_COMPACT_SOURCE");
+                }
+            }
+            let mut typed: Vec<Option<GpuTypedSoaArena>> =
+                (0..InsnKind::COUNT).map(|_| None).collect();
+            for (ordinal, step) in steps.iter().enumerate() {
+                let arena = typed[step.insn().kind as usize]
+                    .get_or_insert_with(|| GpuTypedSoaArena::new(step.insn().kind, 1).unwrap());
+                arena.push_step(ordinal as u32, step).unwrap();
+            }
+            unsafe {
+                match old_compact {
+                    Some(value) => std::env::set_var("CENO_I050_COMPACT_SOURCE", value),
+                    None => std::env::remove_var("CENO_I050_COMPACT_SOURCE"),
+                }
+                match old_combined {
+                    Some(value) => std::env::set_var("CENO_I049_COMBINED_CAPTURE", value),
+                    None => std::env::remove_var("CENO_I049_COMBINED_CAPTURE"),
+                }
+            }
+            GpuReplayShardArenas::from_ranges(vec![GpuReplayTypedRange {
+                sequence: 0,
+                typed,
+                fallback: Vec::new(),
+            }])
+        }
+
+        fn snapshot_matrix(
+            name: &str,
+            role: usize,
+            matrix: &witness::RowMajorMatrix<BabyBear>,
+        ) -> MatrixSnapshot {
+            let values = if let Some(device) =
+                matrix.device_backing_ref::<BufferImpl<'static, BabyBear>>()
+            {
+                device.to_vec().unwrap()
+            } else {
+                matrix.values().to_vec()
+            };
+            (
+                format!("{name}:{role}"),
+                matrix.num_instances(),
+                matrix.height(),
+                matrix.width(),
+                values,
+            )
+        }
+
+        fn flatten_lk(multiplicity: &Multiplicity<u64>) -> Vec<Vec<(u64, usize)>> {
+            multiplicity
+                .iter()
+                .map(|table| {
+                    let mut entries: Vec<_> =
+                        table.iter().map(|(&key, &count)| (key, count)).collect();
+                    entries.sort_unstable();
+                    entries
+                })
+                .collect()
+        }
+
+        fn run(
+            steps: &[StepRecord],
+            arenas: GpuReplayShardArenas,
+        ) -> (
+            Vec<MatrixSnapshot>,
+            Vec<Vec<(u64, usize)>>,
+            (Vec<u32>, Vec<u32>, Vec<u32>),
+        ) {
+            let mut cs = ZKVMConstraintSystem::<E>::new_with_platform(ProgramParams::default());
+            let add = cs.register_opcode_circuit::<AddInstruction<E>>();
+            let addi = cs.register_opcode_circuit::<AddiInstruction<E>>();
+            let beq = cs.register_opcode_circuit::<BeqInstruction<E>>();
+            let jal = cs.register_opcode_circuit::<JalInstruction<E>>();
+            let jalr = cs.register_opcode_circuit::<JalrInstruction<E>>();
+            let lw = cs.register_opcode_circuit::<LwInstruction<E>>();
+            let sw = cs.register_opcode_circuit::<SwInstruction<E>>();
+            let lui = cs.register_opcode_circuit::<LuiInstruction<E>>();
+
+            install_compact_replay_arenas(arenas);
+            macro_rules! prepare {
+                ($instruction:ty, $config:expr, $kind:expr) => {{
+                    let chip = cs.get_cs(&<$instruction>::name()).unwrap();
+                    prepare_fused_assignment::<E, $instruction>(
+                        $config,
+                        chip.zkvm_v1_css.num_witin as usize,
+                        chip.zkvm_v1_css.num_structural_witin as usize,
+                        1,
+                        $kind,
+                    )
+                    .unwrap();
+                }};
+            }
+            prepare!(AddInstruction<E>, &add, GpuWitgenKind::Add);
+            prepare!(AddiInstruction<E>, &addi, GpuWitgenKind::Addi);
+            prepare!(BeqInstruction<E>, &beq, GpuWitgenKind::BranchEq(1));
+            prepare!(JalInstruction<E>, &jal, GpuWitgenKind::Jal);
+            prepare!(JalrInstruction<E>, &jalr, GpuWitgenKind::Jalr);
+            prepare!(LwInstruction<E>, &lw, GpuWitgenKind::Lw);
+            prepare!(SwInstruction<E>, &sw, GpuWitgenKind::Sw);
+            prepare!(LuiInstruction<E>, &lui, GpuWitgenKind::Lui);
+
+            let mut shard_ctx = ShardContext::default();
+            shard_ctx.cur_shard_cycle_range = 4..36;
+            launch_fused_assignments(&shard_ctx).unwrap();
+
+            let mut witness = ZKVMWitnesses::<E>::default();
+            macro_rules! assign {
+                ($instruction:ty, $config:expr) => {
+                    witness
+                        .assign_opcode_circuit::<$instruction>(
+                            &cs,
+                            &mut shard_ctx,
+                            $config,
+                            steps,
+                            &[],
+                        )
+                        .unwrap();
+                };
+            }
+            assign!(AddInstruction<E>, &add);
+            assign!(AddiInstruction<E>, &addi);
+            assign!(BeqInstruction<E>, &beq);
+            assign!(JalInstruction<E>, &jal);
+            assign!(JalrInstruction<E>, &jalr);
+            assign!(LwInstruction<E>, &lw);
+            assign!(SwInstruction<E>, &sw);
+            assign!(LuiInstruction<E>, &lui);
+            clear_compact_replay_arenas();
+
+            let lk = flush_shared_lk_counters().unwrap().unwrap();
+            let shared = take_shared_device_buffers().unwrap();
+            let counts = shared.ec_count.to_vec().unwrap();
+            let ec_words = counts[0] as usize
+                * std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>()
+                / std::mem::size_of::<u32>();
+            let ec = shared.ec_buf.to_vec_n(ec_words).unwrap();
+            let addr_count = shared.addr_count.to_vec().unwrap()[0] as usize;
+            let mut addresses = shared.addr_buf.to_vec_n(addr_count).unwrap();
+            addresses.sort_unstable();
+            addresses.dedup();
+            let emissions = shared.emission_expected.to_vec().unwrap();
+            invalidate_shard_meta_cache();
+
+            let matrices = witness
+                .witnesses
+                .iter()
+                .flat_map(|(name, inputs)| {
+                    inputs.iter().flat_map(move |input| {
+                        input
+                            .witness_rmms
+                            .iter()
+                            .enumerate()
+                            .map(move |(role, matrix)| snapshot_matrix(name, role, matrix))
+                    })
+                })
+                .collect();
+            (matrices, flatten_lk(&lk), (ec, addresses, emissions))
+        }
+
+        let typed = run(&steps, arenas(&steps, false));
+        let compact = run(&steps, arenas(&steps, true));
+        assert_eq!(compact, typed);
     }
 }

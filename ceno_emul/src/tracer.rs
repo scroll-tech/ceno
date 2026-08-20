@@ -1794,7 +1794,10 @@ impl GpuReplayChunk {
         let typed = InsnKind::iter()
             .zip(descriptor.family_counts)
             .map(|(kind, rows)| {
-                (rows > 0).then(|| crate::GpuTypedSoaArena::new(kind, rows).unwrap())
+                (rows > 0).then(|| {
+                    crate::GpuTypedSoaArena::new_with_range(kind, rows, descriptor.range_start)
+                        .unwrap()
+                })
             })
             .collect();
         Self {
@@ -2740,13 +2743,10 @@ impl PreflightCombinedCapture {
             return Err("combined capture deferred patches resolved multiple times");
         }
         let mut events = events.to_vec();
-        events.sort_unstable_by_key(|event| {
-            (event.source_cycle, event.address, event.target_cycle)
-        });
+        events
+            .sort_unstable_by_key(|event| (event.source_cycle, event.address, event.target_cycle));
         for pair in events.windows(2) {
-            if (pair[0].source_cycle, pair[0].address)
-                == (pair[1].source_cycle, pair[1].address)
-            {
+            if (pair[0].source_cycle, pair[0].address) == (pair[1].source_cycle, pair[1].address) {
                 return Err("duplicate deferred patch source/address");
             }
         }
@@ -2764,8 +2764,8 @@ impl PreflightCombinedCapture {
                 .checked_sub(FullTracer::SUBCYCLES_PER_INSN)
                 .ok_or("deferred patch source precedes first instruction")?
                 / FullTracer::SUBCYCLES_PER_INSN;
-            let ordinal = u32::try_from(ordinal)
-                .map_err(|_| "deferred patch ordinal exceeds u32")?;
+            let ordinal =
+                u32::try_from(ordinal).map_err(|_| "deferred patch ordinal exceeds u32")?;
             let (mask, lane, ram_class) = match event.source_cycle % 4 {
                 FullTracer::SUBCYCLE_RS1 => (
                     StepRecord::FUTURE_ACCESS_RS1,
@@ -2817,11 +2817,15 @@ impl PreflightCombinedCapture {
                 let record = &mut fallback.record;
                 let subcycle = event.source_cycle - record.cycle;
                 match subcycle {
-                    FullTracer::SUBCYCLE_RS1 if record.has_rs1 && record.rs1.addr == event.address => {
+                    FullTracer::SUBCYCLE_RS1
+                        if record.has_rs1 && record.rs1.addr == event.address =>
+                    {
                         record.future_access_mask |= StepRecord::FUTURE_ACCESS_RS1;
                         prior_value = record.rs1.value;
                     }
-                    FullTracer::SUBCYCLE_RS2 if record.has_rs2 && record.rs2.addr == event.address => {
+                    FullTracer::SUBCYCLE_RS2
+                        if record.has_rs2 && record.rs2.addr == event.address =>
+                    {
                         record.future_access_mask |= StepRecord::FUTURE_ACCESS_RS2;
                         prior_value = record.rs2.value;
                     }
@@ -2829,29 +2833,39 @@ impl PreflightCombinedCapture {
                         record.future_access_mask |= StepRecord::FUTURE_ACCESS_RD;
                         prior_value = record.rd.value.after;
                     }
-                    FullTracer::SUBCYCLE_MEM if record.has_memory_op && record.memory_op.addr == event.address => {
+                    FullTracer::SUBCYCLE_MEM
+                        if record.has_memory_op && record.memory_op.addr == event.address =>
+                    {
                         record.future_access_mask |= StepRecord::FUTURE_ACCESS_MEM;
                         prior_value = record.memory_op.value.after;
                     }
                     FullTracer::SUBCYCLE_RD if record.syscall_index != StepRecord::NO_SYSCALL => {
                         let witness = &mut self.syscall_witnesses[record.syscall_index as usize];
-                        let index = witness.reg_ops.iter().rposition(|op| op.addr == event.address)
+                        let index = witness
+                            .reg_ops
+                            .iter()
+                            .rposition(|op| op.addr == event.address)
                             .ok_or("deferred patch syscall register address missing")?;
                         witness.reg_future_access[index] = 1;
                         prior_value = witness.reg_ops[index].value.after;
                         resolved_lane = PatchSourceLane::SyscallRegister;
-                        syscall_op_index = u16::try_from(index).map_err(|_| "deferred patch syscall operation exceeds u16")?;
+                        syscall_op_index = u16::try_from(index)
+                            .map_err(|_| "deferred patch syscall operation exceeds u16")?;
                         syscall_witness_index = record.syscall_index;
                     }
                     FullTracer::SUBCYCLE_MEM if record.syscall_index != StepRecord::NO_SYSCALL => {
                         let witness = &mut self.syscall_witnesses[record.syscall_index as usize];
-                        let index = witness.mem_ops.iter().rposition(|op| op.addr == event.address)
+                        let index = witness
+                            .mem_ops
+                            .iter()
+                            .rposition(|op| op.addr == event.address)
                             .ok_or("deferred patch syscall memory address missing")?;
                         witness.mem_future_access[index] = 1;
                         prior_value = witness.mem_ops[index].value.after;
                         resolved_lane = PatchSourceLane::SyscallMemory;
                         resolved_class = PatchRamClass::Memory;
-                        syscall_op_index = u16::try_from(index).map_err(|_| "deferred patch syscall operation exceeds u16")?;
+                        syscall_op_index = u16::try_from(index)
+                            .map_err(|_| "deferred patch syscall operation exceeds u16")?;
                         syscall_witness_index = record.syscall_index;
                     }
                     _ => return Err("deferred patch does not match sparse source record"),
@@ -3250,7 +3264,12 @@ impl PreflightTracer {
         Ok(())
     }
 
-    #[cfg(all(test, feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    #[cfg(all(
+        test,
+        feature = "aot-x86_64",
+        target_arch = "x86_64",
+        target_os = "linux"
+    ))]
     pub(crate) fn finish_combined_capture_for_test(
         &mut self,
     ) -> Result<
@@ -3291,7 +3310,12 @@ impl PreflightTracer {
         ))
     }
 
-    #[cfg(all(test, feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    #[cfg(all(
+        test,
+        feature = "aot-x86_64",
+        target_arch = "x86_64",
+        target_os = "linux"
+    ))]
     pub(crate) fn raw_next_access_events_for_test(&self) -> &[NextAccessEvent] {
         &self.next_access_events
     }
@@ -3337,7 +3361,8 @@ impl PreflightTracer {
         let capture = if let Some(mut capture) = self.combined_capture.take() {
             capture.seal_available(&planner.replay_descriptors)?;
             if !capture.patches_resolved {
-                capture.resolve_patches(&self.next_access_events, planner.shard_cycle_boundaries())?;
+                capture
+                    .resolve_patches(&self.next_access_events, planner.shard_cycle_boundaries())?;
             }
             if capture.descriptor_cursor != planner.replay_descriptors.len() {
                 return Err("combined preflight capture did not seal every descriptor");
@@ -3862,14 +3887,10 @@ impl Tracer for PreflightTracer {
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         if let Some(capture) = self.combined_capture.as_mut() {
             capture.pending.cycle = capture.pending_cycle;
-            capture.pending.heap_maxtouch_addr = Change::new(
-                capture.max_heap_addr_access,
-                capture.max_heap_addr_access,
-            );
-            capture.pending.hint_maxtouch_addr = Change::new(
-                capture.max_hint_addr_access,
-                capture.max_hint_addr_access,
-            );
+            capture.pending.heap_maxtouch_addr =
+                Change::new(capture.max_heap_addr_access, capture.max_heap_addr_access);
+            capture.pending.hint_maxtouch_addr =
+                Change::new(capture.max_hint_addr_access, capture.max_hint_addr_access);
             capture.pending.pc.before = pc.baddr();
             capture.pending.insn = value;
         }
@@ -3960,8 +3981,8 @@ impl Tracer for PreflightTracer {
         if let Some(capture) = self.combined_capture.as_mut() {
             let index = capture.syscall_witnesses.len();
             capture.syscall_witnesses.push(witness);
-            let syscall_index = u32::try_from(index)
-                .expect("combined capture syscall witness index exceeds u32");
+            let syscall_index =
+                u32::try_from(index).expect("combined capture syscall witness index exceeds u32");
             capture.pending.syscall_index = syscall_index;
         }
     }
@@ -4762,7 +4783,10 @@ mod tests {
             .unwrap();
         assert_eq!(valid.initialization_events.len(), 1);
         assert_eq!(valid.patches.len(), 1);
-        assert_eq!((valid.patches[0].source_shard, valid.patches[0].target_shard), (0, 2));
+        assert_eq!(
+            (valid.patches[0].source_shard, valid.patches[0].target_shard),
+            (0, 2)
+        );
         assert_eq!(valid.patches[0].prior_value, 33);
 
         let mut duplicate = capture_with_one_add();
@@ -4785,10 +4809,7 @@ mod tests {
 
         let mut missing = capture_with_one_add();
         assert_eq!(
-            missing.resolve_patches(
-                &[NextAccessEvent::new(10, 12, rd)],
-                &boundaries,
-            ),
+            missing.resolve_patches(&[NextAccessEvent::new(10, 12, rd)], &boundaries,),
             Err("deferred patch source ordinal does not resolve exactly once")
         );
 

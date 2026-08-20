@@ -99,9 +99,7 @@ impl AssemblyTraceStyle {
     fn needs_callback_values(self) -> bool {
         matches!(
             self,
-            Self::FullTracerDirect
-                | Self::GpuReplayDirect
-                | Self::PreflightProductionCapture
+            Self::FullTracerDirect | Self::GpuReplayDirect | Self::PreflightProductionCapture
         )
     }
 
@@ -1779,9 +1777,7 @@ impl AotProgram {
             gpu_replay_event_cursor = state.next_access_cursor;
             gpu_replay_error = state.error;
         }
-        if trace_native_steps
-            && TypeId::of::<T>() == TypeId::of::<PreflightTracer>()
-        {
+        if trace_native_steps && TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
             if let Some(state) = preflight_vm.tracer_mut().prepare_combined_capture_native() {
                 trace_mode = AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT;
@@ -4314,6 +4310,19 @@ fn emit_gpu_replay_shared_recorder(mut file: impl Write) -> Result<()> {
     movl \source, (%r8,%rcx,4)
 .endm
 
+.macro GPU_COMPACT_PACK source, byte_offset, shift, mask
+    movl \source, %r8d
+    andl $\mask, %r8d
+    shlq $\shift, %r8
+    orq %r8, \byte_offset(%r9)
+.endm
+
+.macro GPU_COMPACT_PACK32 source, byte_offset, shift
+    movl \source, %r8d
+    shlq $\shift, %r8
+    orq %r8, \byte_offset(%r9)
+.endm
+
 .macro GPU_REPLAY_ACCESS index_offset, subcycle, scratch_offset
     movl \index_offset(%r12), %edx
     shll $6, %edx
@@ -4346,11 +4355,14 @@ ceno_aot_gpu_replay_emit_step:
     movl {AOT_CTX_TRACE_KIND_OFFSET}(%r12), %eax
     cmpq {AOT_CTX_GPU_REPLAY_KIND_COUNT_OFFSET}(%r12), %rax
     jae .L_gpu_replay_bad_kind
-    imulq $120, %rax, %rax
+    imulq $128, %rax, %rax
     movq {AOT_CTX_GPU_REPLAY_KINDS_OFFSET}(%r12), %r10
     addq %rax, %r10
     cmpl ${gpu_sentinel}, 116(%r10)
+    je .L_gpu_replay_sentinel_ok
+    cmpl ${gpu_compact_sentinel}, 116(%r10)
     jne .L_gpu_replay_bad_sentinel
+.L_gpu_replay_sentinel_ok:
     movl 108(%r10), %ecx
     cmpl 104(%r10), %ecx
     jae .L_gpu_replay_capacity
@@ -4460,6 +4472,9 @@ ceno_aot_gpu_replay_emit_step:
 .L_gpu_replay_events_done:
     movq {AOT_CTX_GPU_REPLAY_EVENT_CURSOR_OFFSET}(%r12), %r8
     movq %rsi, (%r8)
+
+    cmpl ${gpu_compact_sentinel}, 116(%r10)
+    je .L_gpu_replay_compact
 
     movq {AOT_CTX_GPU_REPLAY_ORDINAL_OFFSET}(%r12), %r8
     movl (%r8), %edx
@@ -4623,6 +4638,189 @@ ceno_aot_gpu_replay_emit_step:
     addq $40, %rsp
     ret
 
+.L_gpu_replay_compact:
+    movl 112(%r10), %edx
+    cmpl $0, %edx
+    je .L_gpu_compact_stride_31
+    cmpl $3, %edx
+    je .L_gpu_compact_stride_16
+    cmpl $7, %edx
+    je .L_gpu_compact_stride_20
+    cmpl $5, %edx
+    je .L_gpu_compact_stride_31
+    cmpl $6, %edx
+    je .L_gpu_compact_stride_31
+    imulq $24, %rcx, %r9
+    jmp .L_gpu_compact_pointer
+.L_gpu_compact_stride_31:
+    imulq $31, %rcx, %r9
+    jmp .L_gpu_compact_pointer
+.L_gpu_compact_stride_16:
+    imulq $16, %rcx, %r9
+    jmp .L_gpu_compact_pointer
+.L_gpu_compact_stride_20:
+    imulq $20, %rcx, %r9
+.L_gpu_compact_pointer:
+    addq 0(%r10), %r9
+    movq $0, 0(%r9)
+    movq $0, 8(%r9)
+    movq $0, 16(%r9)
+    movq $0, 24(%r9)
+
+    movq {AOT_CTX_GPU_REPLAY_ORDINAL_OFFSET}(%r12), %r8
+    movl (%r8), %edx
+    subl 120(%r10), %edx
+    cmpl $262144, %edx
+    jae .L_gpu_replay_bad_compact_range
+    GPU_COMPACT_PACK %edx, 0, 0, 0x3ffff
+
+    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %edx
+    testl %ecx, %ecx
+    jne .L_gpu_compact_have_pc_base
+    movl %edx, %r8d
+    andl $0xffc00000, %r8d
+    movl %r8d, 124(%r10)
+.L_gpu_compact_have_pc_base:
+    subl 124(%r10), %edx
+    testl $3, %edx
+    jne .L_gpu_replay_bad_compact_pc
+    cmpl $0x400000, %edx
+    jae .L_gpu_replay_bad_compact_pc
+    shrl $2, %edx
+    GPU_COMPACT_PACK %edx, 2, 2, 0xfffff
+
+    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %edx
+    subl {AOT_CTX_PROGRAM_BASE_OFFSET}(%r12), %edx
+    shrl $2, %edx
+    imulq $12, %rdx, %rdx
+    addq {AOT_CTX_INSTRUCTIONS_OFFSET}(%r12), %rdx
+    movl 8(%rdx), %edx
+    shrl $7, %edx
+    GPU_COMPACT_PACK %edx, 4, 6, 0x1ffffff
+
+    movl 112(%r10), %edx
+    cmpl $3, %edx
+    je .L_gpu_compact_jal_tail
+    cmpl $7, %edx
+    je .L_gpu_compact_u_first
+
+    movl 0(%rsp), %edx
+    cmpl $0x8000000, %edx
+    jae .L_gpu_replay_bad_compact_cycle
+    GPU_COMPACT_PACK %edx, 7, 7, 0x7ffffff
+    movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %edx
+    GPU_COMPACT_PACK32 %edx, 11, 2
+
+    movl 112(%r10), %edx
+    cmpl $1, %edx
+    je .L_gpu_compact_second_rd
+    cmpl $4, %edx
+    je .L_gpu_compact_second_rd
+    cmpl $5, %edx
+    je .L_gpu_compact_second_rd
+    movl 4(%rsp), %edx
+    cmpl $0x8000000, %edx
+    jae .L_gpu_replay_bad_compact_cycle
+    GPU_COMPACT_PACK %edx, 15, 2, 0x7ffffff
+    movl {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12), %edx
+    GPU_COMPACT_PACK32 %edx, 18, 5
+    movl 112(%r10), %edx
+    cmpl $2, %edx
+    je .L_gpu_compact_mask_181
+    jmp .L_gpu_compact_third_memory_or_rd
+
+.L_gpu_compact_second_rd:
+    movl 8(%rsp), %edx
+    cmpl $0x8000000, %edx
+    jae .L_gpu_replay_bad_compact_cycle
+    GPU_COMPACT_PACK %edx, 15, 2, 0x7ffffff
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
+    GPU_COMPACT_PACK32 %edx, 18, 5
+    movl 112(%r10), %edx
+    cmpl $5, %edx
+    jne .L_gpu_compact_mask_181
+
+.L_gpu_compact_third_memory_or_rd:
+    movl 112(%r10), %edx
+    cmpl $0, %edx
+    je .L_gpu_compact_third_rd
+    movl 12(%rsp), %edx
+    jmp .L_gpu_compact_third_cycle
+.L_gpu_compact_third_rd:
+    movl 8(%rsp), %edx
+.L_gpu_compact_third_cycle:
+    cmpl $0x8000000, %edx
+    jae .L_gpu_replay_bad_compact_cycle
+    GPU_COMPACT_PACK %edx, 22, 5, 0x7ffffff
+    movl 112(%r10), %edx
+    cmpl $0, %edx
+    jne .L_gpu_compact_third_memory_value
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
+    jmp .L_gpu_compact_third_value
+.L_gpu_compact_third_memory_value:
+    movl {AOT_CTX_TRACE_MEM_BEFORE_OFFSET}(%r12), %edx
+.L_gpu_compact_third_value:
+    GPU_COMPACT_PACK32 %edx, 26, 0
+    jmp .L_gpu_compact_mask_240
+
+.L_gpu_compact_jal_tail:
+    movl 8(%rsp), %edx
+    cmpl $0x8000000, %edx
+    jae .L_gpu_replay_bad_compact_cycle
+    GPU_COMPACT_PACK %edx, 7, 7, 0x7ffffff
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
+    GPU_COMPACT_PACK32 %edx, 11, 2
+    jmp .L_gpu_compact_mask_122
+
+.L_gpu_compact_u_tail:
+    movl 8(%rsp), %edx
+    cmpl $0x8000000, %edx
+    jae .L_gpu_replay_bad_compact_cycle
+    GPU_COMPACT_PACK %edx, 11, 2, 0x7ffffff
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
+    GPU_COMPACT_PACK32 %edx, 14, 5
+    jmp .L_gpu_compact_mask_149
+
+.L_gpu_compact_u_first:
+    movl 0(%rsp), %edx
+    cmpl $0x8000000, %edx
+    jae .L_gpu_replay_bad_compact_cycle
+    GPU_COMPACT_PACK %edx, 7, 7, 0x7ffffff
+    jmp .L_gpu_compact_u_tail
+
+.L_gpu_compact_mask_122:
+    movl $122, %edx
+    jmp .L_gpu_compact_write_mask
+.L_gpu_compact_mask_149:
+    movl $149, %edx
+    jmp .L_gpu_compact_write_mask
+.L_gpu_compact_mask_181:
+    movl $181, %edx
+    jmp .L_gpu_compact_write_mask
+.L_gpu_compact_mask_240:
+    movl $240, %edx
+.L_gpu_compact_write_mask:
+    movl 16(%rsp), %edi
+    cmpl $16, %edi
+    jae .L_gpu_replay_bad_compact_mask
+    movl %edx, %r11d
+    shrl $3, %edx
+    andl $7, %r11d
+    movl %edi, %r8d
+    movb %r11b, %cl
+    shlq %cl, %r8
+    orq %r8, (%r9,%rdx)
+    movl 108(%r10), %ecx
+    incl %ecx
+    movl %ecx, 108(%r10)
+    movq {AOT_CTX_GPU_REPLAY_ORDINAL_OFFSET}(%r12), %r8
+    incq (%r8)
+    movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %r8
+    addq $4, (%r8)
+    movl ${AOT_STATUS_CONTINUE}, %eax
+    addq $40, %rsp
+    ret
+
 .L_gpu_replay_bad_kind:
     movl $1, %edx
     jmp .L_gpu_replay_error
@@ -4637,6 +4835,18 @@ ceno_aot_gpu_replay_emit_step:
     jmp .L_gpu_replay_error
 .L_gpu_replay_bad_event:
     movl $5, %edx
+    jmp .L_gpu_replay_error
+.L_gpu_replay_bad_compact_range:
+    movl $6, %edx
+    jmp .L_gpu_replay_error
+.L_gpu_replay_bad_compact_pc:
+    movl $7, %edx
+    jmp .L_gpu_replay_error
+.L_gpu_replay_bad_compact_cycle:
+    movl $8, %edx
+    jmp .L_gpu_replay_error
+.L_gpu_replay_bad_compact_mask:
+    movl $9, %edx
 .L_gpu_replay_error:
     movq {AOT_CTX_GPU_REPLAY_ERROR_OFFSET}(%r12), %r8
     movl %edx, (%r8)
@@ -4645,6 +4855,7 @@ ceno_aot_gpu_replay_emit_step:
     ret
 "#,
         gpu_sentinel = crate::gpu_typed_ingress::GPU_TYPED_NATIVE_SENTINEL,
+        gpu_compact_sentinel = crate::gpu_typed_ingress::GPU_COMPACT_NATIVE_SENTINEL,
     )?;
     Ok(())
 }
@@ -4705,14 +4916,24 @@ fn emit_after_native_step(
         // Preflight block emitters carry admission state in r10/r11. Preserve
         // it in dedicated context slots so metadata's fixed guest-stack offsets
         // remain valid.
-        let saved = ["%rax", "%rcx", "%rdx", "%rsi", "%rdi", "%r8", "%r9", "%r10", "%r11"];
+        let saved = [
+            "%rax", "%rcx", "%rdx", "%rsi", "%rdi", "%r8", "%r9", "%r10", "%r11",
+        ];
         for (index, register) in saved.into_iter().enumerate() {
-            writeln!(file, "    movq {register}, {}(%r12)", AOT_CTX_COMBINED_SAVED_OFFSET + index * 8)?;
+            writeln!(
+                file,
+                "    movq {register}, {}(%r12)",
+                AOT_CTX_COMBINED_SAVED_OFFSET + index * 8
+            )?;
         }
         emit_preflight_capture_trace_metadata(&mut file, insn)?;
         writeln!(file, "    call ceno_aot_gpu_replay_emit_step")?;
         for (index, register) in saved.into_iter().enumerate() {
-            writeln!(file, "    movq {}(%r12), {register}", AOT_CTX_COMBINED_SAVED_OFFSET + index * 8)?;
+            writeln!(
+                file,
+                "    movq {}(%r12), {register}",
+                AOT_CTX_COMBINED_SAVED_OFFSET + index * 8
+            )?;
         }
         writeln!(file, "{capture_done}:")?;
         if !batched_block {
@@ -7182,10 +7403,7 @@ fn emit_native_trace_metadata(
     Ok(())
 }
 
-fn emit_preflight_capture_trace_metadata(
-    mut file: impl Write,
-    insn: Instruction,
-) -> Result<()> {
+fn emit_preflight_capture_trace_metadata(mut file: impl Write, insn: Instruction) -> Result<()> {
     writeln!(
         file,
         "    movl ${:#010x}, {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12)",
@@ -9641,18 +9859,12 @@ mod tests {
         );
         let report = aot.run_to_halt(&mut vm, 16).unwrap();
         assert_eq!(report.executed_steps, 4);
-        let (ranges, syscalls, patches, initialization) = vm
-            .tracer_mut()
-            .finish_combined_capture_for_test()
-            .unwrap();
+        let (ranges, syscalls, patches, initialization) =
+            vm.tracer_mut().finish_combined_capture_for_test().unwrap();
         let patch_events = patches
             .iter()
             .map(|patch| {
-                crate::NextAccessEvent::new(
-                    patch.source_cycle,
-                    patch.target_cycle,
-                    patch.address,
-                )
+                crate::NextAccessEvent::new(patch.source_cycle, patch.target_cycle, patch.address)
             })
             .chain(initialization.iter().copied())
             .collect::<Vec<_>>();
@@ -9675,7 +9887,10 @@ mod tests {
             .flat_map(|range| range.typed.iter().flatten())
             .map(crate::GpuTypedSoaArena::len)
             .sum::<usize>();
-        let fallback = ranges.iter().map(|range| range.fallback.len()).sum::<usize>();
+        let fallback = ranges
+            .iter()
+            .map(|range| range.fallback.len())
+            .sum::<usize>();
         assert_eq!((ordinary, fallback, syscalls.len()), (3, 1, 0));
         let ordinals = ranges
             .iter()
@@ -9697,7 +9912,8 @@ mod tests {
                         arena.fields().iter().zip(oracle.fields()).enumerate()
                     {
                         assert_eq!(
-                            actual[row], expected[0],
+                            actual[row],
+                            expected[0],
                             "typed word mismatch kind={:?} ordinal={ordinal} field={field_index}",
                             arena.kind()
                         );
@@ -9749,8 +9965,7 @@ mod tests {
             .map(|index| CENO_PLATFORM.pc_base() + index * PC_STEP_SIZE as u32)
             .collect();
         let aot =
-            AotProgram::compile_preflight_capture_with_extra_roots(program.clone(), roots)
-                .unwrap();
+            AotProgram::compile_preflight_capture_with_extra_roots(program.clone(), roots).unwrap();
         let mut vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
             CENO_PLATFORM.clone(),
             program,
@@ -9760,10 +9975,8 @@ mod tests {
         vm.init_memory(ByteAddr(base).waddr(), 37);
         vm.init_memory(ByteAddr(base + 4).waddr(), 0);
         assert_eq!(aot.run_to_halt(&mut vm, 16).unwrap().executed_steps, 6);
-        let (ranges, syscalls, patches, initialization) = vm
-            .tracer_mut()
-            .finish_combined_capture_for_test()
-            .unwrap();
+        let (ranges, syscalls, patches, initialization) =
+            vm.tracer_mut().finish_combined_capture_for_test().unwrap();
         assert!(syscalls.is_empty());
         assert!(!initialization.is_empty());
         assert!(patches.iter().any(|patch| {
@@ -9772,11 +9985,9 @@ mod tests {
         }));
         let events = patches
             .iter()
-            .map(|patch| crate::NextAccessEvent::new(
-                patch.source_cycle,
-                patch.target_cycle,
-                patch.address,
-            ))
+            .map(|patch| {
+                crate::NextAccessEvent::new(patch.source_cycle, patch.target_cycle, patch.address)
+            })
             .chain(initialization.iter().copied())
             .collect::<Vec<_>>();
         reference
@@ -9788,7 +9999,9 @@ mod tests {
                 for row in 0..arena.len() {
                     let ordinal = arena.fields()[0][row] as usize;
                     let mut oracle = crate::GpuTypedSoaArena::new(arena.kind(), 1).unwrap();
-                    oracle.push_step(ordinal as u32, &expected[ordinal]).unwrap();
+                    oracle
+                        .push_step(ordinal as u32, &expected[ordinal])
+                        .unwrap();
                     for (actual, expected) in arena.fields().iter().zip(oracle.fields()) {
                         assert_eq!(actual[row], expected[0]);
                     }
@@ -9831,7 +10044,10 @@ mod tests {
             program.clone(),
             config,
         );
-        for state in [&mut reference as &mut dyn SyscallTestVm, &mut vm as &mut dyn SyscallTestVm] {
+        for state in [
+            &mut reference as &mut dyn SyscallTestVm,
+            &mut vm as &mut dyn SyscallTestVm,
+        ] {
             state.init_register(Platform::reg_ecall(), crate::SECP256K1_DOUBLE);
             state.init_register(Platform::reg_arg0(), base);
             state.init_register(20, base);
@@ -9843,20 +10059,15 @@ mod tests {
         let roots = (1..4)
             .map(|index| CENO_PLATFORM.pc_base() + index * PC_STEP_SIZE as u32)
             .collect();
-        let aot =
-            AotProgram::compile_preflight_capture_with_extra_roots(program, roots).unwrap();
+        let aot = AotProgram::compile_preflight_capture_with_extra_roots(program, roots).unwrap();
         assert_eq!(aot.run_to_halt(&mut vm, 16).unwrap().executed_steps, 4);
-        let (ranges, syscalls, patches, initialization) = vm
-            .tracer_mut()
-            .finish_combined_capture_for_test()
-            .unwrap();
+        let (ranges, syscalls, patches, initialization) =
+            vm.tracer_mut().finish_combined_capture_for_test().unwrap();
         let events = patches
             .iter()
-            .map(|patch| crate::NextAccessEvent::new(
-                patch.source_cycle,
-                patch.target_cycle,
-                patch.address,
-            ))
+            .map(|patch| {
+                crate::NextAccessEvent::new(patch.source_cycle, patch.target_cycle, patch.address)
+            })
             .chain(initialization.iter().copied())
             .collect::<Vec<_>>();
         reference
@@ -9960,10 +10171,8 @@ mod tests {
                     first_words[..crate::syscalls::secp256k1::COORDINATE_WORDS].fill(1);
                 }
                 _ => {
-                    for (offset, (first, second)) in first_words
-                        .iter_mut()
-                        .zip(&mut second_words)
-                        .enumerate()
+                    for (offset, (first, second)) in
+                        first_words.iter_mut().zip(&mut second_words).enumerate()
                     {
                         *first = offset as Word;
                         *second = !*first;
@@ -9984,11 +10193,20 @@ mod tests {
             let actual_report = capture.run_to_halt(&mut actual, 16).unwrap();
             assert_eq!(expected_report.executed_steps, 4, "code={code}");
             assert_eq!(actual_report.executed_steps, 4, "code={code}");
-            assert_eq!(expected_report.fallback.ecall_by_code[&code], 2, "code={code}");
-            assert_eq!(actual_report.fallback.ecall_by_code[&code], 2, "code={code}");
+            assert_eq!(
+                expected_report.fallback.ecall_by_code[&code], 2,
+                "code={code}"
+            );
+            assert_eq!(
+                actual_report.fallback.ecall_by_code[&code], 2,
+                "code={code}"
+            );
             let expected_events = expected.tracer().raw_next_access_events_for_test().to_vec();
             let actual_events = actual.tracer().raw_next_access_events_for_test().to_vec();
-            assert_eq!(actual_events, expected_events, "raw tape differs for code={code}");
+            assert_eq!(
+                actual_events, expected_events,
+                "raw tape differs for code={code}"
+            );
             let (expected_plan, _, _) = expected.take_tracer().into_shard_plan();
             let (actual_plan, _, _) = actual.take_tracer().into_shard_plan();
             assert_eq!(
@@ -11258,9 +11476,14 @@ mod tests {
     #[cfg(not(debug_assertions))]
     fn gpu_replay_direct_typed_rows_match_interpreter_without_trace_callbacks() {
         let base = CENO_PLATFORM.heap.start;
+        let pc_base = CENO_PLATFORM.pc_base();
         let program = Arc::new(program(vec![
             encode_rv32(InsnKind::ADDI, 0, 0, 1, 5),
             encode_rv32(InsnKind::ADD, 1, 1, 2, 0),
+            encode_rv32(InsnKind::BEQ, 1, 0, 0, 8),
+            encode_rv32(InsnKind::LUI, 0, 0, 4, 0x12000),
+            encode_rv32(InsnKind::JAL, 0, 0, 12, 4),
+            encode_rv32(InsnKind::JALR, 11, 0, 7, 0),
             encode_rv32(InsnKind::SW, 20, 2, 0, 0),
             encode_rv32(InsnKind::LW, 20, 0, 3, 0),
             encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
@@ -11268,18 +11491,22 @@ mod tests {
         let mut family_counts = [0usize; InsnKind::COUNT];
         family_counts[InsnKind::ADDI as usize] = 1;
         family_counts[InsnKind::ADD as usize] = 1;
+        family_counts[InsnKind::BEQ as usize] = 1;
+        family_counts[InsnKind::LUI as usize] = 1;
+        family_counts[InsnKind::JAL as usize] = 1;
+        family_counts[InsnKind::JALR as usize] = 1;
         family_counts[InsnKind::SW as usize] = 1;
         family_counts[InsnKind::LW as usize] = 1;
         let descriptors = Arc::new(vec![crate::GpuReplayRangeDescriptor {
             shard_id: 0,
             sequence: 0,
             range_start: 0,
-            range_len: 5,
+            range_len: 9,
             family_counts,
             fallback_count: 1,
             unsupported_count: 0,
         }]);
-        let config = crate::GpuReplayTracerConfig { chunk_capacity: 5 };
+        let config = crate::GpuReplayTracerConfig { chunk_capacity: 9 };
 
         let mut interp = VMState::<crate::GpuReplayTracer>::new_with_tracer_config(
             CENO_PLATFORM.clone(),
@@ -11290,6 +11517,7 @@ mod tests {
             .tracer_mut()
             .install_range_descriptors(descriptors.clone());
         interp.init_register_unsafe(20, base);
+        interp.init_register_unsafe(11, pc_base + 24);
         interp.init_memory(ByteAddr(base).waddr(), 0);
         while interp.next_step_record().unwrap().is_some() {}
         interp.tracer_mut().finish_chunks();
@@ -11297,7 +11525,7 @@ mod tests {
 
         let aot = AotProgram::compile_with_extra_roots_and_trace_style(
             program.clone(),
-            Vec::new(),
+            vec![pc_base + 24],
             AssemblyTraceStyle::GpuReplayDirect,
         )
         .unwrap();
@@ -11308,11 +11536,12 @@ mod tests {
         );
         direct.tracer_mut().install_range_descriptors(descriptors);
         direct.init_register_unsafe(20, base);
+        direct.init_register_unsafe(11, pc_base + 24);
         direct.init_memory(ByteAddr(base).waddr(), 0);
         // Force two returns in the middle of one compiled basic block. The
         // next entry must use the native resume table, never dynamic-PC Rust
         // fallback.
-        let reports = (0..5)
+        let reports = (0..9)
             .map(|_| aot.run_to_halt(&mut direct, 1).unwrap())
             .collect::<Vec<_>>();
         direct.tracer_mut().finish_chunks();
@@ -11323,7 +11552,7 @@ mod tests {
                 .iter()
                 .map(|report| report.executed_steps)
                 .sum::<usize>(),
-            5
+            9
         );
         assert_eq!(
             reports
@@ -11352,6 +11581,16 @@ mod tests {
             assert_eq!(
                 actual.as_ref().map(crate::GpuTypedSoaArena::fields),
                 expected.as_ref().map(crate::GpuTypedSoaArena::fields)
+            );
+            assert_eq!(
+                actual.as_ref().map(crate::GpuTypedSoaArena::payload_bytes),
+                expected
+                    .as_ref()
+                    .map(crate::GpuTypedSoaArena::payload_bytes)
+            );
+            assert_eq!(
+                actual.as_ref().map(crate::GpuTypedSoaArena::pc_base),
+                expected.as_ref().map(crate::GpuTypedSoaArena::pc_base)
             );
         }
         assert_eq!(actual.fallback, expected.fallback);
@@ -11398,7 +11637,11 @@ mod tests {
         assert!(trace_style.needs_callback_values());
         assert!(!trace_style.preflight_feature_enabled(PreflightFeature::MmioBounds));
         assert!(trace_style.uses_preflight_block_plan());
-        assert!(should_publish_trace_memory_address(trace_style, false, true));
+        assert!(should_publish_trace_memory_address(
+            trace_style,
+            false,
+            true
+        ));
         assert!(!should_publish_trace_memory_address(
             AssemblyTraceStyle::PreflightProduction,
             false,
