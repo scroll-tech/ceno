@@ -341,7 +341,48 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             None
         };
 
-        if let Some(affine_results) = affine_results.as_deref() {
+        let use_gpu_relations = EC::CURVE_TYPE == CurveType::Secp256k1
+            && crate::instructions::gpu::chips::secp256k1::enabled();
+        let gpu_records = if use_gpu_relations {
+            let affine = affine_results.as_deref().ok_or_else(|| {
+                ZKVMError::InvalidWitness(
+                    "I055 secp256k1 double requires compact affine results; legacy mode is unsupported"
+                        .into(),
+                )
+            })?;
+            Some(
+                tracing::info_span!(
+                    "secp256k1_gpu_pack",
+                    operation = "double",
+                    n = instances.len()
+                )
+                .in_scope(|| {
+                    WeierstrassDoubleAssignLayout::<E, EC>::compact_secp256k1_gpu_records(
+                        &instances, affine,
+                    )
+                }),
+            )
+        } else {
+            None
+        };
+
+        if let Some(records) = gpu_records.as_deref() {
+            crate::instructions::gpu::chips::secp256k1::fill_structural_ones::<E>(
+                &mut raw_structural_witin,
+                step_indices.len(),
+            );
+            raw_witin.padding_by_strategy();
+            raw_structural_witin.padding_by_strategy();
+            crate::instructions::gpu::chips::secp256k1::assign_relations::<E>(
+                &mut raw_witin,
+                records,
+                true,
+                step_indices.len(),
+                config.layout.first_wit_id(),
+                config.layout.num_arithmetic_wit_cols(),
+                &mut lk_multiplicity,
+            )?;
+        } else if let Some(affine_results) = affine_results.as_deref() {
             tracing::info_span!(
                 "secp256k1_expand_rows",
                 operation = "double",
@@ -362,8 +403,10 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                 &mut lk_multiplicity,
             );
         }
-        raw_witin.padding_by_strategy();
-        raw_structural_witin.padding_by_strategy();
+        if gpu_records.is_none() {
+            raw_witin.padding_by_strategy();
+            raw_structural_witin.padding_by_strategy();
+        }
         Ok((
             [raw_witin, raw_structural_witin],
             lk_multiplicity.into_finalize_result(),

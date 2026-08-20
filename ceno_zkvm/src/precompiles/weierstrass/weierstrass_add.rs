@@ -74,7 +74,8 @@ use crate::{
         utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
         weierstrass::{
             EllipticCurveAddInstance, Secp256k1AffineResult, batch_multiplicative_inverse,
-            compact_field_relation::CompactFieldRelationCols,
+            compact_field_relation::{CompactFieldRelationCols, compact_relation_quotient},
+            write_fixed_biguint,
         },
     },
     scheme::utils::gkr_witness,
@@ -136,6 +137,55 @@ pub struct WeierstrassAddAssignLayout<E: ExtensionField, EC: EllipticCurve> {
 }
 
 impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
+    pub(crate) fn compact_secp256k1_gpu_records(
+        instances: &[EllipticCurveAddInstance<EC::BaseField>],
+        affine_results: &[Secp256k1AffineResult],
+    ) -> Vec<u8> {
+        assert_eq!(instances.len(), affine_results.len());
+        const STRIDE: usize = ceno_gpu::common::witgen::types::SECP256K1_ADD_RELATION_RECORD_BYTES;
+        instances
+            .par_iter()
+            .zip_eq(affine_results.par_iter())
+            .map(|(event, affine)| {
+                let p = AffinePoint::<EC>::from_words_le(&event.p);
+                let q = AffinePoint::<EC>::from_words_le(&event.q);
+                let modulus = EC::BaseField::modulus();
+                let slope_q = compact_relation_quotient::<EC::BaseField>(
+                    &modulus,
+                    &(&affine.slope * (&q.x + &modulus - &p.x)),
+                    &(&q.y + &modulus - &p.y),
+                );
+                let x_q = compact_relation_quotient::<EC::BaseField>(
+                    &modulus,
+                    &(&affine.x3 + &p.x + &q.x),
+                    &(&affine.slope * &affine.slope),
+                );
+                let y_q = compact_relation_quotient::<EC::BaseField>(
+                    &(&modulus << 1usize),
+                    &(&affine.y3 + &p.y),
+                    &(&affine.slope * (&p.x + &modulus - &affine.x3)),
+                );
+                let mut record = [0u8; STRIDE];
+                for (offset, value) in [
+                    (0, &p.x),
+                    (32, &p.y),
+                    (64, &q.x),
+                    (96, &q.y),
+                    (128, &affine.slope),
+                    (160, &affine.x3),
+                    (192, &affine.y3),
+                ] {
+                    write_fixed_biguint(&mut record, offset, 32, value);
+                }
+                for (offset, value) in [(224, &slope_q), (287, &x_q), (350, &y_q)] {
+                    write_fixed_biguint(&mut record, offset, 63, value);
+                }
+                record
+            })
+            .flat_map_iter(|record| record)
+            .collect()
+    }
+
     pub(crate) fn compute_compact_secp256k1_affine_results(
         instances: &[EllipticCurveAddInstance<EC::BaseField>],
     ) -> Vec<Secp256k1AffineResult> {
@@ -776,14 +826,14 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
         }
     }
 
-    fn first_wit_id(&self) -> usize {
+    pub(crate) fn first_wit_id(&self) -> usize {
         match &self.layer_exprs {
             WeierstrassAddAssignLayer::Generic(wits) => wits.p_x.0[0].id as usize,
             WeierstrassAddAssignLayer::CompactSecp256k1(wits) => wits.p_x.0[0].id as usize,
         }
     }
 
-    fn num_arithmetic_wit_cols(&self) -> usize {
+    pub(crate) fn num_arithmetic_wit_cols(&self) -> usize {
         match &self.layer_exprs {
             WeierstrassAddAssignLayer::Generic(_) => {
                 size_of::<WeierstrassAddAssignWitCols<u8, EC::BaseField>>()
@@ -809,7 +859,7 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
 
 /// this is for testing purpose
 pub struct TestWeierstrassAddLayout<E: ExtensionField, EC: EllipticCurve> {
-    layout: WeierstrassAddAssignLayout<E, EC>,
+    pub(crate) layout: WeierstrassAddAssignLayout<E, EC>,
     mem_rw: Vec<WriteMEM>,
     vm_state: StateInOut<E>,
     _point_ptr_0: WitIn,

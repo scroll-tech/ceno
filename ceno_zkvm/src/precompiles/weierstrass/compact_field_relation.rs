@@ -43,6 +43,17 @@ where
     limbs_expr_from_vec(bytes.into_iter().map(E::BaseField::from_u8).collect())
 }
 
+pub(crate) fn compact_relation_quotient<P: FieldParameters>(
+    positive_modulus_offset: &BigUint,
+    lhs_eval: &BigUint,
+    rhs_eval: &BigUint,
+) -> BigUint {
+    let modulus = P::modulus();
+    let numerator = lhs_eval + positive_modulus_offset * &modulus - rhs_eval;
+    debug_assert_eq!(&numerator % &modulus, BigUint::from(0u32));
+    numerator / modulus
+}
+
 #[derive(Clone, Debug, AlignedBorrow)]
 #[repr(C)]
 pub struct CompactFieldRelationCols<WitT, P: FieldParameters + NumLimbs> {
@@ -116,10 +127,7 @@ impl<F: SmallField, P: FieldParameters + NumLimbs> CompactFieldRelationCols<F, P
         lhs_eval: &BigUint,
         rhs_eval: &BigUint,
     ) {
-        let modulus = P::modulus();
-        let numerator = lhs_eval + positive_modulus_offset * &modulus - rhs_eval;
-        debug_assert_eq!(&numerator % &modulus, BigUint::from(0u32));
-        let quotient = numerator / &modulus;
+        let quotient = compact_relation_quotient::<P>(positive_modulus_offset, lhs_eval, rhs_eval);
         self.populate(record, lhs, rhs, positive_modulus_offset, &quotient);
     }
 }

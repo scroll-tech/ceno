@@ -52,6 +52,16 @@ pub(crate) fn batch_multiplicative_inverse(values: &[BigUint], modulus: &BigUint
     outputs
 }
 
+pub(crate) fn write_fixed_biguint(dst: &mut [u8], offset: usize, width: usize, value: &BigUint) {
+    let bytes = value.to_bytes_le();
+    assert!(
+        bytes.len() <= width,
+        "secp256k1 compact source value exceeds fixed width"
+    );
+    dst[offset..offset + width].fill(0);
+    dst[offset..offset + bytes.len()].copy_from_slice(&bytes);
+}
+
 /// Elliptic Curve Point Decompress Event.
 ///
 /// This event is emitted when an elliptic curve point decompression operation is performed.

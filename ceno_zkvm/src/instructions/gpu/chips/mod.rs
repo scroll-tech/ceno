@@ -26,6 +26,7 @@ pub mod lw;
 pub mod mul;
 #[cfg(feature = "u16limb_circuit")]
 pub mod sb;
+pub mod secp256k1;
 #[cfg(feature = "u16limb_circuit")]
 pub mod sh;
 pub mod shard_ram;

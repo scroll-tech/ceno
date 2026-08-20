@@ -75,7 +75,8 @@ use crate::{
         utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
         weierstrass::{
             EllipticCurveDoubleInstance, Secp256k1AffineResult, batch_multiplicative_inverse,
-            compact_field_relation::CompactFieldRelationCols,
+            compact_field_relation::{CompactFieldRelationCols, compact_relation_quotient},
+            write_fixed_biguint,
         },
     },
     scheme::utils::gkr_witness,
@@ -136,6 +137,53 @@ pub struct WeierstrassDoubleAssignLayout<E: ExtensionField, EC: EllipticCurve> {
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
     WeierstrassDoubleAssignLayout<E, EC>
 {
+    pub(crate) fn compact_secp256k1_gpu_records(
+        instances: &[EllipticCurveDoubleInstance<EC::BaseField>],
+        affine_results: &[Secp256k1AffineResult],
+    ) -> Vec<u8> {
+        assert_eq!(instances.len(), affine_results.len());
+        const STRIDE: usize =
+            ceno_gpu::common::witgen::types::SECP256K1_DOUBLE_RELATION_RECORD_BYTES;
+        instances
+            .par_iter()
+            .zip_eq(affine_results.par_iter())
+            .map(|(event, affine)| {
+                let p = AffinePoint::<EC>::from_words_le(&event.p);
+                let modulus = EC::BaseField::modulus();
+                let slope_q = compact_relation_quotient::<EC::BaseField>(
+                    &(&modulus * 3u32),
+                    &(&affine.slope * (&p.y << 1usize)),
+                    &(&p.x * &p.x * 3u32),
+                );
+                let x_q = compact_relation_quotient::<EC::BaseField>(
+                    &modulus,
+                    &(&affine.x3 + (&p.x << 1usize)),
+                    &(&affine.slope * &affine.slope),
+                );
+                let y_q = compact_relation_quotient::<EC::BaseField>(
+                    &(&modulus << 1usize),
+                    &(&affine.y3 + &p.y),
+                    &(&affine.slope * (&p.x + &modulus - &affine.x3)),
+                );
+                let mut record = [0u8; STRIDE];
+                for (offset, value) in [
+                    (0, &p.x),
+                    (32, &p.y),
+                    (64, &affine.slope),
+                    (96, &affine.x3),
+                    (128, &affine.y3),
+                ] {
+                    write_fixed_biguint(&mut record, offset, 32, value);
+                }
+                for (offset, value) in [(160, &slope_q), (223, &x_q), (286, &y_q)] {
+                    write_fixed_biguint(&mut record, offset, 63, value);
+                }
+                record
+            })
+            .flat_map_iter(|record| record)
+            .collect()
+    }
+
     pub(crate) fn compute_compact_secp256k1_affine_results(
         instances: &[EllipticCurveDoubleInstance<EC::BaseField>],
     ) -> Vec<Secp256k1AffineResult> {
@@ -468,10 +516,8 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
         lhs_eval: &BigUint,
         rhs_eval: &BigUint,
     ) {
-        let modulus = EC::BaseField::modulus();
-        let numerator = lhs_eval + positive_modulus_offset * &modulus - rhs_eval;
-        debug_assert_eq!(&numerator % &modulus, BigUint::from(0u32));
-        let quotient = numerator / &modulus;
+        let quotient =
+            compact_relation_quotient::<EC::BaseField>(positive_modulus_offset, lhs_eval, rhs_eval);
         relation.populate(blu_events, lhs, rhs, positive_modulus_offset, &quotient);
     }
 }
@@ -795,14 +841,14 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
         }
     }
 
-    fn first_wit_id(&self) -> usize {
+    pub(crate) fn first_wit_id(&self) -> usize {
         match &self.layer_exprs {
             WeierstrassDoubleAssignLayer::Generic(wits) => wits.p_x.0[0].id as usize,
             WeierstrassDoubleAssignLayer::CompactSecp256k1(wits) => wits.p_x.0[0].id as usize,
         }
     }
 
-    fn num_arithmetic_wit_cols(&self) -> usize {
+    pub(crate) fn num_arithmetic_wit_cols(&self) -> usize {
         match &self.layer_exprs {
             WeierstrassDoubleAssignLayer::Generic(_) => {
                 size_of::<GenericWeierstrassDoubleAssignWitCols<u8, EC::BaseField>>()
@@ -828,7 +874,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
 
 /// this is for testing purpose
 pub struct TestWeierstrassDoubleLayout<E: ExtensionField, EC: EllipticCurve> {
-    layout: WeierstrassDoubleAssignLayout<E, EC>,
+    pub(crate) layout: WeierstrassDoubleAssignLayout<E, EC>,
     mem_rw: Vec<WriteMEM>,
     vm_state: StateInOut<E>,
     _point_ptr_0: WitIn,
