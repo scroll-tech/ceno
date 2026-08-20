@@ -314,7 +314,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 76;
+const AOT_ABI_VERSION: u32 = 77;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v5";
 const AOT_INITIAL_EVENT_SEED: usize = 20_000_000;
 const AOT_MAX_COMPILE_JOBS: usize = 32;
@@ -4310,19 +4310,6 @@ fn emit_gpu_replay_shared_recorder(mut file: impl Write) -> Result<()> {
     movl \source, (%r8,%rcx,4)
 .endm
 
-.macro GPU_COMPACT_PACK source, byte_offset, shift, mask
-    movl \source, %r8d
-    andl $\mask, %r8d
-    shlq $\shift, %r8
-    orq %r8, \byte_offset(%r9)
-.endm
-
-.macro GPU_COMPACT_PACK32 source, byte_offset, shift
-    movl \source, %r8d
-    shlq $\shift, %r8
-    orq %r8, \byte_offset(%r9)
-.endm
-
 .macro GPU_REPLAY_ACCESS index_offset, subcycle, scratch_offset
     movl \index_offset(%r12), %edx
     shll $6, %edx
@@ -4345,7 +4332,7 @@ fn emit_gpu_replay_shared_recorder(mut file: impl Write) -> Result<()> {
 .hidden ceno_aot_gpu_replay_emit_step
 .type ceno_aot_gpu_replay_emit_step, @function
 ceno_aot_gpu_replay_emit_step:
-    subq $40, %rsp
+    subq $48, %rsp
     movl $0, 0(%rsp)
     movl $0, 4(%rsp)
     movl $0, 8(%rsp)
@@ -4635,7 +4622,7 @@ ceno_aot_gpu_replay_emit_step:
     movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %r8
     addq $4, (%r8)
     movl ${AOT_STATUS_CONTINUE}, %eax
-    addq $40, %rsp
+    addq $48, %rsp
     ret
 
 .L_gpu_replay_compact:
@@ -4662,17 +4649,12 @@ ceno_aot_gpu_replay_emit_step:
     imulq $20, %rcx, %r9
 .L_gpu_compact_pointer:
     addq 0(%r10), %r9
-    movq $0, 0(%r9)
-    movq $0, 8(%r9)
-    movq $0, 16(%r9)
-    movq $0, 24(%r9)
-
     movq {AOT_CTX_GPU_REPLAY_ORDINAL_OFFSET}(%r12), %r8
     movl (%r8), %edx
     subl 120(%r10), %edx
     cmpl $262144, %edx
     jae .L_gpu_replay_bad_compact_range
-    GPU_COMPACT_PACK %edx, 0, 0, 0x3ffff
+    movl %edx, 20(%rsp)
 
     movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %edx
     testl %ecx, %ecx
@@ -4687,7 +4669,7 @@ ceno_aot_gpu_replay_emit_step:
     cmpl $0x400000, %edx
     jae .L_gpu_replay_bad_compact_pc
     shrl $2, %edx
-    GPU_COMPACT_PACK %edx, 2, 2, 0xfffff
+    movl %edx, 24(%rsp)
 
     movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %edx
     subl {AOT_CTX_PROGRAM_BASE_OFFSET}(%r12), %edx
@@ -4696,7 +4678,7 @@ ceno_aot_gpu_replay_emit_step:
     addq {AOT_CTX_INSTRUCTIONS_OFFSET}(%r12), %rdx
     movl 8(%rdx), %edx
     shrl $7, %edx
-    GPU_COMPACT_PACK %edx, 4, 6, 0x1ffffff
+    movl %edx, 28(%rsp)
 
     movl 112(%r10), %edx
     cmpl $3, %edx
@@ -4707,9 +4689,9 @@ ceno_aot_gpu_replay_emit_step:
     movl 0(%rsp), %edx
     cmpl $0x8000000, %edx
     jae .L_gpu_replay_bad_compact_cycle
-    GPU_COMPACT_PACK %edx, 7, 7, 0x7ffffff
+    movl %edx, 32(%rsp)
     movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %edx
-    GPU_COMPACT_PACK32 %edx, 11, 2
+    movl %edx, 36(%rsp)
 
     movl 112(%r10), %edx
     cmpl $1, %edx
@@ -4721,24 +4703,24 @@ ceno_aot_gpu_replay_emit_step:
     movl 4(%rsp), %edx
     cmpl $0x8000000, %edx
     jae .L_gpu_replay_bad_compact_cycle
-    GPU_COMPACT_PACK %edx, 15, 2, 0x7ffffff
+    movl %edx, 40(%rsp)
     movl {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12), %edx
-    GPU_COMPACT_PACK32 %edx, 18, 5
+    movl %edx, 44(%rsp)
     movl 112(%r10), %edx
     cmpl $2, %edx
-    je .L_gpu_compact_mask_181
+    je .L_gpu_compact_pack_2
     jmp .L_gpu_compact_third_memory_or_rd
 
 .L_gpu_compact_second_rd:
     movl 8(%rsp), %edx
     cmpl $0x8000000, %edx
     jae .L_gpu_replay_bad_compact_cycle
-    GPU_COMPACT_PACK %edx, 15, 2, 0x7ffffff
+    movl %edx, 40(%rsp)
     movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
-    GPU_COMPACT_PACK32 %edx, 18, 5
+    movl %edx, 44(%rsp)
     movl 112(%r10), %edx
     cmpl $5, %edx
-    jne .L_gpu_compact_mask_181
+    jne .L_gpu_compact_pack_2
 
 .L_gpu_compact_third_memory_or_rd:
     movl 112(%r10), %edx
@@ -4751,7 +4733,7 @@ ceno_aot_gpu_replay_emit_step:
 .L_gpu_compact_third_cycle:
     cmpl $0x8000000, %edx
     jae .L_gpu_replay_bad_compact_cycle
-    GPU_COMPACT_PACK %edx, 22, 5, 0x7ffffff
+    movl %edx, 0(%rsp)
     movl 112(%r10), %edx
     cmpl $0, %edx
     jne .L_gpu_compact_third_memory_value
@@ -4760,56 +4742,134 @@ ceno_aot_gpu_replay_emit_step:
 .L_gpu_compact_third_memory_value:
     movl {AOT_CTX_TRACE_MEM_BEFORE_OFFSET}(%r12), %edx
 .L_gpu_compact_third_value:
-    GPU_COMPACT_PACK32 %edx, 26, 0
-    jmp .L_gpu_compact_mask_240
+    movl %edx, 4(%rsp)
+    jmp .L_gpu_compact_pack_3
 
 .L_gpu_compact_jal_tail:
     movl 8(%rsp), %edx
     cmpl $0x8000000, %edx
     jae .L_gpu_replay_bad_compact_cycle
-    GPU_COMPACT_PACK %edx, 7, 7, 0x7ffffff
+    movl %edx, 32(%rsp)
     movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
-    GPU_COMPACT_PACK32 %edx, 11, 2
-    jmp .L_gpu_compact_mask_122
+    movl %edx, 36(%rsp)
+    jmp .L_gpu_compact_pack_1
 
 .L_gpu_compact_u_tail:
     movl 8(%rsp), %edx
     cmpl $0x8000000, %edx
     jae .L_gpu_replay_bad_compact_cycle
-    GPU_COMPACT_PACK %edx, 11, 2, 0x7ffffff
+    movl %edx, 40(%rsp)
     movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
-    GPU_COMPACT_PACK32 %edx, 14, 5
-    jmp .L_gpu_compact_mask_149
+    movl %edx, 44(%rsp)
+    jmp .L_gpu_compact_pack_u
 
 .L_gpu_compact_u_first:
     movl 0(%rsp), %edx
     cmpl $0x8000000, %edx
     jae .L_gpu_replay_bad_compact_cycle
-    GPU_COMPACT_PACK %edx, 7, 7, 0x7ffffff
+    movl %edx, 32(%rsp)
     jmp .L_gpu_compact_u_tail
 
-.L_gpu_compact_mask_122:
-    movl $122, %edx
-    jmp .L_gpu_compact_write_mask
-.L_gpu_compact_mask_149:
-    movl $149, %edx
-    jmp .L_gpu_compact_write_mask
-.L_gpu_compact_mask_181:
-    movl $181, %edx
-    jmp .L_gpu_compact_write_mask
-.L_gpu_compact_mask_240:
-    movl $240, %edx
-.L_gpu_compact_write_mask:
+.L_gpu_compact_pack_3:
+    movl 0(%rsp), %edx
+    movl 4(%rsp), %esi
+    call .L_gpu_compact_pack_common
+    movl 40(%rsp), %r8d
+    shrl $6, %r8d
+    movl 44(%rsp), %r11d
+    shlq $21, %r11
+    orq %r11, %r8
+    movl %edx, %r11d
+    andl $0x7ff, %r11d
+    shlq $53, %r11
+    orq %r11, %r8
+    movq %r8, 16(%r9)
+    shrl $11, %edx
+    shlq $16, %rsi
+    orq %rsi, %rdx
     movl 16(%rsp), %edi
     cmpl $16, %edi
     jae .L_gpu_replay_bad_compact_mask
-    movl %edx, %r11d
-    shrl $3, %edx
-    andl $7, %r11d
-    movl %edi, %r8d
-    movb %r11b, %cl
-    shlq %cl, %r8
-    orq %r8, (%r9,%rdx)
+    shlq $48, %rdi
+    orq %rdi, %rdx
+    movq %rdx, 24(%r9)
+    jmp .L_gpu_compact_commit
+
+.L_gpu_compact_pack_2:
+    call .L_gpu_compact_pack_common
+    movl 40(%rsp), %r8d
+    shrl $6, %r8d
+    movl 44(%rsp), %r11d
+    shlq $21, %r11
+    orq %r11, %r8
+    movl 16(%rsp), %edi
+    cmpl $16, %edi
+    jae .L_gpu_replay_bad_compact_mask
+    shlq $53, %rdi
+    orq %rdi, %r8
+    movq %r8, 16(%r9)
+    jmp .L_gpu_compact_commit
+
+.L_gpu_compact_pack_1:
+    movl $0, 40(%rsp)
+    call .L_gpu_compact_pack_common
+    movq 8(%r9), %r8
+    movl 16(%rsp), %edi
+    cmpl $16, %edi
+    jae .L_gpu_replay_bad_compact_mask
+    shlq $58, %rdi
+    orq %rdi, %r8
+    movq %r8, 8(%r9)
+    jmp .L_gpu_compact_commit
+
+.L_gpu_compact_pack_u:
+    call .L_gpu_compact_pack_common
+    movl 40(%rsp), %r11d
+    shlq $26, %r11
+    orq %r11, %r8
+    movl 44(%rsp), %r11d
+    andl $0x7ff, %r11d
+    shlq $53, %r11
+    orq %r11, %r8
+    movq %r8, 8(%r9)
+    movl 44(%rsp), %r8d
+    shrl $11, %r8d
+    movl 16(%rsp), %edi
+    cmpl $16, %edi
+    jae .L_gpu_replay_bad_compact_mask
+    shll $21, %edi
+    orl %edi, %r8d
+    movl %r8d, 16(%r9)
+    jmp .L_gpu_compact_commit
+
+// Assemble the common 63-bit prefix and first access into two fixed stores.
+// Input access cycle/value live at 32/36(%rsp).
+.L_gpu_compact_pack_common:
+    movl 28(%rsp), %r8d
+    movl 32(%rsp), %r11d
+    shlq $18, %r11
+    orq %r11, %r8
+    movl 36(%rsp), %r11d
+    shlq $38, %r11
+    orq %r11, %r8
+    movl 40(%rsp), %r11d
+    andl $1, %r11d
+    shlq $63, %r11
+    orq %r11, %r8
+    movq %r8, 0(%r9)
+    movl 40(%rsp), %r8d
+    shrl $1, %r8d
+    movl 44(%rsp), %r11d
+    shlq $26, %r11
+    orq %r11, %r8
+    movl 48(%rsp), %r11d
+    andl $0x3f, %r11d
+    shlq $58, %r11
+    orq %r11, %r8
+    movq %r8, 8(%r9)
+    ret
+
+.L_gpu_compact_commit:
     movl 108(%r10), %ecx
     incl %ecx
     movl %ecx, 108(%r10)
@@ -4818,7 +4878,7 @@ ceno_aot_gpu_replay_emit_step:
     movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %r8
     addq $4, (%r8)
     movl ${AOT_STATUS_CONTINUE}, %eax
-    addq $40, %rsp
+    addq $48, %rsp
     ret
 
 .L_gpu_replay_bad_kind:
@@ -4854,7 +4914,7 @@ ceno_aot_gpu_replay_emit_step:
     movq {AOT_CTX_GPU_REPLAY_ERROR_OFFSET}(%r12), %r8
     movl %edx, (%r8)
     movl ${AOT_STATUS_ERROR}, %eax
-    addq $40, %rsp
+    addq $48, %rsp
     ret
 "#,
         gpu_sentinel = crate::gpu_typed_ingress::GPU_TYPED_NATIVE_SENTINEL,
