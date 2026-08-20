@@ -770,6 +770,14 @@ impl<E: ExtensionField> ShardRamEcTreeCircuit<E> {
             .map(|witin| instance[witin.id as usize])
             .collect_vec();
 
+        Self::ec_sum_from_xy(&xy)
+    }
+
+    pub(crate) fn ec_sum_from_xy(
+        xy: &[E::BaseField],
+    ) -> SepticPoint<<E as ExtensionField>::BaseField> {
+        assert_eq!(xy.len(), SEPTIC_EXTENSION_DEGREE * 2);
+
         let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
         let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();
 

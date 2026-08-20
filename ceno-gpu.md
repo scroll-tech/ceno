@@ -960,6 +960,31 @@ and associated lookup/ShardRAM outputs on GPU. The CPU batch path remains a
 useful fallback and should be removed only after the GPU expansion passes the
 same exactness and performance gates.
 
+The post-pre-stage causal trim for that next step has also completed. New
+phase-level spans measured packing at 1.30ms/1.54ms, affine batching at
+3.56ms/4.70ms, and compact row expansion at 43.2ms/73.7ms for add/double. A
+temporary trim skipped only compact row expansion, reducing the two chip spans
+from 64.6ms/100ms to 12.6ms/17.4ms, opcode assignment from 711ms to 569ms, and
+shard-0 witness from 1.48s to 1.35s. It completed without fallback, panic,
+CUDA error, or OOM and passed application plus recursion verification. The trim
+was reverted; only the `secp256k1_pack_instances`, `secp256k1_affine_batch`,
+and `secp256k1_expand_rows` timing spans remain. The retained logs are
+`e3_secp_row_expansion_{control,trim}_20260816.log` in
+`ceno-reth-benchmark`. This isolates a 116.9ms row-expansion ceiling and
+justifies the fixed-width CUDA implementation.
+
+The first fixed-width sub-prototype moved only `DoubleU8` lookup counting to a
+CUDA atomic histogram after CPU row construction. It was exact: the instruction
+count, combined lookup digest, proof, and recursion verification all matched.
+It was nevertheless rejected and rolled back. Copying the completed witness
+matrix to the device and compiling the added kernel raised base-prover setup to
+151.97s, while secp256k1 add/double assignment regressed to 115ms/213ms. This
+confirms that GPU expansion must consume compact operation records directly and
+produce rows plus lookup outputs in one device-resident pass; post-processing a
+fully materialized CPU matrix is not an acceptable intermediate mechanism. The
+retained log is `e3_secp_gpu_lookup_candidate_1_20260816.log` in
+`ceno-reth-benchmark`.
+
 Pack add and double syscall operations once, expand EC rows and associated
 lookup/ShardRAM outputs on GPU, and remove CPU EC row construction without
 changing AIR or syscall semantics. Keep add and double independently revertible
@@ -972,10 +997,30 @@ has passed the interleaved trials.
 
 ### E4 — Keccak staging
 
-After a reverted causal prototype confirms its ceiling, reuse compact syscall
-inputs, keep intermediate state device-resident, and remove avoidable
-materialization or synchronization. Preserve the current Keccak path as an
-explicit fallback.
+Status: first mechanism rejected and rolled back on 2026-08-16. Phase tracing
+showed that the existing GPU Keccak path spent about 42ms in compact packing,
+kernel execution, and synchronization, then another approximately 39ms
+allocating and zero-filling a duplicate host witness matrix even though the
+jagged prover consumed the column-major device backing directly.
+
+A rotation-aware device-only prototype removed that host materialization. It
+kept compact syscall inputs and the generated witness device-resident, preserved
+the logical 4,096-instance/32-row rotation metadata, and passed exact jagged
+commitment sizing without adding a public API. Three interleaved warm pairs on
+cached block `23587691` all executed 19,184,568 instructions in two shards with
+boundaries `[4, 54691232, 76738276]`; the combined lookup digest, proof, and
+recursion verification matched. Median KeccakCore assignment fell from 86.7ms
+to 46.0ms (-46.9%), and median application proof fell from 6.1349s to 5.9852s
+(-2.44%). Median shard-0 witness, however, remained 1.53s in both control and
+candidate, so the mechanism failed the required 2% total-witness gate. The
+device-only path and its temporary shape bridge were removed. Retained logs are
+`e4_keccak_host_elision_control_{1,2,3}_20260816.log` and
+`e4_keccak_host_elision_candidate_{4,5,6}_20260816.log` in
+`ceno-reth-benchmark`; earlier candidate logs record the reverted causal steps.
+
+Any further E4 work must target the remaining compact packing/kernel span and
+must preserve the current path as an explicit fallback. Host-witness elision
+alone is closed unless a later pipeline change raises its total-witness ceiling.
 
 Target 40–60ms savings with exact witness, lookup, ShardRAM, proof, and
 verification equality.

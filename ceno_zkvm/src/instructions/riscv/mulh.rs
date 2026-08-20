@@ -104,7 +104,11 @@ mod test {
         }
     }
 
-    fn verify_mulu<I: RIVInstruction, E: ExtensionField>(name: &'static str, rs1: u32, rs2: u32) {
+    fn verify_mulu<I: RIVInstruction + 'static, E: ExtensionField>(
+        name: &'static str,
+        rs1: u32,
+        rs2: u32,
+    ) {
         #[cfg(not(feature = "u16limb_circuit"))]
         use super::mulh_circuit::MulhInstructionBase;
         #[cfg(feature = "u16limb_circuit")]

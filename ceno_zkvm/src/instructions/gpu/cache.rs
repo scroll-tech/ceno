@@ -18,6 +18,8 @@ use ceno_gpu::{
         },
     },
 };
+use cudarc::driver::DevicePtr;
+use multilinear_extensions::util::max_usable_threads;
 use rayon::prelude::*;
 use std::cell::RefCell;
 
@@ -94,27 +96,15 @@ pub(crate) fn upload_shard_steps_cached(
     })
 }
 
+/// Compatibility entry point for compact replay users which still provide a
+/// resident `StepRecord` slice. Typed ordinary ingress itself does not call
+/// this: its field-major arenas are staged directly by the fused launcher.
 pub(crate) fn upload_compact_steps_cached(
     hal: &CudaHalBB31,
-    records: &[ceno_emul::GpuReplayOrdinaryRecord],
+    shard_steps: &[StepRecord],
     shard_id: usize,
 ) -> Result<(), ZKVMError> {
-    let ptr = records.as_ptr() as usize;
-    let byte_len = std::mem::size_of_val(records);
-    SHARD_STEPS_DEVICE.with(|cache| {
-        let bytes = unsafe { std::slice::from_raw_parts(records.as_ptr().cast::<u8>(), byte_len) };
-        let device_buf = hal.inner.htod_copy_stream(None, bytes).map_err(|e| {
-            ZKVMError::InvalidWitness(format!("compact replay H2D failed: {e}").into())
-        })?;
-        *cache.borrow_mut() = Some(ShardStepsCache {
-            host_ptr: ptr,
-            byte_len,
-            shard_id,
-            n_steps: records.len(),
-            device_buf,
-        });
-        Ok(())
-    })
+    upload_shard_steps_cached(hal, shard_steps, shard_id)
 }
 
 /// Borrow the cached device buffer for kernel launch.
@@ -158,6 +148,10 @@ struct ShardMetadataCache {
     shared_addr_buf: Option<ceno_gpu::common::buffer::BufferImpl<'static, u32>>,
     /// Shared addr_accessed count buffer (single u32 counter).
     shared_addr_count: Option<ceno_gpu::common::buffer::BufferImpl<'static, u32>>,
+    /// Device-produced expected write/read/address emission counters.
+    emission_expected: Option<BufferImpl<'static, u32>>,
+    /// CPU dispatcher's conservative one-shot address capacity reservation.
+    reserved_address_capacity: Option<u32>,
     /// Lookup counters accumulated by every GPU opcode launch in this shard.
     shared_lk_counters: Option<GpuLookupCountersResult<BufferImpl<'static, u32>>>,
 }
@@ -215,7 +209,8 @@ pub fn has_compact_shard_records() -> bool {
 }
 
 /// Size of a single GpuShardRamRecord in bytes (must match CUDA struct).
-const GPU_SHARD_RAM_RECORD_SIZE: usize = 104;
+const GPU_SHARD_RAM_RECORD_SIZE: usize =
+    std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>();
 
 /// Take accumulated compact shard records and convert to ShardRamInput.
 /// Returns (writes, reads) pre-partitioned. Empty if no records accumulated.
@@ -245,7 +240,7 @@ pub fn convert_raw_to_shard_ram_inputs<E: ff_ext::ExtensionField>(
 }
 
 /// Convert raw GPU EC record bytes to ShardRamInput.
-/// The raw bytes are from `GpuShardRamRecord` structs (104 bytes each).
+/// The raw bytes are from `GpuShardRamRecord` structs.
 /// EC points are already computed on GPU — no Poseidon2/SepticCurve needed.
 /// Returns (writes, reads) pre-partitioned using parallel iteration.
 fn convert_compact_shard_records<E: ff_ext::ExtensionField>(
@@ -271,28 +266,28 @@ fn convert_compact_shard_records<E: ff_ext::ExtensionField>(
         let base = i * GPU_SHARD_RAM_RECORD_SIZE;
         let r = &raw[base..base + GPU_SHARD_RAM_RECORD_SIZE];
 
-        // Layout matches GpuShardRamRecord (104 bytes, #[repr(C)]):
+        // Layout matches GpuShardRamRecord (112 bytes, #[repr(C)]):
         //   0: addr(u32), 4: ram_type(u32), 8: value(u32), 12: _pad(u32),
-        //   16: shard(u64), 24: local_clk(u64), 32: global_clk(u64),
-        //   40: is_to_write_set(u32), 44: nonce(u32),
-        //   48: point_x[7](u32×7), 76: point_y[7](u32×7)
+        //   16: ordinal(u64), 24: shard(u64), 32: local_clk(u64),
+        //   40: global_clk(u64), 48: is_to_write_set(u32), 52: nonce(u32),
+        //   56: point_x[7](u32×7), 84: point_y[7](u32×7)
         let addr = u32::from_le_bytes(r[0..4].try_into().unwrap());
         let ram_type_val = u32::from_le_bytes(r[4..8].try_into().unwrap());
         let value = u32::from_le_bytes(r[8..12].try_into().unwrap());
-        let shard = u64::from_le_bytes(r[16..24].try_into().unwrap());
-        let local_clk = u64::from_le_bytes(r[24..32].try_into().unwrap());
-        let global_clk = u64::from_le_bytes(r[32..40].try_into().unwrap());
-        let is_to_write_set = u32::from_le_bytes(r[40..44].try_into().unwrap()) != 0;
-        let nonce = u32::from_le_bytes(r[44..48].try_into().unwrap());
+        let shard = u64::from_le_bytes(r[24..32].try_into().unwrap());
+        let local_clk = u64::from_le_bytes(r[32..40].try_into().unwrap());
+        let global_clk = u64::from_le_bytes(r[40..48].try_into().unwrap());
+        let is_to_write_set = u32::from_le_bytes(r[48..52].try_into().unwrap()) != 0;
+        let nonce = u32::from_le_bytes(r[52..56].try_into().unwrap());
 
         let mut point_x_arr = [E::BaseField::ZERO; 7];
         let mut point_y_arr = [E::BaseField::ZERO; 7];
         for j in 0..7 {
             point_x_arr[j] = E::BaseField::from_u32(u32::from_le_bytes(
-                r[48 + j * 4..52 + j * 4].try_into().unwrap(),
+                r[56 + j * 4..60 + j * 4].try_into().unwrap(),
             ));
             point_y_arr[j] = E::BaseField::from_u32(u32::from_le_bytes(
-                r[76 + j * 4..80 + j * 4].try_into().unwrap(),
+                r[84 + j * 4..88 + j * 4].try_into().unwrap(),
             ));
         }
 
@@ -340,7 +335,7 @@ pub(crate) fn ensure_shard_metadata_cached(
     shard_ctx: &ShardContext,
     shard_steps: &[StepRecord],
 ) -> Result<(), ZKVMError> {
-    ensure_shard_metadata_cached_inner(hal, shard_ctx, shard_steps.len(), None, shard_steps)
+    ensure_shard_metadata_cached_inner(hal, shard_ctx, shard_steps.len(), None, None, shard_steps)
 }
 
 pub(crate) fn ensure_compact_shard_metadata_cached(
@@ -348,8 +343,16 @@ pub(crate) fn ensure_compact_shard_metadata_cached(
     shard_ctx: &ShardContext,
     logical_steps: usize,
     fetch_params: (u32, usize),
+    reserved_address_capacity: u32,
 ) -> Result<(), ZKVMError> {
-    ensure_shard_metadata_cached_inner(hal, shard_ctx, logical_steps, Some(fetch_params), &[])
+    ensure_shard_metadata_cached_inner(
+        hal,
+        shard_ctx,
+        logical_steps,
+        Some(fetch_params),
+        Some(reserved_address_capacity),
+        &[],
+    )
 }
 
 fn ensure_shard_metadata_cached_inner(
@@ -357,6 +360,7 @@ fn ensure_shard_metadata_cached_inner(
     shard_ctx: &ShardContext,
     logical_steps: usize,
     fetch_params: Option<(u32, usize)>,
+    reserved_address_capacity: Option<u32>,
     shard_steps: &[StepRecord],
 ) -> Result<(), ZKVMError> {
     let shard_id = shard_ctx.shard_id;
@@ -442,14 +446,20 @@ fn ensure_shard_metadata_cached_inner(
         // Allocate shared EC/addr compact buffers for this shard.
         //
         // EC records: cross-shard only (sparse subset of RAM ops).
-        //   104 bytes each (26 u32s). Cap at 16M entries ≈ 1.6 GB.
+        //   112 bytes each (28 u32s). Cap at 16M entries ≈ 1.8 GB.
         // Addr records: every gpu_send() emits one (dense).
         //   4 bytes each (1 u32). Cap at 256M entries ≈ 1 GB.
         let max_ops_per_step = 52u64; // keccak worst case
         let total_ops_estimate = logical_steps as u64 * max_ops_per_step;
         let ec_capacity = total_ops_estimate.min(16 * 1024 * 1024) as usize;
-        let ec_u32s = ec_capacity * 26; // 26 u32s per GpuShardRamRecord (104 bytes)
-        let addr_capacity = total_ops_estimate.min(256 * 1024 * 1024) as usize;
+        let record_u32s = GPU_SHARD_RAM_RECORD_SIZE / 4;
+        let ec_u32s = ec_capacity * record_u32s;
+        let addr_capacity = match reserved_address_capacity {
+            Some(capacity) => usize::try_from(capacity).map_err(|_| {
+                ZKVMError::InvalidWitness("reserved address capacity exceeds usize".into())
+            })?,
+            None => total_ops_estimate.min(256 * 1024 * 1024) as usize,
+        };
 
         let shared_ec_buf = hal
             .witgen
@@ -465,6 +475,9 @@ fn ensure_shard_metadata_cached_inner(
             .map_err(|e| ZKVMError::InvalidWitness(format!("shared_addr_buf alloc: {e}").into()))?;
         let shared_addr_count = hal.witgen.alloc_u32_zeroed(1, None).map_err(|e| {
             ZKVMError::InvalidWitness(format!("shared_addr_count alloc: {e}").into())
+        })?;
+        let emission_expected = hal.witgen.alloc_u32_zeroed(3, None).map_err(|e| {
+            ZKVMError::InvalidWitness(format!("emission_expected alloc: {e}").into())
         })?;
 
         let shared_lk_counters = if super::config::is_shard_lk_accum_enabled() {
@@ -508,6 +521,7 @@ fn ensure_shard_metadata_cached_inner(
         let shared_ec_count_ptr = shared_ec_count.device_ptr() as u64;
         let shared_addr_out_ptr = shared_addr_buf.device_ptr() as u64;
         let shared_addr_count_ptr = shared_addr_count.device_ptr() as u64;
+        let emission_expected_ptr = emission_expected.device_ptr() as u64;
         let shared_lk = shared_lk_counters
             .as_ref()
             .map(|counters| SharedLkCounterPtrs {
@@ -529,6 +543,11 @@ fn ensure_shard_metadata_cached_inner(
             addr_capacity,
         );
 
+        let initial_reserved_address_capacity = initial_reserved_address_capacity(
+            reserved_address_capacity,
+            addr_capacity as u32,
+            super::config::is_debug_compare_enabled(),
+        );
         *cache = Some(ShardMetadataCache {
             shard_id,
             device_bufs: ShardDeviceBuffers {
@@ -541,14 +560,25 @@ fn ensure_shard_metadata_cached_inner(
                 shared_ec_count_ptr,
                 shared_addr_out_ptr,
                 shared_addr_count_ptr,
+                emission_expected_ptr,
                 shared_ec_capacity: ec_capacity as u32,
                 shared_addr_capacity: addr_capacity as u32,
+                legacy_max_threads: u32::try_from(max_usable_threads())
+                    .ok()
+                    .filter(|threads| *threads != 0 && *threads < (1u32 << 30))
+                    .ok_or_else(|| {
+                        ZKVMError::InvalidWitness(
+                            "legacy worker count is zero or exceeds 30-bit ordinal range".into(),
+                        )
+                    })?,
                 shared_lk,
             },
             shared_ec_buf: Some(shared_ec_buf),
             shared_ec_count: Some(shared_ec_count),
             shared_addr_buf: Some(shared_addr_buf),
             shared_addr_count: Some(shared_addr_count),
+            emission_expected: Some(emission_expected),
+            reserved_address_capacity: initial_reserved_address_capacity,
             shared_lk_counters,
         });
         Ok(())
@@ -562,6 +592,74 @@ pub(crate) fn with_cached_shard_meta<R>(f: impl FnOnce(&ShardDeviceBuffers) -> R
         let c = cache.as_ref().expect("shard metadata not uploaded");
         f(&c.device_bufs)
     })
+}
+
+pub(crate) fn cached_shard_pointer_fingerprint() -> [u64; 9] {
+    let hal = gkr_iop::gpu::get_cuda_hal().expect("CUDA unavailable for shard fingerprint");
+    let stream = hal.inner.default_stream();
+    with_cached_shard_meta(|shard| {
+        let (scalars_ptr, _scalars_guard) = shard.scalars.device_ptr(stream);
+        [
+            scalars_ptr,
+            shard.prev_shard_cycle_range.device_ptr() as u64,
+            shard.prev_shard_heap_range.device_ptr() as u64,
+            shard.prev_shard_hint_range.device_ptr() as u64,
+            shard.shared_ec_out_ptr,
+            shard.shared_ec_count_ptr,
+            shard.shared_addr_out_ptr,
+            shard.shared_addr_count_ptr,
+            shard.emission_expected_ptr,
+        ]
+    })
+}
+
+/// Install the CPU dispatcher's conservative one-shot address reservation.
+pub(crate) fn set_reserved_address_capacity(reserved: u32) {
+    SHARD_META_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let c = cache.as_mut().expect("shard metadata not uploaded");
+        install_reserved_address_capacity(
+            &mut c.reserved_address_capacity,
+            reserved,
+            c.device_bufs.shared_addr_capacity,
+            c.shard_id,
+        );
+    });
+}
+
+fn initial_reserved_address_capacity(
+    compact_reservation: Option<u32>,
+    physical_capacity: u32,
+    debug_compare: bool,
+) -> Option<u32> {
+    if compact_reservation.is_none() && debug_compare {
+        Some(physical_capacity)
+    } else {
+        None
+    }
+}
+
+fn install_reserved_address_capacity(
+    slot: &mut Option<u32>,
+    reserved: u32,
+    physical_capacity: u32,
+    shard_id: usize,
+) {
+    assert!(
+        slot.is_none(),
+        "address capacity reservation installed twice for shard {}",
+        shard_id,
+    );
+    assert!(
+        reserved <= physical_capacity,
+        "reserved address capacity exceeds physical shared capacity",
+    );
+    *slot = Some(reserved);
+}
+
+fn take_reserved_address_capacity(slot: &mut Option<u32>) -> u32 {
+    slot.take()
+        .expect("address capacity reservation not installed before shared-buffer take")
 }
 
 /// Borrow both cached device buffers (shard_steps + shard_meta) in one call.
@@ -637,12 +735,17 @@ pub fn take_shared_device_buffers() -> Option<SharedDeviceBufferSet> {
         let ec_count = c.shared_ec_count.take()?;
         let addr_buf = c.shared_addr_buf.take()?;
         let addr_count = c.shared_addr_count.take()?;
+        let emission_expected = c.emission_expected.take()?;
+        let reserved_address_capacity =
+            take_reserved_address_capacity(&mut c.reserved_address_capacity);
 
         Some(SharedDeviceBufferSet {
             ec_buf,
             ec_count,
             addr_buf,
             addr_count,
+            emission_expected,
+            reserved_address_capacity,
         })
     })
 }
@@ -663,6 +766,8 @@ pub struct SharedDeviceBufferSet {
     pub ec_count: ceno_gpu::common::buffer::BufferImpl<'static, u32>,
     pub addr_buf: ceno_gpu::common::buffer::BufferImpl<'static, u32>,
     pub addr_count: ceno_gpu::common::buffer::BufferImpl<'static, u32>,
+    pub emission_expected: BufferImpl<'static, u32>,
+    pub reserved_address_capacity: u32,
 }
 
 /// Read the current shared addr count from device (single u32 D2H).
@@ -757,7 +862,7 @@ pub(crate) fn flush_shared_ec_buffers_with_validation(
         if ec_count > 0 {
             // D2H EC records (only the active portion)
             let ec_buf = c.shared_ec_buf.as_ref().unwrap();
-            let ec_u32s = ec_count * 26; // 26 u32s per GpuShardRamRecord
+            let ec_u32s = ec_count * (GPU_SHARD_RAM_RECORD_SIZE / 4);
             let raw_u32: Vec<u32> = ec_buf
                 .to_vec_n(ec_u32s)
                 .map_err(|e| ZKVMError::InvalidWitness(format!("shared_ec_buf D2H: {e}").into()))?;
@@ -829,4 +934,57 @@ pub(crate) fn begin_gpu_shard_session(
 pub fn release_all_shard_gpu_caches() {
     invalidate_shard_steps_cache();
     invalidate_shard_meta_cache();
+}
+
+#[cfg(test)]
+mod reservation_tests {
+    use super::{
+        initial_reserved_address_capacity, install_reserved_address_capacity,
+        take_reserved_address_capacity,
+    };
+
+    #[test]
+    fn debug_legacy_reservation_uses_physical_capacity_and_consumes_once() {
+        let mut reservation = initial_reserved_address_capacity(None, 4096, true);
+        assert_eq!(reservation, Some(4096));
+        assert_eq!(take_reserved_address_capacity(&mut reservation), 4096);
+        assert!(reservation.is_none());
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                take_reserved_address_capacity(&mut reservation)
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn compact_reservation_remains_exact_and_double_install_fails_closed() {
+        let mut reservation = initial_reserved_address_capacity(Some(1234), 4096, false);
+        assert!(reservation.is_none());
+        install_reserved_address_capacity(&mut reservation, 1234, 4096, 7);
+        assert_eq!(reservation, Some(1234));
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                install_reserved_address_capacity(&mut reservation, 1234, 4096, 7)
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn reservation_above_physical_capacity_fails_closed() {
+        let mut reservation = None;
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                install_reserved_address_capacity(&mut reservation, 4097, 4096, 0)
+            }))
+            .is_err()
+        );
+        assert!(reservation.is_none());
+    }
+
+    #[test]
+    fn non_debug_legacy_reservation_stays_uninstalled() {
+        assert_eq!(initial_reserved_address_capacity(None, 4096, false), None);
+    }
 }

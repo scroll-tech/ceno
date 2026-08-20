@@ -19,8 +19,6 @@ pub mod column_map;
 pub mod d2h;
 #[cfg(feature = "gpu")]
 pub mod debug_compare;
-#[cfg(all(test, feature = "gpu"))]
-pub mod test_helpers;
 
 #[cfg(test)]
 mod tests {

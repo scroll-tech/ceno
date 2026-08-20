@@ -21,6 +21,8 @@ use tiny_keccak::{Hasher, Keccak};
 use witness::{DeviceMatrixLayout, RowMajorMatrix};
 
 const MANIFEST_ENV: &str = "CENO_VALIDATION_MANIFEST_DIR";
+const DETAIL_DIGESTS_ENV: &str = "CENO_VALIDATION_DETAIL_DIGESTS";
+const DETAIL_CHUNK_ROWS: usize = 4096;
 #[cfg(feature = "gpu")]
 const POST_WITGEN_MEM_ENV: &str = "CENO_GPU_LOG_POST_WITGEN_MEM";
 const MAGIC: &[u8] = b"CENO_VALIDATION_MANIFEST\0";
@@ -39,6 +41,7 @@ const CONTINUATION_NAMES: &[&str] = &[
 #[derive(Clone, Debug)]
 pub(crate) struct ValidationManifestConfig {
     output_dir: PathBuf,
+    detail_digests: bool,
 }
 
 #[derive(Debug)]
@@ -89,7 +92,12 @@ impl ValidationManifestConfig {
                 output_dir.display()
             )));
         }
-        Ok(Some(Self { output_dir }))
+        let detail_digests =
+            env::var_os(DETAIL_DIGESTS_ENV).is_some_and(|value| !value.is_empty() && value != "0");
+        Ok(Some(Self {
+            output_dir,
+            detail_digests,
+        }))
     }
 
     pub(crate) fn with_enabled<T>(
@@ -150,6 +158,8 @@ pub(crate) fn write_shard<E: ExtensionField>(
 ) -> Result<ManifestReport, ManifestError> {
     let start = Instant::now();
     let mut sections = Vec::with_capacity(7);
+    let mut matrix_details = Vec::new();
+    let mut lookup_details = Vec::new();
 
     sections.push(section("public_values", |out| {
         encode_public_values(out, public_values)
@@ -161,7 +171,7 @@ pub(crate) fn write_shard<E: ExtensionField>(
     let lookup_entry_count = lookup_tables.iter().map(|table| table.len() as u64).sum();
     sections.push(section("lookup_multiplicities", |out| {
         out.u32(lookup_tables.len())?;
-        for table in lookup_tables {
+        for (index, table) in lookup_tables.iter().enumerate() {
             let mut entries: Vec<_> = table.iter().map(|(&key, &value)| (key, value)).collect();
             entries.sort_unstable_by_key(|&(key, _)| key);
             out.u64(entries.len())?;
@@ -171,9 +181,44 @@ pub(crate) fn write_shard<E: ExtensionField>(
                     .ok_or_else(|| ManifestError("lookup multiplicity total overflow".into()))
             })?;
             out.u64(total)?;
-            for (key, value) in entries {
+            let mut detail = config.detail_digests.then(DigestEncoder::new);
+            if let Some(detail) = detail.as_mut() {
+                detail.u32(index)?;
+                detail.u64(entries.len())?;
+                detail.u64(total)?;
+            }
+            for &(key, value) in &entries {
                 out.u64(key)?;
                 out.u64(value)?;
+                if let Some(detail) = detail.as_mut() {
+                    detail.u64(key)?;
+                    detail.u64(value)?;
+                }
+            }
+            if let Some(detail) = detail {
+                let (payload_len, digest) = detail.finish();
+                let diagnostic_entries = if matches!(index, 0 | 5) {
+                    entries
+                        .iter()
+                        .map(|&(key, value)| {
+                            u64::try_from(value).map(|value| (key, value)).map_err(|_| {
+                                ManifestError(
+                                    "lookup multiplicity does not fit diagnostic u64".into(),
+                                )
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                } else {
+                    Vec::new()
+                };
+                lookup_details.push(LookupDetail {
+                    index,
+                    entry_count: table.len(),
+                    total,
+                    payload_len,
+                    digest,
+                    entries: diagnostic_entries,
+                });
             }
         }
         Ok(())
@@ -193,13 +238,23 @@ pub(crate) fn write_shard<E: ExtensionField>(
 
     let matrix_count = count_matrices(witnesses, |_| true);
     sections.push(section("witness_matrices", |out| {
-        encode_matrices(out, witnesses, |_| true)
+        encode_matrices(
+            out,
+            witnesses,
+            |_| true,
+            config.detail_digests.then_some(&mut matrix_details),
+        )
     })?);
     sections.push(section("ordered_shard_ram", |out| {
-        encode_matrices(out, witnesses, |name| name == SHARD_RAM_NAME)
+        encode_matrices(out, witnesses, |name| name == SHARD_RAM_NAME, None)
     })?);
     sections.push(section("continuation_matrices", |out| {
-        encode_matrices(out, witnesses, |name| CONTINUATION_NAMES.contains(&name))
+        encode_matrices(
+            out,
+            witnesses,
+            |name| CONTINUATION_NAMES.contains(&name),
+            None,
+        )
     })?);
     sections.push(section("final_continuation_state", |out| {
         encode_final_continuation(out, public_values)
@@ -210,6 +265,13 @@ pub(crate) fn write_shard<E: ExtensionField>(
         .output_dir
         .join(format!("shard-{shard_id:06}.manifest"));
     publish_atomic_no_replace(&final_path, &canonical)?;
+    if config.detail_digests {
+        let detail_path = config
+            .output_dir
+            .join(format!("shard-{shard_id:06}.details"));
+        let detail_bytes = encode_detail_records(&matrix_details, &lookup_details);
+        publish_atomic_no_replace(&detail_path, &detail_bytes)?;
+    }
 
     Ok(ManifestReport {
         path: final_path,
@@ -230,6 +292,55 @@ struct SectionSummary {
 struct DigestEncoder {
     hasher: Keccak,
     len: u64,
+}
+
+trait DigestWrite {
+    fn u32(&mut self, value: impl TryInto<u32>) -> Result<(), ManifestError>;
+    fn u64(&mut self, value: impl TryInto<u64>) -> Result<(), ManifestError>;
+}
+
+struct TeeDigestEncoder<'a> {
+    primary: &'a mut DigestEncoder,
+    detail: &'a mut DigestEncoder,
+}
+
+struct MatrixDetail {
+    chip_name: String,
+    input_name: String,
+    role: usize,
+    actual_rows: usize,
+    num_instances: usize,
+    occupied_rows: usize,
+    height: usize,
+    width: usize,
+    payload_len: u64,
+    digest: [u8; 32],
+    columns: Vec<MatrixColumnDetail>,
+}
+
+struct MatrixColumnDetail {
+    column: usize,
+    actual_rows: usize,
+    padding_rows: usize,
+    actual_digest: [u8; 32],
+    padding_digest: [u8; 32],
+    chunks: Vec<MatrixChunkDetail>,
+}
+
+struct MatrixChunkDetail {
+    chunk: usize,
+    row_start: usize,
+    row_count: usize,
+    digest: [u8; 32],
+}
+
+struct LookupDetail {
+    index: usize,
+    entry_count: usize,
+    total: u64,
+    payload_len: u64,
+    digest: [u8; 32],
+    entries: Vec<(u64, u64)>,
 }
 
 impl DigestEncoder {
@@ -273,6 +384,108 @@ impl DigestEncoder {
         self.hasher.finalize(&mut digest);
         (self.len, digest)
     }
+}
+
+impl DigestWrite for DigestEncoder {
+    fn u32(&mut self, value: impl TryInto<u32>) -> Result<(), ManifestError> {
+        DigestEncoder::u32(self, value)
+    }
+
+    fn u64(&mut self, value: impl TryInto<u64>) -> Result<(), ManifestError> {
+        DigestEncoder::u64(self, value)
+    }
+}
+
+impl DigestWrite for TeeDigestEncoder<'_> {
+    fn u32(&mut self, value: impl TryInto<u32>) -> Result<(), ManifestError> {
+        let value = value
+            .try_into()
+            .map_err(|_| ManifestError("validation value does not fit u32".into()))?;
+        self.primary.u32(value)?;
+        self.detail.u32(value)
+    }
+
+    fn u64(&mut self, value: impl TryInto<u64>) -> Result<(), ManifestError> {
+        let value = value
+            .try_into()
+            .map_err(|_| ManifestError("validation value does not fit u64".into()))?;
+        self.primary.u64(value)?;
+        self.detail.u64(value)
+    }
+}
+
+fn encode_detail_records(matrices: &[MatrixDetail], lookups: &[LookupDetail]) -> Vec<u8> {
+    let mut text = String::from("CENO_VALIDATION_DETAIL_DIGESTS\t2\n");
+    for matrix in matrices {
+        use fmt::Write as _;
+        writeln!(
+            text,
+            "matrix\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            matrix.chip_name,
+            matrix.input_name,
+            matrix.role,
+            matrix.actual_rows,
+            matrix.num_instances,
+            matrix.occupied_rows,
+            matrix.height,
+            matrix.width,
+            matrix.payload_len,
+            hex_digest(&matrix.digest),
+        )
+        .expect("writing validation detail to String cannot fail");
+        for column in &matrix.columns {
+            writeln!(
+                text,
+                "matrix_column\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                matrix.chip_name,
+                matrix.input_name,
+                matrix.role,
+                column.column,
+                column.actual_rows,
+                column.padding_rows,
+                hex_digest(&column.actual_digest),
+                hex_digest(&column.padding_digest),
+            )
+            .expect("writing validation detail to String cannot fail");
+            for chunk in &column.chunks {
+                writeln!(
+                    text,
+                    "matrix_chunk\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    matrix.chip_name,
+                    matrix.input_name,
+                    matrix.role,
+                    column.column,
+                    chunk.chunk,
+                    chunk.row_start,
+                    chunk.row_count,
+                    hex_digest(&chunk.digest),
+                )
+                .expect("writing validation detail to String cannot fail");
+            }
+        }
+    }
+    for lookup in lookups {
+        use fmt::Write as _;
+        writeln!(
+            text,
+            "lookup\t{}\t{}\t{}\t{}\t{}",
+            lookup.index,
+            lookup.entry_count,
+            lookup.total,
+            lookup.payload_len,
+            hex_digest(&lookup.digest),
+        )
+        .expect("writing validation detail to String cannot fail");
+        for &(key, multiplicity) in &lookup.entries {
+            writeln!(
+                text,
+                "lookup_entry\t{}\t{}\t{}",
+                lookup.index, key, multiplicity,
+            )
+            .expect("writing validation detail to String cannot fail");
+        }
+    }
+    text.into_bytes()
 }
 
 fn section(
@@ -387,6 +600,7 @@ fn encode_matrices<E: ExtensionField>(
     out: &mut DigestEncoder,
     witnesses: &ZKVMWitnesses<E>,
     include: impl Fn(&str) -> bool,
+    mut details: Option<&mut Vec<MatrixDetail>>,
 ) -> Result<(), ManifestError> {
     let chips: Vec<_> = witnesses
         .witnesses
@@ -401,18 +615,68 @@ fn encode_matrices<E: ExtensionField>(
             out.string(&input.name)?;
             out.u64(input.num_instances[0])?;
             out.u64(input.num_instances[1])?;
+            let actual_rows = input.num_instances[0]
+                .checked_add(input.num_instances[1])
+                .ok_or_else(|| {
+                    ManifestError(format!(
+                        "validation matrix actual-row count overflow for chip {chip_name:?}, input {:?}",
+                        input.name
+                    ))
+            })?;
             for (role, rmm) in input.witness_rmms.iter().enumerate() {
-                encode_matrix(out, role, rmm)?;
+                if let Some(details) = details.as_deref_mut() {
+                    let mut detail = DigestEncoder::new();
+                    let mut columns = Vec::with_capacity(rmm.width());
+                    detail.string(chip_name)?;
+                    detail.string(&input.name)?;
+                    detail.u32(role)?;
+                    detail.u64(actual_rows)?;
+                    {
+                        let mut tee = TeeDigestEncoder {
+                            primary: out,
+                            detail: &mut detail,
+                        };
+                        encode_matrix(
+                            &mut tee,
+                            chip_name,
+                            &input.name,
+                            role,
+                            actual_rows,
+                            rmm,
+                            Some(&mut columns),
+                        )?;
+                    }
+                    let (payload_len, digest) = detail.finish();
+                    details.push(MatrixDetail {
+                        chip_name: chip_name.to_string(),
+                        input_name: input.name.clone(),
+                        role,
+                        actual_rows,
+                        num_instances: rmm.num_instances(),
+                        occupied_rows: rmm.occupied_physical_rows(),
+                        height: rmm.height(),
+                        width: rmm.width(),
+                        payload_len,
+                        digest,
+                        columns,
+                    });
+                } else {
+                    encode_matrix(out, chip_name, &input.name, role, actual_rows, rmm, None)?;
+                }
             }
         }
     }
     Ok(())
 }
 
-fn encode_matrix<F: SmallField + 'static>(
-    out: &mut DigestEncoder,
+fn encode_matrix<F: SmallField + 'static, W: DigestWrite>(
+    out: &mut W,
+    chip_name: &str,
+    input_name: &str,
     role: usize,
+    actual_rows: usize,
     matrix: &RowMajorMatrix<F>,
+    mut columns: Option<&mut Vec<MatrixColumnDetail>>,
 ) -> Result<(), ManifestError> {
     out.u32(role)?;
     out.u64(matrix.num_instances())?;
@@ -433,22 +697,139 @@ fn encode_matrix<F: SmallField + 'static>(
                 )));
             }
             for col in 0..matrix.width() {
+                if let Some(columns) = columns.as_deref_mut() {
+                    columns.push(build_matrix_column_detail(
+                        col,
+                        actual_rows,
+                        matrix.height(),
+                        |row| values[row * matrix.width() + col].to_canonical_u64(),
+                    )?);
+                }
                 for row in 0..matrix.height() {
                     out.u64(values[row * matrix.width() + col].to_canonical_u64())?;
                 }
             }
             Ok(())
         }
-        Some(DeviceMatrixLayout::RowMajor) => Err(ManifestError(
-            "row-major device-backed validation matrices are unsupported".into(),
-        )),
-        Some(DeviceMatrixLayout::ColMajor) => encode_col_major_device_matrix(out, matrix),
+        Some(DeviceMatrixLayout::RowMajor) => Err(ManifestError(format!(
+            "unsupported row-major validation matrix for chip {chip_name:?}, input {input_name:?}, role {role}: actual_rows={actual_rows}, occupied_rows={}, height={}, width={}, layout=RowMajor",
+            matrix.occupied_physical_rows(),
+            matrix.height(),
+            matrix.width(),
+        ))),
+        Some(DeviceMatrixLayout::ColMajor) => encode_col_major_device_matrix(
+            out,
+            chip_name,
+            input_name,
+            role,
+            actual_rows,
+            matrix,
+            columns,
+        ),
     }
 }
 
+fn build_matrix_column_detail(
+    column: usize,
+    actual_rows: usize,
+    padded_height: usize,
+    mut value_at: impl FnMut(usize) -> u64,
+) -> Result<MatrixColumnDetail, ManifestError> {
+    if actual_rows > padded_height {
+        return Err(ManifestError(format!(
+            "validation matrix has {actual_rows} actual rows but padded height is {padded_height}"
+        )));
+    }
+    let mut actual = DigestEncoder::new();
+    let mut padding = DigestEncoder::new();
+    let chunk_count = padded_height.div_ceil(DETAIL_CHUNK_ROWS);
+    let mut chunk_encoders: Vec<_> = (0..chunk_count).map(|_| DigestEncoder::new()).collect();
+    for row in 0..padded_height {
+        let value = value_at(row);
+        if row < actual_rows {
+            actual.u64(value)?;
+        } else {
+            padding.u64(value)?;
+        }
+        chunk_encoders[row / DETAIL_CHUNK_ROWS].u64(value)?;
+    }
+    let (_, actual_digest) = actual.finish();
+    let (_, padding_digest) = padding.finish();
+    let chunks = chunk_encoders
+        .into_iter()
+        .enumerate()
+        .map(|(chunk, encoder)| {
+            let row_start = chunk * DETAIL_CHUNK_ROWS;
+            MatrixChunkDetail {
+                chunk,
+                row_start,
+                row_count: (padded_height - row_start).min(DETAIL_CHUNK_ROWS),
+                digest: encoder.finish().1,
+            }
+        })
+        .collect();
+    Ok(MatrixColumnDetail {
+        column,
+        actual_rows,
+        padding_rows: padded_height - actual_rows,
+        actual_digest,
+        padding_digest,
+        chunks,
+    })
+}
+
+fn resolve_col_major_present_rows(
+    device_len: usize,
+    actual_rows: usize,
+    occupied_rows: usize,
+    padded_height: usize,
+    width: usize,
+) -> Result<usize, String> {
+    let full_len = padded_height
+        .checked_mul(width)
+        .ok_or_else(|| "full matrix length overflow".to_string())?;
+    let compact_len = occupied_rows
+        .checked_mul(width)
+        .ok_or_else(|| "occupied matrix length overflow".to_string())?;
+
+    // Preserve the existing full and occupied-prefix representations.
+    if device_len == full_len {
+        return Ok(padded_height);
+    }
+    if device_len == compact_len {
+        return Ok(occupied_rows);
+    }
+
+    let actual_len = actual_rows
+        .checked_mul(width)
+        .ok_or_else(|| "actual-row matrix length overflow".to_string())?;
+    if device_len == actual_len {
+        if actual_rows > occupied_rows {
+            return Err(format!(
+                "actual rows {actual_rows} exceed occupied rows {occupied_rows}"
+            ));
+        }
+        if occupied_rows > padded_height {
+            return Err(format!(
+                "occupied rows {occupied_rows} exceed padded height {padded_height}"
+            ));
+        }
+        return Ok(actual_rows);
+    }
+
+    if width != 0 && !device_len.is_multiple_of(width) {
+        return Err(format!(
+            "device length {device_len} is not divisible by width {width}"
+        ));
+    }
+    Err(format!(
+        "device length {device_len} matches neither full {full_len}, occupied {compact_len}, nor checked actual-row {actual_len} length"
+    ))
+}
+
 #[cfg(any(feature = "gpu", test))]
-fn encode_col_major_values<F: SmallField>(
-    out: &mut DigestEncoder,
+fn encode_col_major_values<F: SmallField, W: DigestWrite>(
+    out: &mut W,
     values: &[F],
     present_rows: usize,
     padded_height: usize,
@@ -486,9 +867,14 @@ fn encode_col_major_values<F: SmallField>(
 }
 
 #[cfg(feature = "gpu")]
-fn encode_col_major_device_matrix<F: SmallField + 'static>(
-    out: &mut DigestEncoder,
+fn encode_col_major_device_matrix<F: SmallField + 'static, W: DigestWrite>(
+    out: &mut W,
+    chip_name: &str,
+    input_name: &str,
+    role: usize,
+    actual_rows: usize,
     matrix: &RowMajorMatrix<F>,
+    mut columns: Option<&mut Vec<MatrixColumnDetail>>,
 ) -> Result<(), ManifestError> {
     use ceno_gpu::{Buffer, common::buffer::BufferImpl};
     use p3::babybear::BabyBear;
@@ -502,29 +888,29 @@ fn encode_col_major_device_matrix<F: SmallField + 'static>(
     let device = matrix
         .device_backing_ref::<BufferImpl<'static, BabyBear>>()
         .ok_or_else(|| ManifestError("col-major device backing type mismatch".into()))?;
-    let full_len = matrix
-        .height()
-        .checked_mul(matrix.width())
-        .ok_or_else(|| ManifestError("device validation matrix dimensions overflow".into()))?;
-    let compact_len = matrix
-        .occupied_physical_rows()
-        .checked_mul(matrix.width())
-        .ok_or_else(|| {
-            ManifestError("compact device validation matrix dimensions overflow".into())
-        })?;
-    let present_rows = match device.len() {
-        len if len == full_len => matrix.height(),
-        len if len == compact_len => matrix.occupied_physical_rows(),
-        len => {
-            return Err(ManifestError(format!(
-                "device validation matrix has {len} values, expected full {full_len} or compact {compact_len}"
-            )));
-        }
-    };
+    let present_rows = resolve_col_major_present_rows(
+        device.len(),
+        actual_rows,
+        matrix.occupied_physical_rows(),
+        matrix.height(),
+        matrix.width(),
+    )
+    .map_err(|reason| {
+        ManifestError(format!(
+            "invalid col-major validation matrix for chip {chip_name:?}, input {input_name:?}, role {role}: {reason}; device_len={}, actual_rows={actual_rows}, occupied_rows={}, height={}, width={}, layout=ColMajor",
+            device.len(),
+            matrix.occupied_physical_rows(),
+            matrix.height(),
+            matrix.width(),
+        ))
+    })?;
     if present_rows > matrix.height() {
         return Err(ManifestError(format!(
-            "device validation matrix has {present_rows} present rows but padded height is {}",
-            matrix.height()
+            "invalid col-major validation matrix for chip {chip_name:?}, input {input_name:?}, role {role}: present rows {present_rows} exceed padded height {}; device_len={}, actual_rows={actual_rows}, occupied_rows={}, width={}, layout=ColMajor",
+            matrix.height(),
+            device.len(),
+            matrix.occupied_physical_rows(),
+            matrix.width(),
         )));
     }
     let column_bytes = present_rows
@@ -541,15 +927,28 @@ fn encode_col_major_device_matrix<F: SmallField + 'static>(
             .owned_subrange(start..end)
             .to_vec()
             .map_err(|err| ManifestError(format!("validation matrix D2H failed: {err}")))?;
+        if let Some(columns) = columns.as_deref_mut() {
+            columns.push(build_matrix_column_detail(
+                col,
+                actual_rows,
+                matrix.height(),
+                |row| values.get(row).map_or(0, |value| value.to_canonical_u64()),
+            )?);
+        }
         encode_col_major_values(out, &values, present_rows, matrix.height(), 1)?;
     }
     Ok(())
 }
 
 #[cfg(not(feature = "gpu"))]
-fn encode_col_major_device_matrix<F: SmallField + 'static>(
-    _out: &mut DigestEncoder,
+fn encode_col_major_device_matrix<F: SmallField + 'static, W: DigestWrite>(
+    _out: &mut W,
+    _chip_name: &str,
+    _input_name: &str,
+    _role: usize,
+    _actual_rows: usize,
     _matrix: &RowMajorMatrix<F>,
+    _columns: Option<&mut Vec<MatrixColumnDetail>>,
 ) -> Result<(), ManifestError> {
     Err(ManifestError(
         "device-backed validation matrix requires the gpu feature".into(),
@@ -635,7 +1034,7 @@ mod tests {
             2,
             InstancePaddingStrategy::Default,
         );
-        let actual = digest(|out| encode_matrix(out, 0, &matrix));
+        let actual = digest(|out| encode_matrix(out, "test", "test", 0, 2, &matrix, None));
         let expected = digest(|out| {
             out.u32(0usize)?;
             out.u64(2usize)?;
@@ -661,7 +1060,7 @@ mod tests {
         assert_eq!(host.occupied_physical_rows(), 3);
         assert_eq!(host.height(), 4);
 
-        let host_digest = digest(|out| encode_matrix(out, 0, &host));
+        let host_digest = digest(|out| encode_matrix(out, "test", "test", 0, 3, &host, None));
         let compact_digest = digest(|out| {
             out.u32(0usize)?;
             out.u64(host.num_instances())?;
@@ -681,6 +1080,63 @@ mod tests {
             )
         });
         assert_eq!(host_digest, compact_digest);
+    }
+
+    #[test]
+    fn validation_manifest_checked_actual_prefix_matches_zero_padded_matrix() {
+        let actual_rows = 3;
+        let occupied_rows = 4;
+        let padded_height = 4;
+        let width = 2;
+        let compact_col_major: Vec<F> = [1, 3, 5, 2, 4, 6].into_iter().map(F::from_u64).collect();
+        let present_rows = resolve_col_major_present_rows(
+            compact_col_major.len(),
+            actual_rows,
+            occupied_rows,
+            padded_height,
+            width,
+        )
+        .unwrap();
+        assert_eq!(present_rows, actual_rows);
+
+        let compact_digest = digest(|out| {
+            out.u32(1usize)?;
+            out.u64(occupied_rows)?;
+            out.u64(occupied_rows)?;
+            out.u64(padded_height)?;
+            out.u64(width)?;
+            encode_col_major_values(out, &compact_col_major, present_rows, padded_height, width)
+        });
+        let padded_digest = digest(|out| {
+            out.u32(1usize)?;
+            out.u64(occupied_rows)?;
+            out.u64(occupied_rows)?;
+            out.u64(padded_height)?;
+            out.u64(width)?;
+            for value in [1u64, 3, 5, 0, 2, 4, 6, 0] {
+                out.u64(value)?;
+            }
+            Ok(())
+        });
+        assert_eq!(compact_digest, padded_digest);
+    }
+
+    #[test]
+    fn validation_manifest_checked_actual_prefix_rejects_invalid_shapes() {
+        let non_divisible = resolve_col_major_present_rows(5, 3, 4, 4, 2).unwrap_err();
+        assert!(non_divisible.contains("not divisible"));
+
+        let oversized = resolve_col_major_present_rows(10, 3, 4, 4, 2).unwrap_err();
+        assert!(oversized.contains("matches neither"));
+
+        let actual_exceeds_occupied = resolve_col_major_present_rows(10, 5, 4, 8, 2).unwrap_err();
+        assert!(actual_exceeds_occupied.contains("actual rows 5 exceed occupied rows 4"));
+
+        let occupied_exceeds_height = resolve_col_major_present_rows(4, 2, 5, 4, 2).unwrap_err();
+        assert!(occupied_exceeds_height.contains("occupied rows 5 exceed padded height 4"));
+
+        let arbitrary_prefix = resolve_col_major_present_rows(4, 3, 4, 4, 2).unwrap_err();
+        assert!(arbitrary_prefix.contains("checked actual-row 6"));
     }
 
     #[test]
@@ -724,6 +1180,101 @@ mod tests {
         right.insert(2, 7);
         right.insert(9, 3);
         assert_eq!(encode(&[left]), encode(&[right]));
+    }
+
+    #[test]
+    fn validation_manifest_detail_records_name_matrix_roles_and_lookup_indices() {
+        let matrices = [MatrixDetail {
+            chip_name: "chip".into(),
+            input_name: "input".into(),
+            role: 1,
+            actual_rows: 3,
+            num_instances: 4,
+            occupied_rows: 4,
+            height: 8,
+            width: 2,
+            payload_len: 9,
+            digest: [0x11; 32],
+            columns: vec![MatrixColumnDetail {
+                column: 0,
+                actual_rows: 3,
+                padding_rows: 5,
+                actual_digest: [0x33; 32],
+                padding_digest: [0x44; 32],
+                chunks: vec![MatrixChunkDetail {
+                    chunk: 0,
+                    row_start: 0,
+                    row_count: 8,
+                    digest: [0x55; 32],
+                }],
+            }],
+        }];
+        let lookups = [LookupDetail {
+            index: 7,
+            entry_count: 5,
+            total: 12,
+            payload_len: 13,
+            digest: [0x22; 32],
+            entries: vec![(4, 9)],
+        }];
+        let text = String::from_utf8(encode_detail_records(&matrices, &lookups)).unwrap();
+        assert!(text.starts_with("CENO_VALIDATION_DETAIL_DIGESTS\t2\n"));
+        assert!(text.contains(
+            "matrix\tchip\tinput\t1\t3\t4\t4\t8\t2\t9\t1111111111111111111111111111111111111111111111111111111111111111\n"
+        ));
+        assert!(text.contains(
+            "lookup\t7\t5\t12\t13\t2222222222222222222222222222222222222222222222222222222222222222\n"
+        ));
+        assert!(text.contains(
+            "matrix_column\tchip\tinput\t1\t0\t3\t5\t3333333333333333333333333333333333333333333333333333333333333333\t4444444444444444444444444444444444444444444444444444444444444444\n"
+        ));
+        assert!(text.contains(
+            "matrix_chunk\tchip\tinput\t1\t0\t0\t0\t8\t5555555555555555555555555555555555555555555555555555555555555555\n"
+        ));
+        assert!(text.contains("lookup_entry\t7\t4\t9\n"));
+    }
+
+    #[test]
+    fn validation_manifest_column_details_split_actual_padding_and_fixed_chunks() {
+        let height = DETAIL_CHUNK_ROWS + 3;
+        let actual_rows = DETAIL_CHUNK_ROWS - 1;
+        let detail =
+            build_matrix_column_detail(7, actual_rows, height, |row| row as u64 + 1).unwrap();
+        assert_eq!(detail.column, 7);
+        assert_eq!(detail.actual_rows, actual_rows);
+        assert_eq!(detail.padding_rows, 4);
+        assert_eq!(detail.chunks.len(), 2);
+        assert_eq!(detail.chunks[0].row_count, DETAIL_CHUNK_ROWS);
+        assert_eq!(detail.chunks[1].row_start, DETAIL_CHUNK_ROWS);
+        assert_eq!(detail.chunks[1].row_count, 3);
+
+        let digest_values = |range: std::ops::Range<usize>| {
+            let mut encoder = DigestEncoder::new();
+            for row in range {
+                encoder.u64(row as u64 + 1).unwrap();
+            }
+            encoder.finish().1
+        };
+        assert_eq!(detail.actual_digest, digest_values(0..actual_rows));
+        assert_eq!(detail.padding_digest, digest_values(actual_rows..height));
+        assert_eq!(detail.chunks[0].digest, digest_values(0..DETAIL_CHUNK_ROWS));
+        assert_eq!(
+            detail.chunks[1].digest,
+            digest_values(DETAIL_CHUNK_ROWS..height)
+        );
+    }
+
+    #[test]
+    fn validation_manifest_column_details_encode_implicit_padding_as_zero() {
+        let compact = [9u64, 8, 7];
+        let implicit =
+            build_matrix_column_detail(0, 3, 8, |row| compact.get(row).copied().unwrap_or(0))
+                .unwrap();
+        let explicit =
+            build_matrix_column_detail(0, 3, 8, |row| [9u64, 8, 7, 0, 0, 0, 0, 0][row]).unwrap();
+        assert_eq!(implicit.actual_digest, explicit.actual_digest);
+        assert_eq!(implicit.padding_digest, explicit.padding_digest);
+        assert_eq!(implicit.chunks[0].digest, explicit.chunks[0].digest);
     }
 
     #[test]

@@ -5,20 +5,28 @@
 /// 2. Runs a lightweight CPU loop to collect lk and shardram without witness replay
 /// 3. Returns the GPU-generated witness + CPU-collected lk and shardram
 use ceno_emul::{
-    FullTracer, GpuReplayOrdinaryRecord, GpuReplayShardArenas, StepIndex, StepRecord, WordAddr,
+    FullTracer, GpuReplayShardArenas, GpuReplayTypedRange, GpuTypedSoaArena, InsnKind, StepIndex,
+    StepRecord, WordAddr,
 };
 use ceno_gpu::{
     Buffer,
     bb31::CudaHalBB31,
     common::{
         buffer::BufferImpl,
-        witgen::types::{GpuRamRecordSlot, GpuShardRamRecord},
+        witgen::types::{
+            FusedRangeWorkItem, GpuRamRecordSlot, GpuShardRamRecord, GpuWitnessResult,
+        },
     },
 };
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use p3::field::PrimeCharacteristicRing as FieldAlgebra;
-use std::cell::{Cell, RefCell};
+use std::{
+    any::{Any, TypeId},
+    cell::{Cell, RefCell},
+    collections::HashMap,
+};
+use strum::EnumCount;
 use tracing::info_span;
 use witness::RowMajorMatrix;
 
@@ -36,6 +44,20 @@ use crate::{
     tables::RMMCollections,
     witness::LkMultiplicity,
 };
+
+const PACKED_PRODUCER_COUNT_BITS: u32 = 24;
+const PRODUCER_PRIORITY_ROW_BITS: u32 = 23;
+
+fn packed_producer_total(kind: InsnKind, rows: usize) -> u32 {
+    let rows = u32::try_from(rows).expect("producer total exceeds u32");
+    assert!(
+        rows < (1 << PRODUCER_PRIORITY_ROW_BITS),
+        "producer total exceeds packed priority row range"
+    );
+    let order = kind as u32;
+    assert!(order < (1 << (31 - 25)));
+    (order << PACKED_PRODUCER_COUNT_BITS) | rows
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum GpuWitgenKind {
@@ -65,6 +87,41 @@ pub enum GpuWitgenKind {
     ShardRam,
 }
 
+impl GpuWitgenKind {
+    fn fused_abi(self) -> (u32, u32, u32) {
+        match self {
+            Self::Add => (0, 0, 0),
+            Self::Sub => (1, 0, 0),
+            Self::LogicR(v) => (2, v, 0),
+            Self::LogicI(v) => (3, v, 0),
+            Self::Addi => (4, 0, 0),
+            Self::Lui => (5, 0, 0),
+            Self::Auipc => (6, 0, 0),
+            Self::Jal => (7, 0, 0),
+            Self::ShiftR(v) => (8, v, 0),
+            Self::ShiftI(v) => (9, v, 0),
+            Self::Slt(v) => (10, v, 0),
+            Self::Slti(v) => (11, v, 0),
+            Self::BranchEq(v) => (12, v, 0),
+            Self::BranchCmp(v) => (13, v, 0),
+            Self::Jalr => (14, 0, 0),
+            Self::Sw => (15, 0, 0),
+            Self::Sh => (16, 0, 0),
+            Self::Sb => (17, 0, 0),
+            Self::LoadSub {
+                load_width,
+                is_signed,
+            } => (18, load_width, is_signed),
+            Self::Mul(v) => (19, v, 0),
+            Self::Div(v) => (20, v, 0),
+            // The u16-limb circuit has an explicit imm_sign column.  The
+            // fused CUDA ABI uses arg0 to keep that column in the layout.
+            Self::Lw => (21, u32::from(cfg!(feature = "u16limb_circuit")), 0),
+            Self::Keccak | Self::ShardRam => panic!("sparse kind has no fused ABI"),
+        }
+    }
+}
+
 // Re-exports from device_cache module for external callers (e2e.rs, structs.rs).
 pub use super::cache::{
     SharedDeviceBufferSet, flush_shared_ec_buffers, invalidate_shard_meta_cache,
@@ -73,7 +130,7 @@ pub use super::cache::{
 use super::{
     cache::{
         begin_gpu_shard_session, ensure_compact_shard_metadata_cached, take_shared_lk_counters,
-        upload_compact_steps_cached, with_cached_gpu_ctx_opt,
+        with_cached_gpu_ctx_opt,
     },
     utils::d2h::{
         CompactEcBuf, LkResult, RamBuf, WitResult, gpu_collect_shard_records, gpu_compact_ec_d2h,
@@ -94,59 +151,918 @@ pub fn flush_shared_lk_counters() -> Result<Option<Multiplicity<u64>>, ZKVMError
 thread_local! {
     /// Thread-local flag to force CPU path (used by debug comparison code).
     static FORCE_CPU_PATH: Cell<bool> = const { Cell::new(false) };
-    static COMPACT_REPLAY_ARENAS: RefCell<Option<(GpuReplayShardArenas, (u32, usize))>> = const { RefCell::new(None) };
+    static FUSED_INGRESS: RefCell<Option<FusedIngressState>> = const { RefCell::new(None) };
+    static FUSED_ASSIGNMENTS: RefCell<HashMap<TypeId, Box<dyn Any>>> = RefCell::new(HashMap::new());
+}
+
+type Bb = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
+
+struct FusedRegistration {
+    owner: TypeId,
+    kind: InsnKind,
+    tag: u32,
+    arg0: u32,
+    arg1: u32,
+    num_cols: usize,
+    num_col_entries: usize,
+    mem_max_bits: Option<u32>,
+    rows: usize,
+    output: Option<BufferImpl<'static, Bb>>,
+    cols: BufferImpl<'static, u32>,
+    finalize: Option<Box<dyn FnOnce(BufferImpl<'static, Bb>) -> Result<Box<dyn Any>, ZKVMError>>>,
+}
+
+struct FusedIngressState {
+    arenas: GpuReplayShardArenas,
+    fetch: (u32, usize),
+    reserved_addresses: u32,
+    registrations: Vec<FusedRegistration>,
+    launched: bool,
+    provisional: Option<ProvisionalFusedSession>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProvisionalShardIdentity {
+    shard_id: usize,
+    cycle_range: std::ops::Range<usize>,
+    platform_heap: std::ops::Range<u32>,
+    platform_hints: std::ops::Range<u32>,
+    heap_range: std::ops::Range<u32>,
+    hint_range: std::ops::Range<u32>,
+    prev_cycles: Vec<u64>,
+    prev_heaps: Vec<u32>,
+    prev_hints: Vec<u32>,
+}
+
+impl ProvisionalShardIdentity {
+    fn from_context(ctx: &ShardContext) -> Self {
+        Self {
+            shard_id: ctx.shard_id,
+            cycle_range: ctx.cur_shard_cycle_range.clone(),
+            platform_heap: ctx.platform.heap.clone(),
+            platform_hints: ctx.platform.hints.clone(),
+            heap_range: ctx.shard_heap_addr_range.clone(),
+            hint_range: ctx.shard_hint_addr_range.clone(),
+            prev_cycles: ctx.prev_shard_cycle_range.clone(),
+            prev_heaps: ctx.prev_shard_heap_range.clone(),
+            prev_hints: ctx.prev_shard_hint_range.clone(),
+        }
+    }
+}
+
+struct ProvisionalFusedSession {
+    identity: ProvisionalShardIdentity,
+    pointers: [u64; 9],
+    launcher: ceno_gpu::common::witgen::typed_ingress::FusedRangeLauncher,
+    producer_bases: [usize; InsnKind::COUNT],
+    expected_ranges: usize,
+    submitted_ranges: usize,
+    registration_pointers: Vec<(u64, u64)>,
 }
 
 pub(crate) fn install_compact_replay_arenas(arenas: GpuReplayShardArenas) {
     let mut min_pc = u32::MAX;
     let mut max_pc = 0;
-    for record in arenas.families.iter().flatten() {
-        min_pc = min_pc.min(record.pc_before);
-        max_pc = max_pc.max(record.pc_before);
+    let mut reserved_addresses = ceno_emul::CONTINUATION_ADDRESS_SEND_BOUND;
+    for range in &arenas.ranges {
+        for arena in range.typed.iter().flatten() {
+            reserved_addresses = reserved_addresses
+                .checked_add(
+                    u32::try_from(arena.len())
+                        .expect("typed row count exceeds u32")
+                        .checked_mul(u32::from(
+                            ceno_emul::gpu_typed_kind_spec(arena.kind())
+                                .unwrap()
+                                .send_arity,
+                        ))
+                        .expect("ordinary address reservation overflow"),
+                )
+                .expect("shard address reservation overflow");
+            for &pc in arena.fields()[1].iter() {
+                min_pc = min_pc.min(pc);
+                max_pc = max_pc.max(pc);
+            }
+        }
     }
+    reserved_addresses = reserved_addresses
+        .checked_add(
+            u32::try_from(arenas.fallback.len())
+                .expect("fallback row count exceeds u32")
+                .checked_mul(ceno_emul::MAX_SPARSE_ADDRESS_SENDS_PER_STEP)
+                .expect("sparse address reservation overflow"),
+        )
+        .expect("shard address reservation overflow");
     let fetch_params = if min_pc <= max_pc {
         (min_pc, ((max_pc - min_pc) / 4 + 1) as usize)
     } else {
         (0, 1)
     };
-    COMPACT_REPLAY_ARENAS.with(|slot| {
+    FUSED_INGRESS.with(|slot| {
         assert!(
             slot.borrow().is_none(),
             "compact replay arenas already installed"
         );
-        *slot.borrow_mut() = Some((arenas, fetch_params));
+        *slot.borrow_mut() = Some(FusedIngressState {
+            arenas,
+            fetch: fetch_params,
+            reserved_addresses,
+            registrations: Vec::new(),
+            launched: false,
+            provisional: None,
+        });
     });
 }
 
-pub(crate) fn clear_compact_replay_arenas() {
-    COMPACT_REPLAY_ARENAS.with(|slot| {
-        let arenas = slot.borrow_mut().take();
-        if let Some((arenas, _)) = arenas {
-            let remaining: usize = arenas.families.iter().map(Vec::len).sum();
-            assert_eq!(
-                remaining, 0,
-                "compact replay left ordinary records unconsumed"
-            );
+pub(crate) fn begin_provisional_fused_session(
+    family_totals: [usize; InsnKind::COUNT],
+    reserved_addresses: u32,
+    expected_ranges: usize,
+    fetch: (u32, usize),
+    preview: &ShardContext,
+) -> Result<(), ZKVMError> {
+    if preview.shard_id != 0 || expected_ranges == 0 {
+        return Err(ZKVMError::InvalidWitness(
+            "provisional fused session requires nonempty shard 0".into(),
+        ));
+    }
+    FUSED_INGRESS.with(|slot| {
+        if slot.borrow().is_some() {
+            return Err(ZKVMError::InvalidWitness(
+                "overlapping fused shard session".into(),
+            ));
         }
+        *slot.borrow_mut() = Some(FusedIngressState {
+            arenas: GpuReplayShardArenas::provisional(family_totals),
+            fetch,
+            reserved_addresses,
+            registrations: Vec::new(),
+            launched: false,
+            provisional: None,
+        });
+        Ok(())
+    })?;
+    let hal = gkr_iop::gpu::get_cuda_hal().map_err(|e| {
+        ZKVMError::InvalidWitness(format!("CUDA unavailable for provisional session: {e}").into())
+    })?;
+    let logical_steps = (preview.cur_shard_cycle_range.end - preview.cur_shard_cycle_range.start)
+        / FullTracer::SUBCYCLES_PER_INSN as usize;
+    ensure_compact_shard_metadata_cached(&hal, preview, logical_steps, fetch, reserved_addresses)?;
+    super::cache::set_reserved_address_capacity(reserved_addresses);
+    let pointers = super::cache::cached_shard_pointer_fingerprint();
+    let launcher =
+        ceno_gpu::common::witgen::typed_ingress::FusedRangeLauncher::new(hal.inner.clone())
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(format!("provisional launcher init: {e}").into())
+            })?;
+    FUSED_INGRESS.with(|slot| {
+        slot.borrow_mut().as_mut().unwrap().provisional = Some(ProvisionalFusedSession {
+            identity: ProvisionalShardIdentity::from_context(preview),
+            pointers,
+            launcher,
+            producer_bases: [0; InsnKind::COUNT],
+            expected_ranges,
+            submitted_ranges: 0,
+            registration_pointers: Vec::new(),
+        });
     });
+    Ok(())
 }
 
-fn take_compact_records<E: ExtensionField, I: Instruction<E, InsnType = ceno_emul::InsnKind>>()
--> Option<Vec<GpuReplayOrdinaryRecord>> {
-    COMPACT_REPLAY_ARENAS.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let (arenas, _) = slot.as_mut()?;
-        let mut records = Vec::new();
-        for &kind in I::inst_kinds() {
-            records.append(&mut arenas.families[kind as usize]);
+pub(crate) fn seal_provisional_fused_session() -> Result<(), ZKVMError> {
+    FUSED_INGRESS.with(|slot| {
+        let mut borrowed = slot.borrow_mut();
+        let state = borrowed.as_mut().ok_or_else(|| {
+            ZKVMError::InvalidWitness("missing provisional session at registration seal".into())
+        })?;
+        let pointers = state
+            .registrations
+            .iter()
+            .map(|registration| {
+                (
+                    registration.output.as_ref().unwrap().device_ptr() as u64,
+                    registration.cols.device_ptr() as u64,
+                )
+            })
+            .collect::<Vec<_>>();
+        if pointers.is_empty() {
+            return Err(ZKVMError::InvalidWitness(
+                "provisional session has no registrations".into(),
+            ));
         }
-        records.sort_unstable_by_key(|record| record.ordinal);
-        Some(records)
+        let session = state.provisional.as_mut().unwrap();
+        if !session.registration_pointers.is_empty() {
+            return Err(ZKVMError::InvalidWitness(
+                "provisional registrations sealed twice".into(),
+            ));
+        }
+        session.registration_pointers = pointers;
+        Ok(())
     })
 }
 
+pub(crate) fn submit_provisional_fused_range(range: &GpuReplayTypedRange) -> Result<(), ZKVMError> {
+    use ceno_gpu::common::witgen::types::MAX_TS_BITS;
+    FUSED_INGRESS.with(|slot| -> Result<(), ZKVMError> {
+        let mut borrowed = slot.borrow_mut();
+        let state = borrowed
+            .as_mut()
+            .ok_or_else(|| ZKVMError::InvalidWitness("provisional range without session".into()))?;
+        let mut registration_for_kind = [usize::MAX; InsnKind::COUNT];
+        for (index, registration) in state.registrations.iter().enumerate() {
+            registration_for_kind[registration.kind as usize] = index;
+        }
+        let session = state.provisional.as_mut().ok_or_else(|| {
+            ZKVMError::InvalidWitness("range submitted to non-provisional session".into())
+        })?;
+        if range.sequence as usize != session.submitted_ranges {
+            return Err(ZKVMError::InvalidWitness(
+                "provisional range sequence mismatch".into(),
+            ));
+        }
+        let mem_max_bits = state
+            .registrations
+            .iter()
+            .filter_map(|r| r.mem_max_bits)
+            .next()
+            .unwrap_or(32);
+        let byte_len = range
+            .typed
+            .iter()
+            .flatten()
+            .flat_map(|arena: &GpuTypedSoaArena| arena.fields().iter())
+            .try_fold(0usize, |sum: usize, field: &Box<[u32]>| {
+                sum.checked_add(field.len().checked_mul(std::mem::size_of::<u32>())?)
+            })
+            .ok_or_else(|| ZKVMError::InvalidWitness("typed range byte overflow".into()))?;
+        let registrations = &state.registrations;
+        let producer_bases = &mut session.producer_bases;
+        let launcher = &mut session.launcher;
+        super::cache::with_cached_shard_meta(|shard| {
+            launcher.launch_filled(
+                byte_len,
+                |stage| {
+                    let mut cursor = 0usize;
+                    let mut work: Vec<FusedRangeWorkItem> =
+                        Vec::with_capacity(range.typed.iter().flatten().count());
+                    for arena in range.typed.iter().flatten() {
+                        let arena: &GpuTypedSoaArena = arena;
+                        let index = registration_for_kind[arena.kind() as usize];
+                        assert_ne!(index, usize::MAX, "missing provisional registration");
+                        let registration = &registrations[index];
+                        let mut offsets = [0u32; 13];
+                        for (field_index, field) in arena.fields().iter().enumerate() {
+                            offsets[field_index] = u32::try_from(cursor).unwrap();
+                            let bytes = unsafe {
+                                std::slice::from_raw_parts(
+                                    field.as_ptr().cast::<u8>(),
+                                    std::mem::size_of_val(field.as_ref()),
+                                )
+                            };
+                            stage[cursor..cursor + bytes.len()].copy_from_slice(bytes);
+                            cursor += bytes.len();
+                        }
+                        let producer_base = producer_bases[arena.kind() as usize];
+                        producer_bases[arena.kind() as usize] += arena.len();
+                        work.push(FusedRangeWorkItem {
+                            tag: registration.tag,
+                            layout: arena.layout() as u32,
+                            row_count: u32::try_from(arena.len()).unwrap(),
+                            producer_base: u32::try_from(producer_base).unwrap(),
+                            producer_total: packed_producer_total(arena.kind(), registration.rows),
+                            num_cols: u32::try_from(registration.num_cols).unwrap(),
+                            arg0: registration.arg0,
+                            arg1: registration.arg1,
+                            num_col_entries: u32::try_from(registration.num_col_entries).unwrap(),
+                            input_fields: offsets,
+                            output_ptr: registration.output.as_ref().unwrap().device_ptr() as u64,
+                            cols_ptr: registration.cols.device_ptr() as u64,
+                        });
+                    }
+                    assert_eq!(cursor, stage.len(), "typed stage fill mismatch");
+                    work
+                },
+                (session.identity.cycle_range.start as u64)
+                    .saturating_sub(FullTracer::SUBCYCLES_PER_INSN),
+                MAX_TS_BITS,
+                mem_max_bits,
+                shard,
+            )
+        })
+        .map_err(|e| ZKVMError::InvalidWitness(format!("provisional range launch: {e}").into()))?;
+        session.submitted_ranges += 1;
+        Ok(())
+    })
+}
+
+fn finish_provisional_fused_session(shard_ctx: &ShardContext) -> Result<(), ZKVMError> {
+    let mut state = FUSED_INGRESS
+        .with(|slot| slot.borrow_mut().take())
+        .ok_or_else(|| ZKVMError::InvalidWitness("missing provisional fused session".into()))?;
+    let session = state.provisional.take().unwrap();
+    let canonical_identity = ProvisionalShardIdentity::from_context(shard_ctx);
+    if session.identity != canonical_identity {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "provisional/canonical shard scalar mismatch: provisional={:?}, canonical={canonical_identity:?}",
+                session.identity
+            )
+            .into(),
+        ));
+    }
+    if session.pointers != super::cache::cached_shard_pointer_fingerprint() {
+        return Err(ZKVMError::InvalidWitness(
+            "provisional/canonical shard pointer mismatch".into(),
+        ));
+    }
+    let canonical_registration_pointers = state
+        .registrations
+        .iter()
+        .map(|registration| {
+            (
+                registration.output.as_ref().unwrap().device_ptr() as u64,
+                registration.cols.device_ptr() as u64,
+            )
+        })
+        .collect::<Vec<_>>();
+    if session.registration_pointers != canonical_registration_pointers {
+        return Err(ZKVMError::InvalidWitness(
+            "provisional/canonical output pointer mismatch".into(),
+        ));
+    }
+    if std::env::var_os("CENO_GPU_ASSIGN_PROFILE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        let output_bytes = state
+            .registrations
+            .iter()
+            .fold(0u64, |total, registration| {
+                total + registration.rows as u64 * registration.num_cols as u64 * 4
+            });
+        let column_map_bytes = state
+            .registrations
+            .iter()
+            .fold(0u64, |total, registration| {
+                total + registration.num_col_entries as u64 * 4
+            });
+        tracing::info!(
+            shard_id = shard_ctx.shard_id,
+            registrations = state.registrations.len(),
+            output_zero_and_write_bytes = output_bytes,
+            column_map_h2d_bytes = column_map_bytes,
+            "fused ordinary allocation profile"
+        );
+    }
+    let launch_count = session
+        .launcher
+        .finish()
+        .map_err(|e| ZKVMError::InvalidWitness(format!("provisional drain: {e}").into()))?;
+    if launch_count as usize != session.expected_ranges
+        || session.submitted_ranges != session.expected_ranges
+    {
+        return Err(ZKVMError::InvalidWitness(
+            "provisional descriptor/launch mismatch".into(),
+        ));
+    }
+    tracing::info!(
+        shard_id = shard_ctx.shard_id,
+        descriptors = session.expected_ranges,
+        launches = launch_count,
+        "fused ordinary range schedule complete"
+    );
+    tracing::info!(
+        tracer = "GpuReplayTracer",
+        native_mode = "GPU_REPLAY_DIRECT",
+        descriptors = session.expected_ranges,
+        launches = launch_count,
+        ordinary_callbacks = 0u64,
+        fallback_categories = "ecall,exceptional",
+        "GPU_REPLAY_DIRECT runtime marker"
+    );
+    for registration in &state.registrations {
+        if session.producer_bases[registration.kind as usize] != registration.rows {
+            return Err(ZKVMError::InvalidWitness(
+                format!(
+                    "{:?} provisional producer coverage mismatch",
+                    registration.kind
+                )
+                .into(),
+            ));
+        }
+    }
+    for mut registration in state.registrations.drain(..) {
+        let finalized = registration.finalize.take().unwrap()(registration.output.take().unwrap())?;
+        if FUSED_ASSIGNMENTS
+            .with(|cache| cache.borrow_mut().insert(registration.owner, finalized))
+            .is_some()
+        {
+            return Err(ZKVMError::InvalidWitness(
+                "duplicate provisional assignment owner".into(),
+            ));
+        }
+    }
+    state.launched = true;
+    FUSED_INGRESS.with(|slot| *slot.borrow_mut() = Some(state));
+    Ok(())
+}
+
+pub(crate) fn clear_compact_replay_arenas() {
+    FUSED_INGRESS.with(|slot| {
+        if let Some(state) = slot.borrow_mut().take() {
+            assert!(state.launched, "typed replay ranges were not launched");
+            assert!(
+                state.registrations.is_empty(),
+                "fused registrations were not finalized"
+            );
+        }
+    });
+    FUSED_ASSIGNMENTS.with(|cache| {
+        assert!(
+            cache.borrow().is_empty(),
+            "fused assignment cache not empty"
+        )
+    });
+}
+
 fn compact_shard_fetch_params() -> Option<(u32, usize)> {
-    COMPACT_REPLAY_ARENAS.with(|slot| slot.borrow().as_ref().map(|(_, fetch)| *fetch))
+    FUSED_INGRESS.with(|slot| slot.borrow().as_ref().map(|state| state.fetch))
+}
+
+pub(crate) fn prepare_fused_assignment<
+    E: ExtensionField,
+    I: Instruction<E, InsnType = InsnKind> + 'static,
+>(
+    config: &I::InstructionConfig,
+    num_witin: usize,
+    num_structural_witin: usize,
+    expected_rows: usize,
+    kind: GpuWitgenKind,
+) -> Result<(), ZKVMError> {
+    if !FUSED_INGRESS.with(|slot| slot.borrow().is_some()) {
+        return Ok(());
+    }
+    if TypeId::of::<E::BaseField>() != TypeId::of::<Bb>() {
+        return Err(ZKVMError::InvalidWitness(
+            "typed fused ingress requires BabyBear".into(),
+        ));
+    }
+    let kinds = I::inst_kinds();
+    if kinds.len() != 1 {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "{} owns {} instruction kinds in fused ingress",
+                I::name(),
+                kinds.len()
+            )
+            .into(),
+        ));
+    }
+    let insn_kind = kinds[0];
+    if FUSED_INGRESS.with(|slot| {
+        slot.borrow().as_ref().is_some_and(|state| {
+            state.provisional.is_some()
+                && state
+                    .registrations
+                    .iter()
+                    .any(|r| r.owner == TypeId::of::<I>())
+        })
+    }) {
+        return Ok(());
+    }
+    let planned_rows = FUSED_INGRESS.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .unwrap()
+            .arenas
+            .family_total(insn_kind)
+    });
+    if expected_rows != planned_rows {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "{} typed rows {planned_rows} != expected rows {expected_rows}",
+                I::name()
+            )
+            .into(),
+        ));
+    }
+    if expected_rows == 0 {
+        let raw_witin =
+            RowMajorMatrix::<E::BaseField>::new(0, num_witin.max(1), I::padding_strategy());
+        let raw_structural = RowMajorMatrix::<E::BaseField>::new(
+            0,
+            num_structural_witin.max(1),
+            I::padding_strategy(),
+        );
+        FUSED_ASSIGNMENTS.with(|cache| {
+            cache.borrow_mut().insert(
+                TypeId::of::<I>(),
+                Box::new(([raw_witin, raw_structural], Multiplicity::<u64>::default())),
+            );
+        });
+        return Ok(());
+    }
+
+    macro_rules! map_config {
+        ($ty:ty, $extract:path) => {{
+            let typed = unsafe { &*(config as *const I::InstructionConfig as *const $ty) };
+            let map = $extract(typed, num_witin);
+            let num_cols = map.num_cols as usize;
+            let flat = map.to_flat();
+            let entries = flat.len();
+            (
+                flat.into_iter().collect::<Vec<u32>>(),
+                num_cols,
+                entries,
+                None,
+            )
+        }};
+        ($ty:ty, $extract:path, mem) => {{
+            let typed = unsafe { &*(config as *const I::InstructionConfig as *const $ty) };
+            let mem = typed.memory_addr.max_bits as u32;
+            let map = $extract(typed, num_witin);
+            let num_cols = map.num_cols as usize;
+            let flat = map.to_flat();
+            let entries = flat.len();
+            (
+                flat.into_iter().collect::<Vec<u32>>(),
+                num_cols,
+                entries,
+                Some(mem),
+            )
+        }};
+    }
+
+    let (cols, map_num_cols, num_col_entries, mem_max_bits) = match kind {
+        GpuWitgenKind::Add => map_config!(
+            crate::instructions::riscv::arith::ArithConfig<E>,
+            super::chips::add::extract_add_column_map
+        ),
+        GpuWitgenKind::Sub => map_config!(
+            crate::instructions::riscv::arith::ArithConfig<E>,
+            super::chips::sub::extract_sub_column_map
+        ),
+        GpuWitgenKind::LogicR(_) => map_config!(
+            crate::instructions::riscv::logic::logic_circuit::LogicConfig<E>,
+            super::chips::logic_r::extract_logic_r_column_map
+        ),
+        GpuWitgenKind::LogicI(_) => map_config!(
+            crate::instructions::riscv::logic_imm::logic_imm_circuit_v2::LogicConfig<E>,
+            super::chips::logic_i::extract_logic_i_column_map
+        ),
+        GpuWitgenKind::Addi => map_config!(
+            crate::instructions::riscv::arith_imm::arith_imm_circuit_v2::InstructionConfig<E>,
+            super::chips::addi::extract_addi_column_map
+        ),
+        GpuWitgenKind::Lui => map_config!(
+            crate::instructions::riscv::lui::LuiConfig<E>,
+            super::chips::lui::extract_lui_column_map
+        ),
+        GpuWitgenKind::Auipc => map_config!(
+            crate::instructions::riscv::auipc::AuipcConfig<E>,
+            super::chips::auipc::extract_auipc_column_map
+        ),
+        GpuWitgenKind::Jal => map_config!(
+            crate::instructions::riscv::jump::jal_v2::JalConfig<E>,
+            super::chips::jal::extract_jal_column_map
+        ),
+        GpuWitgenKind::ShiftR(_) => map_config!(
+            crate::instructions::riscv::shift::shift_circuit_v2::ShiftRTypeConfig<E>,
+            super::chips::shift_r::extract_shift_r_column_map
+        ),
+        GpuWitgenKind::ShiftI(_) => map_config!(
+            crate::instructions::riscv::shift::shift_circuit_v2::ShiftImmConfig<E>,
+            super::chips::shift_i::extract_shift_i_column_map
+        ),
+        GpuWitgenKind::Slt(_) => map_config!(
+            crate::instructions::riscv::slt::slt_circuit_v2::SetLessThanConfig<E>,
+            super::chips::slt::extract_slt_column_map
+        ),
+        GpuWitgenKind::Slti(_) => map_config!(
+            crate::instructions::riscv::slti::slti_circuit_v2::SetLessThanImmConfig<E>,
+            super::chips::slti::extract_slti_column_map
+        ),
+        GpuWitgenKind::BranchEq(_) => map_config!(
+            crate::instructions::riscv::branch::branch_circuit_v2::BranchConfig<E>,
+            super::chips::branch_eq::extract_branch_eq_column_map
+        ),
+        GpuWitgenKind::BranchCmp(_) => map_config!(
+            crate::instructions::riscv::branch::branch_circuit_v2::BranchConfig<E>,
+            super::chips::branch_cmp::extract_branch_cmp_column_map
+        ),
+        GpuWitgenKind::Jalr => map_config!(
+            crate::instructions::riscv::jump::jalr_v2::JalrConfig<E>,
+            super::chips::jalr::extract_jalr_column_map
+        ),
+        GpuWitgenKind::Sw => {
+            map_config!(crate::instructions::riscv::memory::store_v2::StoreConfig<E, 2>, super::chips::sw::extract_sw_column_map, mem)
+        }
+        GpuWitgenKind::Sh => {
+            map_config!(crate::instructions::riscv::memory::store_v2::StoreConfig<E, 1>, super::chips::sh::extract_sh_column_map, mem)
+        }
+        GpuWitgenKind::Sb => {
+            map_config!(crate::instructions::riscv::memory::store_v2::StoreConfig<E, 0>, super::chips::sb::extract_sb_column_map, mem)
+        }
+        GpuWitgenKind::LoadSub { .. } => map_config!(
+            crate::instructions::riscv::memory::load_v2::LoadConfig<E>,
+            super::chips::load_sub::extract_load_sub_column_map,
+            mem
+        ),
+        GpuWitgenKind::Mul(_) => map_config!(
+            crate::instructions::riscv::mulh::mulh_circuit_v2::MulhConfig<E>,
+            super::chips::mul::extract_mul_column_map
+        ),
+        GpuWitgenKind::Div(_) => map_config!(
+            crate::instructions::riscv::div::div_circuit_v2::DivRemConfig<E>,
+            super::chips::div::extract_div_column_map
+        ),
+        GpuWitgenKind::Lw => map_config!(
+            crate::instructions::riscv::memory::load_v2::LoadConfig<E>,
+            super::chips::lw::extract_lw_column_map,
+            mem
+        ),
+        GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam => {
+            return Err(ZKVMError::InvalidWitness(
+                "sparse circuit entered fused ordinary registry".into(),
+            ));
+        }
+    };
+    if map_num_cols != num_witin {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "{} configured {} columns, expected {num_witin}",
+                I::name(),
+                map_num_cols
+            )
+            .into(),
+        ));
+    }
+    let hal = gkr_iop::gpu::get_cuda_hal().map_err(|e| {
+        ZKVMError::InvalidWitness(format!("CUDA unavailable for fused registration: {e}").into())
+    })?;
+    let output = hal
+        .witgen
+        .alloc_elems_on_device(expected_rows * num_witin, true, None)
+        .map_err(|e| ZKVMError::InvalidWitness(format!("fused output alloc: {e}").into()))?;
+    let cols = hal
+        .witgen
+        .alloc_u32_from_host(&cols, None)
+        .map_err(|e| ZKVMError::InvalidWitness(format!("fused columns upload: {e}").into()))?;
+    let mut structural = RowMajorMatrix::<E::BaseField>::new(
+        expected_rows,
+        num_structural_witin.max(1),
+        I::padding_strategy(),
+    );
+    for row in structural.iter_mut() {
+        *row.last_mut().unwrap() = E::BaseField::ONE;
+    }
+    structural.padding_by_strategy();
+    let finalize = Box::new(move |output: BufferImpl<'static, Bb>| {
+        let witness = GpuWitnessResult {
+            device_buffer: output,
+            num_rows: expected_rows,
+            num_cols: num_witin,
+        };
+        let mut main =
+            gpu_witness_to_rmm::<E>(witness, expected_rows, num_witin, I::padding_strategy())?;
+        main.padding_by_strategy();
+        Ok(Box::new(([main, structural], Multiplicity::<u64>::default())) as Box<dyn Any>)
+    });
+    let (tag, arg0, arg1) = kind.fused_abi();
+    FUSED_INGRESS.with(|slot| {
+        slot.borrow_mut()
+            .as_mut()
+            .unwrap()
+            .registrations
+            .push(FusedRegistration {
+                owner: TypeId::of::<I>(),
+                kind: insn_kind,
+                tag,
+                arg0,
+                arg1,
+                num_cols: num_witin,
+                num_col_entries,
+                mem_max_bits,
+                rows: expected_rows,
+                output: Some(output),
+                cols,
+                finalize: Some(finalize),
+            });
+    });
+    Ok(())
+}
+
+pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), ZKVMError> {
+    use ceno_gpu::common::witgen::{typed_ingress::FusedRangeLauncher, types::MAX_TS_BITS};
+    if FUSED_INGRESS.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|state| state.provisional.is_some())
+    }) {
+        return finish_provisional_fused_session(shard_ctx);
+    }
+    let Some(mut state) = FUSED_INGRESS.with(|slot| slot.borrow_mut().take()) else {
+        return Ok(());
+    };
+    if state.launched {
+        return Err(ZKVMError::InvalidWitness(
+            "fused ingress launched twice".into(),
+        ));
+    }
+    let mut registration_for_kind = [usize::MAX; InsnKind::COUNT];
+    for (index, registration) in state.registrations.iter().enumerate() {
+        let slot = &mut registration_for_kind[registration.kind as usize];
+        if *slot != usize::MAX {
+            return Err(ZKVMError::InvalidWitness(
+                format!("duplicate fused owner for {:?}", registration.kind).into(),
+            ));
+        }
+        *slot = index;
+    }
+    for kind in <InsnKind as strum::IntoEnumIterator>::iter() {
+        if state.arenas.family_total(kind) != 0
+            && registration_for_kind[kind as usize] == usize::MAX
+        {
+            return Err(ZKVMError::InvalidWitness(
+                format!("missing fused registration for {kind:?}").into(),
+            ));
+        }
+    }
+    let mem_max_bits = state
+        .registrations
+        .iter()
+        .filter_map(|r| r.mem_max_bits)
+        .next()
+        .unwrap_or(32);
+    if state
+        .registrations
+        .iter()
+        .filter_map(|r| r.mem_max_bits)
+        .any(|bits| bits != mem_max_bits)
+    {
+        return Err(ZKVMError::InvalidWitness(
+            "inconsistent fused memory bounds".into(),
+        ));
+    }
+    let hal = gkr_iop::gpu::get_cuda_hal().map_err(|e| {
+        ZKVMError::InvalidWitness(format!("CUDA unavailable for fused launch: {e}").into())
+    })?;
+    let logical_steps = (shard_ctx.cur_shard_cycle_range.end
+        - shard_ctx.cur_shard_cycle_range.start)
+        / FullTracer::SUBCYCLES_PER_INSN as usize;
+    ensure_compact_shard_metadata_cached(
+        &hal,
+        shard_ctx,
+        logical_steps,
+        state.fetch,
+        state.reserved_addresses,
+    )?;
+    super::cache::set_reserved_address_capacity(state.reserved_addresses);
+    let mut launcher = FusedRangeLauncher::new(hal.inner.clone())
+        .map_err(|e| ZKVMError::InvalidWitness(format!("fused launcher init: {e}").into()))?;
+    let mut producer_bases = [0usize; InsnKind::COUNT];
+    if std::env::var_os("CENO_GPU_ASSIGN_PROFILE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        let output_bytes = state
+            .registrations
+            .iter()
+            .fold(0u64, |total, registration| {
+                total + registration.rows as u64 * registration.num_cols as u64 * 4
+            });
+        let column_map_bytes = state
+            .registrations
+            .iter()
+            .fold(0u64, |total, registration| {
+                total + registration.num_col_entries as u64 * 4
+            });
+        tracing::info!(
+            shard_id = shard_ctx.shard_id,
+            registrations = state.registrations.len(),
+            output_zero_and_write_bytes = output_bytes,
+            column_map_h2d_bytes = column_map_bytes,
+            "fused ordinary allocation profile"
+        );
+    }
+    super::cache::with_cached_shard_meta(|shard| -> Result<(), ZKVMError> {
+        for range in &state.arenas.ranges {
+            let byte_len = range
+                .typed
+                .iter()
+                .flatten()
+                .try_fold(0usize, |sum: usize, arena: &GpuTypedSoaArena| {
+                    arena
+                        .fields()
+                        .iter()
+                        .try_fold(sum, |sum: usize, field: &Box<[u32]>| {
+                            sum.checked_add(field.len().checked_mul(std::mem::size_of::<u32>())?)
+                        })
+                })
+                .ok_or_else(|| {
+                    ZKVMError::InvalidWitness("typed range byte size overflow".into())
+                })?;
+            launcher
+                .launch_filled(
+                    byte_len,
+                    |stage| {
+                        let mut cursor = 0usize;
+                        let mut work: Vec<FusedRangeWorkItem> =
+                            Vec::with_capacity(range.typed.iter().flatten().count());
+                        for arena in range.typed.iter().flatten() {
+                            let arena: &GpuTypedSoaArena = arena;
+                            let registration =
+                                &state.registrations[registration_for_kind[arena.kind() as usize]];
+                            let mut offsets = [0u32; 13];
+                            for (field_index, field) in arena.fields().iter().enumerate() {
+                                offsets[field_index] =
+                                    u32::try_from(cursor).expect("typed field offset exceeds u32");
+                                let bytes = unsafe {
+                                    std::slice::from_raw_parts(
+                                        field.as_ptr().cast::<u8>(),
+                                        std::mem::size_of_val(field.as_ref()),
+                                    )
+                                };
+                                stage[cursor..cursor + bytes.len()].copy_from_slice(bytes);
+                                cursor += bytes.len();
+                            }
+                            let producer_base = producer_bases[arena.kind() as usize];
+                            producer_bases[arena.kind() as usize] += arena.len();
+                            work.push(FusedRangeWorkItem {
+                                tag: registration.tag,
+                                layout: arena.layout() as u32,
+                                row_count: u32::try_from(arena.len())
+                                    .expect("typed row count exceeds u32"),
+                                producer_base: u32::try_from(producer_base)
+                                    .expect("producer base exceeds u32"),
+                                producer_total: packed_producer_total(
+                                    arena.kind(),
+                                    registration.rows,
+                                ),
+                                num_cols: u32::try_from(registration.num_cols)
+                                    .expect("column count exceeds u32"),
+                                arg0: registration.arg0,
+                                arg1: registration.arg1,
+                                num_col_entries: u32::try_from(registration.num_col_entries)
+                                    .expect("column map exceeds u32"),
+                                input_fields: offsets,
+                                output_ptr: registration.output.as_ref().unwrap().device_ptr()
+                                    as u64,
+                                cols_ptr: registration.cols.device_ptr() as u64,
+                            });
+                        }
+                        assert_eq!(cursor, stage.len(), "typed stage fill mismatch");
+                        work
+                    },
+                    shard_ctx.current_shard_offset_cycle(),
+                    MAX_TS_BITS,
+                    mem_max_bits,
+                    shard,
+                )
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(format!("fused range launch: {e}").into())
+                })?;
+        }
+        Ok(())
+    })?;
+    let launch_count = launcher
+        .finish()
+        .map_err(|e| ZKVMError::InvalidWitness(format!("fused range drain: {e}").into()))?;
+    if launch_count as usize != state.arenas.ranges.len() {
+        return Err(ZKVMError::InvalidWitness(
+            "fused descriptor/launch mismatch".into(),
+        ));
+    }
+    tracing::info!(
+        shard_id = shard_ctx.shard_id,
+        descriptors = state.arenas.ranges.len(),
+        launches = launch_count,
+        "fused ordinary range schedule complete"
+    );
+    tracing::info!(
+        tracer = "GpuReplayTracer",
+        native_mode = "GPU_REPLAY_DIRECT",
+        descriptors = state.arenas.ranges.len(),
+        launches = launch_count,
+        ordinary_callbacks = 0u64,
+        fallback_categories = "ecall,exceptional",
+        "GPU_REPLAY_DIRECT runtime marker"
+    );
+    for registration in &state.registrations {
+        if producer_bases[registration.kind as usize] != registration.rows {
+            return Err(ZKVMError::InvalidWitness(
+                format!("{:?} producer coverage mismatch", registration.kind).into(),
+            ));
+        }
+    }
+    for mut registration in state.registrations.drain(..) {
+        let output = registration.output.take().unwrap();
+        let finalized = registration.finalize.take().unwrap()(output)?;
+        if FUSED_ASSIGNMENTS
+            .with(|cache| cache.borrow_mut().insert(registration.owner, finalized))
+            .is_some()
+        {
+            return Err(ZKVMError::InvalidWitness(
+                "duplicate fused assignment cache owner".into(),
+            ));
+        }
+    }
+    state.launched = true;
+    FUSED_INGRESS.with(|slot| *slot.borrow_mut() = Some(state));
+    Ok(())
 }
 
 /// Force the current thread to use CPU path for all GPU witgen calls.
@@ -157,6 +1073,10 @@ pub fn set_force_cpu_path(force: bool) {
 
 pub(crate) fn is_force_cpu_path() -> bool {
     FORCE_CPU_PATH.with(|f| f.get())
+}
+
+pub(crate) fn is_fused_ingress_active() -> bool {
+    FUSED_INGRESS.with(|slot| slot.borrow().is_some())
 }
 
 /// Try to run GPU witness generation for the given instruction.
@@ -171,7 +1091,7 @@ pub(crate) fn is_force_cpu_path() -> bool {
 /// Violating this will cause undefined behavior via pointer cast in [`gpu_fill_witness`].
 pub(crate) fn try_gpu_assign_instances<
     E: ExtensionField,
-    I: Instruction<E, InsnType = ceno_emul::InsnKind>,
+    I: Instruction<E, InsnType = ceno_emul::InsnKind> + 'static,
 >(
     config: &I::InstructionConfig,
     shard_ctx: &mut ShardContext,
@@ -195,13 +1115,19 @@ pub(crate) fn try_gpu_assign_instances<
         return Ok(None);
     }
 
-    let compact_records = take_compact_records::<E, I>();
-    let total_instances = compact_records
-        .as_ref()
-        .map_or(step_indices.len(), Vec::len);
-    if compact_records.is_some() {
-        assert_eq!(total_instances, step_indices.len());
+    if FUSED_INGRESS.with(|slot| slot.borrow().is_some()) {
+        return FUSED_ASSIGNMENTS.with(|cache| {
+            let cached = cache
+                .borrow_mut()
+                .remove(&TypeId::of::<I>())
+                .unwrap_or_else(|| panic!("missing fused assignment for {}", I::name()));
+            let assignment = cached
+                .downcast::<(RMMCollections<E::BaseField>, Multiplicity<u64>)>()
+                .unwrap_or_else(|_| panic!("fused assignment type mismatch for {}", I::name()));
+            Ok(Some(*assignment))
+        });
     }
+    let total_instances = step_indices.len();
     if total_instances == 0 {
         // Empty: just return empty matrices
         let num_witin = num_witin.max(1);
@@ -237,7 +1163,6 @@ pub(crate) fn try_gpu_assign_instances<
             num_structural_witin,
             shard_steps,
             step_indices,
-            compact_records.as_deref(),
             kind,
             &hal,
         )
@@ -276,7 +1201,6 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     num_structural_witin: usize,
     shard_steps: &[StepRecord],
     step_indices: &[StepIndex],
-    compact_records: Option<&[GpuReplayOrdinaryRecord]>,
     kind: GpuWitgenKind,
     hal: &CudaHalBB31,
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
@@ -294,10 +1218,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
         gpu_compact_ec,
         gpu_compact_addr,
     ) = info_span!("gpu_kernel").in_scope(|| {
-        let fetch_params = compact_records.map_or_else(
-            || compute_fetch_params(shard_steps, step_indices),
-            compute_compact_fetch_params,
-        );
+        let fetch_params = compute_fetch_params(shard_steps, step_indices);
         gpu_fill_witness::<E, I>(
             hal,
             config,
@@ -305,7 +1226,6 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
             num_witin,
             Some(shard_steps),
             step_indices,
-            compact_records,
             None,
             kind,
             shard_ctx.current_shard_offset_cycle(),
@@ -536,14 +1456,6 @@ pub(crate) fn compute_fetch_params(
     (fetch_base_pc, fetch_num_slots)
 }
 
-fn compute_compact_fetch_params(records: &[GpuReplayOrdinaryRecord]) -> (u32, usize) {
-    let Some(min_pc) = records.iter().map(|record| record.pc_before).min() else {
-        return (0, 0);
-    };
-    let max_pc = records.iter().map(|record| record.pc_before).max().unwrap();
-    (min_pc, ((max_pc - min_pc) / 4 + 1) as usize)
-}
-
 /// GPU kernel dispatch based on instruction kind.
 /// All kinds return witness + LK counters (merged into single GPU kernel).
 fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
@@ -553,7 +1465,6 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     num_witin: usize,
     shard_steps: Option<&[StepRecord]>,
     step_indices: &[StepIndex],
-    compact_records: Option<&[GpuReplayOrdinaryRecord]>,
     cached_step_indices: Option<&BufferImpl<'static, u32>>,
     kind: GpuWitgenKind,
     shard_offset: u64,
@@ -570,29 +1481,14 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     ZKVMError,
 > {
     let fill_mode = GpuFillMode::from_optional_ctx(shard_ctx, shard_steps);
-    if compact_records.is_none() {
-        if let (Some(shard_ctx), Some(shard_steps)) = (shard_ctx, shard_steps) {
-            // Ensure shard-scoped GPU raw data is ready for this kernel dispatch.
-            let _session = info_span!("begin_shard_session")
-                .in_scope(|| begin_gpu_shard_session(hal, shard_ctx, shard_steps))?;
-        }
-    } else if let (Some(shard_ctx), Some(records)) = (shard_ctx, compact_records) {
-        upload_compact_steps_cached(hal, records, shard_ctx.shard_id)?;
-        let logical_steps = (shard_ctx.cur_shard_cycle_range.end
-            - shard_ctx.cur_shard_cycle_range.start)
-            / FullTracer::SUBCYCLES_PER_INSN as usize;
-        ensure_compact_shard_metadata_cached(
-            hal,
-            shard_ctx,
-            logical_steps,
-            compact_shard_fetch_params().unwrap_or(fetch_params),
-        )?;
+    if let (Some(shard_ctx), Some(shard_steps)) = (shard_ctx, shard_steps) {
+        // Ensure shard-scoped GPU raw data is ready for this kernel dispatch.
+        let _session = info_span!("begin_shard_session")
+            .in_scope(|| begin_gpu_shard_session(hal, shard_ctx, shard_steps))?;
     }
 
     // Convert step_indices from usize to u32 for GPU.
-    let indices_u32: Vec<u32> = if compact_records.is_some() {
-        vec![0]
-    } else if cached_step_indices.is_none() {
+    let indices_u32: Vec<u32> = if cached_step_indices.is_none() {
         info_span!("indices_u32", n = step_indices.len())
             .in_scope(|| step_indices.iter().map(|&i| i as u32).collect())
     } else {
@@ -1481,5 +2377,64 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
         GpuWitgenKind::ShardRam => {
             unreachable!("shard ram uses its own replay path, not try_gpu_assign_instances")
         }
+    }
+}
+
+#[cfg(test)]
+mod i017_tests {
+    use super::*;
+
+    fn empty_typed() -> Vec<Option<GpuTypedSoaArena>> {
+        (0..InsnKind::COUNT).map(|_| None).collect()
+    }
+
+    #[test]
+    fn packed_producer_total_preserves_count_and_kind_priority() {
+        let add = packed_producer_total(InsnKind::ADD, 123);
+        let sub = packed_producer_total(InsnKind::SUB, 123);
+        assert_eq!(add & 0x00ff_ffff, 123);
+        assert_eq!(sub & 0x00ff_ffff, 123);
+        assert_eq!(add >> PACKED_PRODUCER_COUNT_BITS, InsnKind::ADD as u32);
+        assert_eq!(sub >> PACKED_PRODUCER_COUNT_BITS, InsnKind::SUB as u32);
+        assert_ne!(add, sub);
+    }
+
+    #[test]
+    fn i042_lw_fused_abi_preserves_the_u16_imm_sign_column() {
+        let (_, has_imm_sign, _) = GpuWitgenKind::Lw.fused_abi();
+        assert_eq!(has_imm_sign, u32::from(cfg!(feature = "u16limb_circuit")));
+    }
+
+    #[test]
+    fn i017_cpu_dispatch_reserves_typed_plus_conservative_sparse_capacity_once() {
+        FUSED_INGRESS.with(|slot| assert!(slot.borrow().is_none()));
+        let mut add = GpuTypedSoaArena::new(InsnKind::ADD, 1).unwrap();
+        add.push_step(0, &StepRecord::default()).unwrap();
+        let mut typed = empty_typed();
+        typed[InsnKind::ADD as usize] = Some(add);
+        let arenas = GpuReplayShardArenas::from_ranges(vec![GpuReplayTypedRange {
+            sequence: 0,
+            typed,
+            fallback: vec![ceno_emul::GpuReplayFallbackRecord {
+                ordinal: 1,
+                record: StepRecord::new_ecall_any(4, ceno_emul::ByteAddr(0x1000)),
+            }],
+        }]);
+        assert_eq!(arenas.family_total(InsnKind::ADD), 1);
+        assert_eq!(arenas.fallback.len(), 1);
+
+        install_compact_replay_arenas(arenas);
+        FUSED_INGRESS.with(|slot| {
+            let state = slot.borrow();
+            let state = state.as_ref().unwrap();
+            assert_eq!(
+                state.reserved_addresses,
+                3 + ceno_emul::MAX_SPARSE_ADDRESS_SENDS_PER_STEP
+            );
+            assert_eq!(state.arenas.family_total(InsnKind::ADD), 1);
+        });
+        FUSED_INGRESS.with(|slot| {
+            slot.borrow_mut().take();
+        });
     }
 }

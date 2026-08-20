@@ -38,7 +38,7 @@ impl RIVInstruction for SubOp {
 }
 pub type SubInstruction<E> = ArithInstruction<E, SubOp>;
 
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
+impl<E: ExtensionField, I: RIVInstruction + 'static> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;
     type InsnType = InsnKind;
 
@@ -195,7 +195,7 @@ mod test {
         verify::<SubOp>("underflow", 3, 11);
     }
 
-    fn verify<I: RIVInstruction>(name: &'static str, rs1: u32, rs2: u32) {
+    fn verify<I: RIVInstruction + 'static>(name: &'static str, rs1: u32, rs2: u32) {
         let mut cs = ConstraintSystem::<GoldilocksExt2>::new(|| "riscv");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = cb

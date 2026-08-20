@@ -293,49 +293,68 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             .collect::<Result<(), ZKVMError>>()?;
 
         // second pass
-        let instances: Vec<EllipticCurveDoubleInstance<EC::BaseField>> = step_indices
-            .par_iter()
-            .map(|&idx| {
-                let step = &steps[idx];
-                let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
-                    .syscall(&shard_ctx.syscall_witnesses)
-                    .unwrap()
-                    .mem_ops
-                    .iter()
-                    .map(|op| (op.value.before, op.previous_cycle))
-                    .unzip();
+        let instances: Vec<EllipticCurveDoubleInstance<EC::BaseField>> = tracing::info_span!(
+            "secp256k1_pack_instances",
+            operation = "double",
+            n = step_indices.len()
+        )
+        .in_scope(|| {
+            step_indices
+                .par_iter()
+                .map(|&idx| {
+                    let step = &steps[idx];
+                    let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
+                        .syscall(&shard_ctx.syscall_witnesses)
+                        .unwrap()
+                        .mem_ops
+                        .iter()
+                        .map(|op| (op.value.before, op.previous_cycle))
+                        .unzip();
 
-                let p = GenericArray::try_from(
-                    instance[0..<EC::BaseField as NumWords>::WordsCurvePoint::USIZE].to_vec(),
-                );
-                p.map(|p| EllipticCurveDoubleInstance::<EC::BaseField> { p })
-                    .map_err(|_| {
-                        ZKVMError::InvalidWitness(
-                            "Failed to parse EllipticCurveDoubleInstance".into(),
-                        )
-                    })
-            })
-            .collect::<Result<_, _>>()?;
+                    let p = GenericArray::try_from(
+                        instance[0..<EC::BaseField as NumWords>::WordsCurvePoint::USIZE].to_vec(),
+                    );
+                    p.map(|p| EllipticCurveDoubleInstance::<EC::BaseField> { p })
+                        .map_err(|_| {
+                            ZKVMError::InvalidWitness(
+                                "Failed to parse EllipticCurveDoubleInstance".into(),
+                            )
+                        })
+                })
+                .collect::<Result<_, _>>()
+        })?;
 
         let affine_results = if EC::CURVE_TYPE == CurveType::Secp256k1
             && std::env::var_os("CENO_GPU_LEGACY_SECP_DOUBLE_ASSIGN").is_none()
         {
-            Some(
+            let span = tracing::info_span!(
+                "secp256k1_affine_batch",
+                operation = "double",
+                n = instances.len()
+            );
+            Some(span.in_scope(|| {
                 WeierstrassDoubleAssignLayout::<E, EC>::compute_compact_secp256k1_affine_results(
                     &instances,
-                ),
-            )
+                )
+            }))
         } else {
             None
         };
 
         if let Some(affine_results) = affine_results.as_deref() {
-            config.layout.phase1_witness_group_with_affine_results(
-                WeierstrassDoubleAssignTrace { instances },
-                affine_results,
-                [&mut raw_witin, &mut raw_structural_witin],
-                &mut lk_multiplicity,
-            );
+            tracing::info_span!(
+                "secp256k1_expand_rows",
+                operation = "double",
+                n = instances.len()
+            )
+            .in_scope(|| {
+                config.layout.phase1_witness_group_with_affine_results(
+                    WeierstrassDoubleAssignTrace { instances },
+                    affine_results,
+                    [&mut raw_witin, &mut raw_structural_witin],
+                    &mut lk_multiplicity,
+                );
+            });
         } else {
             config.layout.phase1_witness_group(
                 WeierstrassDoubleAssignTrace { instances },

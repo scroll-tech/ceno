@@ -29,7 +29,7 @@ pub trait LogicOp {
 /// The Instruction circuit for a given LogicOp.
 pub struct LogicInstruction<E, I>(PhantomData<(E, I)>);
 
-impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
+impl<E: ExtensionField, I: LogicOp + 'static> Instruction<E> for LogicInstruction<E, I> {
     type InstructionConfig = LogicConfig<E>;
     type InsnType = InsnKind;
 

@@ -39,7 +39,7 @@ pub struct BranchConfig<E: ExtensionField> {
     phantom: PhantomData<E>,
 }
 
-impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I> {
+impl<E: ExtensionField, I: RIVInstruction + 'static> Instruction<E> for BranchCircuit<E, I> {
     type InstructionConfig = BranchConfig<E>;
     type InsnType = InsnKind;
 

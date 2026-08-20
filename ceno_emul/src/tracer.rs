@@ -16,7 +16,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use strum::EnumCount;
+use strum::{EnumCount, IntoEnumIterator};
 use tiny_keccak::{Hasher, Keccak};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
@@ -380,6 +380,47 @@ pub struct NextAccessEvent {
     pub source_cycle: Cycle,
     pub target_cycle: Cycle,
     pub address: WordAddr,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PatchRamClass {
+    Register = 0,
+    Memory = 1,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PatchSourceLane {
+    Rs1 = 0,
+    Rs2 = 1,
+    Rd = 2,
+    Memory = 3,
+    SyscallRegister = 4,
+    SyscallMemory = 5,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct CrossShardPatch {
+    pub source_cycle: Cycle,
+    pub target_cycle: Cycle,
+    pub address: WordAddr,
+    pub prior_value: Word,
+    pub source_shard: u32,
+    pub target_shard: u32,
+    pub ram_class: PatchRamClass,
+    pub source_lane: PatchSourceLane,
+    pub syscall_op_index: u16,
+    pub syscall_witness_index: u32,
+}
+
+#[derive(Debug)]
+pub struct CombinedPreflightCapture {
+    pub ranges: Vec<crate::GpuReplayTypedRange>,
+    pub syscall_witnesses: Vec<SyscallWitness>,
+    pub patches: Vec<CrossShardPatch>,
+    pub initialization_events: Vec<NextAccessEvent>,
 }
 
 impl NextAccessEvent {
@@ -777,6 +818,14 @@ pub struct ShardPlanBuilder {
     cur_step_count: usize,
     max_step_shard: usize,
     shard_id: usize,
+    replay_range_capacity: usize,
+    replay_range_start: usize,
+    replay_range_len: usize,
+    replay_range_sequence: u32,
+    replay_family_counts: [usize; InsnKind::COUNT],
+    replay_fallback_count: usize,
+    replay_unsupported_count: usize,
+    replay_descriptors: Vec<crate::GpuReplayRangeDescriptor>,
     finalized: bool,
 }
 
@@ -811,8 +860,30 @@ impl ShardPlanBuilder {
             cur_step_count: 0,
             max_step_shard: 0,
             shard_id: 0,
+            replay_range_capacity: 256 * 1024,
+            replay_range_start: 0,
+            replay_range_len: 0,
+            replay_range_sequence: 0,
+            replay_family_counts: [0; InsnKind::COUNT],
+            replay_fallback_count: 0,
+            replay_unsupported_count: 0,
+            replay_descriptors: Vec::new(),
             finalized: false,
         }
+    }
+
+    pub fn set_replay_range_capacity(&mut self, capacity: usize) {
+        assert!(capacity > 0, "GPU replay range capacity must be nonzero");
+        assert_eq!(
+            self.replay_range_len, 0,
+            "GPU replay capacity cannot change after counting starts"
+        );
+        self.replay_range_capacity = capacity;
+    }
+
+    pub fn replay_descriptors(&self) -> &[crate::GpuReplayRangeDescriptor] {
+        assert!(self.finalized, "shard plan not finalized yet");
+        &self.replay_descriptors
     }
 
     pub fn current_shard_start_cycle(&self) -> Cycle {
@@ -842,6 +913,11 @@ impl ShardPlanBuilder {
     pub fn into_cycle_boundaries(self) -> Vec<Cycle> {
         assert!(self.finalized, "shard plan not finalized yet");
         self.shard_cycle_boundaries
+    }
+
+    pub fn into_replay_plan(self) -> (Vec<Cycle>, Vec<crate::GpuReplayRangeDescriptor>) {
+        assert!(self.finalized, "shard plan not finalized yet");
+        (self.shard_cycle_boundaries, self.replay_descriptors)
     }
 
     pub fn observe_step(&mut self, step_cycle: Cycle, step_cells: u64) {
@@ -884,6 +960,7 @@ impl ShardPlanBuilder {
             self.finish_current_shard(step_cycle);
             candidate = self.preview_modeled_chips(&chips);
         }
+        self.record_replay_step(kind);
         for chip in chips {
             self.num_instances[chip] = self.num_instances[chip].saturating_add(1);
         }
@@ -959,9 +1036,12 @@ impl ShardPlanBuilder {
             self.cur_cells > 0 || self.cur_cycle_in_shard > 0,
             "shard split before accumulating any steps"
         );
+        self.flush_replay_range();
         self.record_predicted_shard_cost();
         self.push_boundary(next_shard_cycle);
         self.shard_id += 1;
+        self.replay_range_start = 0;
+        self.replay_range_sequence = 0;
         self.current_shard_start_cycle = next_shard_cycle;
         self.cur_cells = 0;
         self.cur_trace_cells = 0;
@@ -973,6 +1053,142 @@ impl ShardPlanBuilder {
         self.cur_cycle_in_shard = 0;
         self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
         self.cur_step_count = 0;
+    }
+
+    fn record_replay_step(&mut self, kind: InsnKind) {
+        if kind == InsnKind::ECALL {
+            self.replay_fallback_count = self
+                .replay_fallback_count
+                .checked_add(1)
+                .expect("GPU replay fallback count overflow");
+        } else if crate::gpu_typed_kind_spec(kind).is_some() {
+            let count = &mut self.replay_family_counts[kind as usize];
+            *count = count
+                .checked_add(1)
+                .expect("GPU replay family count overflow");
+        } else {
+            self.replay_unsupported_count = self
+                .replay_unsupported_count
+                .checked_add(1)
+                .expect("GPU replay unsupported count overflow");
+        }
+        self.replay_range_len = self
+            .replay_range_len
+            .checked_add(1)
+            .expect("GPU replay range length overflow");
+        if self.replay_range_len == self.replay_range_capacity {
+            self.flush_replay_range();
+        }
+    }
+
+    fn record_admitted_native_block(
+        &mut self,
+        histogram: &[u32; InsnKind::COUNT],
+        ordered_kinds: &[InsnKind],
+    ) {
+        let block_len = histogram
+            .iter()
+            .try_fold(0usize, |sum, &count| sum.checked_add(count as usize))
+            .expect("AOT replay block length overflow");
+        assert_eq!(
+            block_len,
+            ordered_kinds.len(),
+            "AOT replay block histogram length mismatch"
+        );
+        let remaining = self.replay_range_capacity - self.replay_range_len;
+        if block_len > remaining {
+            for &kind in ordered_kinds {
+                self.record_replay_step(kind);
+            }
+            return;
+        }
+        for (index, &count) in histogram.iter().enumerate() {
+            let count = count as usize;
+            let kind = InsnKind::iter()
+                .nth(index)
+                .expect("AOT replay histogram kind index out of bounds");
+            if kind == InsnKind::ECALL {
+                self.replay_fallback_count = self
+                    .replay_fallback_count
+                    .checked_add(count)
+                    .expect("GPU replay fallback count overflow");
+            } else if crate::gpu_typed_kind_spec(kind).is_some() {
+                self.replay_family_counts[index] = self.replay_family_counts[index]
+                    .checked_add(count)
+                    .expect("GPU replay family count overflow");
+            } else {
+                self.replay_unsupported_count = self
+                    .replay_unsupported_count
+                    .checked_add(count)
+                    .expect("GPU replay unsupported count overflow");
+            }
+        }
+        self.replay_range_len = self
+            .replay_range_len
+            .checked_add(block_len)
+            .expect("GPU replay range length overflow");
+        if self.replay_range_len == self.replay_range_capacity {
+            self.flush_replay_range();
+        }
+    }
+
+    fn flush_replay_range(&mut self) {
+        if self.replay_range_len == 0 {
+            return;
+        }
+        let descriptor = crate::GpuReplayRangeDescriptor {
+            shard_id: u32::try_from(self.shard_id).expect("GPU replay shard id exceeds u32"),
+            sequence: self.replay_range_sequence,
+            range_start: u32::try_from(self.replay_range_start)
+                .expect("GPU replay range start exceeds u32"),
+            range_len: u32::try_from(self.replay_range_len)
+                .expect("GPU replay range length exceeds u32"),
+            family_counts: self.replay_family_counts,
+            fallback_count: self.replay_fallback_count,
+            unsupported_count: self.replay_unsupported_count,
+        };
+        assert_eq!(
+            descriptor.checked_total(),
+            Some(self.replay_range_len),
+            "GPU replay descriptor count mismatch"
+        );
+        self.replay_descriptors.push(descriptor);
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if crate::aot::aot_native_diagnostic_only() && self.replay_descriptors.len() == 1 {
+            let descriptor = &self.replay_descriptors[0];
+            crate::aot::aot_native_diagnostic_boundary(
+                "FIRST_REPLAY_DESCRIPTOR",
+                "FLUSHED",
+                &format!(
+                    "vector_len={},vector_ptr={:p},first_ptr={:p},shard={},sequence={},range_start={},range_len={},checked_total={:?},auipc_index={},auipc_count={},fallback={},unsupported={},family_counts={:?}",
+                    self.replay_descriptors.len(),
+                    self.replay_descriptors.as_ptr(),
+                    descriptor,
+                    descriptor.shard_id,
+                    descriptor.sequence,
+                    descriptor.range_start,
+                    descriptor.range_len,
+                    descriptor.checked_total(),
+                    InsnKind::AUIPC as usize,
+                    descriptor.family_counts[InsnKind::AUIPC as usize],
+                    descriptor.fallback_count,
+                    descriptor.unsupported_count,
+                    descriptor.family_counts,
+                ),
+            );
+        }
+        self.replay_range_start = self
+            .replay_range_start
+            .checked_add(self.replay_range_len)
+            .expect("GPU replay range start overflow");
+        self.replay_range_len = 0;
+        self.replay_range_sequence = self
+            .replay_range_sequence
+            .checked_add(1)
+            .expect("GPU replay range sequence overflow");
+        self.replay_family_counts.fill(0);
+        self.replay_fallback_count = 0;
+        self.replay_unsupported_count = 0;
     }
 
     fn add_ecall_step(&mut self, ecall_code: Word, base_cells: u64) {
@@ -1104,6 +1320,8 @@ impl ShardPlanBuilder {
             !self.finalized,
             "shard plan cannot be finalized multiple times"
         );
+        self.flush_replay_range();
+        self.flush_replay_range();
         self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
         self.record_predicted_shard_cost();
         self.cur_step_count = 0;
@@ -1454,6 +1672,24 @@ impl StepRecord {
         (self.syscall_index != Self::NO_SYSCALL).then_some(self.syscall_index)
     }
 
+    pub fn remap_syscall_index(
+        &mut self,
+        global_base: u32,
+        shard_syscall_count: usize,
+    ) -> Result<(), &'static str> {
+        let Some(index) = self.syscall_index() else {
+            return Ok(());
+        };
+        let local = index
+            .checked_sub(global_base)
+            .ok_or("syscall witness index precedes shard store")?;
+        if local as usize >= shard_syscall_count {
+            return Err("syscall witness index exceeds shard store");
+        }
+        self.syscall_index = local;
+        Ok(())
+    }
+
     /// Look up the syscall witness from a separate store.
     /// The store is typically obtained from `FullTracer::syscall_witnesses()`.
     pub fn syscall<'a>(&self, store: &'a [SyscallWitness]) -> Option<&'a SyscallWitness> {
@@ -1525,67 +1761,6 @@ impl Default for GpuReplayTracerConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[repr(C)]
-pub struct GpuReplayRead {
-    pub previous_cycle: u32,
-    pub value: Word,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[repr(C)]
-pub struct GpuReplayWrite {
-    pub previous_cycle: u32,
-    pub value_before: Word,
-    pub value_after: Word,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[repr(C)]
-pub struct GpuReplayMemory {
-    pub previous_cycle: u32,
-    pub address: Word,
-    pub value_before: Word,
-    pub value_after: Word,
-}
-
-/// Runtime payload for an ordinary instruction.
-///
-/// `cycle` is `shard_start_cycle + ordinal * SUBCYCLES_PER_INSN`. Register
-/// addresses and instruction metadata are derived from `raw_instruction`.
-/// Presence and cross-shard successor bits are held in `flags`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[repr(C)]
-pub struct GpuReplayOrdinaryRecord {
-    pub ordinal: u32,
-    pub pc_before: Word,
-    pub pc_after: Word,
-    pub raw_instruction: Word,
-    pub rs1: GpuReplayRead,
-    pub rs2: GpuReplayRead,
-    pub rd: GpuReplayWrite,
-    pub memory: GpuReplayMemory,
-    pub flags: u32,
-}
-
-impl GpuReplayOrdinaryRecord {
-    pub const HAS_RS1: u32 = 1 << 0;
-    pub const HAS_RS2: u32 = 1 << 1;
-    pub const HAS_RD: u32 = 1 << 2;
-    pub const HAS_MEMORY: u32 = 1 << 3;
-    pub const FUTURE_ACCESS_SHIFT: u32 = 8;
-
-    #[inline(always)]
-    pub fn cycle(&self, shard_start_cycle: Cycle) -> Cycle {
-        shard_start_cycle + self.ordinal as Cycle * FullTracer::SUBCYCLES_PER_INSN
-    }
-
-    #[inline(always)]
-    pub fn future_access_mask(&self) -> u8 {
-        (self.flags >> Self::FUTURE_ACCESS_SHIFT) as u8
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GpuReplayFallbackRecord {
     pub ordinal: u32,
@@ -1598,26 +1773,53 @@ pub struct GpuReplayFallbackRecord {
 pub struct GpuReplayChunk {
     pub sequence: u32,
     pub shard_start_cycle: Cycle,
-    pub ordinary: Vec<GpuReplayOrdinaryRecord>,
+    pub typed: Vec<Option<crate::GpuTypedSoaArena>>,
     pub fallback: Vec<GpuReplayFallbackRecord>,
 }
 
 impl GpuReplayChunk {
-    fn with_capacity(sequence: u32, shard_start_cycle: Cycle, capacity: usize) -> Self {
+    fn empty(sequence: u32, shard_start_cycle: Cycle) -> Self {
         Self {
             sequence,
             shard_start_cycle,
-            ordinary: Vec::with_capacity(capacity),
+            typed: (0..InsnKind::COUNT).map(|_| None).collect(),
             fallback: Vec::new(),
         }
     }
 
+    fn from_descriptor(
+        descriptor: &crate::GpuReplayRangeDescriptor,
+        shard_start_cycle: Cycle,
+    ) -> Self {
+        let typed = InsnKind::iter()
+            .zip(descriptor.family_counts)
+            .map(|(kind, rows)| {
+                (rows > 0).then(|| crate::GpuTypedSoaArena::new(kind, rows).unwrap())
+            })
+            .collect();
+        Self {
+            sequence: descriptor.sequence,
+            shard_start_cycle,
+            typed,
+            fallback: Vec::with_capacity(descriptor.fallback_count),
+        }
+    }
+
     pub fn len(&self) -> usize {
-        self.ordinary.len() + self.fallback.len()
+        self.typed
+            .iter()
+            .flatten()
+            .map(crate::GpuTypedSoaArena::len)
+            .sum::<usize>()
+            + self.fallback.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.ordinary.is_empty() && self.fallback.is_empty()
+        self.typed
+            .iter()
+            .flatten()
+            .all(crate::GpuTypedSoaArena::is_empty)
+            && self.fallback.is_empty()
     }
 }
 
@@ -1633,9 +1835,9 @@ pub struct GpuReplayTracer {
     pending: StepRecord,
     current: GpuReplayChunk,
     sealed: Vec<GpuReplayChunk>,
+    range_descriptors: Arc<Vec<crate::GpuReplayRangeDescriptor>>,
+    next_range_descriptor: usize,
     ordinal: usize,
-    native_ordinary_len: usize,
-    native_annotated_len: usize,
     shard_start_cycle: Cycle,
     latest_accesses: LatestAccesses,
     next_accesses: Arc<NextAccessTape>,
@@ -1645,6 +1847,10 @@ pub struct GpuReplayTracer {
     max_heap_addr_access: ByteAddr,
     max_hint_addr_access: ByteAddr,
     platform: Platform,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    native_kinds: [crate::gpu_typed_ingress::GpuTypedNativeKindState; InsnKind::COUNT],
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    native_error: u32,
 }
 
 impl GpuReplayTracer {
@@ -1660,11 +1866,11 @@ impl GpuReplayTracer {
                 cycle: shard_start_cycle,
                 ..StepRecord::default()
             },
-            current: GpuReplayChunk::with_capacity(0, shard_start_cycle, config.chunk_capacity),
+            current: GpuReplayChunk::empty(0, shard_start_cycle),
             sealed: Vec::new(),
+            range_descriptors: Arc::new(Vec::new()),
+            next_range_descriptor: 0,
             ordinal: 0,
-            native_ordinary_len: 0,
-            native_annotated_len: 0,
             shard_start_cycle,
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: Arc::new(NextAccessTape::default()),
@@ -1674,23 +1880,134 @@ impl GpuReplayTracer {
             max_heap_addr_access: ByteAddr::from(platform.heap.start),
             max_hint_addr_access: ByteAddr::from(platform.hints.start),
             platform: platform.clone(),
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            native_kinds: [crate::gpu_typed_ingress::GpuTypedNativeKindState::default();
+                InsnKind::COUNT],
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            native_error: 0,
         }
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn prepare_native_range(&mut self) -> GpuReplayNativeTraceState {
+        assert!(
+            self.current.len() <= 262_144,
+            "GPU replay native range exceeds 262144 rows"
+        );
+        self.native_error = 0;
+        for (index, slot) in self.native_kinds.iter_mut().enumerate() {
+            *slot = self.current.typed[index]
+                .as_mut()
+                .map_or_else(Default::default, crate::GpuTypedSoaArena::native_state);
+        }
+        let events = self.next_accesses.events();
+        GpuReplayNativeTraceState {
+            kinds: self.native_kinds.as_mut_ptr(),
+            kind_count: InsnKind::COUNT,
+            ordinal: &mut self.ordinal,
+            pending_cycle: &mut self.pending.cycle,
+            latest_cells: self.latest_accesses.cells_mut_ptr(),
+            latest_base: self.latest_accesses.base(),
+            latest_len: &mut self.latest_accesses.len,
+            max_heap_addr_access: &mut self.max_heap_addr_access,
+            max_hint_addr_access: &mut self.max_hint_addr_access,
+            next_access_events: events.as_ptr(),
+            next_access_len: events.len(),
+            next_access_cursor: &mut self.next_access_cursor,
+            error: &mut self.native_error,
+        }
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn sync_native_range(&mut self) -> Result<(), &'static str> {
+        if self.native_error != 0 {
+            return Err("GPU replay native emitter reported an ABI or cursor error");
+        }
+        for (index, state) in self.native_kinds.iter().enumerate() {
+            match self.current.typed[index].as_mut() {
+                Some(arena) => arena.sync_native_state(state)?,
+                None if state.capacity == 0 && state.cursor == 0 => {}
+                None => return Err("GPU replay native emitter used an absent family"),
+            }
+        }
+        if self.current.len() > self.config.chunk_capacity || self.current.len() > 262_144 {
+            return Err("GPU replay native range row bound exceeded");
+        }
+        Ok(())
+    }
+
     fn seal_current(&mut self) {
-        self.sync_native_replay();
         if self.current.is_empty() {
             return;
         }
-        let sequence = self.current.sequence + 1;
-        let next = GpuReplayChunk::with_capacity(
-            sequence,
-            self.shard_start_cycle,
-            self.config.chunk_capacity,
-        );
+        let descriptor = &self.range_descriptors[self.next_range_descriptor];
+        let shard_id = descriptor.shard_id;
+        let sequence = descriptor.sequence;
+        assert_eq!(descriptor.sequence, self.current.sequence);
+        assert_eq!(descriptor.checked_total(), Some(self.current.len()));
+        for (arena, expected) in self.current.typed.iter().zip(descriptor.family_counts) {
+            assert_eq!(
+                arena.as_ref().map_or(0, crate::GpuTypedSoaArena::len),
+                expected
+            );
+        }
+        assert_eq!(self.current.fallback.len(), descriptor.fallback_count);
+        self.next_range_descriptor += 1;
+        let next = self
+            .range_descriptors
+            .get(self.next_range_descriptor)
+            .filter(|next| next.shard_id == shard_id)
+            .map_or_else(
+                || GpuReplayChunk::empty(sequence + 1, self.shard_start_cycle),
+                |next| GpuReplayChunk::from_descriptor(next, self.shard_start_cycle),
+            );
         self.sealed.push(std::mem::replace(&mut self.current, next));
-        self.native_ordinary_len = 0;
-        self.native_annotated_len = 0;
+    }
+
+    pub fn install_range_descriptors(
+        &mut self,
+        descriptors: Arc<Vec<crate::GpuReplayRangeDescriptor>>,
+    ) {
+        assert_eq!(
+            self.ordinal, 0,
+            "GPU replay plan installed after execution started"
+        );
+        assert!(!descriptors.is_empty(), "GPU replay plan has no ranges");
+        assert_eq!(descriptors[0].shard_id, 0);
+        assert_eq!(descriptors[0].sequence, 0);
+        self.range_descriptors = descriptors;
+        self.next_range_descriptor = 0;
+        self.current =
+            GpuReplayChunk::from_descriptor(&self.range_descriptors[0], self.shard_start_cycle);
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if crate::aot::aot_native_diagnostic_only() {
+            let descriptor = &self.range_descriptors[0];
+            let arena = self.current.typed[InsnKind::AUIPC as usize].as_ref();
+            crate::aot::aot_native_diagnostic_boundary(
+                "FIRST_REPLAY_DESCRIPTOR",
+                "INSTALLED",
+                &format!(
+                    "arc_ptr={:p},vector_len={},vector_ptr={:p},first_ptr={:p},shard={},sequence={},range_start={},range_len={},checked_total={:?},auipc_index={},auipc_count={},arena_present={},arena_capacity={},arena_len={},fallback={},unsupported={},family_counts={:?}",
+                    Arc::as_ptr(&self.range_descriptors),
+                    self.range_descriptors.len(),
+                    self.range_descriptors.as_ptr(),
+                    descriptor,
+                    descriptor.shard_id,
+                    descriptor.sequence,
+                    descriptor.range_start,
+                    descriptor.range_len,
+                    descriptor.checked_total(),
+                    InsnKind::AUIPC as usize,
+                    descriptor.family_counts[InsnKind::AUIPC as usize],
+                    arena.is_some(),
+                    arena.map_or(0, crate::GpuTypedSoaArena::capacity),
+                    arena.map_or(0, crate::GpuTypedSoaArena::len),
+                    descriptor.fallback_count,
+                    descriptor.unsupported_count,
+                    descriptor.family_counts,
+                ),
+            );
+        }
     }
 
     pub fn finish_chunks(&mut self) {
@@ -1703,11 +2020,10 @@ impl GpuReplayTracer {
         self.finish_chunks();
         self.shard_start_cycle = self.pending.cycle;
         self.ordinal = 0;
-        self.native_ordinary_len = 0;
-        self.native_annotated_len = 0;
         self.syscall_witnesses.clear();
-        self.current =
-            GpuReplayChunk::with_capacity(0, self.shard_start_cycle, self.config.chunk_capacity);
+        let descriptor = &self.range_descriptors[self.next_range_descriptor];
+        assert_eq!(descriptor.sequence, 0);
+        self.current = GpuReplayChunk::from_descriptor(descriptor, self.shard_start_cycle);
     }
 
     pub fn take_sealed_chunks(&mut self) -> Vec<GpuReplayChunk> {
@@ -1730,51 +2046,10 @@ impl GpuReplayTracer {
         self.max_hint_addr_access
     }
 
-    #[inline(always)]
-    pub(crate) fn sync_native_ordinary(&mut self) {
-        assert!(
-            self.native_ordinary_len <= self.current.ordinary.capacity(),
-            "native GPU replay writer exceeded its chunk capacity"
-        );
-        if self.current.ordinary.len() != self.native_ordinary_len {
-            // The direct AOT recorder initializes every byte of each compact
-            // record before advancing native_ordinary_len.
-            unsafe { self.current.ordinary.set_len(self.native_ordinary_len) };
-        }
-    }
-
     pub fn remaining_chunk_capacity(&self) -> usize {
         self.config
             .chunk_capacity
             .saturating_sub(self.current.len())
-    }
-
-    pub(crate) fn sync_native_replay(&mut self) {
-        self.sync_native_ordinary();
-        while self.native_annotated_len < self.current.ordinary.len() {
-            let record = &mut self.current.ordinary[self.native_annotated_len];
-            let start = record.cycle(self.shard_start_cycle);
-            let end = start + FullTracer::SUBCYCLES_PER_INSN;
-            while let Some(event) = self.next_accesses.events().get(self.next_access_cursor) {
-                if event.source_cycle >= end {
-                    break;
-                }
-                assert!(
-                    event.source_cycle >= start,
-                    "GPU replay skipped next-access event"
-                );
-                let bit = match event.source_cycle - start {
-                    FullTracer::SUBCYCLE_RS1 => StepRecord::FUTURE_ACCESS_RS1,
-                    FullTracer::SUBCYCLE_RS2 => StepRecord::FUTURE_ACCESS_RS2,
-                    FullTracer::SUBCYCLE_RD => StepRecord::FUTURE_ACCESS_RD,
-                    FullTracer::SUBCYCLE_MEM => StepRecord::FUTURE_ACCESS_MEM,
-                    _ => panic!("GPU replay access/tape mismatch"),
-                };
-                record.flags |= (bit as u32) << GpuReplayOrdinaryRecord::FUTURE_ACCESS_SHIFT;
-                self.next_access_cursor += 1;
-            }
-            self.native_annotated_len += 1;
-        }
     }
 
     fn checked_cycle(cycle: Cycle) -> u32 {
@@ -1849,49 +2124,6 @@ impl GpuReplayTracer {
         masks[index] = 1;
     }
 
-    fn compact_pending(&self) -> GpuReplayOrdinaryRecord {
-        let mut flags = (self.pending.future_access_mask as u32)
-            << GpuReplayOrdinaryRecord::FUTURE_ACCESS_SHIFT;
-        if self.pending.has_rs1 {
-            flags |= GpuReplayOrdinaryRecord::HAS_RS1;
-        }
-        if self.pending.has_rs2 {
-            flags |= GpuReplayOrdinaryRecord::HAS_RS2;
-        }
-        if self.pending.has_rd {
-            flags |= GpuReplayOrdinaryRecord::HAS_RD;
-        }
-        if self.pending.has_memory_op {
-            flags |= GpuReplayOrdinaryRecord::HAS_MEMORY;
-        }
-        GpuReplayOrdinaryRecord {
-            ordinal: u32::try_from(self.ordinal).expect("GPU replay ordinal exceeds u32"),
-            pc_before: self.pending.pc.before.0,
-            pc_after: self.pending.pc.after.0,
-            raw_instruction: self.pending.insn.raw,
-            rs1: GpuReplayRead {
-                previous_cycle: Self::checked_cycle(self.pending.rs1.previous_cycle),
-                value: self.pending.rs1.value,
-            },
-            rs2: GpuReplayRead {
-                previous_cycle: Self::checked_cycle(self.pending.rs2.previous_cycle),
-                value: self.pending.rs2.value,
-            },
-            rd: GpuReplayWrite {
-                previous_cycle: Self::checked_cycle(self.pending.rd.previous_cycle),
-                value_before: self.pending.rd.value.before,
-                value_after: self.pending.rd.value.after,
-            },
-            memory: GpuReplayMemory {
-                previous_cycle: Self::checked_cycle(self.pending.memory_op.previous_cycle),
-                address: self.pending.memory_op.addr.0,
-                value_before: self.pending.memory_op.value.before,
-                value_after: self.pending.memory_op.value.after,
-            },
-            flags,
-        }
-    }
-
     fn update_mmio_bounds(&mut self, addr: WordAddr) {
         let Some((start_addr, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
@@ -1916,8 +2148,8 @@ impl GpuReplayTracer {
 
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) struct GpuReplayNativeTraceState {
-    pub records: *mut GpuReplayOrdinaryRecord,
-    pub len: *mut usize,
+    pub kinds: *mut crate::gpu_typed_ingress::GpuTypedNativeKindState,
+    pub kind_count: usize,
     pub ordinal: *mut usize,
     pub pending_cycle: *mut Cycle,
     pub latest_cells: *mut Cycle,
@@ -1925,29 +2157,10 @@ pub(crate) struct GpuReplayNativeTraceState {
     pub latest_len: *mut usize,
     pub max_heap_addr_access: *mut ByteAddr,
     pub max_hint_addr_access: *mut ByteAddr,
-}
-
-#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-impl GpuReplayTracer {
-    pub(crate) fn native_trace_state(&mut self) -> GpuReplayNativeTraceState {
-        self.sync_native_ordinary();
-        assert_eq!(
-            self.current.ordinary.len(),
-            self.native_ordinary_len,
-            "GPU replay native length is out of sync"
-        );
-        GpuReplayNativeTraceState {
-            records: self.current.ordinary.as_mut_ptr(),
-            len: &mut self.native_ordinary_len,
-            ordinal: &mut self.ordinal,
-            pending_cycle: &mut self.pending.cycle,
-            latest_cells: self.latest_accesses.cells_mut_ptr(),
-            latest_base: self.latest_accesses.base(),
-            latest_len: &mut self.latest_accesses.len,
-            max_heap_addr_access: &mut self.max_heap_addr_access,
-            max_hint_addr_access: &mut self.max_hint_addr_access,
-        }
-    }
+    pub next_access_events: *const NextAccessEvent,
+    pub next_access_len: usize,
+    pub next_access_cursor: *mut usize,
+    pub error: *mut u32,
 }
 
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -2038,6 +2251,27 @@ impl FullTracer {
 
     pub fn recorded_steps(&self) -> &[StepRecord] {
         &self.records[..self.len]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_next_access_events_for_test(&mut self, events: &[NextAccessEvent]) {
+        self.next_accesses = Arc::new(NextAccessTape::from_unsorted(events.to_vec()));
+        self.next_access_cursor = 0;
+        for record in &mut self.records[..self.len] {
+            record.future_access_mask = 0;
+        }
+        for witness in &mut self.syscall_witnesses {
+            witness.reg_future_access.fill(0);
+            witness.mem_future_access.fill(0);
+        }
+        for event in events {
+            if event.source_cycle == 0 {
+                continue;
+            }
+            let ordinal = ((event.source_cycle - Self::SUBCYCLES_PER_INSN)
+                / Self::SUBCYCLES_PER_INSN) as usize;
+            self.annotate_event(ordinal, *event);
+        }
     }
 
     pub fn record_buffer_bytes(&self) -> usize {
@@ -2411,8 +2645,338 @@ pub struct PreflightTracer {
     register_reads_tracked: u8,
     planner: Option<ShardPlanBuilder>,
     current_shard_start_cycle: Cycle,
+    replay_shard_previews: Vec<crate::GpuShardPreview>,
+    preview_heap_start: ByteAddr,
+    preview_hint_start: ByteAddr,
+    platform_heap_start: ByteAddr,
+    platform_hint_start: ByteAddr,
     defer_mmio_bounds: bool,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    combined_capture: Option<PreflightCombinedCapture>,
     config: PreflightTracerConfig,
+}
+
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+struct PreflightCombinedCapture {
+    typed: Vec<Option<crate::GpuTypedSoaArena>>,
+    native_kinds: [crate::gpu_typed_ingress::GpuTypedNativeKindState; InsnKind::COUNT],
+    ordinal: usize,
+    pending_cycle: Cycle,
+    register_latest: LatestAccesses,
+    max_heap_addr_access: ByteAddr,
+    max_hint_addr_access: ByteAddr,
+    event_cursor: usize,
+    error: u32,
+    sealed: Vec<crate::GpuReplayTypedRange>,
+    descriptor_cursor: usize,
+    range_capacity: usize,
+    pending: StepRecord,
+    fallback: Vec<GpuReplayFallbackRecord>,
+    syscall_witnesses: Vec<SyscallWitness>,
+    patches: Vec<CrossShardPatch>,
+    initialization_events: Vec<NextAccessEvent>,
+    patches_resolved: bool,
+}
+
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+impl PreflightCombinedCapture {
+    fn new(platform: &Platform, range_capacity: usize) -> Self {
+        let scratch_capacity = range_capacity
+            .checked_mul(2)
+            .expect("combined capture scratch capacity overflow");
+        Self {
+            typed: InsnKind::iter()
+                .map(|kind| crate::GpuTypedSoaArena::new(kind, scratch_capacity))
+                .collect(),
+            native_kinds: [crate::gpu_typed_ingress::GpuTypedNativeKindState::default();
+                InsnKind::COUNT],
+            ordinal: 0,
+            pending_cycle: FullTracer::SUBCYCLES_PER_INSN,
+            register_latest: LatestAccesses::new(platform),
+            max_heap_addr_access: ByteAddr::from(platform.heap.start),
+            max_hint_addr_access: ByteAddr::from(platform.hints.start),
+            event_cursor: 0,
+            error: 0,
+            sealed: Vec::new(),
+            descriptor_cursor: 0,
+            range_capacity,
+            pending: StepRecord {
+                cycle: FullTracer::SUBCYCLES_PER_INSN,
+                heap_maxtouch_addr: Change::new(
+                    ByteAddr::from(platform.heap.start),
+                    ByteAddr::from(platform.heap.start),
+                ),
+                hint_maxtouch_addr: Change::new(
+                    ByteAddr::from(platform.hints.start),
+                    ByteAddr::from(platform.hints.start),
+                ),
+                ..StepRecord::default()
+            },
+            fallback: Vec::new(),
+            syscall_witnesses: Vec::new(),
+            patches: Vec::new(),
+            initialization_events: Vec::new(),
+            patches_resolved: false,
+        }
+    }
+
+    fn shard_for_cycle(boundaries: &[Cycle], cycle: Cycle) -> Result<u32, &'static str> {
+        if boundaries.first().copied() != Some(FullTracer::SUBCYCLES_PER_INSN) {
+            return Err("deferred patch shard boundaries have invalid start");
+        }
+        let shard = boundaries.partition_point(|boundary| *boundary <= cycle);
+        if shard == 0 || shard >= boundaries.len() {
+            return Err("deferred patch cycle is outside finalized shard boundaries");
+        }
+        u32::try_from(shard - 1).map_err(|_| "deferred patch shard exceeds u32")
+    }
+
+    fn resolve_patches(
+        &mut self,
+        events: &[NextAccessEvent],
+        boundaries: &[Cycle],
+    ) -> Result<(), &'static str> {
+        if self.patches_resolved {
+            return Err("combined capture deferred patches resolved multiple times");
+        }
+        let mut events = events.to_vec();
+        events.sort_unstable_by_key(|event| {
+            (event.source_cycle, event.address, event.target_cycle)
+        });
+        for pair in events.windows(2) {
+            if (pair[0].source_cycle, pair[0].address)
+                == (pair[1].source_cycle, pair[1].address)
+            {
+                return Err("duplicate deferred patch source/address");
+            }
+        }
+        for event in events {
+            if event.target_cycle <= event.source_cycle {
+                return Err("deferred patch target does not follow source");
+            }
+            if event.source_cycle == 0 {
+                Self::shard_for_cycle(boundaries, event.target_cycle)?;
+                self.initialization_events.push(event);
+                continue;
+            }
+            let ordinal = event
+                .source_cycle
+                .checked_sub(FullTracer::SUBCYCLES_PER_INSN)
+                .ok_or("deferred patch source precedes first instruction")?
+                / FullTracer::SUBCYCLES_PER_INSN;
+            let ordinal = u32::try_from(ordinal)
+                .map_err(|_| "deferred patch ordinal exceeds u32")?;
+            let (mask, lane, ram_class) = match event.source_cycle % 4 {
+                FullTracer::SUBCYCLE_RS1 => (
+                    StepRecord::FUTURE_ACCESS_RS1,
+                    PatchSourceLane::Rs1,
+                    PatchRamClass::Register,
+                ),
+                FullTracer::SUBCYCLE_RS2 => (
+                    StepRecord::FUTURE_ACCESS_RS2,
+                    PatchSourceLane::Rs2,
+                    PatchRamClass::Register,
+                ),
+                FullTracer::SUBCYCLE_RD => (
+                    StepRecord::FUTURE_ACCESS_RD,
+                    PatchSourceLane::Rd,
+                    PatchRamClass::Register,
+                ),
+                FullTracer::SUBCYCLE_MEM => (
+                    StepRecord::FUTURE_ACCESS_MEM,
+                    PatchSourceLane::Memory,
+                    PatchRamClass::Memory,
+                ),
+                _ => unreachable!(),
+            };
+            let mut matches = 0;
+            let mut prior_value = 0;
+            for arena in self
+                .sealed
+                .iter_mut()
+                .flat_map(|range| range.typed.iter_mut().flatten())
+            {
+                if let Some(value) =
+                    arena.patch_future_access_checked(ordinal, mask, event.address)?
+                {
+                    matches += 1;
+                    prior_value = value;
+                }
+            }
+            let mut resolved_lane = lane;
+            let mut resolved_class = ram_class;
+            let mut syscall_op_index = u16::MAX;
+            let mut syscall_witness_index = u32::MAX;
+            for fallback in self
+                .sealed
+                .iter_mut()
+                .flat_map(|range| range.fallback.iter_mut())
+                .filter(|record| record.ordinal == ordinal)
+            {
+                matches += 1;
+                let record = &mut fallback.record;
+                let subcycle = event.source_cycle - record.cycle;
+                match subcycle {
+                    FullTracer::SUBCYCLE_RS1 if record.has_rs1 && record.rs1.addr == event.address => {
+                        record.future_access_mask |= StepRecord::FUTURE_ACCESS_RS1;
+                        prior_value = record.rs1.value;
+                    }
+                    FullTracer::SUBCYCLE_RS2 if record.has_rs2 && record.rs2.addr == event.address => {
+                        record.future_access_mask |= StepRecord::FUTURE_ACCESS_RS2;
+                        prior_value = record.rs2.value;
+                    }
+                    FullTracer::SUBCYCLE_RD if record.has_rd && record.rd.addr == event.address => {
+                        record.future_access_mask |= StepRecord::FUTURE_ACCESS_RD;
+                        prior_value = record.rd.value.after;
+                    }
+                    FullTracer::SUBCYCLE_MEM if record.has_memory_op && record.memory_op.addr == event.address => {
+                        record.future_access_mask |= StepRecord::FUTURE_ACCESS_MEM;
+                        prior_value = record.memory_op.value.after;
+                    }
+                    FullTracer::SUBCYCLE_RD if record.syscall_index != StepRecord::NO_SYSCALL => {
+                        let witness = &mut self.syscall_witnesses[record.syscall_index as usize];
+                        let index = witness.reg_ops.iter().rposition(|op| op.addr == event.address)
+                            .ok_or("deferred patch syscall register address missing")?;
+                        witness.reg_future_access[index] = 1;
+                        prior_value = witness.reg_ops[index].value.after;
+                        resolved_lane = PatchSourceLane::SyscallRegister;
+                        syscall_op_index = u16::try_from(index).map_err(|_| "deferred patch syscall operation exceeds u16")?;
+                        syscall_witness_index = record.syscall_index;
+                    }
+                    FullTracer::SUBCYCLE_MEM if record.syscall_index != StepRecord::NO_SYSCALL => {
+                        let witness = &mut self.syscall_witnesses[record.syscall_index as usize];
+                        let index = witness.mem_ops.iter().rposition(|op| op.addr == event.address)
+                            .ok_or("deferred patch syscall memory address missing")?;
+                        witness.mem_future_access[index] = 1;
+                        prior_value = witness.mem_ops[index].value.after;
+                        resolved_lane = PatchSourceLane::SyscallMemory;
+                        resolved_class = PatchRamClass::Memory;
+                        syscall_op_index = u16::try_from(index).map_err(|_| "deferred patch syscall operation exceeds u16")?;
+                        syscall_witness_index = record.syscall_index;
+                    }
+                    _ => return Err("deferred patch does not match sparse source record"),
+                }
+            }
+            if matches != 1 {
+                return Err("deferred patch source ordinal does not resolve exactly once");
+            }
+            let source_shard = Self::shard_for_cycle(boundaries, event.source_cycle)?;
+            let target_shard = Self::shard_for_cycle(boundaries, event.target_cycle)?;
+            if source_shard >= target_shard {
+                return Err("deferred patch does not cross a shard boundary");
+            }
+            self.patches.push(CrossShardPatch {
+                source_cycle: event.source_cycle,
+                target_cycle: event.target_cycle,
+                address: event.address,
+                prior_value,
+                source_shard,
+                target_shard,
+                ram_class: resolved_class,
+                source_lane: resolved_lane,
+                syscall_op_index,
+                syscall_witness_index,
+            });
+        }
+        self.patches_resolved = true;
+        Ok(())
+    }
+
+    fn native_state(&mut self) -> GpuReplayNativeTraceState {
+        self.error = 0;
+        for (index, slot) in self.native_kinds.iter_mut().enumerate() {
+            *slot = self.typed[index]
+                .as_mut()
+                .map_or_else(Default::default, crate::GpuTypedSoaArena::native_state);
+        }
+        GpuReplayNativeTraceState {
+            kinds: self.native_kinds.as_mut_ptr(),
+            kind_count: InsnKind::COUNT,
+            ordinal: &mut self.ordinal,
+            pending_cycle: &mut self.pending_cycle,
+            latest_cells: self.register_latest.cells_mut_ptr(),
+            latest_base: self.register_latest.base(),
+            latest_len: &mut self.register_latest.len,
+            max_heap_addr_access: &mut self.max_heap_addr_access,
+            max_hint_addr_access: &mut self.max_hint_addr_access,
+            next_access_events: std::ptr::null(),
+            next_access_len: 0,
+            next_access_cursor: &mut self.event_cursor,
+            error: &mut self.error,
+        }
+    }
+
+    fn sync_native(&mut self) -> Result<(), &'static str> {
+        if self.error != 0 {
+            return Err("combined preflight native capture reported an ABI or cursor error");
+        }
+        for (index, state) in self.native_kinds.iter().enumerate() {
+            match self.typed[index].as_mut() {
+                Some(arena) => arena.sync_native_state(state)?,
+                None if state.capacity == 0 && state.cursor == 0 => {}
+                None => return Err("combined preflight capture used an absent family"),
+            }
+        }
+        Ok(())
+    }
+
+    fn seal_available(
+        &mut self,
+        descriptors: &[crate::GpuReplayRangeDescriptor],
+    ) -> Result<(), &'static str> {
+        self.sync_native()?;
+        while let Some(descriptor) = descriptors.get(self.descriptor_cursor) {
+            if descriptor.range_len as usize > self.range_capacity {
+                return Err("combined capture descriptor exceeds 262144-row range bound");
+            }
+            if descriptor.unsupported_count != 0 {
+                return Err("combined preflight unsupported fallback capture is not implemented");
+            }
+            if self
+                .typed
+                .iter()
+                .zip(descriptor.family_counts)
+                .any(|(arena, rows)| arena.as_ref().map_or(0, crate::GpuTypedSoaArena::len) < rows)
+            {
+                break;
+            }
+            if self.fallback.len() < descriptor.fallback_count {
+                break;
+            }
+            let typed = self
+                .typed
+                .iter_mut()
+                .zip(descriptor.family_counts)
+                .map(|(arena, rows)| {
+                    if rows == 0 {
+                        Ok(None)
+                    } else {
+                        arena
+                            .as_mut()
+                            .ok_or("combined capture descriptor names absent family")?
+                            .drain_prefix(rows)
+                            .map(Some)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let fallback = self
+                .fallback
+                .drain(..descriptor.fallback_count)
+                .collect::<Vec<_>>();
+            self.sealed.push(crate::GpuReplayTypedRange {
+                sequence: descriptor.sequence,
+                typed,
+                fallback,
+            });
+            self.descriptor_cursor += 1;
+        }
+        for (index, arena) in self.typed.iter_mut().enumerate() {
+            if let Some(arena) = arena {
+                self.native_kinds[index] = arena.native_state();
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg_attr(
@@ -2483,6 +3047,11 @@ pub(crate) struct PreflightNativeTraceState {
     pub planner_max_cycle_per_shard: Cycle,
     pub planner_num_instances: *mut u64,
     pub planner_num_chips: usize,
+    pub replay_range_len: *mut usize,
+    pub replay_family_counts: *mut usize,
+    pub replay_fallback_count: *mut usize,
+    pub replay_unsupported_count: *mut usize,
+    pub replay_range_capacity: usize,
 }
 
 #[derive(Clone)]
@@ -2491,6 +3060,8 @@ pub struct PreflightTracerConfig {
     max_cell_per_shard: u64,
     max_cycle_per_shard: Cycle,
     step_cell_extractor: Option<Arc<dyn StepCellExtractor>>,
+    replay_range_capacity: usize,
+    combined_capture: bool,
 }
 
 impl fmt::Debug for PreflightTracer {
@@ -2518,6 +3089,7 @@ impl fmt::Debug for PreflightTracerConfig {
             .field("max_cell_per_shard", &self.max_cell_per_shard)
             .field("max_cycle_per_shard", &self.max_cycle_per_shard)
             .field("step_cell_extractor", &self.step_cell_extractor.is_some())
+            .field("replay_range_capacity", &self.replay_range_capacity)
             .finish()
     }
 }
@@ -2533,6 +3105,8 @@ impl PreflightTracerConfig {
             max_cell_per_shard,
             max_cycle_per_shard,
             step_cell_extractor: None,
+            replay_range_capacity: 256 * 1024,
+            combined_capture: false,
         }
     }
 
@@ -2553,6 +3127,17 @@ impl PreflightTracerConfig {
         self
     }
 
+    pub fn with_replay_range_capacity(mut self, capacity: usize) -> Self {
+        assert!(capacity > 0, "GPU replay range capacity must be nonzero");
+        self.replay_range_capacity = capacity;
+        self
+    }
+
+    pub fn with_combined_capture(mut self, enabled: bool) -> Self {
+        self.combined_capture = enabled;
+        self
+    }
+
     pub fn step_cell_extractor(&self) -> Option<Arc<dyn StepCellExtractor>> {
         self.step_cell_extractor.clone()
     }
@@ -2565,6 +3150,8 @@ impl Default for PreflightTracerConfig {
             max_cell_per_shard: u64::MAX,
             max_cycle_per_shard: Cycle::MAX,
             step_cell_extractor: None,
+            replay_range_capacity: 256 * 1024,
+            combined_capture: false,
         }
     }
 }
@@ -2600,6 +3187,12 @@ impl PreflightTracer {
             .step_cell_extractor
             .as_ref()
             .and_then(|extractor| extractor.shard_cost_model());
+        let mut planner = ShardPlanBuilder::new_with_cost_model(
+            max_cell_per_shard,
+            planner_cycle_limit,
+            cost_model,
+        );
+        planner.set_replay_range_capacity(config.replay_range_capacity);
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             pc: Default::default(),
@@ -2613,30 +3206,178 @@ impl PreflightTracer {
             next_access_growth_bytes: 0,
             next_access_growth_time: Duration::ZERO,
             register_reads_tracked: 0,
-            planner: Some(ShardPlanBuilder::new_with_cost_model(
-                max_cell_per_shard,
-                planner_cycle_limit,
-                cost_model,
-            )),
+            planner: Some(planner),
             current_shard_start_cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
+            replay_shard_previews: Vec::new(),
+            preview_heap_start: ByteAddr::from(platform.heap.start),
+            preview_hint_start: ByteAddr::from(platform.hints.start),
+            platform_heap_start: ByteAddr::from(platform.heap.start),
+            platform_hint_start: ByteAddr::from(platform.hints.start),
             defer_mmio_bounds: false,
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            combined_capture: config
+                .combined_capture
+                .then(|| PreflightCombinedCapture::new(platform, config.replay_range_capacity)),
             config,
         };
         tracer.reset_register_tracking();
         tracer
     }
 
-    pub fn into_shard_plan(self) -> (ShardPlanBuilder, NextCycleAccess) {
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn combined_capture_enabled(&self) -> bool {
+        self.combined_capture.is_some()
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn prepare_combined_capture_native(&mut self) -> Option<GpuReplayNativeTraceState> {
+        self.combined_capture
+            .as_mut()
+            .map(PreflightCombinedCapture::native_state)
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn sync_combined_capture(&mut self) -> Result<(), &'static str> {
+        let descriptors = self
+            .planner
+            .as_ref()
+            .expect("shard planner missing")
+            .replay_descriptors
+            .clone();
+        if let Some(capture) = self.combined_capture.as_mut() {
+            capture.seal_available(&descriptors)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(all(test, feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn finish_combined_capture_for_test(
+        &mut self,
+    ) -> Result<
+        (
+            &[crate::GpuReplayTypedRange],
+            &[SyscallWitness],
+            &[CrossShardPatch],
+            &[NextAccessEvent],
+        ),
+        &'static str,
+    > {
+        let planner = self.planner.as_mut().expect("shard planner missing");
+        if !planner.finalized {
+            planner.finalize(self.cycle);
+        }
+        self.sync_combined_capture()?;
+        let boundaries = self
+            .planner
+            .as_ref()
+            .expect("shard planner missing")
+            .shard_cycle_boundaries()
+            .to_vec();
+        let events = self.next_access_events.clone();
+        if let Some(capture) = self.combined_capture.as_mut()
+            && !capture.patches_resolved
+        {
+            capture.resolve_patches(&events, &boundaries)?;
+        }
+        let capture = self
+            .combined_capture
+            .as_ref()
+            .expect("combined capture missing");
+        Ok((
+            &capture.sealed,
+            &capture.syscall_witnesses,
+            &capture.patches,
+            &capture.initialization_events,
+        ))
+    }
+
+    pub fn into_shard_plan(
+        self,
+    ) -> (
+        ShardPlanBuilder,
+        NextCycleAccess,
+        Vec<crate::GpuShardPreview>,
+    ) {
+        let (planner, next_accesses, previews, _) = self
+            .into_shard_plan_with_capture()
+            .expect("combined preflight capture finalization failed");
+        (planner, next_accesses, previews)
+    }
+
+    pub fn into_shard_plan_with_capture(
+        mut self,
+    ) -> Result<
+        (
+            ShardPlanBuilder,
+            NextCycleAccess,
+            Vec<crate::GpuShardPreview>,
+            Option<CombinedPreflightCapture>,
+        ),
+        &'static str,
+    > {
+        if self
+            .planner
+            .as_ref()
+            .is_some_and(|planner| self.replay_shard_previews.len() <= planner.shard_id)
+        {
+            self.capture_shard_preview(self.cycle);
+        }
         let Some(mut planner) = self.planner else {
             panic!("shard planner missing")
         };
         if !planner.finalized {
             planner.finalize(self.cycle);
         }
-        (
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        let capture = if let Some(mut capture) = self.combined_capture.take() {
+            capture.seal_available(&planner.replay_descriptors)?;
+            if !capture.patches_resolved {
+                capture.resolve_patches(&self.next_access_events, planner.shard_cycle_boundaries())?;
+            }
+            if capture.descriptor_cursor != planner.replay_descriptors.len() {
+                return Err("combined preflight capture did not seal every descriptor");
+            }
+            Some(CombinedPreflightCapture {
+                ranges: capture.sealed,
+                syscall_witnesses: capture.syscall_witnesses,
+                patches: capture.patches,
+                initialization_events: capture.initialization_events,
+            })
+        } else {
+            None
+        };
+        #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
+        let capture = None;
+        Ok((
             planner,
             NextAccessTape::from_unsorted(self.next_access_events),
-        )
+            self.replay_shard_previews,
+            capture,
+        ))
+    }
+
+    fn mmio_region_end(&self, start: ByteAddr) -> ByteAddr {
+        self.mmio_min_max_access
+            .as_ref()
+            .and_then(|regions| regions.get(&start.waddr()))
+            .map_or(start, |(_, _, _, max)| max.baddr())
+    }
+
+    fn capture_shard_preview(&mut self, cycle_end: Cycle) {
+        let heap_end = self.mmio_region_end(self.platform_heap_start);
+        let hint_end = self.mmio_region_end(self.platform_hint_start);
+        self.replay_shard_previews.push(crate::GpuShardPreview {
+            shard_id: u32::try_from(self.replay_shard_previews.len())
+                .expect("GPU preview shard id exceeds u32"),
+            cycle_start: self.current_shard_start_cycle,
+            cycle_end,
+            heap_start: self.preview_heap_start.0,
+            heap_end: heap_end.0,
+            hint_start: self.preview_hint_start.0,
+            hint_end: hint_end.0,
+        });
+        self.preview_heap_start = heap_end;
+        self.preview_hint_start = hint_end;
     }
 
     #[cfg_attr(
@@ -2689,6 +3430,11 @@ impl PreflightTracer {
             planner_max_cycle_per_shard: planner.max_cycle_per_shard,
             planner_num_instances: planner.num_instances.as_mut_ptr(),
             planner_num_chips,
+            replay_range_len: &mut planner.replay_range_len,
+            replay_family_counts: planner.replay_family_counts.as_mut_ptr(),
+            replay_fallback_count: &mut planner.replay_fallback_count,
+            replay_unsupported_count: &mut planner.replay_unsupported_count,
+            replay_range_capacity: planner.replay_range_capacity,
         }
     }
 
@@ -2716,25 +3462,32 @@ impl PreflightTracer {
 
     #[inline(always)]
     fn observe_current_step(&mut self, ecall_code: Option<Word>) {
+        let mut split = false;
+        let mut next_start = self.current_shard_start_cycle;
         if let Some(planner) = self.planner.as_mut() {
+            let old_shard = planner.shard_id;
             if planner.cost_model.is_some() {
                 planner.observe_modeled_step(self.cycle, self.last_kind, ecall_code);
-                self.current_shard_start_cycle = planner.current_shard_start_cycle();
-                return;
-            }
-            let step_cells = self
-                .config
-                .step_cell_extractor
-                .as_ref()
-                .map(|extractor| extractor.cells_for_kind(self.last_kind, ecall_code))
-                .unwrap_or(0);
-            if let Some(ecall_code) = ecall_code {
-                planner.observe_ecall_step(self.cycle, ecall_code, step_cells);
             } else {
-                planner.observe_step(self.cycle, step_cells);
+                let step_cells = self
+                    .config
+                    .step_cell_extractor
+                    .as_ref()
+                    .map(|extractor| extractor.cells_for_kind(self.last_kind, ecall_code))
+                    .unwrap_or(0);
+                if let Some(ecall_code) = ecall_code {
+                    planner.observe_ecall_step(self.cycle, ecall_code, step_cells);
+                } else {
+                    planner.observe_step(self.cycle, step_cells);
+                }
             }
-            self.current_shard_start_cycle = planner.current_shard_start_cycle();
+            split = planner.shard_id != old_shard;
+            next_start = planner.current_shard_start_cycle();
         }
+        if split {
+            self.capture_shard_preview(self.cycle);
+        }
+        self.current_shard_start_cycle = next_start;
     }
 
     #[cfg_attr(
@@ -2794,6 +3547,44 @@ impl PreflightTracer {
         }
         for ((_, region), bounds) in regions.iter_mut().zip(bounds) {
             *region = bounds;
+        }
+
+        // Native production preflight captures shard boundaries while MMIO
+        // bound writes are deferred.  Reconstruct each monotonic shard-local
+        // heap/hint maximum from the same authoritative first-touch events
+        // used above, keyed by the cycle at which the address was first used.
+        let heap_region = regions
+            .get(&self.platform_heap_start.waddr())
+            .map(|&(start, end, _, _)| (start, end));
+        let hint_region = regions
+            .get(&self.platform_hint_start.waddr())
+            .map(|&(start, end, _, _)| (start, end));
+        if let (Some((heap_start, heap_limit)), Some((hint_start, hint_limit))) =
+            (heap_region, hint_region)
+        {
+            let region_end_at = |start: WordAddr, limit: WordAddr, cycle_end: Cycle| {
+                self.next_access_events
+                    .iter()
+                    .filter(|event| {
+                        event.source_cycle == 0
+                            && event.target_cycle < cycle_end
+                            && event.address >= start
+                            && event.address < limit
+                    })
+                    .fold(start, |end, event| end.max(event.address + 1usize))
+                    .baddr()
+                    .0
+            };
+            let mut previous_heap_end = heap_start.baddr().0;
+            let mut previous_hint_end = hint_start.baddr().0;
+            for preview in &mut self.replay_shard_previews {
+                preview.heap_start = previous_heap_end;
+                preview.heap_end = region_end_at(heap_start, heap_limit, preview.cycle_end);
+                preview.hint_start = previous_hint_end;
+                preview.hint_end = region_end_at(hint_start, hint_limit, preview.cycle_end);
+                previous_heap_end = preview.heap_end;
+                previous_hint_end = preview.hint_end;
+            }
         }
     }
 
@@ -2896,12 +3687,31 @@ impl PreflightTracer {
         not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
         allow(dead_code)
     )]
+    pub(crate) fn record_admitted_native_block(
+        &mut self,
+        histogram: &[u32; InsnKind::COUNT],
+        ordered_kinds: &[InsnKind],
+    ) {
+        self.planner
+            .as_mut()
+            .expect("shard planner missing")
+            .record_admitted_native_block(histogram, ordered_kinds);
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn record_native_shard_split(&mut self) {
+        self.capture_shard_preview(self.cycle);
         let planner = self.planner.as_mut().expect("shard planner missing");
         let next_shard_cycle = self.cycle;
+        planner.flush_replay_range();
         planner.record_predicted_shard_cost();
         planner.push_boundary(next_shard_cycle);
         planner.shard_id += 1;
+        planner.replay_range_start = 0;
+        planner.replay_range_sequence = 0;
         planner.current_shard_start_cycle = next_shard_cycle;
         planner.max_step_shard = planner.max_step_shard.max(planner.cur_step_count);
         planner.cur_cells = 0;
@@ -2996,6 +3806,30 @@ impl Tracer for PreflightTracer {
 
     #[inline(always)]
     fn advance(&mut self) -> Self::Record {
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if self.last_kind == InsnKind::ECALL {
+            if let Some(capture) = self.combined_capture.as_mut() {
+                capture.fallback.push(GpuReplayFallbackRecord {
+                    ordinal: u32::try_from(capture.ordinal)
+                        .expect("combined capture ordinal exceeds u32"),
+                    record: capture.pending,
+                });
+                capture.ordinal += 1;
+                capture.pending_cycle += Self::SUBCYCLES_PER_INSN;
+                capture.pending = StepRecord {
+                    cycle: capture.pending_cycle,
+                    heap_maxtouch_addr: Change::new(
+                        capture.max_heap_addr_access,
+                        capture.max_heap_addr_access,
+                    ),
+                    hint_maxtouch_addr: Change::new(
+                        capture.max_hint_addr_access,
+                        capture.max_hint_addr_access,
+                    ),
+                    ..StepRecord::default()
+                };
+            }
+        }
         self.cycle += Self::SUBCYCLES_PER_INSN;
         self.reset_register_tracking();
     }
@@ -3007,6 +3841,10 @@ impl Tracer for PreflightTracer {
     #[inline(always)]
     fn store_pc(&mut self, pc: ByteAddr) {
         self.pc.after = pc;
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if let Some(capture) = self.combined_capture.as_mut() {
+            capture.pending.pc.after = pc;
+        }
     }
 
     #[inline(always)]
@@ -3014,6 +3852,20 @@ impl Tracer for PreflightTracer {
         self.pc.before = pc.baddr();
         self.last_kind = value.kind;
         self.last_rs1 = None;
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if let Some(capture) = self.combined_capture.as_mut() {
+            capture.pending.cycle = capture.pending_cycle;
+            capture.pending.heap_maxtouch_addr = Change::new(
+                capture.max_heap_addr_access,
+                capture.max_heap_addr_access,
+            );
+            capture.pending.hint_maxtouch_addr = Change::new(
+                capture.max_hint_addr_access,
+                capture.max_hint_addr_access,
+            );
+            capture.pending.pc.before = pc.baddr();
+            capture.pending.insn = value;
+        }
         if !matches!(value.kind, InsnKind::ECALL) {
             self.observe_current_step(None);
         }
@@ -3038,13 +3890,37 @@ impl Tracer for PreflightTracer {
             self.last_rs1 = Some(value);
             self.observe_current_step(Some(value));
         }
-        self.track_access(addr, subcycle);
+        let previous_cycle = self.track_access(addr, subcycle);
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if let Some(capture) = self.combined_capture.as_mut() {
+            let op = ReadOp {
+                addr,
+                value,
+                previous_cycle,
+            };
+            if subcycle == Self::SUBCYCLE_RS1 {
+                capture.pending.rs1 = op;
+                capture.pending.has_rs1 = true;
+            } else {
+                capture.pending.rs2 = op;
+                capture.pending.has_rs2 = true;
+            }
+        }
     }
 
     #[inline(always)]
-    fn store_register(&mut self, idx: RegIdx, _value: Change<Word>) {
+    fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
         let addr = Platform::register_vma(idx).into();
-        self.track_access(addr, Self::SUBCYCLE_RD);
+        let previous_cycle = self.track_access(addr, Self::SUBCYCLE_RD);
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if let Some(capture) = self.combined_capture.as_mut() {
+            capture.pending.rd = WriteOp {
+                addr,
+                value,
+                previous_cycle,
+            };
+            capture.pending.has_rd = true;
+        }
     }
 
     #[inline(always)]
@@ -3053,9 +3929,18 @@ impl Tracer for PreflightTracer {
     }
 
     #[inline(always)]
-    fn store_memory(&mut self, addr: WordAddr, _value: Change<Word>, previous_cycle: Cycle) {
+    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>, previous_cycle: Cycle) {
         self.update_mmio_bounds(addr);
         self.record_memory_access(addr, previous_cycle);
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if let Some(capture) = self.combined_capture.as_mut() {
+            capture.pending.memory_op = WriteOp {
+                addr,
+                value,
+                previous_cycle,
+            };
+            capture.pending.has_memory_op = true;
+        }
     }
 
     #[inline(always)]
@@ -3063,7 +3948,15 @@ impl Tracer for PreflightTracer {
         for op in effects.iter_mem_ops_mut() {
             self.record_memory_access(op.addr, op.previous_cycle);
         }
-        let _ = effects.finalize(self);
+        let witness = effects.finalize(self);
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if let Some(capture) = self.combined_capture.as_mut() {
+            let index = capture.syscall_witnesses.len();
+            capture.syscall_witnesses.push(witness);
+            let syscall_index = u32::try_from(index)
+                .expect("combined capture syscall witness index exceeds u32");
+            capture.pending.syscall_index = syscall_index;
+        }
     }
 
     #[inline(always)]
@@ -3239,18 +4132,53 @@ impl Tracer for GpuReplayTracer {
 
     #[inline(always)]
     fn advance(&mut self) -> Self::Record {
-        self.sync_native_ordinary();
         self.annotate_pending();
         let busy_loop = self.pending.is_busy_loop();
         let ordinal = u32::try_from(self.ordinal).expect("GPU replay ordinal exceeds u32");
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if crate::aot::aot_native_diagnostic_only() && self.ordinal == 0 {
+            let kind_index = self.pending.insn.kind as usize;
+            let descriptor = self.range_descriptors.get(self.next_range_descriptor);
+            let arena = self.current.typed.get(kind_index).and_then(Option::as_ref);
+            crate::aot::aot_native_diagnostic_boundary(
+                "FIRST_REPLAY_ADVANCE",
+                "OBSERVE",
+                &format!(
+                    "ordinal={},pending_pc_before={:#010x},pending_pc_after={:#010x},pending_kind={:?},kind_index={},current_sequence={},next_descriptor_index={},descriptor_ptr={:p},descriptor_shard={},descriptor_sequence={},descriptor_range_start={},descriptor_range_len={},descriptor_kind_count={},arena_present={},arena_capacity={},arena_len={},install_before_callback={}",
+                    ordinal,
+                    self.pending.pc.before.0,
+                    self.pending.pc.after.0,
+                    self.pending.insn.kind,
+                    kind_index,
+                    self.current.sequence,
+                    self.next_range_descriptor,
+                    descriptor.map_or(
+                        std::ptr::null::<crate::GpuReplayRangeDescriptor>(),
+                        |value| { value as *const _ }
+                    ),
+                    descriptor.map_or(u32::MAX, |value| value.shard_id),
+                    descriptor.map_or(u32::MAX, |value| value.sequence),
+                    descriptor.map_or(u32::MAX, |value| value.range_start),
+                    descriptor.map_or(u32::MAX, |value| value.range_len),
+                    descriptor.map_or(0, |value| value.family_counts[kind_index]),
+                    arena.is_some(),
+                    arena.map_or(0, crate::GpuTypedSoaArena::capacity),
+                    arena.map_or(0, crate::GpuTypedSoaArena::len),
+                    !self.range_descriptors.is_empty(),
+                ),
+            );
+        }
         if self.pending.insn.kind == InsnKind::ECALL {
             self.current.fallback.push(GpuReplayFallbackRecord {
                 ordinal,
                 record: self.pending,
             });
         } else {
-            self.current.ordinary.push(self.compact_pending());
-            self.native_ordinary_len = self.current.ordinary.len();
+            self.current.typed[self.pending.insn.kind as usize]
+                .as_mut()
+                .expect("GPU replay kind absent from exact descriptor")
+                .push_step(ordinal, &self.pending)
+                .expect("GPU replay typed cursor overflow");
         }
         self.ordinal += 1;
         if self.current.len() == self.config.chunk_capacity {
@@ -3758,6 +4686,93 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    #[test]
+    fn i049_deferred_patch_initialization_boundary_and_rejections() {
+        fn capture_with_one_add() -> PreflightCombinedCapture {
+            let mut capture = PreflightCombinedCapture::new(&CENO_PLATFORM, 2);
+            let step = StepRecord::new_r_instruction(
+                4,
+                ByteAddr(CENO_PLATFORM.pc_base()),
+                crate::encode_rv32(InsnKind::ADD, 1, 2, 3, 0),
+                11,
+                22,
+                Change::new(0, 33),
+                0,
+            );
+            let mut add = crate::GpuTypedSoaArena::new(InsnKind::ADD, 1).unwrap();
+            add.push_step(0, &step).unwrap();
+            let mut typed = (0..InsnKind::COUNT).map(|_| None).collect::<Vec<_>>();
+            typed[InsnKind::ADD as usize] = Some(add);
+            capture.sealed.push(crate::GpuReplayTypedRange {
+                sequence: 0,
+                typed,
+                fallback: Vec::new(),
+            });
+            capture
+        }
+
+        let boundaries = [4, 8, 12, 16];
+        let rd = Platform::register_vma(3).into();
+        let mut valid = capture_with_one_add();
+        valid
+            .resolve_patches(
+                &[
+                    NextAccessEvent::new(0, 12, WordAddr(99)),
+                    NextAccessEvent::new(6, 12, rd),
+                ],
+                &boundaries,
+            )
+            .unwrap();
+        assert_eq!(valid.initialization_events.len(), 1);
+        assert_eq!(valid.patches.len(), 1);
+        assert_eq!((valid.patches[0].source_shard, valid.patches[0].target_shard), (0, 2));
+        assert_eq!(valid.patches[0].prior_value, 33);
+
+        let mut duplicate = capture_with_one_add();
+        assert_eq!(
+            duplicate.resolve_patches(
+                &[
+                    NextAccessEvent::new(6, 8, rd),
+                    NextAccessEvent::new(6, 12, rd),
+                ],
+                &boundaries,
+            ),
+            Err("duplicate deferred patch source/address")
+        );
+
+        let mut order = capture_with_one_add();
+        assert_eq!(
+            order.resolve_patches(&[NextAccessEvent::new(6, 6, rd)], &boundaries),
+            Err("deferred patch target does not follow source")
+        );
+
+        let mut missing = capture_with_one_add();
+        assert_eq!(
+            missing.resolve_patches(
+                &[NextAccessEvent::new(10, 12, rd)],
+                &boundaries,
+            ),
+            Err("deferred patch source ordinal does not resolve exactly once")
+        );
+
+        let mut capacity = PreflightCombinedCapture::new(&CENO_PLATFORM, 2);
+        let _ = capacity.native_state();
+        let descriptor = crate::GpuReplayRangeDescriptor {
+            shard_id: 0,
+            sequence: 0,
+            range_start: 0,
+            range_len: 3,
+            family_counts: [0; InsnKind::COUNT],
+            fallback_count: 0,
+            unsupported_count: 0,
+        };
+        assert_eq!(
+            capacity.seal_available(&[descriptor]),
+            Err("combined capture descriptor exceeds 262144-row range bound")
+        );
+    }
+
     #[test]
     fn test_step_record_is_copy_and_compact() {
         // Verify StepRecord is Copy (this compiles only if Copy is implemented)
@@ -3914,135 +4929,5 @@ mod tests {
         );
         assert_eq!(planner.ecall_count(code), 1);
         assert_eq!(planner.cur_cells(), base);
-    }
-
-    fn record_add<T: Tracer>(tracer: &mut T, pc: WordAddr) {
-        tracer.fetch(pc, encode_rv32(InsnKind::ADD, 3, 1, 2, 0));
-        tracer.track_mmu_maxtouch_before();
-        tracer.load_register(1, 7);
-        tracer.load_register(2, 11);
-        tracer.store_register(3, Change::new(5, 18));
-        tracer.store_pc(pc.baddr() + PC_STEP_SIZE);
-        tracer.track_mmu_maxtouch_after();
-        tracer.advance();
-    }
-
-    #[test]
-    fn gpu_replay_ordinary_record_matches_full_tracer() {
-        let mut full = FullTracer::new(&CENO_PLATFORM, FullTracerConfig { max_step_shard: 1 });
-        let mut compact =
-            GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig { chunk_capacity: 1 });
-        let pc = WordAddr(0x1000 / WORD_SIZE as u32);
-        record_add(&mut full, pc);
-        record_add(&mut compact, pc);
-        compact.finish_chunks();
-
-        let chunks = compact.take_sealed_chunks();
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].sequence, 0);
-        assert!(chunks[0].fallback.is_empty());
-        let actual = chunks[0].ordinary[0];
-        let expected = full.recorded_steps()[0];
-        assert_eq!(actual.cycle(chunks[0].shard_start_cycle), expected.cycle());
-        assert_eq!(actual.pc_before, expected.pc().before.0);
-        assert_eq!(actual.pc_after, expected.pc().after.0);
-        assert_eq!(actual.raw_instruction, expected.insn().raw);
-        assert_eq!(actual.rs1.value, expected.rs1().unwrap().value);
-        assert_eq!(
-            actual.rs1.previous_cycle as Cycle,
-            expected.rs1().unwrap().previous_cycle
-        );
-        assert_eq!(actual.rs2.value, expected.rs2().unwrap().value);
-        assert_eq!(actual.rd.value_before, expected.rd().unwrap().value.before);
-        assert_eq!(actual.rd.value_after, expected.rd().unwrap().value.after);
-        assert_eq!(
-            actual.flags & 0xf,
-            GpuReplayOrdinaryRecord::HAS_RS1
-                | GpuReplayOrdinaryRecord::HAS_RS2
-                | GpuReplayOrdinaryRecord::HAS_RD
-        );
-    }
-
-    #[test]
-    fn gpu_replay_chunks_are_bounded_and_ordered() {
-        let mut compact =
-            GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig { chunk_capacity: 2 });
-        for i in 0..5 {
-            record_add(&mut compact, WordAddr(0x400 + i));
-        }
-        compact.finish_chunks();
-        let chunks = compact.take_sealed_chunks();
-        assert_eq!(
-            chunks.iter().map(GpuReplayChunk::len).collect::<Vec<_>>(),
-            [2, 2, 1]
-        );
-        assert_eq!(
-            chunks
-                .iter()
-                .map(|chunk| chunk.sequence)
-                .collect::<Vec<_>>(),
-            [0, 1, 2]
-        );
-        assert_eq!(
-            chunks
-                .iter()
-                .flat_map(|chunk| chunk.ordinary.iter().map(|record| record.ordinal))
-                .collect::<Vec<_>>(),
-            [0, 1, 2, 3, 4]
-        );
-        assert_eq!(std::mem::size_of::<GpuReplayOrdinaryRecord>(), 64);
-        assert!(
-            std::mem::size_of::<GpuReplayOrdinaryRecord>() < std::mem::size_of::<StepRecord>() / 2
-        );
-    }
-
-    #[test]
-    fn gpu_replay_applies_sparse_future_access_tape() {
-        let rd_addr: WordAddr = Platform::register_vma(3).into();
-        let tape = Arc::new(NextAccessTape::from_unsorted(vec![NextAccessEvent::new(
-            FullTracer::SUBCYCLES_PER_INSN + FullTracer::SUBCYCLE_RD,
-            100,
-            rd_addr,
-        )]));
-        let mut full = FullTracer::with_next_accesses(
-            &CENO_PLATFORM,
-            FullTracerConfig { max_step_shard: 1 },
-            Some(tape.clone()),
-        );
-        let mut compact = GpuReplayTracer::with_next_accesses(
-            &CENO_PLATFORM,
-            GpuReplayTracerConfig { chunk_capacity: 1 },
-            Some(tape),
-        );
-        let pc = WordAddr(0x1000 / WORD_SIZE as u32);
-        record_add(&mut full, pc);
-        full.annotate_recorded_steps(0);
-        record_add(&mut compact, pc);
-        compact.finish_chunks();
-        let chunks = compact.take_sealed_chunks();
-        assert_eq!(
-            chunks[0].ordinary[0].future_access_mask(),
-            full.recorded_steps()[0].future_access_mask()
-        );
-        assert_eq!(
-            chunks[0].ordinary[0].future_access_mask(),
-            StepRecord::FUTURE_ACCESS_RD
-        );
-    }
-
-    #[test]
-    fn gpu_replay_routes_ecall_to_explicit_fallback_lane() {
-        let mut compact =
-            GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig { chunk_capacity: 2 });
-        let pc = WordAddr(0x1000 / WORD_SIZE as u32);
-        compact.fetch(pc, encode_rv32(InsnKind::ECALL, 0, 0, 0, 0));
-        compact.store_pc(pc.baddr() + PC_STEP_SIZE);
-        compact.advance();
-        compact.finish_chunks();
-        let chunks = compact.take_sealed_chunks();
-        assert!(chunks[0].ordinary.is_empty());
-        assert_eq!(chunks[0].fallback.len(), 1);
-        assert_eq!(chunks[0].fallback[0].ordinal, 0);
-        assert_eq!(chunks[0].fallback[0].record.insn().kind, InsnKind::ECALL);
     }
 }

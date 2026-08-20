@@ -30,9 +30,14 @@ use std::{
     os::raw::c_void,
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    thread::JoinHandle,
     time::{Duration, Instant},
 };
+use strum::{EnumCount, IntoEnumIterator};
 use tiny_keccak::{Hasher, Keccak};
 
 type NativeEntry = unsafe extern "C" fn(
@@ -60,6 +65,10 @@ enum AssemblyTraceStyle {
     /// Native code emits `StepRecord`s and maintains FullTracer access state
     /// directly. Rust is entered only for fallback instructions and syscalls.
     FullTracerDirect,
+    /// Native code emits ordinary `GpuReplayTracer` rows directly into the
+    /// current preallocated typed-SoA range. The same image retains the
+    /// FullTracer direct lane for the environment-gated CPU control.
+    GpuReplayDirect,
     /// Native code updates `PreflightTracer` state directly for per-step access
     /// accounting, avoiding the generic callback value path.
     PreflightScalar,
@@ -71,6 +80,9 @@ enum AssemblyTraceStyle {
     /// Production preflight execution. Block admission selects the private
     /// register-only, memory, or scalar emission strategy per block.
     PreflightProduction,
+    /// Internal I049 feasibility image: production preflight block planning
+    /// plus explicit trace values for same-execution compact capture.
+    PreflightProductionCapture,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,7 +97,12 @@ enum PreflightFeature {
 
 impl AssemblyTraceStyle {
     fn needs_callback_values(self) -> bool {
-        self == Self::FullTracerDirect
+        matches!(
+            self,
+            Self::FullTracerDirect
+                | Self::GpuReplayDirect
+                | Self::PreflightProductionCapture
+        )
     }
 
     fn is_pure(self) -> bool {
@@ -99,6 +116,7 @@ impl AssemblyTraceStyle {
                 | Self::PreflightAdmittedRegisterBlock
                 | Self::PreflightAdmittedMemoryBlock
                 | Self::PreflightProduction
+                | Self::PreflightProductionCapture
         )
     }
 
@@ -108,6 +126,7 @@ impl AssemblyTraceStyle {
             Self::PreflightAdmittedRegisterBlock
                 | Self::PreflightAdmittedMemoryBlock
                 | Self::PreflightProduction
+                | Self::PreflightProductionCapture
         )
     }
 
@@ -119,6 +138,7 @@ impl AssemblyTraceStyle {
         !(matches!(
             self,
             Self::PreflightProduction
+                | Self::PreflightProductionCapture
                 | Self::PreflightScalar
                 | Self::PreflightAdmittedRegisterBlock
                 | Self::PreflightAdmittedMemoryBlock
@@ -129,11 +149,20 @@ impl AssemblyTraceStyle {
         match self {
             Self::Pure | Self::PureBlock | Self::PureCountedBlock => "pure",
             Self::FullTracerDirect => "fulltracer-direct",
+            Self::GpuReplayDirect => "gpu-replay-direct",
             Self::PreflightScalar => "preflight-scalar",
             Self::PreflightAdmittedRegisterBlock => "preflight-admitted-register-block",
             Self::PreflightAdmittedMemoryBlock => "preflight-block-memory-atomic-registers",
             Self::PreflightProduction => "preflight-production",
+            Self::PreflightProductionCapture => "preflight-production-capture",
         }
+    }
+
+    fn is_preflight_production(self) -> bool {
+        matches!(
+            self,
+            Self::PreflightProduction | Self::PreflightProductionCapture
+        )
     }
 }
 
@@ -257,12 +286,34 @@ const AOT_CTX_PREFLIGHT_PENDING_TRACE_OFFSET: usize = 736;
 const AOT_CTX_PREFLIGHT_PENDING_MAIN_OFFSET: usize = 744;
 const AOT_CTX_PREFLIGHT_PENDING_TOWER_OFFSET: usize = 752;
 const AOT_CTX_PREFLIGHT_MEMORY_SHARD_START_ORDINAL_OFFSET: usize = 760;
+const AOT_CTX_PREFLIGHT_BLOCK_KIND_HISTOGRAMS_OFFSET: usize = 768;
+const AOT_CTX_PREFLIGHT_BLOCK_KIND_HISTOGRAM_COUNT_OFFSET: usize = 776;
+const AOT_CTX_PREFLIGHT_REPLAY_RANGE_LEN_OFFSET: usize = 784;
+const AOT_CTX_PREFLIGHT_REPLAY_FAMILY_COUNTS_OFFSET: usize = 792;
+const AOT_CTX_PREFLIGHT_REPLAY_FALLBACK_COUNT_OFFSET: usize = 800;
+const AOT_CTX_PREFLIGHT_REPLAY_UNSUPPORTED_COUNT_OFFSET: usize = 808;
+const AOT_CTX_PREFLIGHT_REPLAY_RANGE_CAPACITY_OFFSET: usize = 816;
+const AOT_CTX_GPU_REPLAY_KINDS_OFFSET: usize = 824;
+const AOT_CTX_GPU_REPLAY_KIND_COUNT_OFFSET: usize = 832;
+const AOT_CTX_GPU_REPLAY_ORDINAL_OFFSET: usize = 840;
+const AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET: usize = 848;
+const AOT_CTX_GPU_REPLAY_LATEST_CELLS_OFFSET: usize = 856;
+const AOT_CTX_GPU_REPLAY_LATEST_BASE_OFFSET: usize = 864;
+const AOT_CTX_GPU_REPLAY_LATEST_LEN_OFFSET: usize = 872;
+const AOT_CTX_GPU_REPLAY_MAX_HEAP_OFFSET: usize = 880;
+const AOT_CTX_GPU_REPLAY_MAX_HINT_OFFSET: usize = 888;
+const AOT_CTX_GPU_REPLAY_EVENTS_OFFSET: usize = 896;
+const AOT_CTX_GPU_REPLAY_EVENTS_LEN_OFFSET: usize = 904;
+const AOT_CTX_GPU_REPLAY_EVENT_CURSOR_OFFSET: usize = 912;
+const AOT_CTX_GPU_REPLAY_ERROR_OFFSET: usize = 920;
+const AOT_CTX_GPU_REPLAY_ORDINARY_CALLBACKS_OFFSET: usize = 928;
+const AOT_CTX_COMBINED_SAVED_OFFSET: usize = 936;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 71;
+const AOT_ABI_VERSION: u32 = 75;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v5";
 const AOT_INITIAL_EVENT_SEED: usize = 20_000_000;
 const AOT_MAX_COMPILE_JOBS: usize = 32;
@@ -273,6 +324,7 @@ const AOT_TRACE_MODE_CALLBACK: u32 = 1;
 const AOT_TRACE_MODE_PREFLIGHT_DIRECT: u32 = 2;
 const AOT_TRACE_MODE_FULLTRACER_DIRECT: u32 = 3;
 const AOT_TRACE_MODE_GPU_REPLAY_DIRECT: u32 = 4;
+const AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT: u32 = 5;
 
 const AOT_PREFLIGHT_HELPER_SYNC: u32 = 1;
 const AOT_PREFLIGHT_HELPER_BUSY_LOOP: u32 = 2;
@@ -280,10 +332,239 @@ const AOT_PREFLIGHT_HELPER_CALLBACK: u32 = 3;
 const AOT_PREFLIGHT_HELPER_SHARD_SPLIT: u32 = 4;
 const AOT_PREFLIGHT_HELPER_FIRST_TOUCH: u32 = 5;
 const AOT_PREFLIGHT_HELPER_MEMORY_FIRST_TOUCH: u32 = 6;
+const AOT_PREFLIGHT_HELPER_REPLAY_BLOCK_CUT: u32 = 7;
+const AOT_PREFLIGHT_HELPER_DIAGNOSTIC_ADAPTIVE_ENTRY: u32 = 8;
+const AOT_PREFLIGHT_HELPER_DIAGNOSTIC_ADAPTIVE_EXIT: u32 = 9;
+const AOT_PREFLIGHT_HELPER_DIAGNOSTIC_BLOCK_PLAN_ENTRY: u32 = 10;
+const AOT_PREFLIGHT_HELPER_DIAGNOSTIC_BLOCK_PLAN_EXIT: u32 = 11;
 const AOT_PREFLIGHT_HELPER_GROW_TAPE: u32 = u32::MAX;
 
 thread_local! {
     static LAST_AOT_ERROR: RefCell<Option<anyhow::Error>> = const { RefCell::new(None) };
+}
+
+static AOT_STARTUP_DIAGNOSTIC_ONLY: OnceLock<bool> = OnceLock::new();
+static AOT_DIAGNOSTIC_EPOCH: OnceLock<Instant> = OnceLock::new();
+static AOT_DIAGNOSTIC_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static AOT_NATIVE_DIAGNOSTIC_ONLY: OnceLock<bool> = OnceLock::new();
+static AOT_NATIVE_DIAGNOSTIC_EPOCH: OnceLock<Instant> = OnceLock::new();
+static AOT_NATIVE_DIAGNOSTIC_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static AOT_NATIVE_CALLBACK_FALLBACK: AtomicU64 = AtomicU64::new(0);
+static AOT_NATIVE_CALLBACK_TRACE: AtomicU64 = AtomicU64::new(0);
+static AOT_NATIVE_CALLBACK_PREFLIGHT: AtomicU64 = AtomicU64::new(0);
+
+fn aot_startup_diagnostic_only() -> bool {
+    *AOT_STARTUP_DIAGNOSTIC_ONLY.get_or_init(|| {
+        std::env::var_os("CENO_AOT_STARTUP_DIAGNOSTIC_ONLY").as_deref()
+            == Some(std::ffi::OsStr::new("1"))
+    })
+}
+
+/// Private, fail-closed diagnostic gate for bounded native execution.
+pub fn aot_native_diagnostic_only() -> bool {
+    *AOT_NATIVE_DIAGNOSTIC_ONLY.get_or_init(|| {
+        let native = std::env::var_os("CENO_AOT_NATIVE_DIAGNOSTIC_ONLY");
+        let startup = std::env::var_os("CENO_AOT_STARTUP_DIAGNOSTIC_ONLY");
+        match (native.as_deref(), startup.as_deref()) {
+            (None, _) => false,
+            (Some(value), None) if value == std::ffi::OsStr::new("1") => true,
+            (Some(_), None) => panic!("CENO_AOT_NATIVE_DIAGNOSTIC_ONLY must be exactly 1"),
+            (Some(_), Some(_)) => panic!(
+                "CENO_AOT_NATIVE_DIAGNOSTIC_ONLY and CENO_AOT_STARTUP_DIAGNOSTIC_ONLY are mutually exclusive"
+            ),
+        }
+    })
+}
+
+pub fn aot_native_diagnostic_boundary(phase: &str, state: &str, counts: &str) {
+    aot_native_diagnostic_marker(phase, state, "caller", "-", Path::new("-"), 0, counts);
+}
+
+fn aot_native_diagnostic_marker(
+    phase: &str,
+    state: &str,
+    role: &str,
+    key: &str,
+    path: &Path,
+    bytes: u64,
+    counts: &str,
+) {
+    if !aot_native_diagnostic_only() {
+        return;
+    }
+    let sequence = AOT_NATIVE_DIAGNOSTIC_SEQUENCE.fetch_add(1, Ordering::Relaxed) + 1;
+    let monotonic_ns = AOT_NATIVE_DIAGNOSTIC_EPOCH
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_nanos();
+    let mut stderr = std::io::stderr().lock();
+    let _ = writeln!(
+        stderr,
+        "CENO_AOT_NATIVE_DIAGNOSTIC seq={sequence} monotonic_ns={monotonic_ns} phase={phase} state={state} pid={} tid={:?} role={role} key={key} path={} bytes={bytes} counts={counts}",
+        std::process::id(),
+        std::thread::current().id(),
+        path.display(),
+    );
+    let _ = stderr.flush();
+}
+
+fn aot_native_callback_event(counter: &AtomicU64, category: &str) {
+    if !aot_native_diagnostic_only() {
+        return;
+    }
+    let count = counter.fetch_add(1, Ordering::Relaxed) + 1;
+    if count.is_power_of_two() || count % 65_536 == 0 {
+        aot_native_diagnostic_boundary(
+            "CALLBACK_CATEGORY",
+            "SAMPLE",
+            &format!("category={category},count={count}"),
+        );
+    }
+}
+
+fn aot_plan_commit_diagnostic_state(phase: &str, variant: &str, context: &AotRuntimeContext) {
+    if !aot_native_diagnostic_only() {
+        return;
+    }
+    let read_usize = |pointer: *const usize| {
+        if pointer.is_null() {
+            None
+        } else {
+            Some(unsafe { *pointer })
+        }
+    };
+    let read_cycle = |pointer: *const Cycle| {
+        if pointer.is_null() {
+            None
+        } else {
+            Some(unsafe { *pointer })
+        }
+    };
+    let family = context.preflight_replay_family_counts;
+    let auipc_pointer = if family.is_null() {
+        std::ptr::null()
+    } else {
+        unsafe { family.add(InsnKind::AUIPC as usize) }
+    };
+    aot_native_diagnostic_boundary(
+        "FIRST_PLAN_COMMIT_STATE",
+        phase,
+        &format!(
+            "variant={variant},block_idx=0,context={context:p},trace_mode={},next_pc={:#010x},cycle_ptr={:p},cycle={:?},step_ptr={:p},step={:?},range_ptr={:p},range={:?},family_ptr={:p},auipc_ptr={:p},auipc={:?},fallback_ptr={:p},fallback={:?},unsupported_ptr={:p},unsupported={:?},capacity={},offset_trace_mode={},offset_cycle={},offset_step={},offset_range={},offset_family={},offset_fallback={},offset_unsupported={},offset_capacity={}",
+            context.trace_mode,
+            context.trace_next_pc,
+            context.preflight_planner_cur_cycle_in_shard,
+            read_cycle(context.preflight_planner_cur_cycle_in_shard),
+            context.preflight_planner_cur_step_count,
+            read_usize(context.preflight_planner_cur_step_count),
+            context.preflight_replay_range_len,
+            read_usize(context.preflight_replay_range_len),
+            family,
+            auipc_pointer,
+            read_usize(auipc_pointer),
+            context.preflight_replay_fallback_count,
+            read_usize(context.preflight_replay_fallback_count),
+            context.preflight_replay_unsupported_count,
+            read_usize(context.preflight_replay_unsupported_count),
+            context.preflight_replay_range_capacity,
+            AOT_CTX_TRACE_MODE_OFFSET,
+            AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET,
+            AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET,
+            AOT_CTX_PREFLIGHT_REPLAY_RANGE_LEN_OFFSET,
+            AOT_CTX_PREFLIGHT_REPLAY_FAMILY_COUNTS_OFFSET,
+            AOT_CTX_PREFLIGHT_REPLAY_FALLBACK_COUNT_OFFSET,
+            AOT_CTX_PREFLIGHT_REPLAY_UNSUPPORTED_COUNT_OFFSET,
+            AOT_CTX_PREFLIGHT_REPLAY_RANGE_CAPACITY_OFFSET,
+        ),
+    );
+}
+
+struct AotNativeDiagnosticWatchdog {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl AotNativeDiagnosticWatchdog {
+    fn start(role: &str, key: &str, max_steps: usize) -> Option<Self> {
+        if !aot_native_diagnostic_only() {
+            return None;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let role = role.to_owned();
+        let key = key.to_owned();
+        let thread = std::thread::spawn(move || {
+            let started = Instant::now();
+            while !thread_stop.load(Ordering::Acquire) {
+                for _ in 0..50 {
+                    if thread_stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                aot_native_diagnostic_marker(
+                    "NATIVE_WATCHDOG",
+                    "SAMPLE",
+                    &role,
+                    &key,
+                    Path::new("-"),
+                    0,
+                    &format!(
+                        "elapsed_ms={},max_steps={max_steps},fallback={},trace={},preflight={}",
+                        started.elapsed().as_millis(),
+                        AOT_NATIVE_CALLBACK_FALLBACK.load(Ordering::Relaxed),
+                        AOT_NATIVE_CALLBACK_TRACE.load(Ordering::Relaxed),
+                        AOT_NATIVE_CALLBACK_PREFLIGHT.load(Ordering::Relaxed),
+                    ),
+                );
+            }
+        });
+        Some(Self {
+            stop,
+            thread: Some(thread),
+        })
+    }
+
+    fn stop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl Drop for AotNativeDiagnosticWatchdog {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn aot_diagnostic_marker(
+    phase: &str,
+    state: &str,
+    role: &str,
+    key: &str,
+    path: &Path,
+    bytes: u64,
+    counts: &str,
+) {
+    if !aot_startup_diagnostic_only() {
+        return;
+    }
+    let sequence = AOT_DIAGNOSTIC_SEQUENCE.fetch_add(1, Ordering::Relaxed) + 1;
+    let monotonic_ns = AOT_DIAGNOSTIC_EPOCH
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_nanos();
+    let mut stderr = std::io::stderr().lock();
+    let _ = writeln!(
+        stderr,
+        "CENO_AOT_STARTUP_DIAGNOSTIC seq={sequence} monotonic_ns={monotonic_ns} phase={phase} state={state} pid={} tid={:?} role={role} key={key} path={} bytes={bytes} counts={counts}",
+        std::process::id(),
+        std::thread::current().id(),
+        path.display(),
+    );
+    let _ = stderr.flush();
 }
 
 /// Raw state shared between generated assembly and Rust fallback helpers.
@@ -408,6 +689,29 @@ struct AotRuntimeContext {
     preflight_pending_main: u64,
     preflight_pending_tower: u64,
     preflight_memory_shard_start_ordinal: u64,
+    preflight_block_kind_histograms: *const AotBlockKindHistogram,
+    preflight_block_kind_histogram_count: usize,
+    preflight_replay_range_len: *mut usize,
+    preflight_replay_family_counts: *mut usize,
+    preflight_replay_fallback_count: *mut usize,
+    preflight_replay_unsupported_count: *mut usize,
+    preflight_replay_range_capacity: usize,
+    gpu_replay_kinds: *mut crate::gpu_typed_ingress::GpuTypedNativeKindState,
+    gpu_replay_kind_count: usize,
+    gpu_replay_ordinal: *mut usize,
+    gpu_replay_pending_cycle: *mut Cycle,
+    gpu_replay_latest_cells: *mut Cycle,
+    gpu_replay_latest_base: u32,
+    _gpu_replay_latest_padding: u32,
+    gpu_replay_latest_len: *mut usize,
+    gpu_replay_max_heap: *mut ByteAddr,
+    gpu_replay_max_hint: *mut ByteAddr,
+    gpu_replay_events: *const NextAccessEvent,
+    gpu_replay_events_len: usize,
+    gpu_replay_event_cursor: *mut usize,
+    gpu_replay_error: *mut u32,
+    gpu_replay_ordinary_callbacks: u64,
+    combined_saved: [u64; 9],
 }
 
 const PURE_ECALL_CODES: [u32; 11] = [
@@ -458,6 +762,14 @@ struct AotChipContribution {
     chip_index: u32,
     cost_row_byte_offset: u32,
     instance_delta: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+struct AotBlockKindHistogram {
+    counts: [u32; InsnKind::COUNT],
+    instruction_offset: u32,
+    instruction_count: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -588,6 +900,7 @@ impl Tracer for PureAotTracer {
 pub struct AotProgram {
     program: Arc<Program>,
     cache_identity: String,
+    artifact_path: Option<PathBuf>,
     blocks: Vec<BasicBlock>,
     layout_profile: AotLayoutProfile,
     _library: Library,
@@ -816,8 +1129,18 @@ impl AotProgram {
                 tracing::info!("Pure AOT artifact cache hit: {key}");
                 return Ok(aot);
             }
-            Ok(None) => tracing::info!("Pure AOT artifact cache miss: {key}"),
-            Err(err) => tracing::warn!("Pure AOT artifact cache invalid, rebuilding: {err:#}"),
+            Ok(None) => {
+                if aot_startup_diagnostic_only() {
+                    bail!("diagnostic-only Pure AOT cache miss: {key}");
+                }
+                tracing::info!("Pure AOT artifact cache miss: {key}");
+            }
+            Err(err) => {
+                if aot_startup_diagnostic_only() {
+                    return Err(err.context("diagnostic-only Pure AOT cache invalid"));
+                }
+                tracing::warn!("Pure AOT artifact cache invalid, rebuilding: {err:#}");
+            }
         }
 
         let init_memory = init_memory.into_iter().collect::<Vec<_>>();
@@ -858,11 +1181,23 @@ impl AotProgram {
     }
 
     #[cfg(test)]
+    fn compile_preflight_capture_with_extra_roots(
+        program: Arc<Program>,
+        extra_roots: Vec<u32>,
+    ) -> Result<Self> {
+        Self::compile_with_extra_roots_and_trace_style(
+            program,
+            extra_roots,
+            AssemblyTraceStyle::PreflightProductionCapture,
+        )
+    }
+
+    #[cfg(test)]
     fn compile_fulltracer(program: Arc<Program>) -> Result<Self> {
         Self::compile_with_extra_roots_and_trace_style(
             program,
             Vec::new(),
-            AssemblyTraceStyle::FullTracerDirect,
+            AssemblyTraceStyle::GpuReplayDirect,
         )
     }
 
@@ -894,25 +1229,51 @@ impl AotProgram {
         )
     }
 
+    /// Internal I049 feasibility loader. This keeps the production preflight
+    /// cache key and image unchanged while enabling same-execution capture.
+    pub fn load_or_train_preflight_capture_with_config(
+        platform: &Platform,
+        program: Arc<Program>,
+        init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
+        config: PreflightTracerConfig,
+    ) -> Result<Self> {
+        Self::load_or_train_preflight_style_in(
+            platform,
+            program,
+            init_memory,
+            config,
+            &default_aot_cache_dir(),
+            AssemblyTraceStyle::PreflightProductionCapture,
+        )
+    }
+
     /// Load or build the direct-record image used by `FullTracer` witness
     /// replay. It reuses the static preflight image's block leaders and has its
     /// own cache entry.
     pub fn load_or_compile_fulltracer_replay(&self) -> Result<Self> {
         let cache_dir = default_aot_cache_dir();
-        let trace_style = AssemblyTraceStyle::FullTracerDirect;
+        let trace_style = AssemblyTraceStyle::GpuReplayDirect;
         let key = format!(
-            "{}-layout{}-fulltracer-replay",
+            "{}-layout{}-gpu-replay-direct",
             aot_cache_key(&self.program, trace_style),
             hex_digest(&self.layout_profile.digest),
         );
         match load_cached_aot(self.program.clone(), trace_style, &cache_dir, &key, None) {
             Ok(Some(aot)) => {
-                tracing::info!("FullTracer AOT replay artifact cache hit: {key}");
+                tracing::info!("GPU replay direct AOT artifact cache hit: {key}");
                 return Ok(aot);
             }
-            Ok(None) => tracing::info!("FullTracer AOT replay artifact cache miss: {key}"),
+            Ok(None) => {
+                if aot_startup_diagnostic_only() {
+                    bail!("diagnostic-only FullTracer AOT replay cache miss: {key}");
+                }
+                tracing::info!("GPU replay direct AOT artifact cache miss: {key}");
+            }
             Err(err) => {
-                tracing::warn!("FullTracer AOT replay artifact cache invalid, rebuilding: {err:#}")
+                if aot_startup_diagnostic_only() {
+                    return Err(err.context("diagnostic-only GPU replay direct AOT cache invalid"));
+                }
+                tracing::warn!("GPU replay direct AOT artifact cache invalid, rebuilding: {err:#}")
             }
         }
 
@@ -930,13 +1291,30 @@ impl AotProgram {
     }
 
     fn load_or_train_preflight_in(
+        platform: &Platform,
+        program: Arc<Program>,
+        init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
+        config: PreflightTracerConfig,
+        cache_dir: &Path,
+    ) -> Result<Self> {
+        Self::load_or_train_preflight_style_in(
+            platform,
+            program,
+            init_memory,
+            config,
+            cache_dir,
+            production_preflight_trace_style(),
+        )
+    }
+
+    fn load_or_train_preflight_style_in(
         _platform: &Platform,
         program: Arc<Program>,
         _init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
         config: PreflightTracerConfig,
         cache_dir: &Path,
+        trace_style: AssemblyTraceStyle,
     ) -> Result<Self> {
-        let trace_style = production_preflight_trace_style();
         let planner_model = config
             .step_cell_extractor()
             .and_then(|extractor| extractor.shard_cost_model())
@@ -958,8 +1336,18 @@ impl AotProgram {
                 tracing::info!("AOT artifact cache hit: {}", key);
                 return Ok(aot);
             }
-            Ok(None) => tracing::info!("AOT artifact cache miss: {}", key),
-            Err(err) => tracing::warn!("AOT artifact cache invalid, rebuilding: {err:#}"),
+            Ok(None) => {
+                if aot_startup_diagnostic_only() {
+                    bail!("diagnostic-only preflight AOT cache miss: {key}");
+                }
+                tracing::info!("AOT artifact cache miss: {}", key);
+            }
+            Err(err) => {
+                if aot_startup_diagnostic_only() {
+                    return Err(err.context("diagnostic-only preflight AOT cache invalid"));
+                }
+                tracing::warn!("AOT artifact cache invalid, rebuilding: {err:#}");
+            }
         }
 
         let roots = static_preflight_roots(&program)?;
@@ -1000,6 +1388,7 @@ impl AotProgram {
         )?;
         Ok(Self {
             cache_identity: aot_cache_key(&program, trace_style),
+            artifact_path: None,
             program,
             blocks,
             layout_profile,
@@ -1047,6 +1436,25 @@ impl AotProgram {
         max_steps: usize,
         trace_native_steps: bool,
     ) -> Result<AotRunReport> {
+        let diagnostic_role = self.trace_style.cache_name();
+        let diagnostic_path = self
+            .artifact_path
+            .as_deref()
+            .unwrap_or_else(|| Path::new("-"));
+        let diagnostic_bytes = self
+            .artifact_path
+            .as_deref()
+            .and_then(|path| fs::metadata(path).ok())
+            .map_or(0, |metadata| metadata.len());
+        aot_diagnostic_marker(
+            "RUNTIME_IDENTITY_POINTERS",
+            "BEGIN",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!("max_steps={max_steps},trace_native_steps={trace_native_steps}"),
+        );
         if !std::ptr::eq(vm.program(), self.program.as_ref()) {
             bail!("AOT program does not match VM program");
         }
@@ -1080,6 +1488,19 @@ impl AotProgram {
         let native_max_steps = max_steps.min(packed_step_limit);
         let instructions = self.program.instructions.as_ptr();
         let program_base = self.program.base_address;
+        aot_diagnostic_marker(
+            "RUNTIME_IDENTITY_POINTERS",
+            "END",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!(
+                "instructions={},memory_words={},native_max_steps={native_max_steps}",
+                self.program.instructions.len(),
+                memory_end_word.saturating_sub(memory_base_word)
+            ),
+        );
         let mut trace_mode = if trace_native_steps {
             AOT_TRACE_MODE_CALLBACK
         } else {
@@ -1105,6 +1526,11 @@ impl AotProgram {
         let mut preflight_planner_shard_id = std::ptr::null_mut();
         let mut preflight_planner_num_instances = std::ptr::null_mut();
         let mut preflight_planner_num_chips = 0;
+        let mut preflight_replay_range_len = std::ptr::null_mut();
+        let mut preflight_replay_family_counts = std::ptr::null_mut();
+        let mut preflight_replay_fallback_count = std::ptr::null_mut();
+        let mut preflight_replay_unsupported_count = std::ptr::null_mut();
+        let mut preflight_replay_range_capacity = 0;
         let mut preflight_max_cell_per_shard = u64::MAX;
         let mut preflight_target_cell_first_shard = u64::MAX;
         let mut preflight_max_cycle_per_shard = Cycle::MAX;
@@ -1116,6 +1542,29 @@ impl AotProgram {
         let mut preflight_hints_min = std::ptr::null_mut();
         let mut preflight_hints_max = std::ptr::null_mut();
         let mut preflight_block_cost_descriptors = Vec::new();
+        aot_diagnostic_marker(
+            "RUNTIME_HISTOGRAMS",
+            "BEGIN",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!("blocks={}", self.blocks.len()),
+        );
+        let preflight_block_kind_histograms = if self.trace_style.uses_preflight_block_plan() {
+            build_aot_block_kind_histograms(&self.program, &self.blocks)?
+        } else {
+            Vec::new()
+        };
+        aot_diagnostic_marker(
+            "RUNTIME_HISTOGRAMS",
+            "END",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!("histograms={}", preflight_block_kind_histograms.len()),
+        );
         let mut preflight_chip_contributions = Vec::new();
         let mut preflight_cost_model = None;
         let mut fallback_ecall_codes = BTreeMap::new();
@@ -1123,6 +1572,15 @@ impl AotProgram {
         let mut pure_double_cache = (self.trace_style.is_pure()
             || self.trace_style.uses_preflight_block_plan())
         .then(crate::syscalls::pure::DoubleCache::new);
+        aot_diagnostic_marker(
+            "RUNTIME_COST_DESCRIPTORS",
+            "BEGIN",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            "descriptors=0,contributions=0",
+        );
         if trace_native_steps && TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
             if preflight_vm.tracer().supports_direct_native_trace() {
@@ -1149,7 +1607,30 @@ impl AotProgram {
                         .map(|insn| preflight_vm.tracer().native_step_cells_for_kind(insn.kind))
                         .collect();
                 }
-                if self.trace_style == AssemblyTraceStyle::PreflightProduction {
+                aot_diagnostic_marker(
+                    "RUNTIME_COST_DESCRIPTORS",
+                    "END",
+                    diagnostic_role,
+                    &self.cache_identity,
+                    diagnostic_path,
+                    diagnostic_bytes,
+                    &format!(
+                        "descriptors={},contributions={},step_cells={}",
+                        preflight_block_cost_descriptors.len(),
+                        preflight_chip_contributions.len(),
+                        preflight_step_cells.len()
+                    ),
+                );
+                aot_diagnostic_marker(
+                    "RUNTIME_MMIO",
+                    "BEGIN",
+                    diagnostic_role,
+                    &self.cache_identity,
+                    diagnostic_path,
+                    diagnostic_bytes,
+                    "regions=3",
+                );
+                if self.trace_style.is_preflight_production() {
                     preflight_vm.tracer_mut().begin_deferred_mmio_bounds();
                 }
                 (preflight_heap_min, preflight_heap_max) = preflight_vm
@@ -1161,6 +1642,24 @@ impl AotProgram {
                 (preflight_hints_min, preflight_hints_max) = preflight_vm
                     .tracer_mut()
                     .native_mmio_bound_ptrs(ByteAddr(hints.start).waddr());
+                aot_diagnostic_marker(
+                    "RUNTIME_MMIO",
+                    "END",
+                    diagnostic_role,
+                    &self.cache_identity,
+                    diagnostic_path,
+                    diagnostic_bytes,
+                    "regions=3",
+                );
+                aot_diagnostic_marker(
+                    "RUNTIME_NEXT_ACCESS",
+                    "BEGIN",
+                    diagnostic_role,
+                    &self.cache_identity,
+                    diagnostic_path,
+                    diagnostic_bytes,
+                    &format!("configured_capacity={}", self.next_access_capacity),
+                );
                 let event_capacity = if self.next_access_capacity == 0 {
                     next_access_capacity(max_steps.saturating_add(15) / 16)
                 } else {
@@ -1191,9 +1690,25 @@ impl AotProgram {
                 preflight_planner_shard_id = state.planner_shard_id;
                 preflight_planner_num_instances = state.planner_num_instances;
                 preflight_planner_num_chips = state.planner_num_chips;
+                preflight_replay_range_len = state.replay_range_len;
+                preflight_replay_family_counts = state.replay_family_counts;
+                preflight_replay_fallback_count = state.replay_fallback_count;
+                preflight_replay_unsupported_count = state.replay_unsupported_count;
+                preflight_replay_range_capacity = state.replay_range_capacity;
                 preflight_max_cell_per_shard = state.planner_max_cell_per_shard;
                 preflight_target_cell_first_shard = state.planner_target_cell_first_shard;
                 preflight_max_cycle_per_shard = state.planner_max_cycle_per_shard;
+                aot_diagnostic_marker(
+                    "RUNTIME_NEXT_ACCESS",
+                    "END",
+                    diagnostic_role,
+                    &self.cache_identity,
+                    diagnostic_path,
+                    diagnostic_bytes,
+                    &format!(
+                        "event_capacity={event_capacity},replay_range_capacity={preflight_replay_range_capacity}"
+                    ),
+                );
             }
         }
         let mut fulltracer_records = std::ptr::null_mut();
@@ -1208,7 +1723,10 @@ impl AotProgram {
         if trace_native_steps
             && !cfg!(debug_assertions)
             && TypeId::of::<T>() == TypeId::of::<crate::FullTracer>()
-            && self.trace_style == AssemblyTraceStyle::FullTracerDirect
+            && matches!(
+                self.trace_style,
+                AssemblyTraceStyle::FullTracerDirect | AssemblyTraceStyle::GpuReplayDirect
+            )
         {
             let fulltracer_vm = unsafe { &mut *(vm_ptr as *mut VMState<crate::FullTracer>) };
             let state = fulltracer_vm.tracer_mut().native_trace_state();
@@ -1223,25 +1741,66 @@ impl AotProgram {
             fulltracer_max_heap = state.max_heap_addr_access;
             fulltracer_max_hint = state.max_hint_addr_access;
         }
+        let mut gpu_replay_kinds = std::ptr::null_mut();
+        let mut gpu_replay_kind_count = 0;
+        let mut gpu_replay_ordinal = std::ptr::null_mut();
+        let mut gpu_replay_pending_cycle = std::ptr::null_mut();
+        let mut gpu_replay_latest_cells = std::ptr::null_mut();
+        let mut gpu_replay_latest_base = 0;
+        let mut gpu_replay_latest_len = std::ptr::null_mut();
+        let mut gpu_replay_max_heap = std::ptr::null_mut();
+        let mut gpu_replay_max_hint = std::ptr::null_mut();
+        let mut gpu_replay_events = std::ptr::null();
+        let mut gpu_replay_events_len = 0;
+        let mut gpu_replay_event_cursor = std::ptr::null_mut();
+        let mut gpu_replay_error = std::ptr::null_mut();
         if trace_native_steps
             && !cfg!(debug_assertions)
             && TypeId::of::<T>() == TypeId::of::<crate::GpuReplayTracer>()
-            && self.trace_style == AssemblyTraceStyle::FullTracerDirect
+            && self.trace_style == AssemblyTraceStyle::GpuReplayDirect
         {
             let replay_vm = unsafe { &mut *(vm_ptr as *mut VMState<crate::GpuReplayTracer>) };
-            let state = replay_vm.tracer_mut().native_trace_state();
+            let state = replay_vm.tracer_mut().prepare_native_range();
             trace_mode = AOT_TRACE_MODE_GPU_REPLAY_DIRECT;
-            fulltracer_records = state.records.cast();
-            fulltracer_len = state.len;
-            fulltracer_pending_index = state.ordinal;
-            fulltracer_pending_cycle = state.pending_cycle;
-            fulltracer_latest_cells = state.latest_cells;
-            fulltracer_latest_base = state.latest_base.0;
-            fulltracer_latest_len = state.latest_len;
-            fulltracer_max_heap = state.max_heap_addr_access;
-            fulltracer_max_hint = state.max_hint_addr_access;
+            gpu_replay_kinds = state.kinds;
+            gpu_replay_kind_count = state.kind_count;
+            gpu_replay_ordinal = state.ordinal;
+            gpu_replay_pending_cycle = state.pending_cycle;
+            gpu_replay_latest_cells = state.latest_cells;
+            gpu_replay_latest_base = state.latest_base.0;
+            gpu_replay_latest_len = state.latest_len;
+            gpu_replay_max_heap = state.max_heap_addr_access;
+            gpu_replay_max_hint = state.max_hint_addr_access;
+            gpu_replay_events = state.next_access_events;
+            gpu_replay_events_len = state.next_access_len;
+            gpu_replay_event_cursor = state.next_access_cursor;
+            gpu_replay_error = state.error;
         }
-        let preflight_step_cells_table = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+        if trace_native_steps
+            && TypeId::of::<T>() == TypeId::of::<PreflightTracer>()
+        {
+            let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
+            if let Some(state) = preflight_vm.tracer_mut().prepare_combined_capture_native() {
+                trace_mode = AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT;
+                gpu_replay_kinds = state.kinds;
+                gpu_replay_kind_count = state.kind_count;
+                gpu_replay_ordinal = state.ordinal;
+                gpu_replay_pending_cycle = state.pending_cycle;
+                gpu_replay_latest_cells = state.latest_cells;
+                gpu_replay_latest_base = state.latest_base.0;
+                gpu_replay_latest_len = state.latest_len;
+                gpu_replay_max_heap = state.max_heap_addr_access;
+                gpu_replay_max_hint = state.max_hint_addr_access;
+                gpu_replay_events = state.next_access_events;
+                gpu_replay_events_len = state.next_access_len;
+                gpu_replay_event_cursor = state.next_access_cursor;
+                gpu_replay_error = state.error;
+            }
+        }
+        let preflight_step_cells_table = if matches!(
+            trace_mode,
+            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
+        ) {
             preflight_step_cells.as_ptr()
         } else {
             std::ptr::null()
@@ -1253,6 +1812,15 @@ impl AotProgram {
         } else {
             std::ptr::null()
         };
+        aot_diagnostic_marker(
+            "RUNTIME_ADDITIVE_BUCKETS",
+            "BEGIN",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!("chips={preflight_planner_num_chips}"),
+        );
         let preflight_additive_cost_table = preflight_cost_model
             .as_ref()
             .map(|model| {
@@ -1286,6 +1854,28 @@ impl AotProgram {
                 *ceiling = next_cost_bucket_ceiling(count);
             }
         }
+        aot_diagnostic_marker(
+            "RUNTIME_ADDITIVE_BUCKETS",
+            "END",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!(
+                "additive={},buckets={},chips={preflight_planner_num_chips}",
+                preflight_additive_cost_table.len(),
+                preflight_bucket_ceilings.len()
+            ),
+        );
+        aot_diagnostic_marker(
+            "RUNTIME_CONTEXT",
+            "BEGIN",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!("context_bytes={}", std::mem::size_of::<AotRuntimeContext>()),
+        );
         let mut context = AotRuntimeContext {
             vm: vm_ptr,
             registers,
@@ -1405,7 +1995,51 @@ impl AotProgram {
             preflight_pending_main: 0,
             preflight_pending_tower: 0,
             preflight_memory_shard_start_ordinal: preflight_register_shard_start >> 2,
+            preflight_block_kind_histograms: preflight_block_kind_histograms.as_ptr(),
+            preflight_block_kind_histogram_count: preflight_block_kind_histograms.len(),
+            preflight_replay_range_len,
+            preflight_replay_family_counts,
+            preflight_replay_fallback_count,
+            preflight_replay_unsupported_count,
+            preflight_replay_range_capacity,
+            gpu_replay_kinds,
+            gpu_replay_kind_count,
+            gpu_replay_ordinal,
+            gpu_replay_pending_cycle,
+            gpu_replay_latest_cells,
+            gpu_replay_latest_base,
+            _gpu_replay_latest_padding: 0,
+            gpu_replay_latest_len,
+            gpu_replay_max_heap,
+            gpu_replay_max_hint,
+            gpu_replay_events,
+            gpu_replay_events_len,
+            gpu_replay_event_cursor,
+            gpu_replay_error,
+            gpu_replay_ordinary_callbacks: 0,
+            combined_saved: [0; 9],
         };
+        aot_diagnostic_marker(
+            "RUNTIME_CONTEXT",
+            "END",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!(
+                "context_bytes={},trace_mode={trace_mode}",
+                std::mem::size_of::<AotRuntimeContext>()
+            ),
+        );
+        aot_diagnostic_marker(
+            "RUNTIME_CALLBACK",
+            "BEGIN",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!("trace_mode={trace_mode}"),
+        );
         let trace_fn = if matches!(
             trace_mode,
             AOT_TRACE_MODE_FULLTRACER_DIRECT | AOT_TRACE_MODE_GPU_REPLAY_DIRECT
@@ -1413,7 +2047,10 @@ impl AotProgram {
             std::ptr::null()
         } else if trace_native_steps {
             if TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
-                if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+                if matches!(
+                    trace_mode,
+                    AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
+                ) {
                     (ceno_aot_preflight_direct_callback as AotTraceFn) as *const c_void
                 } else {
                     (aot_trace_native_preflight as AotTraceFn) as *const c_void
@@ -1426,12 +2063,65 @@ impl AotProgram {
         };
         let exec_fn = if self.trace_style.is_pure() && !trace_native_steps {
             ceno_aot_pure_ecall_callback as AotInsnFn
-        } else if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+        } else if matches!(
+            trace_mode,
+            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
+        ) {
             ceno_aot_preflight_fallback_callback as AotInsnFn
         } else {
             aot_exec_one::<T>
         };
+        aot_diagnostic_marker(
+            "RUNTIME_CALLBACK",
+            "END",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!(
+                "trace_mode={trace_mode},trace_fn_null={}",
+                trace_fn.is_null()
+            ),
+        );
+        if aot_startup_diagnostic_only() {
+            aot_diagnostic_marker(
+                "PRE_NATIVE_DIAGNOSTIC_STOP",
+                "STOP",
+                diagnostic_role,
+                &self.cache_identity,
+                diagnostic_path,
+                diagnostic_bytes,
+                &format!("native_entries=0,executed_steps={executed_steps}"),
+            );
+            bail!("CENO_AOT_STARTUP_DIAGNOSTIC_ONLY: PRE_NATIVE_DIAGNOSTIC_STOP");
+        }
+        AOT_NATIVE_CALLBACK_FALLBACK.store(0, Ordering::Relaxed);
+        AOT_NATIVE_CALLBACK_TRACE.store(0, Ordering::Relaxed);
+        AOT_NATIVE_CALLBACK_PREFLIGHT.store(0, Ordering::Relaxed);
+        aot_native_diagnostic_marker(
+            "NATIVE_ENTRY",
+            "BEGIN",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!(
+                "max_steps={native_max_steps},start_pc={:#010x},trace_mode={trace_mode}",
+                vm.get_pc().0
+            ),
+        );
+        if matches!(
+            trace_mode,
+            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
+        ) {
+            aot_plan_commit_diagnostic_state("HOST_BEFORE_NATIVE", "host", &context);
+        }
         let started = Instant::now();
+        let mut native_watchdog = AotNativeDiagnosticWatchdog::start(
+            diagnostic_role,
+            &self.cache_identity,
+            native_max_steps,
+        );
         let native_status = unsafe {
             (self.entry)(
                 &mut context,
@@ -1442,7 +2132,43 @@ impl AotProgram {
                 vm.get_pc().0,
             )
         };
-        if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+        if matches!(
+            trace_mode,
+            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
+        ) {
+            aot_plan_commit_diagnostic_state("HOST_AFTER_NATIVE", "host", &context);
+        }
+        if let Some(watchdog) = native_watchdog.as_mut() {
+            watchdog.stop();
+        }
+        aot_native_diagnostic_marker(
+            "NATIVE_ENTRY",
+            "RETURN",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!(
+                "status={native_status},elapsed_ms={},executed_steps={executed_steps},fallback={},trace={},preflight={}",
+                started.elapsed().as_millis(),
+                AOT_NATIVE_CALLBACK_FALLBACK.load(Ordering::Relaxed),
+                AOT_NATIVE_CALLBACK_TRACE.load(Ordering::Relaxed),
+                AOT_NATIVE_CALLBACK_PREFLIGHT.load(Ordering::Relaxed),
+            ),
+        );
+        aot_native_diagnostic_marker(
+            "POST_RETURN_NEXT_ACCESS",
+            "BEGIN",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!("trace_mode={trace_mode}"),
+        );
+        if matches!(
+            trace_mode,
+            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
+        ) {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
             unsafe {
                 preflight_vm
@@ -1450,20 +2176,63 @@ impl AotProgram {
                     .sync_native_next_access_tape(context.preflight_event_cursor)
             };
             preflight_vm.tracer_mut().finish_deferred_mmio_bounds();
-        }
-        if trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT {
+            preflight_vm
+                .tracer_mut()
+                .sync_combined_capture()
+                .map_err(|message| anyhow!(message))?;
+        } else if trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT {
             let replay_vm = unsafe { &mut *(vm_ptr as *mut VMState<crate::GpuReplayTracer>) };
-            replay_vm.tracer_mut().sync_native_replay();
+            replay_vm
+                .tracer_mut()
+                .sync_native_range()
+                .map_err(|message| anyhow!(message))?;
         }
+        aot_native_diagnostic_marker(
+            "POST_RETURN_NEXT_ACCESS",
+            "END",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!("trace_mode={trace_mode}"),
+        );
+        aot_native_diagnostic_marker(
+            "POST_RETURN_STATUS",
+            "BEGIN",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!("status={native_status}"),
+        );
         if native_status == AOT_STATUS_ERROR {
             let err = LAST_AOT_ERROR
                 .with(|slot| slot.borrow_mut().take())
                 .unwrap_or_else(|| anyhow!("AOT native step failed without error detail"));
             return Err(err);
         }
+        if trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT {
+            tracing::info!(
+                "GPU_REPLAY_DIRECT tracer=GpuReplayTracer native_mode=gpu-replay-direct ordinary_callbacks={} fallback_dynamic_pc={} fallback_memory_guard={} fallback_ecall={} fallback_exceptional={}",
+                context.gpu_replay_ordinary_callbacks,
+                context.fallback_dynamic_pc,
+                context.fallback_memory_guard,
+                context.fallback_ecall,
+                context.fallback_exceptional,
+            );
+        }
         if native_status != AOT_STATUS_HALTED {
             bail!("AOT native entry returned invalid status {native_status}");
         }
+        aot_native_diagnostic_marker(
+            "POST_RETURN_STATUS",
+            "END",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!("status={native_status}"),
+        );
         if let Some(cache) = pure_double_cache.as_ref() {
             let (hits, misses) = cache.stats();
             tracing::info!("Pure AOT secp double cache hits={hits} misses={misses}");
@@ -1478,12 +2247,26 @@ impl AotProgram {
             next_access_growths,
             next_access_growth_bytes,
             next_access_growth_time,
-        ) = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+        ) = if matches!(
+            trace_mode,
+            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
+        ) {
             let preflight_vm = unsafe { &*(vm_ptr as *const VMState<PreflightTracer>) };
             preflight_vm.tracer().next_access_tape_stats()
         } else {
             (0, 0, 0, 0, Duration::ZERO)
         };
+        aot_native_diagnostic_marker(
+            "POST_RETURN_TAPE_REPORT",
+            "END",
+            diagnostic_role,
+            &self.cache_identity,
+            diagnostic_path,
+            diagnostic_bytes,
+            &format!(
+                "events={next_access_events},capacity={next_access_capacity},growths={next_access_growths}"
+            ),
+        );
         tracing::info!(
             "AOT next-access tape usage={next_access_events} capacity={next_access_capacity} growths={next_access_growths} growth_bytes={next_access_growth_bytes} growth_time={next_access_growth_time:?} normal_access_callbacks=0"
         );
@@ -1987,7 +2770,7 @@ fn compile_and_load_native(
         &asm_path,
         &so_path,
     )?;
-    load_native(&so_path)
+    load_native(&so_path, trace_style.cache_name(), "uncached-test")
 }
 
 fn compile_native_to(
@@ -2203,14 +2986,51 @@ fn shard_emission_order(
     Ok(shards)
 }
 
-fn load_native(so_path: &Path) -> Result<(Library, NativeEntry)> {
+fn load_native(so_path: &Path, role: &str, key: &str) -> Result<(Library, NativeEntry)> {
+    let bytes = fs::metadata(so_path).map_or(0, |metadata| metadata.len());
+    aot_diagnostic_marker(
+        "LIBRARY_NEW",
+        "BEGIN",
+        role,
+        key,
+        so_path,
+        bytes,
+        "libraries=1",
+    );
     let library = unsafe { Library::new(so_path) }.context("load AOT shared object")?;
+    aot_diagnostic_marker(
+        "LIBRARY_NEW",
+        "END",
+        role,
+        key,
+        so_path,
+        bytes,
+        "libraries=1",
+    );
+    aot_diagnostic_marker(
+        "SYMBOL_LOOKUP",
+        "BEGIN",
+        role,
+        key,
+        so_path,
+        bytes,
+        "symbols=1",
+    );
     let entry = unsafe {
         let symbol: Symbol<'_, NativeEntry> = library
             .get(b"ceno_aot_entry")
             .context("load ceno_aot_entry")?;
         *symbol
     };
+    aot_diagnostic_marker(
+        "SYMBOL_LOOKUP",
+        "END",
+        role,
+        key,
+        so_path,
+        bytes,
+        "symbols=1",
+    );
     Ok((library, entry))
 }
 
@@ -2403,14 +3223,120 @@ fn load_cached_aot(
     planner_fingerprint: Option<[u8; 32]>,
 ) -> Result<Option<AotProgram>> {
     let (so_path, metadata_path) = cache_paths(cache_dir, key);
-    if !so_path.exists() || !metadata_path.exists() {
+    let role = trace_style.cache_name();
+    aot_diagnostic_marker(
+        "CACHE_PRESENCE",
+        "BEGIN",
+        role,
+        key,
+        &so_path,
+        0,
+        "artifacts=2",
+    );
+    let so_exists = so_path.exists();
+    let metadata_exists = metadata_path.exists();
+    aot_diagnostic_marker(
+        "CACHE_PRESENCE",
+        "END",
+        role,
+        key,
+        &so_path,
+        0,
+        &format!("so_exists={so_exists},metadata_exists={metadata_exists}"),
+    );
+    if !so_exists || !metadata_exists {
         return Ok(None);
     }
+    let metadata_bytes = fs::metadata(&metadata_path)?.len();
+    aot_diagnostic_marker(
+        "METADATA_READ",
+        "BEGIN",
+        role,
+        key,
+        &metadata_path,
+        metadata_bytes,
+        "files=1",
+    );
     let metadata = fs::read_to_string(&metadata_path)
         .with_context(|| format!("read AOT metadata {}", metadata_path.display()))?;
+    aot_diagnostic_marker(
+        "METADATA_READ",
+        "END",
+        role,
+        key,
+        &metadata_path,
+        metadata.len() as u64,
+        "files=1",
+    );
+    aot_diagnostic_marker(
+        "METADATA_DECODE",
+        "BEGIN",
+        role,
+        key,
+        &metadata_path,
+        metadata.len() as u64,
+        "records=1",
+    );
     let (expected_digest, roots, event_capacity, profile_digest, emission_order) =
         decode_cache_metadata(&metadata, key)?;
-    if artifact_digest(&so_path)? != expected_digest {
+    aot_diagnostic_marker(
+        "METADATA_DECODE",
+        "END",
+        role,
+        key,
+        &metadata_path,
+        metadata.len() as u64,
+        &format!(
+            "roots={},emissions={},event_capacity={},artifact_digest={},profile_digest={}",
+            roots.len(),
+            emission_order.len(),
+            event_capacity,
+            hex_digest(&expected_digest),
+            hex_digest(&profile_digest)
+        ),
+    );
+    let so_bytes = fs::metadata(&so_path)?.len();
+    aot_diagnostic_marker(
+        "ARTIFACT_READ",
+        "BEGIN",
+        role,
+        key,
+        &so_path,
+        so_bytes,
+        "files=1",
+    );
+    let artifact =
+        fs::read(&so_path).with_context(|| format!("read AOT artifact {}", so_path.display()))?;
+    aot_diagnostic_marker(
+        "ARTIFACT_READ",
+        "END",
+        role,
+        key,
+        &so_path,
+        artifact.len() as u64,
+        "files=1",
+    );
+    aot_diagnostic_marker(
+        "ARTIFACT_KECCAK",
+        "BEGIN",
+        role,
+        key,
+        &so_path,
+        artifact.len() as u64,
+        "digests=1",
+    );
+    let actual_digest = keccak256(&artifact);
+    aot_diagnostic_marker(
+        "ARTIFACT_KECCAK",
+        "END",
+        role,
+        key,
+        &so_path,
+        artifact.len() as u64,
+        &format!("digests=1,artifact_digest={}", hex_digest(&actual_digest)),
+    );
+    drop(artifact);
+    if actual_digest != expected_digest {
         bail!("AOT artifact checksum mismatch");
     }
     tracing::info!(
@@ -2418,8 +3344,45 @@ fn load_cached_aot(
         fs::metadata(&so_path)?.len(),
         hex_digest(&profile_digest),
     );
+    let root_count = roots.len();
+    aot_diagnostic_marker(
+        "BLOCK_RECONSTRUCTION",
+        "BEGIN",
+        role,
+        key,
+        &so_path,
+        so_bytes,
+        &format!("roots={root_count}"),
+    );
     let blocks = partition_basic_blocks_with_roots(&program, roots)?;
+    aot_diagnostic_marker(
+        "BLOCK_RECONSTRUCTION",
+        "END",
+        role,
+        key,
+        &so_path,
+        so_bytes,
+        &format!("roots={root_count},blocks={}", blocks.len()),
+    );
+    aot_diagnostic_marker(
+        "EMISSION_VALIDATION",
+        "BEGIN",
+        role,
+        key,
+        &so_path,
+        so_bytes,
+        &format!("blocks={},emissions={}", blocks.len(), emission_order.len()),
+    );
     validate_emission_order(&blocks, &emission_order)?;
+    aot_diagnostic_marker(
+        "EMISSION_VALIDATION",
+        "END",
+        role,
+        key,
+        &so_path,
+        so_bytes,
+        &format!("blocks={},emissions={}", blocks.len(), emission_order.len()),
+    );
     let layout_profile = AotLayoutProfile {
         block_counts: Vec::new(),
         edge_counts: BTreeMap::new(),
@@ -2427,9 +3390,19 @@ fn load_cached_aot(
         digest: profile_digest,
     };
     let started = Instant::now();
-    let (library, entry) = load_native(&so_path)?;
-    Ok(Some(AotProgram {
+    let (library, entry) = load_native(&so_path, trace_style.cache_name(), key)?;
+    aot_diagnostic_marker(
+        "AOT_PROGRAM_COMPLETION",
+        "BEGIN",
+        role,
+        key,
+        &so_path,
+        so_bytes,
+        &format!("blocks={},event_capacity={event_capacity}", blocks.len()),
+    );
+    let aot = AotProgram {
         cache_identity: key.to_owned(),
+        artifact_path: Some(so_path.clone()),
         program,
         blocks,
         layout_profile,
@@ -2439,7 +3412,20 @@ fn load_cached_aot(
         trace_style,
         next_access_capacity: event_capacity,
         planner_fingerprint,
-    }))
+    };
+    aot_diagnostic_marker(
+        "AOT_PROGRAM_COMPLETION",
+        "END",
+        role,
+        key,
+        &so_path,
+        so_bytes,
+        &format!(
+            "blocks={},event_capacity={event_capacity}",
+            aot.blocks.len()
+        ),
+    );
+    Ok(Some(aot))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2505,9 +3491,10 @@ fn compile_cached_aot(
         let _ = fs::remove_file(&meta_tmp);
         return Err(err.context("compile and atomically cache AOT artifact"));
     }
-    let (library, entry) = load_native(&so_path)?;
+    let (library, entry) = load_native(&so_path, trace_style.cache_name(), key)?;
     Ok(AotProgram {
         cache_identity: key.to_owned(),
+        artifact_path: Some(so_path),
         program,
         blocks,
         layout_profile,
@@ -2790,6 +3777,13 @@ fn write_assembly_part(
         let mut last_profile_region = None;
         while pc < block.end_pc {
             let insn = instruction_at(program, pc)?;
+            if trace_style == AssemblyTraceStyle::GpuReplayDirect {
+                let resume_label = format!("ceno_aot_gpu_resume_{pc:08x}");
+                writeln!(file, ".globl {resume_label}")?;
+                writeln!(file, ".hidden {resume_label}")?;
+                writeln!(file, ".type {resume_label}, @function")?;
+                writeln!(file, "{resume_label}:")?;
+            }
             let current_memory_access_index =
                 if native_opcode_family(insn.kind) == Some(NativeOpcodeFamily::Memory) {
                     let index = memory_access_index;
@@ -2798,7 +3792,7 @@ fn write_assembly_part(
                 } else {
                     None
                 };
-            let step_trace_style = if trace_style == AssemblyTraceStyle::PreflightProduction {
+            let step_trace_style = if trace_style.is_preflight_production() {
                 trace_style
             } else if pure_block_plan.is_some() {
                 AssemblyTraceStyle::PureBlock
@@ -2869,7 +3863,19 @@ fn write_assembly_part(
                     &mut file,
                     &format!("ceno_aot_bb_{:08x}_plan_commit", block.start_pc),
                 )?;
-                emit_preflight_direct_block_plan_exit(&mut file, block)?;
+                if block_idx == 0 && aot_native_diagnostic_only() {
+                    emit_preflight_plan_commit_diagnostic(
+                        &mut file,
+                        AOT_PREFLIGHT_HELPER_DIAGNOSTIC_BLOCK_PLAN_ENTRY,
+                    )?;
+                }
+                emit_preflight_direct_block_plan_exit(&mut file, program, block_idx, block)?;
+                if block_idx == 0 && aot_native_diagnostic_only() {
+                    emit_preflight_plan_commit_diagnostic(
+                        &mut file,
+                        AOT_PREFLIGHT_HELPER_DIAGNOSTIC_BLOCK_PLAN_EXIT,
+                    )?;
+                }
                 emit_assembly_profile_symbol(
                     &mut file,
                     &format!("ceno_aot_bb_{:08x}_guards_exit", block.start_pc),
@@ -2887,7 +3893,19 @@ fn write_assembly_part(
                     &mut file,
                     &format!("ceno_aot_bb_{:08x}_plan_commit", block.start_pc),
                 )?;
-                emit_preflight_adaptive_exact_access_plan_exit(&mut file, block)?;
+                if block_idx == 0 && aot_native_diagnostic_only() {
+                    emit_preflight_plan_commit_diagnostic(
+                        &mut file,
+                        AOT_PREFLIGHT_HELPER_DIAGNOSTIC_ADAPTIVE_ENTRY,
+                    )?;
+                }
+                emit_preflight_direct_block_plan_exit(&mut file, program, block_idx, block)?;
+                if block_idx == 0 && aot_native_diagnostic_only() {
+                    emit_preflight_plan_commit_diagnostic(
+                        &mut file,
+                        AOT_PREFLIGHT_HELPER_DIAGNOSTIC_ADAPTIVE_EXIT,
+                    )?;
+                }
                 emit_assembly_profile_symbol(
                     &mut file,
                     &format!("ceno_aot_bb_{:08x}_guards_exit", block.start_pc),
@@ -2900,8 +3918,31 @@ fn write_assembly_part(
     if emit_control {
         emit_assembly_profile_symbol(&mut file, "ceno_aot_dynamic_fallback")?;
         emit_global_hidden_symbol(&mut file, "ceno_aot_dynamic")?;
-        emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC, trace_style)?;
-        writeln!(file, "    jmp ceno_aot_dispatch")?;
+        if trace_style == AssemblyTraceStyle::GpuReplayDirect {
+            let fallback_label = ".L_gpu_replay_dynamic_fallback";
+            writeln!(file, "    movl %r15d, %eax")?;
+            writeln!(file, "    subl ${:#010x}, %eax", program.base_address)?;
+            writeln!(file, "    testl $3, %eax")?;
+            writeln!(file, "    jne {fallback_label}")?;
+            writeln!(
+                file,
+                "    cmpl ${}, %eax",
+                program.instructions.len() * PC_STEP_SIZE
+            )?;
+            writeln!(file, "    jae {fallback_label}")?;
+            writeln!(file, "    shrl $2, %eax")?;
+            writeln!(file, "    leaq ceno_aot_gpu_resume_table(%rip), %rdx")?;
+            writeln!(file, "    movq (%rdx,%rax,8), %rax")?;
+            writeln!(file, "    testq %rax, %rax")?;
+            writeln!(file, "    je {fallback_label}")?;
+            writeln!(file, "    jmp *%rax")?;
+            writeln!(file, "{fallback_label}:")?;
+            emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC, trace_style)?;
+            writeln!(file, "    jmp ceno_aot_dispatch")?;
+        } else {
+            emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC, trace_style)?;
+            writeln!(file, "    jmp ceno_aot_dispatch")?;
+        }
         emit_global_hidden_symbol(&mut file, "ceno_aot_memory_guard")?;
         emit_call_current_pc(&mut file, AOT_FALLBACK_MEMORY_GUARD, trace_style)?;
         writeln!(file, "    jmp ceno_aot_dispatch")?;
@@ -2939,8 +3980,35 @@ fn write_assembly_part(
         writeln!(file, "    popq %r12")?;
         writeln!(file, "    popq %rbx")?;
         writeln!(file, "    ret")?;
-        if trace_style == AssemblyTraceStyle::FullTracerDirect {
+        if matches!(
+            trace_style,
+            AssemblyTraceStyle::FullTracerDirect | AssemblyTraceStyle::GpuReplayDirect
+        ) {
             emit_fulltracer_shared_recorder(&mut file)?;
+        }
+        if trace_style == AssemblyTraceStyle::GpuReplayDirect || trace_style.is_preflight_direct() {
+            emit_gpu_replay_shared_recorder(&mut file)?;
+        }
+        if trace_style == AssemblyTraceStyle::GpuReplayDirect {
+            let compiled = blocks
+                .iter()
+                .flat_map(|block| (block.start_pc..block.end_pc).step_by(PC_STEP_SIZE))
+                .collect::<BTreeSet<_>>();
+            writeln!(file, ".section .data.rel.ro.local,\"aw\",@progbits")?;
+            writeln!(file, ".p2align 3")?;
+            writeln!(file, ".hidden ceno_aot_gpu_resume_table")?;
+            writeln!(file, "ceno_aot_gpu_resume_table:")?;
+            for index in 0..program.instructions.len() {
+                let pc = program
+                    .base_address
+                    .wrapping_add((index * PC_STEP_SIZE) as u32);
+                if compiled.contains(&pc) {
+                    writeln!(file, "    .quad ceno_aot_gpu_resume_{pc:08x}")?;
+                } else {
+                    writeln!(file, "    .quad 0")?;
+                }
+            }
+            writeln!(file, ".text")?;
         }
     }
     writeln!(file, ".section .note.GNU-stack,\"\",@progbits")?;
@@ -3230,130 +4298,350 @@ ceno_aot_fulltracer_emit_step:
     ret
 "#
     )?;
+    writeln!(file, r#""#)?;
+    Ok(())
+}
+
+fn emit_gpu_replay_shared_recorder(mut file: impl Write) -> Result<()> {
     writeln!(
         file,
         r#"
-.macro GPU_REPLAY_ACCESS previous_offset, subcycle
-    movq {AOT_CTX_FULLTRACER_LATEST_CELLS_OFFSET}(%r12), %r8
-    movl %edx, %ecx
-    subl {AOT_CTX_FULLTRACER_LATEST_BASE_OFFSET}(%r12), %ecx
-    movq (%r8,%rcx,8), %r9
-    leaq \subcycle(%rax), %rsi
-    movq %rsi, (%r8,%rcx,8)
-    movl %r9d, \previous_offset(%r10)
-    testq %r9, %r9
-    jne 1f
-    movq {AOT_CTX_FULLTRACER_LATEST_LEN_OFFSET}(%r12), %r8
+.macro GPU_REPLAY_WRITE field, source
+    movq (\field*8)(%r10), %r8
+    movl \source, (%r8,%rcx,4)
+.endm
+
+.macro GPU_REPLAY_ACCESS index_offset, subcycle, scratch_offset
+    movl \index_offset(%r12), %edx
+    shll $6, %edx
+    movq {AOT_CTX_GPU_REPLAY_LATEST_CELLS_OFFSET}(%r12), %r8
+    movl %edx, %r9d
+    subl {AOT_CTX_GPU_REPLAY_LATEST_BASE_OFFSET}(%r12), %r9d
+    movq (%r8,%r9,8), %r11
+    movq %rax, %rsi
+    addq $\subcycle, %rsi
+    movq %rsi, (%r8,%r9,8)
+    movl %r11d, \scratch_offset(%rsp)
+    testq %r11, %r11
+    jne .L_gpu_replay_access_done_\@
+    movq {AOT_CTX_GPU_REPLAY_LATEST_LEN_OFFSET}(%r12), %r8
     incq (%r8)
-1:
+.L_gpu_replay_access_done_\@:
 .endm
 
 .globl ceno_aot_gpu_replay_emit_step
 .hidden ceno_aot_gpu_replay_emit_step
 .type ceno_aot_gpu_replay_emit_step, @function
 ceno_aot_gpu_replay_emit_step:
-    movq {AOT_CTX_FULLTRACER_RECORDS_OFFSET}(%r12), %r10
-    movq {AOT_CTX_FULLTRACER_LEN_OFFSET}(%r12), %r8
-    movq (%r8), %rcx
-    shlq $6, %rcx
-    addq %rcx, %r10
-    pxor %xmm0, %xmm0
-    movdqu %xmm0, 0(%r10)
-    movdqu %xmm0, 16(%r10)
-    movdqu %xmm0, 32(%r10)
-    movdqu %xmm0, 48(%r10)
+    subq $40, %rsp
+    movl $0, 0(%rsp)
+    movl $0, 4(%rsp)
+    movl $0, 8(%rsp)
+    movl $0, 12(%rsp)
+    movl $0, 16(%rsp)
 
-    movq {AOT_CTX_FULLTRACER_PENDING_INDEX_OFFSET}(%r12), %r8
-    movq (%r8), %rcx
-    movl %ecx, 0(%r10)
-    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %ecx
-    movl %ecx, 4(%r10)
-    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %ecx
-    movl %ecx, 8(%r10)
-    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %ecx
-    subl {AOT_CTX_PROGRAM_BASE_OFFSET}(%r12), %ecx
-    shrl $2, %ecx
-    imulq $12, %rcx, %rcx
-    movq {AOT_CTX_INSTRUCTIONS_OFFSET}(%r12), %r8
-    movl 8(%r8,%rcx), %ecx
-    movl %ecx, 12(%r10)
+    movl {AOT_CTX_TRACE_KIND_OFFSET}(%r12), %eax
+    cmpq {AOT_CTX_GPU_REPLAY_KIND_COUNT_OFFSET}(%r12), %rax
+    jae .L_gpu_replay_bad_kind
+    imulq $120, %rax, %rax
+    movq {AOT_CTX_GPU_REPLAY_KINDS_OFFSET}(%r12), %r10
+    addq %rax, %r10
+    cmpl ${gpu_sentinel}, 116(%r10)
+    jne .L_gpu_replay_bad_sentinel
+    movl 108(%r10), %ecx
+    cmpl 104(%r10), %ecx
+    jae .L_gpu_replay_capacity
+    cmpl $7, 112(%r10)
+    ja .L_gpu_replay_bad_layout
 
-    movq {AOT_CTX_FULLTRACER_PENDING_CYCLE_OFFSET}(%r12), %r8
+    movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %r8
     movq (%r8), %rax
     movl {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12), %edi
     testl ${NATIVE_TRACE_READ_RS1}, %edi
-    je .L_gpu_replay_rs1_skip
-    orl $1, 60(%r10)
-    movl {AOT_CTX_TRACE_RS1_IDX_OFFSET}(%r12), %edx
-    shll $6, %edx
-    movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %ecx
-    movl %ecx, 20(%r10)
-    GPU_REPLAY_ACCESS 16, 0
-.L_gpu_replay_rs1_skip:
+    je .L_gpu_replay_rs1_done
+    GPU_REPLAY_ACCESS {AOT_CTX_TRACE_RS1_IDX_OFFSET}, 0, 0
+.L_gpu_replay_rs1_done:
     testl ${NATIVE_TRACE_READ_RS2}, %edi
-    je .L_gpu_replay_rs2_skip
-    orl $2, 60(%r10)
-    movl {AOT_CTX_TRACE_RS2_IDX_OFFSET}(%r12), %edx
-    shll $6, %edx
-    movl {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12), %ecx
-    movl %ecx, 28(%r10)
-    GPU_REPLAY_ACCESS 24, 1
-.L_gpu_replay_rs2_skip:
+    je .L_gpu_replay_rs2_done
+    GPU_REPLAY_ACCESS {AOT_CTX_TRACE_RS2_IDX_OFFSET}, 1, 4
+.L_gpu_replay_rs2_done:
     testl ${NATIVE_TRACE_WRITE_RD}, %edi
-    je .L_gpu_replay_rd_skip
-    orl $4, 60(%r10)
-    movl {AOT_CTX_TRACE_RD_IDX_OFFSET}(%r12), %edx
-    shll $6, %edx
-    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %ecx
-    movl %ecx, 36(%r10)
-    movl {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12), %ecx
-    movl %ecx, 40(%r10)
-    GPU_REPLAY_ACCESS 32, 2
-.L_gpu_replay_rd_skip:
+    je .L_gpu_replay_rd_done
+    GPU_REPLAY_ACCESS {AOT_CTX_TRACE_RD_IDX_OFFSET}, 2, 8
+.L_gpu_replay_rd_done:
     testl $24, %edi
-    je .L_gpu_replay_mem_skip
-    orl $8, 60(%r10)
+    je .L_gpu_replay_mem_done
+    movq {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12), %r11
+    leaq 3(,%r11,4), %rsi
+    testl %r11d, %r11d
+    cmovzq %r11, %rsi
+    movl %esi, 12(%rsp)
     movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %edx
-    movl %edx, 48(%r10)
-    movl {AOT_CTX_TRACE_MEM_BEFORE_OFFSET}(%r12), %ecx
-    movl %ecx, 52(%r10)
-    movl {AOT_CTX_TRACE_MEM_AFTER_OFFSET}(%r12), %ecx
-    movl %ecx, 56(%r10)
-    movq {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12), %rcx
-    leal 3(,%ecx,4), %esi
-    testl %ecx, %ecx
-    cmovzl %ecx, %esi
-    movl %esi, 44(%r10)
-
     leal (,%rdx,4), %esi
-    leal 4(%rsi), %ecx
+    leal 4(%rsi), %r9d
     cmpl {AOT_CTX_HEAP_START_OFFSET}(%r12), %esi
     jb .L_gpu_replay_heap_done
     cmpl {AOT_CTX_HEAP_END_OFFSET}(%r12), %esi
     jae .L_gpu_replay_heap_done
-    movq {AOT_CTX_FULLTRACER_MAX_HEAP_OFFSET}(%r12), %r8
-    cmpl (%r8), %ecx
+    movq {AOT_CTX_GPU_REPLAY_MAX_HEAP_OFFSET}(%r12), %r8
+    cmpl (%r8), %r9d
     jbe .L_gpu_replay_heap_done
-    movl %ecx, (%r8)
+    movl %r9d, (%r8)
 .L_gpu_replay_heap_done:
     cmpl {AOT_CTX_HINTS_START_OFFSET}(%r12), %esi
-    jb .L_gpu_replay_hint_done
+    jb .L_gpu_replay_mem_done
     cmpl {AOT_CTX_HINTS_END_OFFSET}(%r12), %esi
-    jae .L_gpu_replay_hint_done
-    movq {AOT_CTX_FULLTRACER_MAX_HINT_OFFSET}(%r12), %r8
-    cmpl (%r8), %ecx
-    jbe .L_gpu_replay_hint_done
-    movl %ecx, (%r8)
-.L_gpu_replay_hint_done:
-.L_gpu_replay_mem_skip:
-    movq {AOT_CTX_FULLTRACER_LEN_OFFSET}(%r12), %r8
+    jae .L_gpu_replay_mem_done
+    movq {AOT_CTX_GPU_REPLAY_MAX_HINT_OFFSET}(%r12), %r8
+    cmpl (%r8), %r9d
+    jbe .L_gpu_replay_mem_done
+    movl %r9d, (%r8)
+.L_gpu_replay_mem_done:
+
+    movq {AOT_CTX_GPU_REPLAY_EVENT_CURSOR_OFFSET}(%r12), %r8
+    movq (%r8), %rsi
+.L_gpu_replay_event_loop:
+    cmpq {AOT_CTX_GPU_REPLAY_EVENTS_LEN_OFFSET}(%r12), %rsi
+    jae .L_gpu_replay_events_done
+    leaq (%rsi,%rsi,2), %r9
+    shlq $3, %r9
+    addq {AOT_CTX_GPU_REPLAY_EVENTS_OFFSET}(%r12), %r9
+    movq 0(%r9), %r11
+    cmpq %rax, %r11
+    jb .L_gpu_replay_bad_event
+    leaq 4(%rax), %rdx
+    cmpq %rdx, %r11
+    jae .L_gpu_replay_events_done
+    subq %rax, %r11
+    movl 16(%r9), %edx
+    cmpl $0, %r11d
+    je .L_gpu_replay_event_rs1
+    cmpl $1, %r11d
+    je .L_gpu_replay_event_rs2
+    cmpl $2, %r11d
+    je .L_gpu_replay_event_rd
+    cmpl $3, %r11d
+    jne .L_gpu_replay_bad_event
+    testl $24, %edi
+    je .L_gpu_replay_bad_event
+    cmpl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %edx
+    jne .L_gpu_replay_bad_event
+    jmp .L_gpu_replay_event_match
+.L_gpu_replay_event_rs1:
+    testl ${NATIVE_TRACE_READ_RS1}, %edi
+    je .L_gpu_replay_bad_event
+    movl {AOT_CTX_TRACE_RS1_IDX_OFFSET}(%r12), %r9d
+    shll $6, %r9d
+    cmpl %r9d, %edx
+    jne .L_gpu_replay_bad_event
+    jmp .L_gpu_replay_event_match
+.L_gpu_replay_event_rs2:
+    testl ${NATIVE_TRACE_READ_RS2}, %edi
+    je .L_gpu_replay_bad_event
+    movl {AOT_CTX_TRACE_RS2_IDX_OFFSET}(%r12), %r9d
+    shll $6, %r9d
+    cmpl %r9d, %edx
+    jne .L_gpu_replay_bad_event
+    jmp .L_gpu_replay_event_match
+.L_gpu_replay_event_rd:
+    testl ${NATIVE_TRACE_WRITE_RD}, %edi
+    je .L_gpu_replay_bad_event
+    movl {AOT_CTX_TRACE_RD_IDX_OFFSET}(%r12), %r9d
+    shll $6, %r9d
+    cmpl %r9d, %edx
+    jne .L_gpu_replay_bad_event
+.L_gpu_replay_event_match:
+    btsl %r11d, 16(%rsp)
+    incq %rsi
+    jmp .L_gpu_replay_event_loop
+.L_gpu_replay_events_done:
+    movq {AOT_CTX_GPU_REPLAY_EVENT_CURSOR_OFFSET}(%r12), %r8
+    movq %rsi, (%r8)
+
+    movq {AOT_CTX_GPU_REPLAY_ORDINAL_OFFSET}(%r12), %r8
+    movl (%r8), %edx
+    GPU_REPLAY_WRITE 0, %edx
+    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 1, %edx
+    subl {AOT_CTX_PROGRAM_BASE_OFFSET}(%r12), %edx
+    shrl $2, %edx
+    imulq $12, %rdx, %rdx
+    addq {AOT_CTX_INSTRUCTIONS_OFFSET}(%r12), %rdx
+    movl 8(%rdx), %edx
+    GPU_REPLAY_WRITE 2, %edx
+
+    movl 112(%r10), %edx
+    cmpl $0, %edx
+    je .L_gpu_replay_layout_r
+    cmpl $1, %edx
+    je .L_gpu_replay_layout_i
+    cmpl $2, %edx
+    je .L_gpu_replay_layout_branch
+    cmpl $3, %edx
+    je .L_gpu_replay_layout_jal
+    cmpl $4, %edx
+    je .L_gpu_replay_layout_jalr
+    cmpl $5, %edx
+    je .L_gpu_replay_layout_load
+    cmpl $6, %edx
+    je .L_gpu_replay_layout_store
+    jmp .L_gpu_replay_layout_u
+.L_gpu_replay_layout_r:
+    movl 0(%rsp), %edx
+    GPU_REPLAY_WRITE 3, %edx
+    movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 4, %edx
+    movl 4(%rsp), %edx
+    GPU_REPLAY_WRITE 5, %edx
+    movl {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 6, %edx
+    movl 8(%rsp), %edx
+    GPU_REPLAY_WRITE 7, %edx
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 8, %edx
+    movl {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 9, %edx
+    movl $10, %edx
+    jmp .L_gpu_replay_write_mask
+.L_gpu_replay_layout_i:
+    movl 0(%rsp), %edx
+    GPU_REPLAY_WRITE 3, %edx
+    movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 4, %edx
+    movl 8(%rsp), %edx
+    GPU_REPLAY_WRITE 5, %edx
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 6, %edx
+    movl {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 7, %edx
+    movl $8, %edx
+    jmp .L_gpu_replay_write_mask
+.L_gpu_replay_layout_branch:
+    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 3, %edx
+    movl 0(%rsp), %edx
+    GPU_REPLAY_WRITE 4, %edx
+    movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 5, %edx
+    movl 4(%rsp), %edx
+    GPU_REPLAY_WRITE 6, %edx
+    movl {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 7, %edx
+    movl $8, %edx
+    jmp .L_gpu_replay_write_mask
+.L_gpu_replay_layout_jal:
+    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 3, %edx
+    movl 8(%rsp), %edx
+    GPU_REPLAY_WRITE 4, %edx
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 5, %edx
+    movl {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 6, %edx
+    movl $7, %edx
+    jmp .L_gpu_replay_write_mask
+.L_gpu_replay_layout_jalr:
+    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 3, %edx
+    movl 0(%rsp), %edx
+    GPU_REPLAY_WRITE 4, %edx
+    movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 5, %edx
+    movl 8(%rsp), %edx
+    GPU_REPLAY_WRITE 6, %edx
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 7, %edx
+    movl {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 8, %edx
+    movl $9, %edx
+    jmp .L_gpu_replay_write_mask
+.L_gpu_replay_layout_load:
+    movl 0(%rsp), %edx
+    GPU_REPLAY_WRITE 3, %edx
+    movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 4, %edx
+    movl 8(%rsp), %edx
+    GPU_REPLAY_WRITE 5, %edx
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 6, %edx
+    movl {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 7, %edx
+    movl 12(%rsp), %edx
+    GPU_REPLAY_WRITE 8, %edx
+    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 9, %edx
+    movl {AOT_CTX_TRACE_MEM_BEFORE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 10, %edx
+    movl {AOT_CTX_TRACE_MEM_AFTER_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 11, %edx
+    movl $12, %edx
+    jmp .L_gpu_replay_write_mask
+.L_gpu_replay_layout_store:
+    movl 0(%rsp), %edx
+    GPU_REPLAY_WRITE 3, %edx
+    movl {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 4, %edx
+    movl 4(%rsp), %edx
+    GPU_REPLAY_WRITE 5, %edx
+    movl {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 6, %edx
+    movl 12(%rsp), %edx
+    GPU_REPLAY_WRITE 7, %edx
+    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 8, %edx
+    movl {AOT_CTX_TRACE_MEM_BEFORE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 9, %edx
+    movl {AOT_CTX_TRACE_MEM_AFTER_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 10, %edx
+    movl $11, %edx
+    jmp .L_gpu_replay_write_mask
+.L_gpu_replay_layout_u:
+    movl 0(%rsp), %edx
+    GPU_REPLAY_WRITE 3, %edx
+    movl 8(%rsp), %edx
+    GPU_REPLAY_WRITE 4, %edx
+    movl {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 5, %edx
+    movl {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12), %edx
+    GPU_REPLAY_WRITE 6, %edx
+    movl $7, %edx
+.L_gpu_replay_write_mask:
+    movl 16(%rsp), %edi
+    shll $8, %edi
+    movq (%r10,%rdx,8), %r8
+    movl %edi, (%r8,%rcx,4)
+    incl %ecx
+    movl %ecx, 108(%r10)
+    movq {AOT_CTX_GPU_REPLAY_ORDINAL_OFFSET}(%r12), %r8
     incq (%r8)
-    movq {AOT_CTX_FULLTRACER_PENDING_INDEX_OFFSET}(%r12), %r8
-    incq (%r8)
-    movq {AOT_CTX_FULLTRACER_PENDING_CYCLE_OFFSET}(%r12), %r8
+    movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %r8
     addq $4, (%r8)
+    movl ${AOT_STATUS_CONTINUE}, %eax
+    addq $40, %rsp
     ret
-"#
+
+.L_gpu_replay_bad_kind:
+    movl $1, %edx
+    jmp .L_gpu_replay_error
+.L_gpu_replay_bad_sentinel:
+    movl $2, %edx
+    jmp .L_gpu_replay_error
+.L_gpu_replay_capacity:
+    movl $3, %edx
+    jmp .L_gpu_replay_error
+.L_gpu_replay_bad_layout:
+    movl $4, %edx
+    jmp .L_gpu_replay_error
+.L_gpu_replay_bad_event:
+    movl $5, %edx
+.L_gpu_replay_error:
+    movq {AOT_CTX_GPU_REPLAY_ERROR_OFFSET}(%r12), %r8
+    movl %edx, (%r8)
+    movl ${AOT_STATUS_ERROR}, %eax
+    addq $40, %rsp
+    ret
+"#,
+        gpu_sentinel = crate::gpu_typed_ingress::GPU_TYPED_NATIVE_SENTINEL,
     )?;
     Ok(())
 }
@@ -3405,15 +4693,38 @@ fn emit_after_native_step(
             reserved_block_step.map(|step| step.cycle_offset),
             trace_style,
         )?;
+        let capture_done = format!(".L_preflight_capture_done_{pc:x}");
+        writeln!(
+            file,
+            "    cmpl ${AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
+        )?;
+        writeln!(file, "    jne {capture_done}")?;
+        // Preflight block emitters carry admission state in r10/r11. Preserve
+        // it in dedicated context slots so metadata's fixed guest-stack offsets
+        // remain valid.
+        let saved = ["%rax", "%rcx", "%rdx", "%rsi", "%rdi", "%r8", "%r9", "%r10", "%r11"];
+        for (index, register) in saved.into_iter().enumerate() {
+            writeln!(file, "    movq {register}, {}(%r12)", AOT_CTX_COMBINED_SAVED_OFFSET + index * 8)?;
+        }
+        emit_preflight_capture_trace_metadata(&mut file, insn)?;
+        writeln!(file, "    call ceno_aot_gpu_replay_emit_step")?;
+        for (index, register) in saved.into_iter().enumerate() {
+            writeln!(file, "    movq {}(%r12), {register}", AOT_CTX_COMBINED_SAVED_OFFSET + index * 8)?;
+        }
+        writeln!(file, "{capture_done}:")?;
         if !batched_block {
             emit_after_step(&mut file)?;
         }
         return Ok(());
     }
 
-    if trace_style == AssemblyTraceStyle::FullTracerDirect {
+    if matches!(
+        trace_style,
+        AssemblyTraceStyle::FullTracerDirect | AssemblyTraceStyle::GpuReplayDirect
+    ) {
         let callback_label = format!(".L_fulltracer_callback_{pc:x}");
         let fulltracer_label = format!(".L_fulltracer_direct_{pc:x}");
+        let gpu_replay_label = format!(".L_gpu_replay_direct_{pc:x}");
         let done_label = format!(".L_fulltracer_direct_done_{pc:x}");
         writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
         writeln!(file, "    movl %r15d, 8(%rsp)")?;
@@ -3422,20 +4733,25 @@ fn emit_after_native_step(
             "    cmpl ${AOT_TRACE_MODE_FULLTRACER_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
         )?;
         writeln!(file, "    je {fulltracer_label}")?;
-        writeln!(
-            file,
-            "    cmpl ${AOT_TRACE_MODE_GPU_REPLAY_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
-        )?;
-        writeln!(file, "    jne {callback_label}")?;
-        emit_native_trace_metadata(&mut file, pc, program, insn)?;
-        writeln!(file, "    call ceno_aot_gpu_replay_emit_step")?;
-        writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
-        writeln!(file, "    jmp {done_label}")?;
+        if trace_style == AssemblyTraceStyle::GpuReplayDirect {
+            writeln!(
+                file,
+                "    cmpl ${AOT_TRACE_MODE_GPU_REPLAY_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
+            )?;
+            writeln!(file, "    je {gpu_replay_label}")?;
+        }
+        writeln!(file, "    jmp {callback_label}")?;
         writeln!(file, "{fulltracer_label}:")?;
         emit_native_trace_metadata(&mut file, pc, program, insn)?;
         writeln!(file, "    call ceno_aot_fulltracer_emit_step")?;
         writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
         writeln!(file, "    jmp {done_label}")?;
+        if trace_style == AssemblyTraceStyle::GpuReplayDirect {
+            writeln!(file, "{gpu_replay_label}:")?;
+            emit_native_trace_metadata(&mut file, pc, program, insn)?;
+            writeln!(file, "    call ceno_aot_gpu_replay_emit_step")?;
+            writeln!(file, "    jmp {done_label}")?;
+        }
         writeln!(file, "{callback_label}:")?;
         emit_native_trace_metadata(&mut file, pc, program, insn)?;
         writeln!(file, "    movq %r12, %rdi")?;
@@ -3714,6 +5030,35 @@ fn preflight_block_last_accesses(
         .into_iter()
         .map(|(addr, cycle_offset)| PreflightBlockAccess { addr, cycle_offset })
         .collect())
+}
+
+fn build_aot_block_kind_histograms(
+    program: &Program,
+    blocks: &[BasicBlock],
+) -> Result<Vec<AotBlockKindHistogram>> {
+    blocks
+        .iter()
+        .map(|block| {
+            let instruction_offset =
+                usize::try_from((block.start_pc - program.base_address) / PC_STEP_SIZE as u32)?;
+            let instruction_count = usize::try_from(block_instruction_count(block))?;
+            let instructions = program
+                .instructions
+                .get(instruction_offset..instruction_offset + instruction_count)
+                .ok_or_else(|| anyhow!("AOT block instruction range is out of bounds"))?;
+            let mut counts = [0u32; InsnKind::COUNT];
+            for instruction in instructions {
+                counts[instruction.kind as usize] = counts[instruction.kind as usize]
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("AOT block kind histogram overflow"))?;
+            }
+            Ok(AotBlockKindHistogram {
+                counts,
+                instruction_offset: u32::try_from(instruction_offset)?,
+                instruction_count: u32::try_from(instruction_count)?,
+            })
+        })
+        .collect()
 }
 
 fn build_aot_block_cost_descriptors(
@@ -4906,7 +6251,36 @@ fn emit_preflight_adaptive_block_plan_entry(
     Ok(())
 }
 
-fn emit_preflight_direct_block_plan_exit(mut file: impl Write, block: &BasicBlock) -> Result<()> {
+fn emit_preflight_plan_commit_diagnostic(mut file: impl Write, helper_kind: u32) -> Result<()> {
+    // Keep the native entry's SysV stack alignment and preserve the semantic
+    // helper kind. No caller-saved register or condition flag is live here.
+    writeln!(file, "    subq $16, %rsp")?;
+    writeln!(
+        file,
+        "    movl {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12), %eax"
+    )?;
+    writeln!(file, "    movl %eax, 0(%rsp)")?;
+    writeln!(
+        file,
+        "    movl ${helper_kind}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "    movl 0(%rsp), %ecx")?;
+    writeln!(
+        file,
+        "    movl %ecx, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    addq $16, %rsp")?;
+    Ok(())
+}
+
+fn emit_preflight_direct_block_plan_exit(
+    mut file: impl Write,
+    program: &Program,
+    block_idx: usize,
+    block: &BasicBlock,
+) -> Result<()> {
     let block_steps = block_instruction_count(block);
     let block_cycles = block_steps * PC_STEP_SIZE as u64;
     writeln!(
@@ -4919,6 +6293,72 @@ fn emit_preflight_direct_block_plan_exit(mut file: impl Write, block: &BasicBloc
         "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET}(%r12), %rax"
     )?;
     writeln!(file, "    addq ${block_steps}, (%rax)")?;
+    let cut_label = format!(".L_preflight_replay_cut_{block_idx}");
+    let done_label = format!(".L_preflight_replay_counted_{block_idx}");
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_REPLAY_RANGE_LEN_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movq (%rax), %r10")?;
+    writeln!(file, "    leaq {block_steps}(%r10), %r11")?;
+    writeln!(
+        file,
+        "    cmpq {AOT_CTX_PREFLIGHT_REPLAY_RANGE_CAPACITY_OFFSET}(%r12), %r11"
+    )?;
+    writeln!(file, "    jae {cut_label}")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_REPLAY_FAMILY_COUNTS_OFFSET}(%r12), %r9"
+    )?;
+    let mut histogram = [0usize; InsnKind::COUNT];
+    let mut pc = block.start_pc;
+    while pc < block.end_pc {
+        histogram[instruction_at(program, pc)?.kind as usize] += 1;
+        pc += PC_STEP_SIZE as u32;
+    }
+    for (kind, count) in histogram
+        .into_iter()
+        .enumerate()
+        .filter(|(_, count)| *count != 0)
+    {
+        if crate::gpu_typed_kind_spec(InsnKind::iter().nth(kind).unwrap()).is_some() {
+            writeln!(
+                file,
+                "    addq ${count}, {}(%r9)",
+                kind * size_of::<usize>()
+            )?;
+        } else if InsnKind::iter().nth(kind).unwrap() == InsnKind::ECALL {
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_REPLAY_FALLBACK_COUNT_OFFSET}(%r12), %r8"
+            )?;
+            writeln!(file, "    addq ${count}, (%r8)")?;
+        } else {
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_REPLAY_UNSUPPORTED_COUNT_OFFSET}(%r12), %r8"
+            )?;
+            writeln!(file, "    addq ${count}, (%r8)")?;
+        }
+    }
+    writeln!(file, "    movq %r11, (%rax)")?;
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, "{cut_label}:")?;
+    writeln!(
+        file,
+        "    movq ${block_idx}, {AOT_CTX_PREFLIGHT_PENDING_BLOCK_OFFSET}(%r12)"
+    )?;
+    writeln!(
+        file,
+        "    movl ${AOT_PREFLIGHT_HELPER_REPLAY_BLOCK_CUT}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movq %r12, %rdi")?;
+    emit_flush_preflight_event_cursor(&mut file)?;
+    writeln!(file, "    call *%r14")?;
+    emit_reload_preflight_event_cursor(&mut file)?;
+    writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
+    writeln!(file, "    je ceno_aot_error")?;
+    writeln!(file, "{done_label}:")?;
     Ok(())
 }
 
@@ -5730,6 +7170,38 @@ fn emit_native_trace_metadata(
         "    movq $0, {AOT_CTX_PREFLIGHT_STEP_CELLS_OFFSET}(%r12)"
     )?;
     writeln!(file, "2:")?;
+    Ok(())
+}
+
+fn emit_preflight_capture_trace_metadata(
+    mut file: impl Write,
+    insn: Instruction,
+) -> Result<()> {
+    writeln!(
+        file,
+        "    movl ${:#010x}, {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12)",
+        native_trace_flags(insn)
+    )?;
+    writeln!(
+        file,
+        "    movl ${}, {AOT_CTX_TRACE_RS1_IDX_OFFSET}(%r12)",
+        insn.rs1
+    )?;
+    writeln!(
+        file,
+        "    movl ${}, {AOT_CTX_TRACE_RS2_IDX_OFFSET}(%r12)",
+        insn.rs2
+    )?;
+    writeln!(
+        file,
+        "    movl ${}, {AOT_CTX_TRACE_RD_IDX_OFFSET}(%r12)",
+        insn.rd_internal()
+    )?;
+    writeln!(
+        file,
+        "    movl ${}, {AOT_CTX_TRACE_KIND_OFFSET}(%r12)",
+        insn.kind as u8
+    )?;
     Ok(())
 }
 
@@ -6651,11 +8123,27 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
     pc: u32,
     next_pc: *mut u32,
 ) -> u32 {
+    aot_native_callback_event(&AOT_NATIVE_CALLBACK_FALLBACK, "fallback");
     let fallback_started = Instant::now();
     let context = unsafe { &mut *(context as *mut AotRuntimeContext) };
     if context.trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT {
         let replay_vm = unsafe { &mut *(context.vm as *mut VMState<crate::GpuReplayTracer>) };
-        replay_vm.tracer_mut().sync_native_replay();
+        if let Err(message) = replay_vm.tracer_mut().sync_native_range() {
+            LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(anyhow!(message)));
+            return AOT_STATUS_ERROR;
+        }
+        if !matches!(
+            context.fallback_reason,
+            AOT_FALLBACK_ECALL | AOT_FALLBACK_EXCEPTIONAL
+        ) {
+            LAST_AOT_ERROR.with(|slot| {
+                *slot.borrow_mut() = Some(anyhow!(
+                    "GPU_REPLAY_DIRECT rejected fallback category {}",
+                    context.fallback_reason
+                ))
+            });
+            return AOT_STATUS_ERROR;
+        }
     }
     let vm = unsafe { &mut *(context.vm as *mut VMState<T>) };
     context.fallback_steps += 1;
@@ -6718,7 +8206,10 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
         Ok(())
     })();
 
-    if context.trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+    if matches!(
+        context.trace_mode,
+        AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
+    ) {
         let preflight_vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
         (context.preflight_event_cursor, context.preflight_event_end) =
             preflight_vm.tracer_mut().native_next_access_ptrs();
@@ -6749,6 +8240,23 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(
             AOT_STATUS_ERROR
         }
     };
+    if context.trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT && status != AOT_STATUS_ERROR {
+        let replay_vm = unsafe { &mut *(context.vm as *mut VMState<crate::GpuReplayTracer>) };
+        let state = replay_vm.tracer_mut().prepare_native_range();
+        context.gpu_replay_kinds = state.kinds;
+        context.gpu_replay_kind_count = state.kind_count;
+        context.gpu_replay_ordinal = state.ordinal;
+        context.gpu_replay_pending_cycle = state.pending_cycle;
+        context.gpu_replay_latest_cells = state.latest_cells;
+        context.gpu_replay_latest_base = state.latest_base.0;
+        context.gpu_replay_latest_len = state.latest_len;
+        context.gpu_replay_max_heap = state.max_heap_addr_access;
+        context.gpu_replay_max_hint = state.max_hint_addr_access;
+        context.gpu_replay_events = state.next_access_events;
+        context.gpu_replay_events_len = state.next_access_len;
+        context.gpu_replay_event_cursor = state.next_access_cursor;
+        context.gpu_replay_error = state.error;
+    }
     context.fallback_time_ns = context
         .fallback_time_ns
         .saturating_add(fallback_started.elapsed().as_nanos() as u64);
@@ -6802,7 +8310,9 @@ unsafe extern "C" fn ceno_aot_preflight_fallback_callback(
     let context = unsafe { &mut *(raw_context as *mut AotRuntimeContext) };
     let vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
     invalidate_preflight_bucket_cache(context);
-    if context.fallback_reason == AOT_FALLBACK_ECALL {
+    if context.trace_mode != AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
+        && context.fallback_reason == AOT_FALLBACK_ECALL
+    {
         let code = unsafe { *context.registers.add(Platform::reg_ecall() as usize) };
         let arg0 = unsafe { *context.registers.add(Platform::reg_arg0() as usize) };
         let arg1 = unsafe { *context.registers.add(Platform::reg_arg1() as usize) };
@@ -6858,6 +8368,7 @@ unsafe extern "C" fn ceno_aot_preflight_fallback_callback(
 }
 
 unsafe extern "C" fn aot_trace_native_compute<T: Tracer>(context: *mut AotRuntimeContext) -> u32 {
+    aot_native_callback_event(&AOT_NATIVE_CALLBACK_TRACE, "trace");
     let context = unsafe { &mut *context };
     let vm = unsafe { &mut *(context.vm as *mut VMState<T>) };
     if vm.halted() {
@@ -6870,6 +8381,21 @@ unsafe extern "C" fn aot_trace_native_compute<T: Tracer>(context: *mut AotRuntim
     let result = (|| -> Result<()> {
         let idx = pc.0.wrapping_sub(context.program_base) / PC_STEP_SIZE as u32;
         let insn = unsafe { *context.instructions.add(idx as usize) };
+        if aot_native_diagnostic_only() && AOT_NATIVE_CALLBACK_TRACE.load(Ordering::Relaxed) == 1 {
+            aot_native_diagnostic_boundary(
+                "FIRST_CALLBACK_CONTEXT",
+                "OBSERVE",
+                &format!(
+                    "callback_ordinal=0,trace_pc={:#010x},trace_next_pc={:#010x},raw_trace_kind={},program_pc={:#010x},program_kind={:?},mode={}",
+                    context.trace_pc,
+                    context.trace_next_pc,
+                    context.trace_kind,
+                    pc.0,
+                    insn.kind,
+                    context.trace_mode,
+                ),
+            );
+        }
         vm.trace_fetch_known(pc.waddr(), insn);
         if !supports_native_compute(insn.kind)
             && !supports_native_control_flow(insn.kind)
@@ -6973,6 +8499,7 @@ fn invalidate_preflight_bucket_cache(context: &mut AotRuntimeContext) {
 }
 
 unsafe extern "C" fn aot_trace_native_preflight(context: *mut AotRuntimeContext) -> u32 {
+    aot_native_callback_event(&AOT_NATIVE_CALLBACK_TRACE, "trace");
     let context = unsafe { &mut *context };
     let vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
     if vm.halted() {
@@ -7006,7 +8533,19 @@ unsafe extern "C" fn aot_trace_native_preflight(context: *mut AotRuntimeContext)
 #[unsafe(no_mangle)]
 #[inline(never)]
 unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntimeContext) -> u32 {
+    aot_native_callback_event(&AOT_NATIVE_CALLBACK_PREFLIGHT, "preflight-direct");
     let context = unsafe { &mut *context };
+    let diagnostic_variant = match context.preflight_helper_kind {
+        AOT_PREFLIGHT_HELPER_DIAGNOSTIC_ADAPTIVE_ENTRY => Some(("COMMIT_ENTRY", "adaptive_exact")),
+        AOT_PREFLIGHT_HELPER_DIAGNOSTIC_ADAPTIVE_EXIT => Some(("COMMIT_EXIT", "adaptive_exact")),
+        AOT_PREFLIGHT_HELPER_DIAGNOSTIC_BLOCK_PLAN_ENTRY => Some(("COMMIT_ENTRY", "block_plan")),
+        AOT_PREFLIGHT_HELPER_DIAGNOSTIC_BLOCK_PLAN_EXIT => Some(("COMMIT_EXIT", "block_plan")),
+        _ => None,
+    };
+    if let Some((phase, variant)) = diagnostic_variant {
+        aot_plan_commit_diagnostic_state(phase, variant, context);
+        return AOT_STATUS_CONTINUE;
+    }
     invalidate_preflight_bucket_cache(context);
     let vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
     if !context.preflight_event_cursor.is_null() {
@@ -7091,6 +8630,10 @@ unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntime
                 }
             }
             vm.tracer_mut().record_native_shard_split();
+            if let Err(message) = vm.tracer_mut().sync_combined_capture() {
+                LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(anyhow!(message)));
+                return AOT_STATUS_ERROR;
+            }
             if let Some(count) = specialized_count {
                 let counts = unsafe {
                     std::slice::from_raw_parts_mut(
@@ -7147,6 +8690,42 @@ unsafe extern "C" fn ceno_aot_preflight_direct_callback(context: *mut AotRuntime
                 context.preflight_pending_block = usize::MAX;
             }
             AOT_STATUS_CONTINUE
+        }
+        AOT_PREFLIGHT_HELPER_REPLAY_BLOCK_CUT => {
+            let block_index = context.preflight_pending_block;
+            if context.preflight_block_kind_histograms.is_null()
+                || block_index >= context.preflight_block_kind_histogram_count
+            {
+                LAST_AOT_ERROR.with(|slot| {
+                    *slot.borrow_mut() = Some(anyhow!(
+                        "AOT replay block metadata index {block_index} is out of bounds"
+                    ))
+                });
+                AOT_STATUS_ERROR
+            } else {
+                let descriptor =
+                    unsafe { &*context.preflight_block_kind_histograms.add(block_index) };
+                let instructions = unsafe {
+                    std::slice::from_raw_parts(
+                        context
+                            .instructions
+                            .add(descriptor.instruction_offset as usize),
+                        descriptor.instruction_count as usize,
+                    )
+                };
+                let ordered_kinds = instructions
+                    .iter()
+                    .map(|instruction| instruction.kind)
+                    .collect::<Vec<_>>();
+                vm.tracer_mut()
+                    .record_admitted_native_block(&descriptor.counts, &ordered_kinds);
+                if let Err(message) = vm.tracer_mut().sync_combined_capture() {
+                    LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(anyhow!(message)));
+                    return AOT_STATUS_ERROR;
+                }
+                context.preflight_pending_block = usize::MAX;
+                AOT_STATUS_CONTINUE
+            }
         }
         AOT_PREFLIGHT_HELPER_FIRST_TOUCH => {
             vm.tracer_mut()
@@ -7722,6 +9301,94 @@ mod tests {
             std::mem::offset_of!(AotRuntimeContext, preflight_memory_shard_start_ordinal),
             AOT_CTX_PREFLIGHT_MEMORY_SHARD_START_ORDINAL_OFFSET
         );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_block_kind_histograms),
+            AOT_CTX_PREFLIGHT_BLOCK_KIND_HISTOGRAMS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_block_kind_histogram_count),
+            AOT_CTX_PREFLIGHT_BLOCK_KIND_HISTOGRAM_COUNT_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_replay_range_len),
+            AOT_CTX_PREFLIGHT_REPLAY_RANGE_LEN_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_replay_family_counts),
+            AOT_CTX_PREFLIGHT_REPLAY_FAMILY_COUNTS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_replay_fallback_count),
+            AOT_CTX_PREFLIGHT_REPLAY_FALLBACK_COUNT_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_replay_unsupported_count),
+            AOT_CTX_PREFLIGHT_REPLAY_UNSUPPORTED_COUNT_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_replay_range_capacity),
+            AOT_CTX_PREFLIGHT_REPLAY_RANGE_CAPACITY_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_kinds),
+            AOT_CTX_GPU_REPLAY_KINDS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_kind_count),
+            AOT_CTX_GPU_REPLAY_KIND_COUNT_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_ordinal),
+            AOT_CTX_GPU_REPLAY_ORDINAL_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_pending_cycle),
+            AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_latest_cells),
+            AOT_CTX_GPU_REPLAY_LATEST_CELLS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_latest_base),
+            AOT_CTX_GPU_REPLAY_LATEST_BASE_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_latest_len),
+            AOT_CTX_GPU_REPLAY_LATEST_LEN_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_max_heap),
+            AOT_CTX_GPU_REPLAY_MAX_HEAP_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_max_hint),
+            AOT_CTX_GPU_REPLAY_MAX_HINT_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_events),
+            AOT_CTX_GPU_REPLAY_EVENTS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_events_len),
+            AOT_CTX_GPU_REPLAY_EVENTS_LEN_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_event_cursor),
+            AOT_CTX_GPU_REPLAY_EVENT_CURSOR_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_error),
+            AOT_CTX_GPU_REPLAY_ERROR_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, gpu_replay_ordinary_callbacks),
+            AOT_CTX_GPU_REPLAY_ORDINARY_CALLBACKS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, combined_saved),
+            AOT_CTX_COMBINED_SAVED_OFFSET
+        );
     }
 
     #[test]
@@ -7832,10 +9499,11 @@ mod tests {
                 jobs,
             )
             .unwrap();
-            let (library, entry) = load_native(&so).unwrap();
+            let (library, entry) = load_native(&so, "fulltracer-direct", "test").unwrap();
             AotProgram {
                 program: program.clone(),
                 cache_identity: String::new(),
+                artifact_path: None,
                 blocks: blocks.clone(),
                 layout_profile: layout.clone(),
                 _library: library,
@@ -7902,13 +9570,296 @@ mod tests {
         assert!(report.next_access_growths > 0);
         assert!(report.next_access_growth_bytes > 0);
         assert!(report.next_access_capacity > 1);
-        let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
-        let (aot_plan, aot_next) = aot_vm.take_tracer().into_shard_plan();
+        let (interp_plan, interp_next, _) = interp.take_tracer().into_shard_plan();
+        let (aot_plan, aot_next, _) = aot_vm.take_tracer().into_shard_plan();
         assert_eq!(aot_next, interp_next);
         assert_eq!(
             aot_plan.shard_cycle_boundaries(),
             interp_plan.shard_cycle_boundaries()
         );
+    }
+
+    #[test]
+    fn i049_preflight_capture_emits_exact_typed_ranges_and_sparse_halt() {
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 7),
+            encode_rv32(InsnKind::ADDI, 1, 0, 2, 5),
+            encode_rv32(
+                InsnKind::ADDI,
+                0,
+                0,
+                Platform::reg_ecall().into(),
+                Platform::ecall_halt() as i32,
+            ),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let mut reference = VMState::<crate::FullTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            crate::FullTracerConfig { max_step_shard: 2 },
+        );
+        while reference.next_step_record().unwrap().is_some() {}
+
+        let config = crate::PreflightTracerConfig::new(true, 2, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep))
+            .with_replay_range_capacity(2)
+            .with_combined_capture(true);
+        let aot =
+            AotProgram::compile_preflight_capture_with_extra_roots(program.clone(), Vec::new())
+                .unwrap();
+        let mut vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
+        let report = aot.run_to_halt(&mut vm, 16).unwrap();
+        assert_eq!(report.executed_steps, 4);
+        let (ranges, syscalls, patches, initialization) = vm
+            .tracer_mut()
+            .finish_combined_capture_for_test()
+            .unwrap();
+        let patch_events = patches
+            .iter()
+            .map(|patch| {
+                crate::NextAccessEvent::new(
+                    patch.source_cycle,
+                    patch.target_cycle,
+                    patch.address,
+                )
+            })
+            .chain(initialization.iter().copied())
+            .collect::<Vec<_>>();
+        reference
+            .tracer_mut()
+            .apply_next_access_events_for_test(&patch_events);
+        assert_eq!(ranges.len(), 3);
+        assert!(ranges.iter().all(|range| {
+            range
+                .typed
+                .iter()
+                .flatten()
+                .map(crate::GpuTypedSoaArena::len)
+                .sum::<usize>()
+                + range.fallback.len()
+                <= 2
+        }));
+        let ordinary = ranges
+            .iter()
+            .flat_map(|range| range.typed.iter().flatten())
+            .map(crate::GpuTypedSoaArena::len)
+            .sum::<usize>();
+        let fallback = ranges.iter().map(|range| range.fallback.len()).sum::<usize>();
+        assert_eq!((ordinary, fallback, syscalls.len()), (3, 1, 0));
+        let ordinals = ranges
+            .iter()
+            .filter_map(|range| range.typed[InsnKind::ADDI as usize].as_ref())
+            .flat_map(|arena| arena.fields()[0][..arena.len()].iter().copied())
+            .collect::<Vec<_>>();
+        assert_eq!(ordinals, [0, 1, 2]);
+        assert_eq!(ranges.last().unwrap().fallback[0].ordinal, 3);
+        let expected = reference.tracer().recorded_steps();
+        for range in ranges {
+            for arena in range.typed.iter().flatten() {
+                for row in 0..arena.len() {
+                    let ordinal = arena.fields()[0][row] as usize;
+                    let mut oracle = crate::GpuTypedSoaArena::new(arena.kind(), 1).unwrap();
+                    oracle
+                        .push_step(ordinal as u32, &expected[ordinal])
+                        .unwrap();
+                    for (field_index, (actual, expected)) in
+                        arena.fields().iter().zip(oracle.fields()).enumerate()
+                    {
+                        assert_eq!(
+                            actual[row], expected[0],
+                            "typed word mismatch kind={:?} ordinal={ordinal} field={field_index}",
+                            arena.kind()
+                        );
+                    }
+                }
+            }
+            for fallback in &range.fallback {
+                assert_eq!(
+                    fallback.record, expected[fallback.ordinal as usize],
+                    "sparse record mismatch ordinal={}",
+                    fallback.ordinal
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn i049_preflight_capture_matches_fulltracer_for_memory_and_multishard_reuse() {
+        let base = CENO_PLATFORM.heap.start;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::LW, 20, 0, 1, 0),
+            encode_rv32(InsnKind::SW, 20, 1, 0, 4),
+            encode_rv32(InsnKind::LW, 20, 0, 2, 4),
+            encode_rv32(InsnKind::LW, 20, 0, 3, 0),
+            encode_rv32(
+                InsnKind::ADDI,
+                0,
+                0,
+                Platform::reg_ecall().into(),
+                Platform::ecall_halt() as i32,
+            ),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let mut reference = VMState::<crate::FullTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            crate::FullTracerConfig { max_step_shard: 1 },
+        );
+        reference.init_register_unsafe(20, base);
+        reference.init_memory(ByteAddr(base).waddr(), 37);
+        reference.init_memory(ByteAddr(base + 4).waddr(), 0);
+        while reference.next_step_record().unwrap().is_some() {}
+
+        let config = crate::PreflightTracerConfig::new(true, 1, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep))
+            .with_replay_range_capacity(2)
+            .with_combined_capture(true);
+        let roots = (1..6)
+            .map(|index| CENO_PLATFORM.pc_base() + index * PC_STEP_SIZE as u32)
+            .collect();
+        let aot =
+            AotProgram::compile_preflight_capture_with_extra_roots(program.clone(), roots)
+                .unwrap();
+        let mut vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
+        vm.init_register_unsafe(20, base);
+        vm.init_memory(ByteAddr(base).waddr(), 37);
+        vm.init_memory(ByteAddr(base + 4).waddr(), 0);
+        assert_eq!(aot.run_to_halt(&mut vm, 16).unwrap().executed_steps, 6);
+        let (ranges, syscalls, patches, initialization) = vm
+            .tracer_mut()
+            .finish_combined_capture_for_test()
+            .unwrap();
+        assert!(syscalls.is_empty());
+        assert!(!initialization.is_empty());
+        assert!(patches.iter().any(|patch| {
+            patch.ram_class == crate::tracer::PatchRamClass::Memory
+                && patch.target_shard > patch.source_shard + 1
+        }));
+        let events = patches
+            .iter()
+            .map(|patch| crate::NextAccessEvent::new(
+                patch.source_cycle,
+                patch.target_cycle,
+                patch.address,
+            ))
+            .chain(initialization.iter().copied())
+            .collect::<Vec<_>>();
+        reference
+            .tracer_mut()
+            .apply_next_access_events_for_test(&events);
+        let expected = reference.tracer().recorded_steps();
+        for range in ranges {
+            for arena in range.typed.iter().flatten() {
+                for row in 0..arena.len() {
+                    let ordinal = arena.fields()[0][row] as usize;
+                    let mut oracle = crate::GpuTypedSoaArena::new(arena.kind(), 1).unwrap();
+                    oracle.push_step(ordinal as u32, &expected[ordinal]).unwrap();
+                    for (actual, expected) in arena.fields().iter().zip(oracle.fields()) {
+                        assert_eq!(actual[row], expected[0]);
+                    }
+                }
+            }
+            for fallback in &range.fallback {
+                assert_eq!(fallback.record, expected[fallback.ordinal as usize]);
+            }
+        }
+    }
+
+    #[test]
+    fn i049_preflight_capture_matches_fulltracer_for_multiop_syscall() {
+        let base = CENO_PLATFORM.heap.start;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+            encode_rv32(InsnKind::LW, 20, 0, 1, 0),
+            encode_rv32(
+                InsnKind::ADDI,
+                0,
+                0,
+                Platform::reg_ecall().into(),
+                Platform::ecall_halt() as i32,
+            ),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let input: [Word; crate::syscalls::secp256k1::SECP256K1_ARG_WORDS] =
+            crate::syscalls::secp256k1::SecpMaybePoint(secp::Point::generator().into()).into();
+        let mut reference = VMState::<crate::FullTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            crate::FullTracerConfig { max_step_shard: 1 },
+        );
+        let config = crate::PreflightTracerConfig::new(true, 1, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep))
+            .with_replay_range_capacity(2)
+            .with_combined_capture(true);
+        let mut vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            config,
+        );
+        for state in [&mut reference as &mut dyn SyscallTestVm, &mut vm as &mut dyn SyscallTestVm] {
+            state.init_register(Platform::reg_ecall(), crate::SECP256K1_DOUBLE);
+            state.init_register(Platform::reg_arg0(), base);
+            state.init_register(20, base);
+            for (offset, value) in input.into_iter().enumerate() {
+                state.init_word(ByteAddr(base).waddr() + offset, value);
+            }
+        }
+        while reference.next_step_record().unwrap().is_some() {}
+        let roots = (1..4)
+            .map(|index| CENO_PLATFORM.pc_base() + index * PC_STEP_SIZE as u32)
+            .collect();
+        let aot =
+            AotProgram::compile_preflight_capture_with_extra_roots(program, roots).unwrap();
+        assert_eq!(aot.run_to_halt(&mut vm, 16).unwrap().executed_steps, 4);
+        let (ranges, syscalls, patches, initialization) = vm
+            .tracer_mut()
+            .finish_combined_capture_for_test()
+            .unwrap();
+        let events = patches
+            .iter()
+            .map(|patch| crate::NextAccessEvent::new(
+                patch.source_cycle,
+                patch.target_cycle,
+                patch.address,
+            ))
+            .chain(initialization.iter().copied())
+            .collect::<Vec<_>>();
+        reference
+            .tracer_mut()
+            .apply_next_access_events_for_test(&events);
+        assert_eq!(syscalls, reference.tracer().syscall_witnesses());
+        let expected = reference.tracer().recorded_steps();
+        for fallback in ranges.iter().flat_map(|range| &range.fallback) {
+            assert_eq!(fallback.record, expected[fallback.ordinal as usize]);
+        }
+        assert!(patches.iter().any(|patch| matches!(
+            patch.source_lane,
+            crate::tracer::PatchSourceLane::SyscallMemory
+                | crate::tracer::PatchSourceLane::SyscallRegister
+        )));
+    }
+
+    trait SyscallTestVm {
+        fn init_register(&mut self, index: RegIdx, value: Word);
+        fn init_word(&mut self, address: WordAddr, value: Word);
+    }
+
+    impl<T: crate::Tracer> SyscallTestVm for VMState<T> {
+        fn init_register(&mut self, index: RegIdx, value: Word) {
+            self.init_register_unsafe(index, value);
+        }
+
+        fn init_word(&mut self, address: WordAddr, value: Word) {
+            self.init_memory(address, value);
+        }
     }
 
     #[test]
@@ -7950,7 +9901,7 @@ mod tests {
         while interp.next_step_record().unwrap().is_some() {}
 
         let aot = AotProgram::compile_preflight_with_extra_roots(program, Vec::new()).unwrap();
-        let report = aot.run_to_halt(&mut direct, 3).unwrap();
+        let report = aot.run_to_halt(&mut direct, 64).unwrap();
         assert_eq!(report.executed_steps, 3);
         assert_eq!(report.fallback.ecall_by_code[&crate::SECP256K1_DOUBLE], 1);
         for offset in 0..crate::syscalls::secp256k1::SECP256K1_ARG_WORDS {
@@ -7968,8 +9919,8 @@ mod tests {
                 interp.final_access_cycle(addr)
             );
         }
-        let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
-        let (direct_plan, direct_next) = direct.take_tracer().into_shard_plan();
+        let (interp_plan, interp_next, _) = interp.take_tracer().into_shard_plan();
+        let (direct_plan, direct_next, _) = direct.take_tracer().into_shard_plan();
         assert_eq!(direct_next, interp_next);
         assert_eq!(
             direct_plan.shard_cycle_boundaries(),
@@ -8114,8 +10065,8 @@ mod tests {
                 warm_vm.final_access_cycle(addr)
             );
         }
-        let (cold_plan, cold_next) = cold_vm.take_tracer().into_shard_plan();
-        let (warm_plan, warm_next) = warm_vm.take_tracer().into_shard_plan();
+        let (cold_plan, cold_next, _) = cold_vm.take_tracer().into_shard_plan();
+        let (warm_plan, warm_next, _) = warm_vm.take_tracer().into_shard_plan();
         assert_eq!(cold_next, warm_next);
         assert_eq!(
             cold_plan.shard_cycle_boundaries(),
@@ -8218,8 +10169,8 @@ mod tests {
         );
         let report = aot.run_to_halt(&mut direct, 64).unwrap();
         assert_eq!(report.fallback, generic_report.fallback);
-        let (generic_plan, generic_next) = generic.take_tracer().into_shard_plan();
-        let (direct_plan, direct_next) = direct.take_tracer().into_shard_plan();
+        let (generic_plan, generic_next, _) = generic.take_tracer().into_shard_plan();
+        let (direct_plan, direct_next, _) = direct.take_tracer().into_shard_plan();
         assert_eq!(
             direct_plan.shard_cycle_boundaries(),
             generic_plan.shard_cycle_boundaries()
@@ -8335,7 +10286,7 @@ mod tests {
             config,
         );
         let report = aot.run_to_halt(&mut vm, 100).unwrap();
-        let (plan, _) = vm.take_tracer().into_shard_plan();
+        let (plan, _, _) = vm.take_tracer().into_shard_plan();
         assert_eq!(plan.shard_cycle_boundaries(), &[4, 16, 28, 32]);
         assert_eq!(plan.predicted_shard_costs(), &[7, 19, 1]);
         assert_eq!(report.fallback.dynamic_pc_miss, 0);
@@ -8354,7 +10305,7 @@ mod tests {
             config,
         );
         aot.run_to_halt(&mut vm, 100).unwrap();
-        let (plan, _) = vm.take_tracer().into_shard_plan();
+        let (plan, _, _) = vm.take_tracer().into_shard_plan();
         assert_eq!(plan.shard_cycle_boundaries(), &[4, 16, 28, 32]);
         assert_eq!(plan.predicted_shard_costs(), &[7, 19, 1]);
     }
@@ -8413,8 +10364,8 @@ mod tests {
             );
         }
 
-        let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
-        let (aot_plan, aot_next) = aot_vm.take_tracer().into_shard_plan();
+        let (interp_plan, interp_next, _) = interp.take_tracer().into_shard_plan();
+        let (aot_plan, aot_next, _) = aot_vm.take_tracer().into_shard_plan();
         assert_eq!(aot_next, interp_next);
         assert_eq!(
             aot_plan.shard_cycle_boundaries(),
@@ -8541,8 +10492,8 @@ mod tests {
             interp.peek_memory(ByteAddr(base + 4).waddr())
         );
 
-        let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
-        let (aot_plan, aot_next) = aot_vm.take_tracer().into_shard_plan();
+        let (interp_plan, interp_next, _) = interp.take_tracer().into_shard_plan();
+        let (aot_plan, aot_next, _) = aot_vm.take_tracer().into_shard_plan();
         assert_eq!(aot_next, interp_next);
         assert_eq!(
             aot_plan.shard_cycle_boundaries(),
@@ -8970,70 +10921,6 @@ mod tests {
     }
 
     #[test]
-    fn aot_gpu_replay_direct_matches_fulltracer_runtime_values() {
-        let base = CENO_PLATFORM.heap.start;
-        let program = Arc::new(program(vec![
-            encode_rv32(InsnKind::ADDI, 0, 0, 1, 7),
-            encode_rv32(InsnKind::ADDI, 0, 0, 2, 11),
-            encode_rv32(InsnKind::ADD, 1, 2, 3, 0),
-            encode_rv32(InsnKind::SW, 20, 3, 0, 0),
-            encode_rv32(InsnKind::LW, 20, 0, 4, 0),
-        ]));
-        let aot = AotProgram::compile_fulltracer(program.clone()).unwrap();
-
-        let mut full = VMState::<crate::FullTracer>::new_with_tracer_config(
-            CENO_PLATFORM.clone(),
-            program.clone(),
-            crate::FullTracerConfig { max_step_shard: 5 },
-        );
-        full.init_register_unsafe(20, base);
-        full.init_memory(ByteAddr(base).waddr(), 0);
-        for _ in 0..5 {
-            full.next_step_record().unwrap().unwrap();
-        }
-
-        let mut compact = VMState::<crate::GpuReplayTracer>::new_with_tracer_config(
-            CENO_PLATFORM.clone(),
-            program,
-            crate::GpuReplayTracerConfig { chunk_capacity: 8 },
-        );
-        compact.init_register_unsafe(20, base);
-        compact.init_memory(ByteAddr(base).waddr(), 0);
-        aot.run_to_halt(&mut compact, 5).unwrap();
-        compact.tracer_mut().finish_chunks();
-        let chunks = compact.tracer_mut().take_sealed_chunks();
-        assert_eq!(chunks.len(), 1);
-        assert!(chunks[0].fallback.is_empty());
-        assert_eq!(chunks[0].ordinary.len(), 5);
-
-        for (actual, expected) in chunks[0]
-            .ordinary
-            .iter()
-            .zip(full.tracer().recorded_steps())
-        {
-            assert_eq!(
-                actual.pc_before,
-                expected.pc().before.0,
-                "ordinal {} compact record: {:?}",
-                actual.ordinal,
-                actual
-            );
-            assert_eq!(actual.pc_after, expected.pc().after.0);
-            assert_eq!(actual.raw_instruction, expected.insn().raw);
-            assert_eq!(actual.rs1.value, expected.rs1().map_or(0, |op| op.value));
-            assert_eq!(actual.rs2.value, expected.rs2().map_or(0, |op| op.value));
-            assert_eq!(
-                actual.rd.value_after,
-                expected.rd().map_or(0, |op| op.value.after)
-            );
-            assert_eq!(
-                actual.memory.value_after,
-                expected.memory_op().map_or(0, |op| op.value.after)
-            );
-        }
-    }
-
-    #[test]
     fn aot_memory_misalignment_uses_exact_slow_path_traps() {
         let base = CENO_PLATFORM.heap.start;
         let lw_program = Arc::new(program(vec![encode_rv32(InsnKind::LW, 20, 0, 1, 1)]));
@@ -9226,6 +11113,110 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
+    fn gpu_replay_direct_typed_rows_match_interpreter_without_trace_callbacks() {
+        let base = CENO_PLATFORM.heap.start;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 5),
+            encode_rv32(InsnKind::ADD, 1, 1, 2, 0),
+            encode_rv32(InsnKind::SW, 20, 2, 0, 0),
+            encode_rv32(InsnKind::LW, 20, 0, 3, 0),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let mut family_counts = [0usize; InsnKind::COUNT];
+        family_counts[InsnKind::ADDI as usize] = 1;
+        family_counts[InsnKind::ADD as usize] = 1;
+        family_counts[InsnKind::SW as usize] = 1;
+        family_counts[InsnKind::LW as usize] = 1;
+        let descriptors = Arc::new(vec![crate::GpuReplayRangeDescriptor {
+            shard_id: 0,
+            sequence: 0,
+            range_start: 0,
+            range_len: 5,
+            family_counts,
+            fallback_count: 1,
+            unsupported_count: 0,
+        }]);
+        let config = crate::GpuReplayTracerConfig { chunk_capacity: 5 };
+
+        let mut interp = VMState::<crate::GpuReplayTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            config,
+        );
+        interp
+            .tracer_mut()
+            .install_range_descriptors(descriptors.clone());
+        interp.init_register_unsafe(20, base);
+        interp.init_memory(ByteAddr(base).waddr(), 0);
+        while interp.next_step_record().unwrap().is_some() {}
+        interp.tracer_mut().finish_chunks();
+        let expected = interp.tracer_mut().take_sealed_chunks().remove(0);
+
+        let aot = AotProgram::compile_with_extra_roots_and_trace_style(
+            program.clone(),
+            Vec::new(),
+            AssemblyTraceStyle::GpuReplayDirect,
+        )
+        .unwrap();
+        let mut direct = VMState::<crate::GpuReplayTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
+        direct.tracer_mut().install_range_descriptors(descriptors);
+        direct.init_register_unsafe(20, base);
+        direct.init_memory(ByteAddr(base).waddr(), 0);
+        // Force two returns in the middle of one compiled basic block. The
+        // next entry must use the native resume table, never dynamic-PC Rust
+        // fallback.
+        let reports = (0..5)
+            .map(|_| aot.run_to_halt(&mut direct, 1).unwrap())
+            .collect::<Vec<_>>();
+        direct.tracer_mut().finish_chunks();
+        let actual = direct.tracer_mut().take_sealed_chunks().remove(0);
+
+        assert_eq!(
+            reports
+                .iter()
+                .map(|report| report.executed_steps)
+                .sum::<usize>(),
+            5
+        );
+        assert_eq!(
+            reports
+                .iter()
+                .map(|report| report.fallback_steps)
+                .sum::<usize>(),
+            1
+        );
+        assert_eq!(
+            reports
+                .iter()
+                .map(|report| report.fallback.dynamic_pc_miss)
+                .sum::<usize>(),
+            0
+        );
+        assert_eq!(actual.sequence, expected.sequence);
+        for (actual, expected) in actual.typed.iter().zip(&expected.typed) {
+            assert_eq!(
+                actual.as_ref().map(crate::GpuTypedSoaArena::kind),
+                expected.as_ref().map(crate::GpuTypedSoaArena::kind)
+            );
+            assert_eq!(
+                actual.as_ref().map(crate::GpuTypedSoaArena::len),
+                expected.as_ref().map(crate::GpuTypedSoaArena::len)
+            );
+            assert_eq!(
+                actual.as_ref().map(crate::GpuTypedSoaArena::fields),
+                expected.as_ref().map(crate::GpuTypedSoaArena::fields)
+            );
+        }
+        assert_eq!(actual.fallback, expected.fallback);
+        assert_eq!(AOT_NATIVE_CALLBACK_TRACE.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
     fn production_preflight_uses_admitted_block_emitter() {
         assert_eq!(
             production_preflight_trace_style(),
@@ -9287,6 +11278,6 @@ mod tests {
         )
         .unwrap();
 
-        load_native(&so).unwrap();
+        load_native(&so, "preflight-production", "test").unwrap();
     }
 }
