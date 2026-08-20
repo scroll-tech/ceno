@@ -1922,19 +1922,48 @@ impl GpuReplayTracer {
     }
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    pub(crate) fn sync_native_range(&mut self) -> Result<(), &'static str> {
+    pub(crate) fn sync_native_range(&mut self) -> Result<(), String> {
         if self.native_error != 0 {
-            return Err("GPU replay native emitter reported an ABI or cursor error");
+            let code = self.native_error & 0xff;
+            let kind_index = (self.native_error >> 8) as usize;
+            let message = match code {
+                1 => "GPU replay native emitter rejected the instruction kind",
+                2 => "GPU replay native emitter rejected the arena sentinel",
+                3 => "GPU replay native emitter exceeded an arena capacity",
+                4 => "GPU replay native emitter rejected the arena layout",
+                5 => "GPU replay native emitter rejected a next-access event",
+                6 => "GPU replay native emitter rejected the compact ordinal range",
+                7 => "GPU replay native emitter rejected the compact PC range",
+                8 => "GPU replay native emitter rejected a compact predecessor cycle",
+                9 => "GPU replay native emitter rejected the compact future-access mask",
+                _ => "GPU replay native emitter reported an unknown ABI error",
+            };
+            let state = self
+                .native_kinds
+                .get(kind_index)
+                .copied()
+                .unwrap_or_default();
+            let kind = InsnKind::iter().nth(kind_index);
+            return Err(format!(
+                "{message}: code={code}, kind={kind:?}, kind_index={kind_index}, capacity={}, cursor={}, layout={}, sentinel={:#010x}, range_start={}, pc_base={:#010x}, ordinal={}",
+                state.capacity,
+                state.cursor,
+                state.layout,
+                state.sentinel,
+                state.range_start,
+                state.pc_base,
+                self.ordinal,
+            ));
         }
         for (index, state) in self.native_kinds.iter().enumerate() {
             match self.current.typed[index].as_mut() {
-                Some(arena) => arena.sync_native_state(state)?,
+                Some(arena) => arena.sync_native_state(state).map_err(str::to_owned)?,
                 None if state.capacity == 0 && state.cursor == 0 => {}
-                None => return Err("GPU replay native emitter used an absent family"),
+                None => return Err("GPU replay native emitter used an absent family".to_owned()),
             }
         }
         if self.current.len() > self.config.chunk_capacity || self.current.len() > 262_144 {
-            return Err("GPU replay native range row bound exceeded");
+            return Err("GPU replay native range row bound exceeded".to_owned());
         }
         Ok(())
     }

@@ -1568,11 +1568,13 @@ impl CompactStepReplay {
                         target_arch = "x86_64",
                         target_os = "linux"
                     ))]
-                        let ran = self
-                            .aot
-                            .run_to_halt(&mut self.vm, max_steps)
-                            .unwrap_or_else(|err| panic!("AOT compact replay failed: {err:?}"))
-                            .executed_steps;
+                        let ran = match self.aot.run_to_halt(&mut self.vm, max_steps) {
+                            Ok(result) => result.executed_steps,
+                            Err(err) => panic!(
+                                "AOT compact replay failed at pc={:#010x}: {err:?}",
+                                self.vm.get_pc().0
+                            ),
+                        };
                     #[cfg(all(
                         feature = "aot-x86_64",
                         target_arch = "x86_64",

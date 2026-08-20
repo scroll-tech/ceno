@@ -314,7 +314,7 @@ const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 75;
+const AOT_ABI_VERSION: u32 = 76;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v5";
 const AOT_INITIAL_EVENT_SEED: usize = 20_000_000;
 const AOT_MAX_COMPILE_JOBS: usize = 32;
@@ -4848,6 +4848,9 @@ ceno_aot_gpu_replay_emit_step:
 .L_gpu_replay_bad_compact_mask:
     movl $9, %edx
 .L_gpu_replay_error:
+    movl {AOT_CTX_TRACE_KIND_OFFSET}(%r12), %r11d
+    shll $8, %r11d
+    orl %r11d, %edx
     movq {AOT_CTX_GPU_REPLAY_ERROR_OFFSET}(%r12), %r8
     movl %edx, (%r8)
     movl ${AOT_STATUS_ERROR}, %eax
