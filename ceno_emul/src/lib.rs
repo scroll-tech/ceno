@@ -11,11 +11,11 @@ pub use platform::{CENO_PLATFORM, Platform};
 mod tracer;
 pub use tracer::{
     Change, ChipCostSpec, CombinedPreflightCapture, CrossShardPatch, FullTracer, FullTracerConfig,
-    GpuReplayChunk, GpuReplayFallbackRecord, GpuReplayStep, GpuReplayTracer,
-    GpuReplayTracerConfig, LatestAccesses, MemOp, NextAccessEvent, NextAccessPair, NextAccessTape,
-    NextCycleAccess, PatchRamClass, PatchSourceLane, PreflightTracer, PreflightTracerConfig, ReadOp,
-    ReplayChunk, ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel,
-    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
+    GpuReplayChunk, GpuReplayFallbackRecord, GpuReplayStep, GpuReplayTracer, GpuReplayTracerConfig,
+    LatestAccesses, MemOp, NextAccessEvent, NextAccessPair, NextAccessTape, NextCycleAccess,
+    PatchRamClass, PatchSourceLane, PreflightTracer, PreflightTracerConfig, ReadOp, ReplayChunk,
+    ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel, ShardPlanBuilder,
+    StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
 };
 
 mod compact_journal;
