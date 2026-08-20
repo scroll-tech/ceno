@@ -3585,6 +3585,8 @@ impl PreflightTracer {
                 previous_heap_end = preview.heap_end;
                 previous_hint_end = preview.hint_end;
             }
+            self.preview_heap_start = ByteAddr(previous_heap_end);
+            self.preview_hint_start = ByteAddr(previous_hint_end);
         }
     }
 
@@ -4684,6 +4686,35 @@ mod tests {
             tracer.probe_min_max_address_by_start_addr(hints_start),
             Some((hints_start + 5usize, hints_start + 6usize))
         );
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    #[test]
+    fn i049_deferred_mmio_repair_advances_pending_preview_starts() {
+        let mut tracer = PreflightTracer::new(
+            &CENO_PLATFORM,
+            PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX),
+        );
+        let heap_start = ByteAddr(CENO_PLATFORM.heap.start).waddr();
+        let hint_start = ByteAddr(CENO_PLATFORM.hints.start).waddr();
+
+        tracer.begin_deferred_mmio_bounds();
+        tracer.push_next_access_event(NextAccessEvent::new(0, 8, heap_start + 3usize));
+        tracer.push_next_access_event(NextAccessEvent::new(0, 8, hint_start + 2usize));
+        tracer.capture_shard_preview(12);
+        tracer.current_shard_start_cycle = 12;
+        tracer.push_next_access_event(NextAccessEvent::new(0, 16, heap_start + 9usize));
+        tracer.push_next_access_event(NextAccessEvent::new(0, 16, hint_start + 5usize));
+
+        tracer.finish_deferred_mmio_bounds();
+        tracer.capture_shard_preview(20);
+
+        let first = tracer.replay_shard_previews[0];
+        let second = tracer.replay_shard_previews[1];
+        assert_eq!(second.heap_start, first.heap_end);
+        assert_eq!(second.hint_start, first.hint_end);
+        assert_eq!(second.heap_end, (heap_start + 10usize).baddr().0);
+        assert_eq!(second.hint_end, (hint_start + 6usize).baddr().0);
     }
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
