@@ -30,7 +30,7 @@ pub(crate) const GPU_TYPED_NATIVE_SENTINEL: u32 = 0x4750_5544;
 pub(crate) const GPU_COMPACT_NATIVE_SENTINEL: u32 = 0x4930_3530;
 const GPU_COMPACT_TAIL_PADDING: usize = 31;
 
-pub(crate) fn i050_compact_source_enabled() -> bool {
+pub fn i050_compact_source_enabled() -> bool {
     std::env::var_os("CENO_I050_COMPACT_SOURCE").as_deref() == Some(std::ffi::OsStr::new("1"))
         && std::env::var_os("CENO_I049_COMBINED_CAPTURE").as_deref()
             != Some(std::ffi::OsStr::new("1"))
@@ -168,6 +168,34 @@ impl GpuReplayRangeDescriptor {
             .ok()?
             .checked_mul(u64::from(MAX_SPARSE_ADDRESS_SENDS_PER_STEP))?;
         u32::try_from(ordinary.checked_add(sparse)?).ok()
+    }
+
+    /// Exact fused-launch source capacity derived from preflight family counts.
+    pub fn fused_payload_bytes(&self, compact: bool) -> Option<usize> {
+        InsnKind::iter()
+            .zip(self.family_counts)
+            .try_fold(0usize, |total, (kind, rows)| {
+                if rows == 0 {
+                    return Some(total);
+                }
+                let spec = gpu_typed_kind_spec(kind)?;
+                let row_bytes = if compact {
+                    spec.layout.compact_bytes()
+                } else {
+                    spec.layout.bytes()
+                };
+                total.checked_add(rows.checked_mul(row_bytes)?)
+            })
+    }
+
+    /// Exact number of nonempty fused work descriptors for this replay range.
+    pub fn fused_work_items(&self) -> Option<usize> {
+        InsnKind::iter()
+            .zip(self.family_counts)
+            .try_fold(0usize, |total, (kind, rows)| {
+                let present = usize::from(rows != 0 && gpu_typed_kind_spec(kind).is_some());
+                total.checked_add(present)
+            })
     }
 }
 
@@ -1135,5 +1163,11 @@ mod i017_tests {
         assert_eq!(descriptor.checked_total(), None);
         assert_eq!(descriptor.conservative_address_reservation(), None);
         assert_eq!(CONTINUATION_ADDRESS_SEND_BOUND, 0);
+        descriptor.family_counts[InsnKind::ADD as usize] = 1;
+        assert_eq!(
+            descriptor.fused_payload_bytes(true),
+            Some(GpuTypedLayout::R.compact_bytes() + GpuTypedLayout::Jal.compact_bytes())
+        );
+        assert_eq!(descriptor.fused_work_items(), Some(2));
     }
 }

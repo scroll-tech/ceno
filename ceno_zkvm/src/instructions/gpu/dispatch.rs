@@ -48,6 +48,23 @@ use crate::{
 const PACKED_PRODUCER_COUNT_BITS: u32 = 24;
 const PRODUCER_PRIORITY_ROW_BITS: u32 = 23;
 
+fn fused_launcher_capacities(
+    stage_capacity: usize,
+    work_capacity: usize,
+) -> Result<(usize, usize), ZKVMError> {
+    match std::env::var_os("CENO_I057_PREFLIGHT_SIZED_FUSED") {
+        None => Ok((stage_capacity, work_capacity)),
+        Some(value) if value == std::ffi::OsStr::new("1") => Ok((stage_capacity, work_capacity)),
+        Some(value) if value == std::ffi::OsStr::new("0") => Ok((
+            ceno_gpu::common::witgen::typed_ingress::FUSED_STAGE_BYTES,
+            ceno_gpu::common::witgen::typed_ingress::FUSED_MAX_WORK_ITEMS,
+        )),
+        Some(_) => Err(ZKVMError::InvalidWitness(
+            "CENO_I057_PREFLIGHT_SIZED_FUSED must be 0 or 1".into(),
+        )),
+    }
+}
+
 fn packed_producer_total(kind: InsnKind, rows: usize) -> u32 {
     let rows = u32::try_from(rows).expect("producer total exceeds u32");
     assert!(
@@ -280,6 +297,8 @@ pub(crate) fn begin_provisional_fused_session(
     family_totals: [usize; InsnKind::COUNT],
     reserved_addresses: u32,
     expected_ranges: usize,
+    stage_capacity: usize,
+    work_capacity: usize,
     fetch: (u32, usize),
     preview: &ShardContext,
 ) -> Result<(), ZKVMError> {
@@ -312,11 +331,13 @@ pub(crate) fn begin_provisional_fused_session(
     ensure_compact_shard_metadata_cached(&hal, preview, logical_steps, fetch, reserved_addresses)?;
     super::cache::set_reserved_address_capacity(reserved_addresses);
     let pointers = super::cache::cached_shard_pointer_fingerprint();
-    let launcher =
-        ceno_gpu::common::witgen::typed_ingress::FusedRangeLauncher::new(hal.inner.clone())
-            .map_err(|e| {
-                ZKVMError::InvalidWitness(format!("provisional launcher init: {e}").into())
-            })?;
+    let (stage_capacity, work_capacity) = fused_launcher_capacities(stage_capacity, work_capacity)?;
+    let launcher = ceno_gpu::common::witgen::typed_ingress::FusedRangeLauncher::new(
+        hal.inner.clone(),
+        stage_capacity,
+        work_capacity,
+    )
+    .map_err(|e| ZKVMError::InvalidWitness(format!("provisional launcher init: {e}").into()))?;
     FUSED_INGRESS.with(|slot| {
         slot.borrow_mut().as_mut().unwrap().provisional = Some(ProvisionalFusedSession {
             identity: ProvisionalShardIdentity::from_context(preview),
@@ -409,10 +430,8 @@ pub(crate) fn submit_provisional_fused_range(range: &GpuReplayTypedRange) -> Res
         super::cache::with_cached_shard_meta(|shard| {
             launcher.launch_filled(
                 byte_len,
-                |stage| {
+                |stage, work| {
                     let mut cursor = 0usize;
-                    let mut work: Vec<FusedRangeWorkItem> =
-                        Vec::with_capacity(range.typed.iter().flatten().count());
                     for arena in range.typed.iter().flatten() {
                         let arena: &GpuTypedSoaArena = arena;
                         let index = registration_for_kind[arena.kind() as usize];
@@ -463,7 +482,6 @@ pub(crate) fn submit_provisional_fused_range(range: &GpuReplayTypedRange) -> Res
                         });
                     }
                     assert_eq!(cursor, stage.len(), "typed stage fill mismatch");
-                    work
                 },
                 (session.identity.cycle_range.start as u64)
                     .saturating_sub(FullTracer::SUBCYCLES_PER_INSN),
@@ -938,7 +956,38 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
         state.reserved_addresses,
     )?;
     super::cache::set_reserved_address_capacity(state.reserved_addresses);
-    let mut launcher = FusedRangeLauncher::new(hal.inner.clone())
+    let stage_capacity = state
+        .arenas
+        .ranges
+        .iter()
+        .map(|range| {
+            range
+                .typed
+                .iter()
+                .flatten()
+                .try_fold(0usize, |sum, arena| {
+                    let bytes = if arena.is_compact() {
+                        arena.payload_bytes().len()
+                    } else {
+                        arena.fields().iter().try_fold(0usize, |sum, field| {
+                            sum.checked_add(field.len().checked_mul(std::mem::size_of::<u32>())?)
+                        })?
+                    };
+                    sum.checked_add(bytes)
+                })
+                .expect("installed fused payload capacity overflow")
+        })
+        .max()
+        .ok_or_else(|| ZKVMError::InvalidWitness("installed fused shard has no ranges".into()))?;
+    let work_capacity = state
+        .arenas
+        .ranges
+        .iter()
+        .map(|range| range.typed.iter().flatten().count())
+        .max()
+        .ok_or_else(|| ZKVMError::InvalidWitness("installed fused shard has no ranges".into()))?;
+    let (stage_capacity, work_capacity) = fused_launcher_capacities(stage_capacity, work_capacity)?;
+    let mut launcher = FusedRangeLauncher::new(hal.inner.clone(), stage_capacity, work_capacity)
         .map_err(|e| ZKVMError::InvalidWitness(format!("fused launcher init: {e}").into()))?;
     let mut producer_bases = [0usize; InsnKind::COUNT];
     if std::env::var_os("CENO_GPU_ASSIGN_PROFILE").as_deref() == Some(std::ffi::OsStr::new("1")) {
@@ -983,10 +1032,8 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
             launcher
                 .launch_filled(
                     byte_len,
-                    |stage| {
+                    |stage, work| {
                         let mut cursor = 0usize;
-                        let mut work: Vec<FusedRangeWorkItem> =
-                            Vec::with_capacity(range.typed.iter().flatten().count());
                         for arena in range.typed.iter().flatten() {
                             let arena: &GpuTypedSoaArena = arena;
                             let registration =
@@ -1046,7 +1093,6 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                             });
                         }
                         assert_eq!(cursor, stage.len(), "typed stage fill mismatch");
-                        work
                     },
                     shard_ctx.current_shard_offset_cycle(),
                     MAX_TS_BITS,

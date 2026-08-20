@@ -2511,10 +2511,31 @@ pub fn generate_witness<'a, E: ExtensionField>(
                             )
                             .expect("shard address reservation overflow");
                     }
+                    let compact_source = ceno_emul::i050_compact_source_enabled();
+                    let stage_capacity = descriptors
+                        .iter()
+                        .map(|descriptor| {
+                            descriptor
+                                .fused_payload_bytes(compact_source)
+                                .expect("preflight fused payload capacity overflow")
+                        })
+                        .max()
+                        .expect("shard 0 has no replay descriptors");
+                    let work_capacity = descriptors
+                        .iter()
+                        .map(|descriptor| {
+                            descriptor
+                                .fused_work_items()
+                                .expect("preflight fused work capacity overflow")
+                        })
+                        .max()
+                        .expect("shard 0 has no replay descriptors");
                     crate::instructions::gpu::dispatch::begin_provisional_fused_session(
                         family_totals,
                         reserved_addresses,
                         descriptors.len(),
+                        stage_capacity,
+                        work_capacity,
                         (program.base_address, program.instructions.len()),
                         &preview,
                     )
