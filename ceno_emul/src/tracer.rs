@@ -4815,6 +4815,32 @@ mod tests {
 
         // Sub-type sizes
         assert_eq!(mem::size_of::<Instruction>(), 12, "Instruction size");
+        assert_eq!(
+            mem::offset_of!(Instruction, kind),
+            0,
+            "Instruction.kind offset"
+        );
+        assert_eq!(
+            mem::offset_of!(Instruction, rs1),
+            1,
+            "Instruction.rs1 offset"
+        );
+        assert_eq!(
+            mem::offset_of!(Instruction, rs2),
+            2,
+            "Instruction.rs2 offset"
+        );
+        assert_eq!(mem::offset_of!(Instruction, rd), 3, "Instruction.rd offset");
+        assert_eq!(
+            mem::offset_of!(Instruction, imm),
+            4,
+            "Instruction.imm offset"
+        );
+        assert_eq!(
+            mem::offset_of!(Instruction, raw),
+            8,
+            "Instruction.raw offset"
+        );
         assert_eq!(mem::size_of::<ReadOp>(), 16, "ReadOp size");
         assert_eq!(mem::size_of::<WriteOp>(), 24, "WriteOp size");
         assert_eq!(

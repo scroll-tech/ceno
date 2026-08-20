@@ -225,58 +225,57 @@ impl GpuTypedSoaArena {
         let Ok(row) = ordinals.binary_search(&ordinal) else {
             return Ok(None);
         };
-        let raw = self.fields[2][row];
-        let (expected_address, prior_value) = match (self.layout, mask) {
+        let (expected_memory_address, prior_value) = match (self.layout, mask) {
             (GpuTypedLayout::R, StepRecord::FUTURE_ACCESS_RS1)
             | (GpuTypedLayout::I, StepRecord::FUTURE_ACCESS_RS1)
             | (GpuTypedLayout::Load, StepRecord::FUTURE_ACCESS_RS1) => {
-                (WordAddr(((raw >> 15) & 31) << 6), self.fields[4][row])
+                (None, self.fields[4][row])
             }
             (GpuTypedLayout::Branch, StepRecord::FUTURE_ACCESS_RS1)
             | (GpuTypedLayout::Jalr, StepRecord::FUTURE_ACCESS_RS1) => {
-                (WordAddr(((raw >> 15) & 31) << 6), self.fields[5][row])
+                (None, self.fields[5][row])
             }
             (GpuTypedLayout::Store, StepRecord::FUTURE_ACCESS_RS1) => {
-                (WordAddr(((raw >> 15) & 31) << 6), self.fields[4][row])
+                (None, self.fields[4][row])
             }
-            (GpuTypedLayout::U, StepRecord::FUTURE_ACCESS_RS1) => (WordAddr(0), 0),
+            (GpuTypedLayout::U, StepRecord::FUTURE_ACCESS_RS1) => (None, 0),
             (GpuTypedLayout::R, StepRecord::FUTURE_ACCESS_RS2) => {
-                (WordAddr(((raw >> 20) & 31) << 6), self.fields[6][row])
+                (None, self.fields[6][row])
             }
             (GpuTypedLayout::Branch, StepRecord::FUTURE_ACCESS_RS2) => {
-                (WordAddr(((raw >> 20) & 31) << 6), self.fields[7][row])
+                (None, self.fields[7][row])
             }
             (GpuTypedLayout::Store, StepRecord::FUTURE_ACCESS_RS2) => {
-                (WordAddr(((raw >> 20) & 31) << 6), self.fields[6][row])
+                (None, self.fields[6][row])
             }
             (GpuTypedLayout::R, StepRecord::FUTURE_ACCESS_RD) => {
-                (WordAddr(((raw >> 7) & 31) << 6), self.fields[9][row])
+                (None, self.fields[9][row])
             }
             (GpuTypedLayout::I, StepRecord::FUTURE_ACCESS_RD)
             | (GpuTypedLayout::Load, StepRecord::FUTURE_ACCESS_RD) => {
-                (WordAddr(((raw >> 7) & 31) << 6), self.fields[7][row])
+                (None, self.fields[7][row])
             }
             (GpuTypedLayout::Jal, StepRecord::FUTURE_ACCESS_RD)
             | (GpuTypedLayout::U, StepRecord::FUTURE_ACCESS_RD) => {
-                (WordAddr(((raw >> 7) & 31) << 6), self.fields[6][row])
+                (None, self.fields[6][row])
             }
             (GpuTypedLayout::Jalr, StepRecord::FUTURE_ACCESS_RD) => {
-                (WordAddr(((raw >> 7) & 31) << 6), self.fields[8][row])
+                (None, self.fields[8][row])
             }
             (GpuTypedLayout::Load, StepRecord::FUTURE_ACCESS_MEM) => {
-                (WordAddr(self.fields[9][row]), self.fields[11][row])
+                (Some(WordAddr(self.fields[9][row])), self.fields[11][row])
             }
             (GpuTypedLayout::Store, StepRecord::FUTURE_ACCESS_MEM) => {
-                (WordAddr(self.fields[8][row]), self.fields[10][row])
+                (Some(WordAddr(self.fields[8][row])), self.fields[10][row])
             }
             _ => return Err("deferred patch lane is invalid for typed layout"),
         };
-        // Unit-constructed `Instruction`s intentionally carry raw=0. Real
-        // decoded guest instructions carry the raw word used to validate
-        // register addresses; memory addresses are explicit in every layout.
-        if expected_address != address
-            && (raw != 0 || mask == StepRecord::FUTURE_ACCESS_MEM)
-        {
+        // Register addresses are owned by the authoritative next-access event:
+        // `Instruction::raw` is diagnostic-only and can remain non-semantic
+        // after an instruction is transformed. Exact ordinal plus the checked
+        // layout/lane identifies the register source. Memory addresses are
+        // explicit replay fields and remain subject to strict equality.
+        if expected_memory_address.is_some_and(|expected| expected != address) {
             return Err("deferred patch address does not match typed source row");
         }
         let mask_field = self
@@ -646,6 +645,80 @@ mod i017_tests {
             first.fields().last().unwrap()[1],
             u32::from(StepRecord::FUTURE_ACCESS_RD) << 8
         );
+    }
+
+    #[test]
+    fn i049_deferred_register_patches_use_authoritative_event_addresses() {
+        let layouts = [
+            GpuTypedLayout::R,
+            GpuTypedLayout::I,
+            GpuTypedLayout::Branch,
+            GpuTypedLayout::Jal,
+            GpuTypedLayout::Jalr,
+            GpuTypedLayout::Load,
+            GpuTypedLayout::Store,
+            GpuTypedLayout::U,
+        ];
+        for layout in layouts {
+            let step = record(layout);
+            let mut arena = GpuTypedSoaArena::new(step.insn().kind, 1).unwrap();
+            arena.push_step(7, &step).unwrap();
+            // `raw` is diagnostic-only and may not describe transformed
+            // structured register fields. It must not override the event tape.
+            arena.fields[2][0] = u32::MAX;
+            let lanes: &[(u8, u32)] = match layout {
+                GpuTypedLayout::R => &[
+                    (StepRecord::FUTURE_ACCESS_RS1, 0x11),
+                    (StepRecord::FUTURE_ACCESS_RS2, 0x22),
+                    (StepRecord::FUTURE_ACCESS_RD, 0x44),
+                ],
+                GpuTypedLayout::I | GpuTypedLayout::Jalr | GpuTypedLayout::Load => &[
+                    (StepRecord::FUTURE_ACCESS_RS1, 0x11),
+                    (StepRecord::FUTURE_ACCESS_RD, 0x44),
+                ],
+                GpuTypedLayout::Branch | GpuTypedLayout::Store => &[
+                    (StepRecord::FUTURE_ACCESS_RS1, 0x11),
+                    (StepRecord::FUTURE_ACCESS_RS2, 0x22),
+                ],
+                GpuTypedLayout::Jal => &[(StepRecord::FUTURE_ACCESS_RD, 0x44)],
+                GpuTypedLayout::U => &[
+                    (StepRecord::FUTURE_ACCESS_RS1, 0),
+                    (StepRecord::FUTURE_ACCESS_RD, 0x44),
+                ],
+            };
+            for &(lane, prior_value) in lanes {
+                assert_eq!(
+                    arena
+                        .patch_future_access_checked(7, lane, WordAddr(0xdead_beef))
+                        .unwrap(),
+                    Some(prior_value),
+                    "layout={layout:?} lane={lane}"
+                );
+            }
+        }
+
+        for layout in [GpuTypedLayout::Load, GpuTypedLayout::Store] {
+            let step = record(layout);
+            let mut arena = GpuTypedSoaArena::new(step.insn().kind, 1).unwrap();
+            arena.push_step(7, &step).unwrap();
+            assert_eq!(
+                arena.patch_future_access_checked(
+                    7,
+                    StepRecord::FUTURE_ACCESS_MEM,
+                    WordAddr(0xdead_beef),
+                ),
+                Err("deferred patch address does not match typed source row"),
+                "layout={layout:?}"
+            );
+            assert!(arena
+                .patch_future_access_checked(
+                    7,
+                    StepRecord::FUTURE_ACCESS_MEM,
+                    WordAddr(0x88),
+                )
+                .unwrap()
+                .is_some());
+        }
     }
 
     #[test]
