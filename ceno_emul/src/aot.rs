@@ -157,7 +157,7 @@ impl AssemblyTraceStyle {
             // Keep the experimental capture image independently cache-busted:
             // release block-atomic memory rows now publish trace_mem_addr even
             // when their next-access event was emitted early.
-            Self::PreflightProductionCapture => "preflight-production-capture-memaddr1",
+            Self::PreflightProductionCapture => "preflight-production-capture-sync2",
         }
     }
 
@@ -4810,7 +4810,13 @@ fn emit_sync_preflight_direct(mut file: impl Write) -> Result<()> {
         file,
         "    cmpl ${AOT_TRACE_MODE_PREFLIGHT_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
     )?;
+    writeln!(file, "    je 2f")?;
+    writeln!(
+        file,
+        "    cmpl ${AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
+    )?;
     writeln!(file, "    jne 1f")?;
+    writeln!(file, "2:")?;
     writeln!(
         file,
         "    cmpq $0, {AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET}(%r12)"
@@ -7843,6 +7849,12 @@ fn emit_native_memory(
         writeln!(file, "    movq %rax, %rcx")?;
         writeln!(file, "    shrq $32, %rcx")?;
         if emits_memory_event_early {
+            if trace_style == AssemblyTraceStyle::PreflightProductionCapture {
+                writeln!(
+                    file,
+                    "    movq %rcx, {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12)"
+                )?;
+            }
             emit_preflight_direct_memory_access_cached(
                 &mut file,
                 pc,
@@ -9611,7 +9623,7 @@ mod tests {
         let mut reference = VMState::<crate::FullTracer>::new_with_tracer_config(
             CENO_PLATFORM.clone(),
             program.clone(),
-            crate::FullTracerConfig { max_step_shard: 2 },
+            crate::FullTracerConfig { max_step_shard: 64 },
         );
         while reference.next_step_record().unwrap().is_some() {}
 
@@ -9722,7 +9734,7 @@ mod tests {
         let mut reference = VMState::<crate::FullTracer>::new_with_tracer_config(
             CENO_PLATFORM.clone(),
             program.clone(),
-            crate::FullTracerConfig { max_step_shard: 1 },
+            crate::FullTracerConfig { max_step_shard: 64 },
         );
         reference.init_register_unsafe(20, base);
         reference.init_memory(ByteAddr(base).waddr(), 37);
@@ -9808,7 +9820,7 @@ mod tests {
         let mut reference = VMState::<crate::FullTracer>::new_with_tracer_config(
             CENO_PLATFORM.clone(),
             program.clone(),
-            crate::FullTracerConfig { max_step_shard: 1 },
+            crate::FullTracerConfig { max_step_shard: 64 },
         );
         let config = crate::PreflightTracerConfig::new(true, 1, Cycle::MAX)
             .with_step_cell_extractor(Arc::new(OneCellPerNativeStep))
@@ -9874,6 +9886,116 @@ mod tests {
 
         fn init_word(&mut self, address: WordAddr, value: Word) {
             self.init_memory(address, value);
+        }
+    }
+
+    #[test]
+    fn i049_production_capture_syscalls_match_canonical_raw_next_access_tape() {
+        let codes = [267, 268, 270, 65801, 65802, 65840];
+        assert_eq!(crate::SECP256K1_DOUBLE, codes[0]);
+        assert_eq!(crate::SECP256K1_DECOMPRESS, codes[1]);
+        assert_eq!(crate::SECP256K1_SCALAR_INVERT, codes[2]);
+        assert_eq!(crate::KECCAK_PERMUTE, codes[3]);
+        assert_eq!(crate::SECP256K1_ADD, codes[4]);
+        assert_eq!(crate::KECCAK_XORIN, codes[5]);
+
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+            encode_rv32(
+                InsnKind::ADDI,
+                0,
+                0,
+                Platform::reg_ecall().into(),
+                Platform::ecall_halt() as i32,
+            ),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let roots = (1..4)
+            .map(|index| CENO_PLATFORM.pc_base() + index * PC_STEP_SIZE as u32)
+            .collect::<Vec<_>>();
+        let production =
+            AotProgram::compile_preflight_with_extra_roots(program.clone(), roots.clone()).unwrap();
+        let capture =
+            AotProgram::compile_preflight_capture_with_extra_roots(program.clone(), roots).unwrap();
+        let generator: [Word; crate::syscalls::secp256k1::SECP256K1_ARG_WORDS] =
+            crate::syscalls::secp256k1::SecpMaybePoint(secp::Point::generator().into()).into();
+        let doubled = crate::syscalls::secp256k1::double_words(generator);
+
+        for code in codes {
+            let first = CENO_PLATFORM.heap.start;
+            let second = first + 256;
+            let arg1 = if code == crate::SECP256K1_DECOMPRESS {
+                0
+            } else {
+                second
+            };
+            let config = crate::PreflightTracerConfig::new(true, 1, Cycle::MAX)
+                .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
+            let mut expected = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+                CENO_PLATFORM.clone(),
+                program.clone(),
+                config.clone(),
+            );
+            let mut actual = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+                CENO_PLATFORM.clone(),
+                program.clone(),
+                config.with_combined_capture(true),
+            );
+            let mut first_words = [0; 64];
+            let mut second_words = [0; 64];
+            match code {
+                crate::SECP256K1_DOUBLE | crate::SECP256K1_ADD => {
+                    first_words[..generator.len()].copy_from_slice(&generator);
+                    second_words[..doubled.len()].copy_from_slice(&doubled);
+                }
+                crate::SECP256K1_DECOMPRESS => {
+                    let encoded = secp::Point::generator().serialize_uncompressed();
+                    let x: [u8; 32] = encoded[1..33].try_into().unwrap();
+                    let x: [Word; crate::syscalls::secp256k1::COORDINATE_WORDS] =
+                        unsafe { std::mem::transmute(x) };
+                    first_words[..x.len()].copy_from_slice(&x);
+                }
+                crate::SECP256K1_SCALAR_INVERT => {
+                    first_words[..crate::syscalls::secp256k1::COORDINATE_WORDS].fill(1);
+                }
+                _ => {
+                    for (offset, (first, second)) in first_words
+                        .iter_mut()
+                        .zip(&mut second_words)
+                        .enumerate()
+                    {
+                        *first = offset as Word;
+                        *second = !*first;
+                    }
+                }
+            }
+            for vm in [&mut expected, &mut actual] {
+                vm.init_register_unsafe(Platform::reg_ecall(), code);
+                vm.init_register_unsafe(Platform::reg_arg0(), first);
+                vm.init_register_unsafe(Platform::reg_arg1(), arg1);
+                for offset in 0usize..64 {
+                    vm.init_memory(ByteAddr(first).waddr() + offset, first_words[offset]);
+                    vm.init_memory(ByteAddr(second).waddr() + offset, second_words[offset]);
+                }
+            }
+
+            let expected_report = production.run_to_halt(&mut expected, 16).unwrap();
+            let actual_report = capture.run_to_halt(&mut actual, 16).unwrap();
+            assert_eq!(expected_report.executed_steps, 4, "code={code}");
+            assert_eq!(actual_report.executed_steps, 4, "code={code}");
+            assert_eq!(expected_report.fallback.ecall_by_code[&code], 2, "code={code}");
+            assert_eq!(actual_report.fallback.ecall_by_code[&code], 2, "code={code}");
+            let expected_events = expected.tracer().raw_next_access_events_for_test().to_vec();
+            let actual_events = actual.tracer().raw_next_access_events_for_test().to_vec();
+            assert_eq!(actual_events, expected_events, "raw tape differs for code={code}");
+            let (expected_plan, _, _) = expected.take_tracer().into_shard_plan();
+            let (actual_plan, _, _) = actual.take_tracer().into_shard_plan();
+            assert_eq!(
+                actual_plan.shard_cycle_boundaries(),
+                expected_plan.shard_cycle_boundaries(),
+                "shard boundaries differ for code={code}",
+            );
         }
     }
 
@@ -9961,6 +10083,11 @@ mod tests {
             let mut ecalls = BTreeMap::new();
             ecalls.insert(Platform::ecall_halt(), vec![0]);
             ecalls.insert(crate::SECP256K1_DOUBLE, vec![0]);
+            ecalls.insert(crate::SECP256K1_ADD, vec![0]);
+            ecalls.insert(crate::SECP256K1_DECOMPRESS, vec![0]);
+            ecalls.insert(crate::KECCAK_PERMUTE, vec![0]);
+            ecalls.insert(crate::KECCAK_XORIN, vec![0]);
+            ecalls.insert(crate::SECP256K1_SCALAR_INVERT, vec![0]);
             Some(Arc::new(ShardCostModel::new(
                 opcodes,
                 ecalls,

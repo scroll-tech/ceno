@@ -3291,6 +3291,11 @@ impl PreflightTracer {
         ))
     }
 
+    #[cfg(all(test, feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub(crate) fn raw_next_access_events_for_test(&self) -> &[NextAccessEvent] {
+        &self.next_access_events
+    }
+
     pub fn into_shard_plan(
         self,
     ) -> (
