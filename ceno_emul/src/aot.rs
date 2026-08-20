@@ -154,7 +154,10 @@ impl AssemblyTraceStyle {
             Self::PreflightAdmittedRegisterBlock => "preflight-admitted-register-block",
             Self::PreflightAdmittedMemoryBlock => "preflight-block-memory-atomic-registers",
             Self::PreflightProduction => "preflight-production",
-            Self::PreflightProductionCapture => "preflight-production-capture",
+            // Keep the experimental capture image independently cache-busted:
+            // release block-atomic memory rows now publish trace_mem_addr even
+            // when their next-access event was emitted early.
+            Self::PreflightProductionCapture => "preflight-production-capture-memaddr1",
         }
     }
 
@@ -7813,10 +7816,11 @@ fn emit_native_memory(
             writeln!(file, "    shll $3, %r8d")?;
         }
         writeln!(file, "    shrl $2, %edx")?;
-        if tracks_mmio_bounds
-            || (trace_style.preflight_feature_enabled(PreflightFeature::MemoryEvents)
-                && !emits_memory_event_early)
-        {
+        if should_publish_trace_memory_address(
+            trace_style,
+            tracks_mmio_bounds,
+            emits_memory_event_early,
+        ) {
             writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
         }
         if let Some(region_index) = encoded_memory_region {
@@ -7998,6 +8002,17 @@ fn emit_native_memory(
     writeln!(file, ".popsection")?;
     writeln!(file, "{done_label}:")?;
     Ok(())
+}
+
+fn should_publish_trace_memory_address(
+    trace_style: AssemblyTraceStyle,
+    tracks_mmio_bounds: bool,
+    emits_memory_event_early: bool,
+) -> bool {
+    trace_style.needs_callback_values()
+        || tracks_mmio_bounds
+        || (trace_style.preflight_feature_enabled(PreflightFeature::MemoryEvents)
+            && !emits_memory_event_early)
 }
 
 fn emit_native_memory_region_entry(
@@ -11248,6 +11263,20 @@ mod tests {
         let assembly = String::from_utf8(production).unwrap();
         assert!(assembly.contains("preflight_bucket_special_fail"));
         assert!(!assembly.contains(".L_preflight_cost_loop_0:"));
+    }
+
+    #[test]
+    fn i049_capture_requires_memory_address_when_release_events_emit_early() {
+        let trace_style = AssemblyTraceStyle::PreflightProductionCapture;
+        assert!(trace_style.needs_callback_values());
+        assert!(!trace_style.preflight_feature_enabled(PreflightFeature::MmioBounds));
+        assert!(trace_style.uses_preflight_block_plan());
+        assert!(should_publish_trace_memory_address(trace_style, false, true));
+        assert!(!should_publish_trace_memory_address(
+            AssemblyTraceStyle::PreflightProduction,
+            false,
+            true,
+        ));
     }
 
     #[test]
