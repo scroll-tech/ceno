@@ -19,6 +19,28 @@ use std::{
 use strum::{EnumCount, IntoEnumIterator};
 use tiny_keccak::{Hasher, Keccak};
 
+fn instruction_reads_rs1(kind: InsnKind) -> bool {
+    use crate::rv32im::InsnFormat::{B, I, R, S};
+    !matches!(kind, InsnKind::ECALL | InsnKind::INVALID)
+        && matches!(crate::rv32im::InsnFormat::from(kind), R | I | S | B)
+}
+
+fn instruction_reads_rs2(kind: InsnKind) -> bool {
+    use crate::rv32im::InsnFormat::{B, R, S};
+    matches!(crate::rv32im::InsnFormat::from(kind), R | S | B)
+}
+
+fn instruction_writes_rd(kind: InsnKind) -> bool {
+    !matches!(kind, InsnKind::ECALL | InsnKind::INVALID)
+        && matches!(
+            crate::rv32im::InsnFormat::from(kind),
+            crate::rv32im::InsnFormat::R
+                | crate::rv32im::InsnFormat::I
+                | crate::rv32im::InsnFormat::U
+                | crate::rv32im::InsnFormat::J
+        )
+}
+
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
 /// - Each instruction is divided into 4 subcycles with the operations on: rs1, rs2, rd, memory. Each op is assigned a unique `cycle + subcycle`.
@@ -66,6 +88,271 @@ impl StepRecord {
     pub const FUTURE_ACCESS_RS2: u8 = 1 << 1;
     pub const FUTURE_ACCESS_RD: u8 = 1 << 2;
     pub const FUTURE_ACCESS_MEM: u8 = 1 << 3;
+
+    pub(crate) const L1_POISON_WORD: u32 = 0xa5a5_a5a5;
+    pub(crate) const L1_POISON_CYCLE: Cycle = 0xa5a5_a5a5_a5a5_a5a5;
+
+    pub(crate) fn l1_skeleton(
+        cycle: Cycle,
+        pc: Change<ByteAddr>,
+        insn: Instruction,
+        memory_addr: Option<WordAddr>,
+    ) -> Self {
+        let poison_change = Change {
+            before: Self::L1_POISON_WORD,
+            after: Self::L1_POISON_WORD,
+        };
+        let poison_read = ReadOp {
+            addr: 0.into(),
+            value: Self::L1_POISON_WORD,
+            previous_cycle: Self::L1_POISON_CYCLE,
+        };
+        let poison_write = WriteOp {
+            addr: 0.into(),
+            value: poison_change,
+            previous_cycle: Self::L1_POISON_CYCLE,
+        };
+        let has_rs1 = instruction_reads_rs1(insn.kind);
+        let has_rs2 = instruction_reads_rs2(insn.kind);
+        let has_rd = instruction_writes_rd(insn.kind);
+        let has_memory_op = memory_addr.is_some();
+        Self {
+            cycle,
+            pc,
+            heap_maxtouch_addr: Change {
+                before: Self::L1_POISON_WORD.into(),
+                after: Self::L1_POISON_WORD.into(),
+            },
+            hint_maxtouch_addr: Change {
+                before: Self::L1_POISON_WORD.into(),
+                after: Self::L1_POISON_WORD.into(),
+            },
+            insn,
+            has_rs1,
+            has_rs2,
+            has_rd,
+            has_memory_op,
+            rs1: ReadOp {
+                addr: if has_rs1 {
+                    Platform::register_vma(insn.rs1).into()
+                } else {
+                    0.into()
+                },
+                ..poison_read
+            },
+            rs2: ReadOp {
+                addr: if has_rs2 {
+                    Platform::register_vma(insn.rs2).into()
+                } else {
+                    0.into()
+                },
+                ..poison_read
+            },
+            rd: WriteOp {
+                addr: if has_rd {
+                    Platform::register_vma(insn.rd_internal() as RegIdx).into()
+                } else {
+                    0.into()
+                },
+                ..poison_write
+            },
+            memory_op: WriteOp {
+                addr: memory_addr.unwrap_or_default(),
+                ..poison_write
+            },
+            syscall_index: Self::L1_POISON_WORD,
+            future_access_mask: 0xa5,
+            _padding: [0xa5; 3],
+        }
+    }
+
+    pub(crate) fn l1_disabled_fields_are_poisoned(&self) -> bool {
+        let poisoned_change = |value: Change<Word>| {
+            value.before == Self::L1_POISON_WORD && value.after == Self::L1_POISON_WORD
+        };
+        self.heap_maxtouch_addr.before.0 == Self::L1_POISON_WORD
+            && self.heap_maxtouch_addr.after.0 == Self::L1_POISON_WORD
+            && self.hint_maxtouch_addr.before.0 == Self::L1_POISON_WORD
+            && self.hint_maxtouch_addr.after.0 == Self::L1_POISON_WORD
+            && self.rs1.value == Self::L1_POISON_WORD
+            && self.rs1.previous_cycle == Self::L1_POISON_CYCLE
+            && self.rs2.value == Self::L1_POISON_WORD
+            && self.rs2.previous_cycle == Self::L1_POISON_CYCLE
+            && poisoned_change(self.rd.value)
+            && self.rd.previous_cycle == Self::L1_POISON_CYCLE
+            && poisoned_change(self.memory_op.value)
+            && self.memory_op.previous_cycle == Self::L1_POISON_CYCLE
+            && self.syscall_index == Self::L1_POISON_WORD
+            && self.future_access_mask == 0xa5
+            && self._padding == [0xa5; 3]
+    }
+
+    pub(crate) fn l2_values(
+        cycle: Cycle,
+        pc: Change<ByteAddr>,
+        insn: Instruction,
+        memory_addr: Option<WordAddr>,
+        rs1_value: Word,
+        rs2_value: Word,
+        rd_value: Change<Word>,
+        memory_value: Option<Change<Word>>,
+    ) -> Self {
+        let mut record = Self::l1_skeleton(cycle, pc, insn, memory_addr);
+        if record.has_rs1 {
+            record.rs1.value = rs1_value;
+        }
+        if record.has_rs2 {
+            record.rs2.value = rs2_value;
+        }
+        if record.has_rd {
+            record.rd.value = rd_value;
+        }
+        if let Some(memory_value) = memory_value {
+            record.memory_op.value = memory_value;
+        }
+        record
+    }
+
+    pub(crate) fn l3_registers(
+        cycle: Cycle,
+        pc: Change<ByteAddr>,
+        insn: Instruction,
+        memory_addr: Option<WordAddr>,
+        rs1_value: Word,
+        rs2_value: Word,
+        rd_value: Change<Word>,
+        memory_value: Option<Change<Word>>,
+        register_previous_cycles: [Cycle; 3],
+    ) -> Self {
+        let mut record = Self::l2_values(
+            cycle,
+            pc,
+            insn,
+            memory_addr,
+            rs1_value,
+            rs2_value,
+            rd_value,
+            memory_value,
+        );
+        if record.has_rs1 {
+            record.rs1.previous_cycle = register_previous_cycles[0];
+        }
+        if record.has_rs2 {
+            record.rs2.previous_cycle = register_previous_cycles[1];
+        }
+        if record.has_rd {
+            record.rd.previous_cycle = register_previous_cycles[2];
+        }
+        record
+    }
+
+    pub(crate) fn l4_memory(
+        cycle: Cycle,
+        pc: Change<ByteAddr>,
+        insn: Instruction,
+        memory_addr: Option<WordAddr>,
+        rs1_value: Word,
+        rs2_value: Word,
+        rd_value: Change<Word>,
+        memory_value: Option<Change<Word>>,
+        register_previous_cycles: [Cycle; 3],
+        memory_previous_cycle: Option<Cycle>,
+        heap_maxtouch_addr: Change<ByteAddr>,
+        hint_maxtouch_addr: Change<ByteAddr>,
+    ) -> Self {
+        let mut record = Self::l3_registers(
+            cycle,
+            pc,
+            insn,
+            memory_addr,
+            rs1_value,
+            rs2_value,
+            rd_value,
+            memory_value,
+            register_previous_cycles,
+        );
+        record.heap_maxtouch_addr = heap_maxtouch_addr;
+        record.hint_maxtouch_addr = hint_maxtouch_addr;
+        if let Some(previous_cycle) = memory_previous_cycle {
+            record.memory_op.previous_cycle = previous_cycle;
+        }
+        record
+    }
+
+    pub(crate) fn l2_later_fields_are_poisoned(&self) -> bool {
+        self.heap_maxtouch_addr.before.0 == Self::L1_POISON_WORD
+            && self.heap_maxtouch_addr.after.0 == Self::L1_POISON_WORD
+            && self.hint_maxtouch_addr.before.0 == Self::L1_POISON_WORD
+            && self.hint_maxtouch_addr.after.0 == Self::L1_POISON_WORD
+            && self.rs1.previous_cycle == Self::L1_POISON_CYCLE
+            && self.rs2.previous_cycle == Self::L1_POISON_CYCLE
+            && self.rd.previous_cycle == Self::L1_POISON_CYCLE
+            && self.memory_op.previous_cycle == Self::L1_POISON_CYCLE
+            && self.syscall_index == Self::L1_POISON_WORD
+            && self.future_access_mask == 0xa5
+            && self._padding == [0xa5; 3]
+    }
+
+    pub(crate) fn l3_later_fields_are_poisoned(&self) -> bool {
+        self.heap_maxtouch_addr.before.0 == Self::L1_POISON_WORD
+            && self.heap_maxtouch_addr.after.0 == Self::L1_POISON_WORD
+            && self.hint_maxtouch_addr.before.0 == Self::L1_POISON_WORD
+            && self.hint_maxtouch_addr.after.0 == Self::L1_POISON_WORD
+            && self.memory_op.previous_cycle == Self::L1_POISON_CYCLE
+            && self.syscall_index == Self::L1_POISON_WORD
+            && self.future_access_mask == 0xa5
+            && self._padding == [0xa5; 3]
+    }
+
+    pub(crate) fn l4_later_fields_are_poisoned(&self) -> bool {
+        self.syscall_index == Self::L1_POISON_WORD
+            && self.future_access_mask == 0xa5
+            && self._padding == [0xa5; 3]
+    }
+
+    pub(crate) fn l5_later_fields_are_poisoned(&self) -> bool {
+        self.syscall_index == Self::L1_POISON_WORD && self._padding == [0xa5; 3]
+    }
+
+    /// Finish the private layered representation after its exceptional side
+    /// stream has been decoded. Ordinary instructions use `NO_SYSCALL`.
+    pub(crate) fn complete_l6(
+        &mut self,
+        syscall_index: Option<u32>,
+        ecall_code: Option<(Word, Cycle)>,
+        ecall_arg0: Option<(Word, Cycle)>,
+    ) {
+        self.syscall_index = syscall_index.unwrap_or(Self::NO_SYSCALL);
+        if let Some((value, previous_cycle)) = ecall_code {
+            self.rs1 = ReadOp {
+                addr: Platform::register_vma(Platform::reg_ecall()).into(),
+                value,
+                previous_cycle,
+            };
+            self.has_rs1 = true;
+        }
+        if let Some((value, previous_cycle)) = ecall_arg0 {
+            self.rs2 = ReadOp {
+                addr: Platform::register_vma(Platform::reg_arg0()).into(),
+                value,
+                previous_cycle,
+            };
+            self.has_rs2 = true;
+        }
+        if !self.has_rs1 {
+            self.rs1 = ReadOp::default();
+        }
+        if !self.has_rs2 {
+            self.rs2 = ReadOp::default();
+        }
+        if !self.has_rd {
+            self.rd = WriteOp::default();
+        }
+        if !self.has_memory_op {
+            self.memory_op = WriteOp::default();
+        }
+        self._padding = [0; 3];
+    }
 }
 
 impl Default for StepRecord {
@@ -1705,6 +1992,14 @@ impl StepRecord {
         self.future_access_mask
     }
 
+    pub(crate) fn set_future_access_mask(&mut self, mask: u8) {
+        self.future_access_mask |= mask;
+    }
+
+    pub(crate) fn clear_future_access_mask(&mut self) {
+        self.future_access_mask = 0;
+    }
+
     #[inline(always)]
     pub fn has_future_access(&self, bit: u8) -> bool {
         self.future_access_mask & bit != 0
@@ -1782,7 +2077,9 @@ impl GpuReplayChunk {
         Self {
             sequence,
             shard_start_cycle,
-            typed: (0..InsnKind::COUNT).map(|_| None).collect(),
+            // Ownership placeholder only. It must not allocate a replacement
+            // family vector while both warmed owners are outside the tracer.
+            typed: Vec::new(),
             fallback: Vec::new(),
         }
     }
@@ -1806,6 +2103,63 @@ impl GpuReplayChunk {
             typed,
             fallback: Vec::with_capacity(descriptor.fallback_count),
         }
+    }
+
+    fn warmed(
+        family_capacities: [usize; InsnKind::COUNT],
+        fallback_capacity: usize,
+        shard_start_cycle: Cycle,
+    ) -> Self {
+        Self {
+            sequence: 0,
+            shard_start_cycle,
+            typed: InsnKind::iter()
+                .zip(family_capacities)
+                .map(|(kind, rows)| {
+                    (rows > 0)
+                        .then(|| crate::GpuTypedSoaArena::new_with_range(kind, rows, 0).unwrap())
+                })
+                .collect(),
+            fallback: Vec::with_capacity(fallback_capacity),
+        }
+    }
+
+    fn reset_from_descriptor(
+        &mut self,
+        descriptor: &crate::GpuReplayRangeDescriptor,
+        shard_start_cycle: Cycle,
+    ) {
+        self.sequence = descriptor.sequence;
+        self.shard_start_cycle = shard_start_cycle;
+        for ((kind, arena), required) in InsnKind::iter()
+            .zip(&mut self.typed)
+            .zip(descriptor.family_counts)
+        {
+            if required == 0 {
+                if let Some(arena) = arena {
+                    arena.reset_for_range(descriptor.range_start);
+                }
+                continue;
+            }
+            let arena = arena
+                .as_mut()
+                .unwrap_or_else(|| panic!("warmed range missing {kind:?} family"));
+            assert!(
+                arena.capacity() >= required,
+                "warmed family capacity regressed"
+            );
+            arena.reset_for_range(descriptor.range_start);
+        }
+        self.fallback.clear();
+        assert!(self.fallback.capacity() >= descriptor.fallback_count);
+    }
+
+    fn reset_empty(&mut self, shard_start_cycle: Cycle) {
+        self.shard_start_cycle = shard_start_cycle;
+        for arena in self.typed.iter_mut().flatten() {
+            arena.reset_for_range(arena.range_start());
+        }
+        self.fallback.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -1838,6 +2192,7 @@ pub struct GpuReplayTracer {
     pending: StepRecord,
     current: GpuReplayChunk,
     sealed: Vec<GpuReplayChunk>,
+    recyclable: Option<GpuReplayChunk>,
     range_descriptors: Arc<Vec<crate::GpuReplayRangeDescriptor>>,
     next_range_descriptor: usize,
     ordinal: usize,
@@ -1871,6 +2226,7 @@ impl GpuReplayTracer {
             },
             current: GpuReplayChunk::empty(0, shard_start_cycle),
             sealed: Vec::new(),
+            recyclable: None,
             range_descriptors: Arc::new(Vec::new()),
             next_range_descriptor: 0,
             ordinal: 0,
@@ -1985,14 +2341,19 @@ impl GpuReplayTracer {
         }
         assert_eq!(self.current.fallback.len(), descriptor.fallback_count);
         self.next_range_descriptor += 1;
-        let next = self
-            .range_descriptors
-            .get(self.next_range_descriptor)
-            .filter(|next| next.shard_id == shard_id)
-            .map_or_else(
-                || GpuReplayChunk::empty(sequence + 1, self.shard_start_cycle),
-                |next| GpuReplayChunk::from_descriptor(next, self.shard_start_cycle),
-            );
+        let next = self.recyclable.take().map_or_else(
+            || GpuReplayChunk::empty(sequence + 1, self.shard_start_cycle),
+            |mut next| {
+                if let Some(descriptor) = self
+                    .range_descriptors
+                    .get(self.next_range_descriptor)
+                    .filter(|next| next.shard_id == shard_id)
+                {
+                    next.reset_from_descriptor(descriptor, self.shard_start_cycle);
+                }
+                next
+            },
+        );
         self.sealed.push(std::mem::replace(&mut self.current, next));
     }
 
@@ -2009,8 +2370,23 @@ impl GpuReplayTracer {
         assert_eq!(descriptors[0].sequence, 0);
         self.range_descriptors = descriptors;
         self.next_range_descriptor = 0;
-        self.current =
-            GpuReplayChunk::from_descriptor(&self.range_descriptors[0], self.shard_start_cycle);
+        let mut family_capacities = [0usize; InsnKind::COUNT];
+        let mut fallback_capacity = 0usize;
+        for descriptor in self.range_descriptors.iter() {
+            for (capacity, required) in family_capacities.iter_mut().zip(descriptor.family_counts) {
+                *capacity = (*capacity).max(required);
+            }
+            fallback_capacity = fallback_capacity.max(descriptor.fallback_count);
+        }
+        let mut first =
+            GpuReplayChunk::warmed(family_capacities, fallback_capacity, self.shard_start_cycle);
+        first.reset_from_descriptor(&self.range_descriptors[0], self.shard_start_cycle);
+        self.current = first;
+        self.recyclable = Some(GpuReplayChunk::warmed(
+            family_capacities,
+            fallback_capacity,
+            self.shard_start_cycle,
+        ));
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         if crate::aot::aot_native_diagnostic_only() {
             let descriptor = &self.range_descriptors[0];
@@ -2055,11 +2431,49 @@ impl GpuReplayTracer {
         self.syscall_witnesses.clear();
         let descriptor = &self.range_descriptors[self.next_range_descriptor];
         assert_eq!(descriptor.sequence, 0);
-        self.current = GpuReplayChunk::from_descriptor(descriptor, self.shard_start_cycle);
+        assert_eq!(
+            self.current.typed.len(),
+            InsnKind::COUNT,
+            "GPU replay shard transition lost a warmed CPU owner"
+        );
+        assert!(
+            self.recyclable.is_some(),
+            "GPU replay shard transition did not recover both warmed CPU owners"
+        );
+        self.current
+            .reset_from_descriptor(descriptor, self.shard_start_cycle);
     }
 
     pub fn take_sealed_chunks(&mut self) -> Vec<GpuReplayChunk> {
         std::mem::take(&mut self.sealed)
+    }
+
+    pub fn recycle_range(&mut self, range: crate::GpuReplayTypedRange) {
+        let mut recycled = GpuReplayChunk {
+            sequence: range.sequence,
+            shard_start_cycle: self.shard_start_cycle,
+            typed: range.typed,
+            fallback: range.fallback,
+        };
+        if self.current.typed.is_empty() {
+            let current_shard_id = self
+                .next_range_descriptor
+                .checked_sub(1)
+                .map(|index| self.range_descriptors[index].shard_id);
+            if let Some(descriptor) = self
+                .range_descriptors
+                .get(self.next_range_descriptor)
+                .filter(|descriptor| Some(descriptor.shard_id) == current_shard_id)
+            {
+                recycled.reset_from_descriptor(descriptor, self.shard_start_cycle);
+            } else {
+                recycled.reset_empty(self.shard_start_cycle);
+            }
+            self.current = recycled;
+        } else {
+            assert!(self.recyclable.is_none(), "GPU replay range recycled twice");
+            self.recyclable = Some(recycled);
+        }
     }
 
     pub fn syscall_witnesses(&self) -> &[SyscallWitness] {
@@ -4699,6 +5113,162 @@ mod tests {
             tracer.next_access_capacity,
             Some(tracer.next_access_events.capacity())
         );
+    }
+
+    #[test]
+    fn i061_l8_replay_keeps_exactly_two_warmed_nonaliasing_owners() {
+        fn fingerprint(chunk: &GpuReplayChunk) -> ((usize, usize), (usize, usize), (usize, usize)) {
+            let add = chunk.typed[InsnKind::ADD as usize].as_ref().unwrap();
+            let add_ptr = if add.is_compact() {
+                add.payload_bytes().as_ptr() as usize
+            } else {
+                add.fields()[0].as_ptr() as usize
+            };
+            (
+                (chunk.typed.as_ptr() as usize, chunk.typed.capacity()),
+                (add_ptr, add.capacity()),
+                (chunk.fallback.as_ptr() as usize, chunk.fallback.capacity()),
+            )
+        }
+
+        let mut counts = [0; InsnKind::COUNT];
+        counts[InsnKind::ADD as usize] = 2;
+        let descriptors = Arc::new(vec![
+            crate::GpuReplayRangeDescriptor {
+                shard_id: 0,
+                sequence: 0,
+                range_start: 0,
+                range_len: 3,
+                family_counts: counts,
+                fallback_count: 1,
+                unsupported_count: 0,
+            },
+            crate::GpuReplayRangeDescriptor {
+                shard_id: 0,
+                sequence: 1,
+                range_start: 3,
+                range_len: 3,
+                family_counts: counts,
+                fallback_count: 1,
+                unsupported_count: 0,
+            },
+        ]);
+        let mut tracer = GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig::default());
+        tracer.install_range_descriptors(descriptors);
+
+        let first = fingerprint(&tracer.current);
+        let second = fingerprint(tracer.recyclable.as_ref().unwrap());
+        assert_eq!(
+            (first.0.1, first.1.1, first.2.1),
+            (second.0.1, second.1.1, second.2.1)
+        );
+        assert_ne!(first.0.0, second.0.0);
+        assert_ne!(first.1.0, second.1.0);
+        assert_ne!(first.2.0, second.2.0);
+
+        let first_owner = std::mem::replace(
+            &mut tracer.current,
+            GpuReplayChunk::empty(0, FullTracer::SUBCYCLES_PER_INSN),
+        );
+        let second_owner = tracer.recyclable.take().unwrap();
+        assert!(tracer.current.typed.is_empty());
+        assert!(tracer.recyclable.is_none());
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: first_owner.sequence,
+            typed: first_owner.typed,
+            fallback: first_owner.fallback,
+        });
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: second_owner.sequence,
+            typed: second_owner.typed,
+            fallback: second_owner.fallback,
+        });
+
+        assert_eq!(fingerprint(&tracer.current), first);
+        assert_eq!(fingerprint(tracer.recyclable.as_ref().unwrap()), second);
+    }
+
+    #[test]
+    fn i061_l8_cross_shard_recycle_stays_empty_until_start_shard() {
+        fn fingerprint(chunk: &GpuReplayChunk) -> ((usize, usize), (usize, usize), (usize, usize)) {
+            let add = chunk.typed[InsnKind::ADD as usize].as_ref().unwrap();
+            let add_ptr = if add.is_compact() {
+                add.payload_bytes().as_ptr() as usize
+            } else {
+                add.fields()[0].as_ptr() as usize
+            };
+            (
+                (chunk.typed.as_ptr() as usize, chunk.typed.capacity()),
+                (add_ptr, add.capacity()),
+                (chunk.fallback.as_ptr() as usize, chunk.fallback.capacity()),
+            )
+        }
+
+        let mut counts = [0; InsnKind::COUNT];
+        counts[InsnKind::ADD as usize] = 2;
+        let descriptors = Arc::new(vec![
+            crate::GpuReplayRangeDescriptor {
+                shard_id: 0,
+                sequence: 0,
+                range_start: 0,
+                range_len: 2,
+                family_counts: counts,
+                fallback_count: 0,
+                unsupported_count: 0,
+            },
+            crate::GpuReplayRangeDescriptor {
+                shard_id: 1,
+                sequence: 0,
+                range_start: 17,
+                range_len: 2,
+                family_counts: counts,
+                fallback_count: 0,
+                unsupported_count: 0,
+            },
+        ]);
+        let mut tracer = GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig::default());
+        tracer.install_range_descriptors(descriptors);
+
+        let first_owner = std::mem::replace(
+            &mut tracer.current,
+            GpuReplayChunk::empty(0, FullTracer::SUBCYCLES_PER_INSN),
+        );
+        let second_owner = tracer.recyclable.take().unwrap();
+        let first = fingerprint(&first_owner);
+        let second = fingerprint(&second_owner);
+        tracer.next_range_descriptor = 1;
+
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: first_owner.sequence,
+            typed: first_owner.typed,
+            fallback: first_owner.fallback,
+        });
+        let add = tracer.current.typed[InsnKind::ADD as usize]
+            .as_ref()
+            .unwrap();
+        assert!(tracer.current.is_empty());
+        assert_ne!(
+            add.range_start(),
+            17,
+            "recycle initialized the next shard descriptor before start_shard"
+        );
+
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: second_owner.sequence,
+            typed: second_owner.typed,
+            fallback: second_owner.fallback,
+        });
+        tracer.start_shard();
+
+        assert_eq!(
+            tracer.current.typed[InsnKind::ADD as usize]
+                .as_ref()
+                .unwrap()
+                .range_start(),
+            17
+        );
+        assert_eq!(fingerprint(&tracer.current), first);
+        assert_eq!(fingerprint(tracer.recyclable.as_ref().unwrap()), second);
     }
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]

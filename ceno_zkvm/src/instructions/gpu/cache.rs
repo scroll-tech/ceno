@@ -630,9 +630,9 @@ pub(crate) fn set_reserved_address_capacity(reserved: u32) {
 fn initial_reserved_address_capacity(
     compact_reservation: Option<u32>,
     physical_capacity: u32,
-    debug_compare: bool,
+    _debug_compare: bool,
 ) -> Option<u32> {
-    if compact_reservation.is_none() && debug_compare {
+    if compact_reservation.is_none() {
         Some(physical_capacity)
     } else {
         None
@@ -944,8 +944,8 @@ mod reservation_tests {
     };
 
     #[test]
-    fn debug_legacy_reservation_uses_physical_capacity_and_consumes_once() {
-        let mut reservation = initial_reserved_address_capacity(None, 4096, true);
+    fn production_legacy_reservation_uses_physical_capacity_and_consumes_once() {
+        let mut reservation = initial_reserved_address_capacity(None, 4096, false);
         assert_eq!(reservation, Some(4096));
         assert_eq!(take_reserved_address_capacity(&mut reservation), 4096);
         assert!(reservation.is_none());
@@ -981,10 +981,5 @@ mod reservation_tests {
             .is_err()
         );
         assert!(reservation.is_none());
-    }
-
-    #[test]
-    fn non_debug_legacy_reservation_stays_uninstalled() {
-        assert_eq!(initial_reserved_address_capacity(None, 4096, false), None);
     }
 }

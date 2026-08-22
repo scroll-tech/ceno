@@ -1,4 +1,5 @@
 use crate::{InsnKind, StepRecord, WordAddr};
+use std::mem::MaybeUninit;
 use strum::{EnumCount, IntoEnumIterator};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,10 +31,28 @@ pub(crate) const GPU_TYPED_NATIVE_SENTINEL: u32 = 0x4750_5544;
 pub(crate) const GPU_COMPACT_NATIVE_SENTINEL: u32 = 0x4930_3530;
 const GPU_COMPACT_TAIL_PADDING: usize = 31;
 
+fn compact_source_enabled_from(
+    source_override: Option<&std::ffi::OsStr>,
+    combined_capture: bool,
+) -> bool {
+    if combined_capture {
+        return false;
+    }
+    match source_override {
+        None => true,
+        Some(value) if value == std::ffi::OsStr::new("1") => true,
+        Some(value) if value == std::ffi::OsStr::new("0") => false,
+        Some(value) => panic!("CENO_I050_COMPACT_SOURCE must be 0 or 1, got {:?}", value),
+    }
+}
+
 pub fn i050_compact_source_enabled() -> bool {
-    std::env::var_os("CENO_I050_COMPACT_SOURCE").as_deref() == Some(std::ffi::OsStr::new("1"))
-        && std::env::var_os("CENO_I049_COMBINED_CAPTURE").as_deref()
-            != Some(std::ffi::OsStr::new("1"))
+    let source_override = std::env::var_os("CENO_I050_COMPACT_SOURCE");
+    compact_source_enabled_from(
+        source_override.as_deref(),
+        std::env::var_os("CENO_I049_COMBINED_CAPTURE").as_deref()
+            == Some(std::ffi::OsStr::new("1")),
+    )
 }
 
 /// Stable, pointer-only ABI for one preallocated typed-SoA family. Native AOT
@@ -206,7 +225,10 @@ pub struct GpuTypedSoaArena {
     kind: InsnKind,
     layout: GpuTypedLayout,
     fields: Vec<Box<[u32]>>,
-    compact: Option<Box<[u8]>>,
+    // Spare compact capacity is intentionally uninitialized. Direct native
+    // emission writes complete rows before publishing them; safe readers are
+    // restricted to the initialized `len`-row prefix.
+    compact: Option<Box<[MaybeUninit<u8>]>>,
     range_start: u32,
     pc_base: u32,
     len: usize,
@@ -221,6 +243,17 @@ impl GpuTypedSoaArena {
         Self::new_with_mode(kind, rows, range_start, i050_compact_source_enabled())
     }
 
+    /// Internal compact-first replay constructor. Unlike the retained I050
+    /// environment switch, layered L7 selects the byte representation as part
+    /// of its cache identity and must never allocate the field-SoA oracle.
+    pub(crate) fn new_compact_with_range(
+        kind: InsnKind,
+        rows: usize,
+        range_start: u32,
+    ) -> Option<Self> {
+        Self::new_with_mode(kind, rows, range_start, true)
+    }
+
     fn new_with_mode(kind: InsnKind, rows: usize, range_start: u32, compact: bool) -> Option<Self> {
         let layout = gpu_typed_kind_spec(kind)?.layout;
         let fields = if compact {
@@ -231,8 +264,12 @@ impl GpuTypedSoaArena {
                 .collect()
         };
         let compact = compact.then(|| {
-            vec![0u8; rows.checked_mul(layout.compact_bytes()).unwrap() + GPU_COMPACT_TAIL_PADDING]
-                .into_boxed_slice()
+            let bytes = rows
+                .checked_mul(layout.compact_bytes())
+                .unwrap()
+                .checked_add(GPU_COMPACT_TAIL_PADDING)
+                .unwrap();
+            Box::<[u8]>::new_uninit_slice(bytes)
         });
         Some(Self {
             kind,
@@ -268,6 +305,12 @@ impl GpuTypedSoaArena {
         self.len == 0
     }
 
+    pub(crate) fn reset_for_range(&mut self, range_start: u32) {
+        self.range_start = range_start;
+        self.pc_base = 0;
+        self.len = 0;
+    }
+
     pub fn fields(&self) -> &[Box<[u32]>] {
         &self.fields
     }
@@ -278,7 +321,9 @@ impl GpuTypedSoaArena {
 
     pub fn payload_bytes(&self) -> &[u8] {
         if let Some(compact) = &self.compact {
-            &compact[..self.len * self.layout.compact_bytes()]
+            let bytes = self.len * self.layout.compact_bytes();
+            // SAFETY: `len` advances only after complete row stores.
+            unsafe { std::slice::from_raw_parts(compact.as_ptr().cast::<u8>(), bytes) }
         } else {
             &[]
         }
@@ -314,6 +359,10 @@ impl GpuTypedSoaArena {
     pub fn pc_bounds(&self) -> Result<Option<(u32, u32)>, &'static str> {
         if let Some(compact) = &self.compact {
             let stride = self.layout.compact_bytes();
+            // SAFETY: only the initialized `len`-row prefix is read.
+            let compact = unsafe {
+                std::slice::from_raw_parts(compact.as_ptr().cast::<u8>(), self.len * stride)
+            };
             let mut min = u32::MAX;
             let mut max = 0u32;
             for row in 0..self.len {
@@ -590,7 +639,11 @@ impl GpuTypedSoaArena {
         values.push((u32::from(record.future_access_mask()), 4));
         let stride = self.layout.compact_bytes();
         let destination = &mut self.compact.as_mut().unwrap()[row * stride..(row + 1) * stride];
-        destination.fill(0);
+        destination.fill(MaybeUninit::new(0));
+        // SAFETY: the complete row was initialized immediately above.
+        let destination = unsafe {
+            std::slice::from_raw_parts_mut(destination.as_mut_ptr().cast::<u8>(), stride)
+        };
         let mut bit = 0usize;
         for (value, width) in values {
             write_compact_bits(destination, bit, width, value)?;
@@ -612,6 +665,10 @@ impl GpuTypedSoaArena {
             .ok_or("compact patch ordinal precedes range")?;
         let stride = self.layout.compact_bytes();
         let compact = self.compact.as_mut().unwrap();
+        // SAFETY: deferred patching scans only the initialized `len` rows.
+        let compact = unsafe {
+            std::slice::from_raw_parts_mut(compact.as_mut_ptr().cast::<u8>(), self.len * stride)
+        };
         for row in 0..self.len {
             let record = &mut compact[row * stride..(row + 1) * stride];
             if read_compact_bits(record, 0, 18)? == local {
@@ -1169,5 +1226,29 @@ mod i017_tests {
             Some(GpuTypedLayout::R.compact_bytes() + GpuTypedLayout::Jal.compact_bytes())
         );
         assert_eq!(descriptor.fused_work_items(), Some(2));
+    }
+
+    #[test]
+    fn i061_l8_packed_source_is_default_with_explicit_soa_oracle_override() {
+        assert!(compact_source_enabled_from(None, false));
+        assert!(compact_source_enabled_from(
+            Some(std::ffi::OsStr::new("1")),
+            false
+        ));
+        assert!(!compact_source_enabled_from(
+            Some(std::ffi::OsStr::new("0")),
+            false
+        ));
+        assert!(!compact_source_enabled_from(None, true));
+        assert!(!compact_source_enabled_from(
+            Some(std::ffi::OsStr::new("1")),
+            true
+        ));
+    }
+
+    #[test]
+    #[should_panic(expected = "CENO_I050_COMPACT_SOURCE must be 0 or 1")]
+    fn i061_l8_invalid_compact_source_override_fails_closed() {
+        compact_source_enabled_from(Some(std::ffi::OsStr::new("invalid")), false);
     }
 }

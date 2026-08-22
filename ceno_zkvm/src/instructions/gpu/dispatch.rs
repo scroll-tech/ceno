@@ -5,8 +5,8 @@
 /// 2. Runs a lightweight CPU loop to collect lk and shardram without witness replay
 /// 3. Returns the GPU-generated witness + CPU-collected lk and shardram
 use ceno_emul::{
-    FullTracer, GpuReplayShardArenas, GpuReplayTypedRange, GpuTypedSoaArena, InsnKind, StepIndex,
-    StepRecord, WordAddr,
+    FullTracer, GpuReplayRangeDescriptor, GpuReplayShardArenas, GpuReplayTypedRange,
+    GpuTypedSoaArena, InsnKind, StepIndex, StepRecord, WordAddr,
 };
 use ceno_gpu::{
     Buffer,
@@ -26,7 +26,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
 };
-use strum::EnumCount;
+use strum::{EnumCount, IntoEnumIterator};
 use tracing::info_span;
 use witness::RowMajorMatrix;
 
@@ -172,6 +172,45 @@ thread_local! {
     static FUSED_ASSIGNMENTS: RefCell<HashMap<TypeId, Box<dyn Any>>> = RefCell::new(HashMap::new());
 }
 
+fn abort_fused_session() {
+    FUSED_INGRESS.with(|slot| {
+        slot.borrow_mut().take();
+    });
+    FUSED_ASSIGNMENTS.with(|cache| cache.borrow_mut().clear());
+}
+
+fn validate_fused_assignment_cache_disjoint(
+    owners: &std::collections::HashSet<TypeId>,
+) -> Result<(), ZKVMError> {
+    FUSED_ASSIGNMENTS.with(|cache| {
+        if cache.borrow().keys().any(|owner| owners.contains(owner)) {
+            Err(ZKVMError::InvalidWitness(
+                "fused assignment owner collides with cached assignment".into(),
+            ))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+fn publish_fused_assignments(finalized: Vec<(TypeId, Box<dyn Any>)>) -> Result<(), ZKVMError> {
+    FUSED_ASSIGNMENTS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if finalized.iter().any(|(owner, _)| cache.contains_key(owner)) {
+            return Err(ZKVMError::InvalidWitness(
+                "fused assignment owner collides before cache publication".into(),
+            ));
+        }
+        for (owner, assignment) in finalized {
+            let std::collections::hash_map::Entry::Vacant(entry) = cache.entry(owner) else {
+                unreachable!("fused assignment cache changed during publication")
+            };
+            entry.insert(assignment);
+        }
+        Ok(())
+    })
+}
+
 type Bb = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
 
 struct FusedRegistration {
@@ -196,6 +235,7 @@ struct FusedIngressState {
     registrations: Vec<FusedRegistration>,
     launched: bool,
     provisional: Option<ProvisionalFusedSession>,
+    drained_host_slots: [Option<GpuReplayTypedRange>; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -233,8 +273,52 @@ struct ProvisionalFusedSession {
     launcher: ceno_gpu::common::witgen::typed_ingress::FusedRangeLauncher,
     producer_bases: [usize; InsnKind::COUNT],
     expected_ranges: usize,
+    expected_descriptors: Vec<GpuReplayRangeDescriptor>,
+    compact_source: bool,
+    expected_payload_bytes: u64,
+    observed_payload_bytes: u64,
     submitted_ranges: usize,
     registration_pointers: Vec<(u64, u64)>,
+    host_slots: [Option<GpuReplayTypedRange>; 2],
+    host_fingerprints: [Option<HostOwnerFingerprint>; 2],
+    device_fingerprint: ([u64; 2], usize, u64, usize),
+    profile_enabled: bool,
+    submit_count: usize,
+    submit_elapsed: std::time::Duration,
+    recycle_wait_count: usize,
+    recycle_wait_elapsed: std::time::Duration,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HostOwnerFingerprint {
+    typed_vec: (u64, usize),
+    family_ptrs: [u64; InsnKind::COUNT],
+    family_capacities: [usize; InsnKind::COUNT],
+    fallback: (u64, usize),
+}
+
+fn host_owner_fingerprint(range: &GpuReplayTypedRange) -> HostOwnerFingerprint {
+    let mut family_ptrs = [0u64; InsnKind::COUNT];
+    let mut family_capacities = [0usize; InsnKind::COUNT];
+    for (index, arena) in range.typed.iter().enumerate() {
+        if let Some(arena) = arena {
+            family_ptrs[index] = if arena.is_compact() {
+                arena.payload_bytes().as_ptr() as u64
+            } else {
+                arena
+                    .fields()
+                    .first()
+                    .map_or(0, |field| field.as_ptr() as u64)
+            };
+            family_capacities[index] = arena.capacity();
+        }
+    }
+    HostOwnerFingerprint {
+        typed_vec: (range.typed.as_ptr() as u64, range.typed.capacity()),
+        family_ptrs,
+        family_capacities,
+        fallback: (range.fallback.as_ptr() as u64, range.fallback.capacity()),
+    }
 }
 
 pub(crate) fn install_compact_replay_arenas(arenas: GpuReplayShardArenas) {
@@ -289,71 +373,243 @@ pub(crate) fn install_compact_replay_arenas(arenas: GpuReplayShardArenas) {
             registrations: Vec::new(),
             launched: false,
             provisional: None,
+            drained_host_slots: [None, None],
         });
     });
+}
+
+fn validate_provisional_range_payload(
+    range: &GpuReplayTypedRange,
+    descriptor: &GpuReplayRangeDescriptor,
+    compact_source: bool,
+) -> Result<usize, ZKVMError> {
+    if range.sequence != descriptor.sequence {
+        return Err(ZKVMError::InvalidWitness(
+            "provisional range/descriptor sequence mismatch".into(),
+        ));
+    }
+    if !range.fallback.is_empty() {
+        return Err(ZKVMError::InvalidWitness(
+            "provisional range fallback was not drained before GPU handoff".into(),
+        ));
+    }
+    if range.typed.len() != InsnKind::COUNT {
+        return Err(ZKVMError::InvalidWitness(
+            "provisional range family vector length mismatch".into(),
+        ));
+    }
+    let mut observed = 0usize;
+    for ((kind, expected_rows), arena) in InsnKind::iter()
+        .zip(descriptor.family_counts)
+        .zip(&range.typed)
+    {
+        let actual_rows = arena.as_ref().map_or(0, GpuTypedSoaArena::len);
+        if actual_rows != expected_rows {
+            return Err(ZKVMError::InvalidWitness(
+                format!(
+                    "provisional family row mismatch: kind={kind:?}, expected={expected_rows}, observed={actual_rows}"
+                )
+                .into(),
+            ));
+        }
+        let Some(arena) = arena else {
+            continue;
+        };
+        if arena.kind() != kind || arena.range_start() != descriptor.range_start {
+            return Err(ZKVMError::InvalidWitness(
+                format!("provisional family identity mismatch: kind={kind:?}").into(),
+            ));
+        }
+        if arena.is_compact() != compact_source {
+            return Err(ZKVMError::InvalidWitness(
+                format!(
+                    "provisional family storage mode mismatch: kind={kind:?}, expected_compact={compact_source}"
+                )
+                .into(),
+            ));
+        }
+        let spec = ceno_emul::gpu_typed_kind_spec(kind).ok_or_else(|| {
+            ZKVMError::InvalidWitness(
+                format!("unsupported provisional family: kind={kind:?}").into(),
+            )
+        })?;
+        let row_bytes = if compact_source {
+            spec.layout.compact_bytes()
+        } else {
+            spec.layout.bytes()
+        };
+        let expected_bytes = expected_rows
+            .checked_mul(row_bytes)
+            .ok_or_else(|| ZKVMError::InvalidWitness("provisional family byte overflow".into()))?;
+        let actual_bytes = initialized_typed_bytes(arena).ok_or_else(|| {
+            ZKVMError::InvalidWitness("provisional initialized-prefix byte overflow".into())
+        })?;
+        if actual_bytes != expected_bytes {
+            return Err(ZKVMError::InvalidWitness(
+                format!(
+                    "provisional family byte mismatch: kind={kind:?}, expected={expected_bytes}, observed={actual_bytes}"
+                )
+                .into(),
+            ));
+        }
+        observed = observed
+            .checked_add(actual_bytes)
+            .ok_or_else(|| ZKVMError::InvalidWitness("provisional range byte overflow".into()))?;
+    }
+    let expected = descriptor
+        .fused_payload_bytes(compact_source)
+        .ok_or_else(|| {
+            ZKVMError::InvalidWitness("invalid provisional descriptor payload".into())
+        })?;
+    if observed != expected {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "provisional descriptor byte mismatch: expected={expected}, observed={observed}"
+            )
+            .into(),
+        ));
+    }
+    Ok(observed)
 }
 
 pub(crate) fn begin_provisional_fused_session(
     family_totals: [usize; InsnKind::COUNT],
     reserved_addresses: u32,
-    expected_ranges: usize,
+    expected_descriptors: &[GpuReplayRangeDescriptor],
+    compact_source: bool,
     stage_capacity: usize,
     work_capacity: usize,
     fetch: (u32, usize),
     preview: &ShardContext,
 ) -> Result<(), ZKVMError> {
-    if preview.shard_id != 0 || expected_ranges == 0 {
-        return Err(ZKVMError::InvalidWitness(
-            "provisional fused session requires nonempty shard 0".into(),
-        ));
-    }
-    FUSED_INGRESS.with(|slot| {
-        if slot.borrow().is_some() {
+    let result = (|| {
+        let expected_ranges = expected_descriptors.len();
+        if expected_ranges == 0 {
             return Err(ZKVMError::InvalidWitness(
-                "overlapping fused shard session".into(),
+                "provisional fused session requires a nonempty shard".into(),
             ));
         }
-        *slot.borrow_mut() = Some(FusedIngressState {
-            arenas: GpuReplayShardArenas::provisional(family_totals),
+        let mut descriptor_family_totals = [0usize; InsnKind::COUNT];
+        let mut expected_payload_bytes = 0u64;
+        for (sequence, descriptor) in expected_descriptors.iter().enumerate() {
+            if descriptor.shard_id
+                != u32::try_from(preview.shard_id).map_err(|_| {
+                    ZKVMError::InvalidWitness("provisional shard id exceeds u32".into())
+                })?
+                || descriptor.sequence as usize != sequence
+                || descriptor.unsupported_count != 0
+                || descriptor.checked_total()
+                    != Some(usize::try_from(descriptor.range_len).map_err(|_| {
+                        ZKVMError::InvalidWitness("provisional range length exceeds usize".into())
+                    })?)
+            {
+                return Err(ZKVMError::InvalidWitness(
+                    "invalid provisional descriptor identity or closure".into(),
+                ));
+            }
+            for (total, count) in descriptor_family_totals
+                .iter_mut()
+                .zip(descriptor.family_counts)
+            {
+                *total = total.checked_add(count).ok_or_else(|| {
+                    ZKVMError::InvalidWitness("provisional family total overflow".into())
+                })?;
+            }
+            expected_payload_bytes = expected_payload_bytes
+                .checked_add(
+                    u64::try_from(descriptor.fused_payload_bytes(compact_source).ok_or_else(
+                        || ZKVMError::InvalidWitness("invalid provisional descriptor bytes".into()),
+                    )?)
+                    .map_err(|_| {
+                        ZKVMError::InvalidWitness("provisional descriptor bytes exceed u64".into())
+                    })?,
+                )
+                .ok_or_else(|| {
+                    ZKVMError::InvalidWitness("provisional payload total overflow".into())
+                })?;
+        }
+        if descriptor_family_totals != family_totals {
+            return Err(ZKVMError::InvalidWitness(
+                "provisional descriptor family totals mismatch".into(),
+            ));
+        }
+        FUSED_INGRESS.with(|slot| {
+            if slot.borrow().is_some() {
+                return Err(ZKVMError::InvalidWitness(
+                    "overlapping fused shard session".into(),
+                ));
+            }
+            *slot.borrow_mut() = Some(FusedIngressState {
+                arenas: GpuReplayShardArenas::provisional(family_totals),
+                fetch,
+                reserved_addresses,
+                registrations: Vec::new(),
+                launched: false,
+                provisional: None,
+                drained_host_slots: [None, None],
+            });
+            Ok(())
+        })?;
+        let hal = gkr_iop::gpu::get_cuda_hal().map_err(|e| {
+            ZKVMError::InvalidWitness(
+                format!("CUDA unavailable for provisional session: {e}").into(),
+            )
+        })?;
+        let logical_steps = (preview.cur_shard_cycle_range.end
+            - preview.cur_shard_cycle_range.start)
+            / FullTracer::SUBCYCLES_PER_INSN as usize;
+        ensure_compact_shard_metadata_cached(
+            &hal,
+            preview,
+            logical_steps,
             fetch,
             reserved_addresses,
-            registrations: Vec::new(),
-            launched: false,
-            provisional: None,
+        )?;
+        super::cache::set_reserved_address_capacity(reserved_addresses);
+        let pointers = super::cache::cached_shard_pointer_fingerprint();
+        let (stage_capacity, work_capacity) =
+            fused_launcher_capacities(stage_capacity, work_capacity)?;
+        let launcher = ceno_gpu::common::witgen::typed_ingress::FusedRangeLauncher::new(
+            hal.inner.clone(),
+            stage_capacity,
+            work_capacity,
+        )
+        .map_err(|e| ZKVMError::InvalidWitness(format!("provisional launcher init: {e}").into()))?;
+        let device_fingerprint = launcher.storage_fingerprint();
+        FUSED_INGRESS.with(|slot| {
+            slot.borrow_mut().as_mut().unwrap().provisional = Some(ProvisionalFusedSession {
+                identity: ProvisionalShardIdentity::from_context(preview),
+                pointers,
+                launcher,
+                producer_bases: [0; InsnKind::COUNT],
+                expected_ranges,
+                expected_descriptors: expected_descriptors.to_vec(),
+                compact_source,
+                expected_payload_bytes,
+                observed_payload_bytes: 0,
+                submitted_ranges: 0,
+                registration_pointers: Vec::new(),
+                host_slots: [None, None],
+                host_fingerprints: [None, None],
+                device_fingerprint,
+                profile_enabled: std::env::var_os("CENO_GPU_ASSIGN_PROFILE").as_deref()
+                    == Some(std::ffi::OsStr::new("1")),
+                submit_count: 0,
+                submit_elapsed: std::time::Duration::ZERO,
+                recycle_wait_count: 0,
+                recycle_wait_elapsed: std::time::Duration::ZERO,
+            });
         });
         Ok(())
-    })?;
-    let hal = gkr_iop::gpu::get_cuda_hal().map_err(|e| {
-        ZKVMError::InvalidWitness(format!("CUDA unavailable for provisional session: {e}").into())
-    })?;
-    let logical_steps = (preview.cur_shard_cycle_range.end - preview.cur_shard_cycle_range.start)
-        / FullTracer::SUBCYCLES_PER_INSN as usize;
-    ensure_compact_shard_metadata_cached(&hal, preview, logical_steps, fetch, reserved_addresses)?;
-    super::cache::set_reserved_address_capacity(reserved_addresses);
-    let pointers = super::cache::cached_shard_pointer_fingerprint();
-    let (stage_capacity, work_capacity) = fused_launcher_capacities(stage_capacity, work_capacity)?;
-    let launcher = ceno_gpu::common::witgen::typed_ingress::FusedRangeLauncher::new(
-        hal.inner.clone(),
-        stage_capacity,
-        work_capacity,
-    )
-    .map_err(|e| ZKVMError::InvalidWitness(format!("provisional launcher init: {e}").into()))?;
-    FUSED_INGRESS.with(|slot| {
-        slot.borrow_mut().as_mut().unwrap().provisional = Some(ProvisionalFusedSession {
-            identity: ProvisionalShardIdentity::from_context(preview),
-            pointers,
-            launcher,
-            producer_bases: [0; InsnKind::COUNT],
-            expected_ranges,
-            submitted_ranges: 0,
-            registration_pointers: Vec::new(),
-        });
-    });
-    Ok(())
+    })();
+    if result.is_err() {
+        abort_fused_session();
+    }
+    result
 }
 
 pub(crate) fn seal_provisional_fused_session() -> Result<(), ZKVMError> {
-    FUSED_INGRESS.with(|slot| {
+    let result = FUSED_INGRESS.with(|slot| {
         let mut borrowed = slot.borrow_mut();
         let state = borrowed.as_mut().ok_or_else(|| {
             ZKVMError::InvalidWitness("missing provisional session at registration seal".into())
@@ -381,12 +637,31 @@ pub(crate) fn seal_provisional_fused_session() -> Result<(), ZKVMError> {
         }
         session.registration_pointers = pointers;
         Ok(())
-    })
+    });
+    if result.is_err() {
+        abort_fused_session();
+    }
+    result
 }
 
-pub(crate) fn submit_provisional_fused_range(range: &GpuReplayTypedRange) -> Result<(), ZKVMError> {
+fn initialized_typed_bytes(arena: &GpuTypedSoaArena) -> Option<usize> {
+    if arena.is_empty() {
+        return Some(0);
+    }
+    if arena.is_compact() {
+        Some(arena.payload_bytes().len())
+    } else {
+        arena.fields().iter().try_fold(0usize, |sum, _| {
+            sum.checked_add(arena.len().checked_mul(std::mem::size_of::<u32>())?)
+        })
+    }
+}
+
+pub(crate) fn submit_provisional_fused_range(
+    range: GpuReplayTypedRange,
+) -> Result<Option<GpuReplayTypedRange>, ZKVMError> {
     use ceno_gpu::common::witgen::types::MAX_TS_BITS;
-    FUSED_INGRESS.with(|slot| -> Result<(), ZKVMError> {
+    let result = FUSED_INGRESS.with(|slot| -> Result<Option<GpuReplayTypedRange>, ZKVMError> {
         let mut borrowed = slot.borrow_mut();
         let state = borrowed
             .as_mut()
@@ -398,6 +673,45 @@ pub(crate) fn submit_provisional_fused_range(range: &GpuReplayTypedRange) -> Res
         let session = state.provisional.as_mut().ok_or_else(|| {
             ZKVMError::InvalidWitness("range submitted to non-provisional session".into())
         })?;
+        let descriptor = session
+            .expected_descriptors
+            .get(session.submitted_ranges)
+            .ok_or_else(|| {
+                ZKVMError::InvalidWitness("provisional range exceeds descriptor schedule".into())
+            })?;
+        let byte_len =
+            validate_provisional_range_payload(&range, descriptor, session.compact_source)?;
+        let fill_slot = session.launcher.next_slot_index();
+        if session.host_slots[fill_slot].is_some() {
+            return Err(ZKVMError::InvalidWitness(
+                "CPU fill attempted to overwrite an unrecycled GPU slot".into(),
+            ));
+        }
+        let fingerprint = host_owner_fingerprint(&range);
+        if let Some(expected) = &session.host_fingerprints[fill_slot] {
+            if expected != &fingerprint {
+                return Err(ZKVMError::InvalidWitness(
+                    "warmed CPU owner pointer/capacity fingerprint changed".into(),
+                ));
+            }
+        } else {
+            if let Some(other) = &session.host_fingerprints[fill_slot ^ 1]
+                && (other.family_capacities != fingerprint.family_capacities
+                    || other.fallback.1 != fingerprint.fallback.1)
+            {
+                return Err(ZKVMError::InvalidWitness(
+                    "warmed CPU owners have different family capacities".into(),
+                ));
+            }
+            session.host_fingerprints[fill_slot] = Some(fingerprint);
+        }
+        if session.launcher.storage_fingerprint() != session.device_fingerprint {
+            return Err(ZKVMError::InvalidWitness(
+                "fused device pointer/capacity fingerprint changed".into(),
+            ));
+        }
+        session.host_slots[fill_slot] = Some(range);
+        let range = session.host_slots[fill_slot].as_ref().unwrap();
         if range.sequence as usize != session.submitted_ranges {
             return Err(ZKVMError::InvalidWitness(
                 "provisional range sequence mismatch".into(),
@@ -409,98 +723,151 @@ pub(crate) fn submit_provisional_fused_range(range: &GpuReplayTypedRange) -> Res
             .filter_map(|r| r.mem_max_bits)
             .next()
             .unwrap_or(32);
-        let byte_len = range
-            .typed
-            .iter()
-            .flatten()
-            .try_fold(0usize, |sum: usize, arena: &GpuTypedSoaArena| {
-                let bytes = if arena.is_compact() {
-                    arena.payload_bytes().len()
-                } else {
-                    arena.fields().iter().try_fold(0usize, |sum, field| {
-                        sum.checked_add(field.len().checked_mul(std::mem::size_of::<u32>())?)
-                    })?
-                };
-                sum.checked_add(bytes)
-            })
-            .ok_or_else(|| ZKVMError::InvalidWitness("typed range byte overflow".into()))?;
         let registrations = &state.registrations;
         let producer_bases = &mut session.producer_bases;
         let launcher = &mut session.launcher;
-        super::cache::with_cached_shard_meta(|shard| {
-            launcher.launch_filled(
-                byte_len,
-                |stage, work| {
-                    let mut cursor = 0usize;
-                    for arena in range.typed.iter().flatten() {
-                        let arena: &GpuTypedSoaArena = arena;
-                        let index = registration_for_kind[arena.kind() as usize];
-                        assert_ne!(index, usize::MAX, "missing provisional registration");
-                        let registration = &registrations[index];
-                        let mut offsets = [0u32; 13];
-                        if arena.is_compact() {
-                            offsets[0] = u32::try_from(cursor).unwrap();
-                            let bytes = arena.payload_bytes();
-                            stage[cursor..cursor + bytes.len()].copy_from_slice(bytes);
-                            cursor += bytes.len();
-                        } else {
-                            for (field_index, field) in arena.fields().iter().enumerate() {
-                                offsets[field_index] = u32::try_from(cursor).unwrap();
-                                let bytes = unsafe {
-                                    std::slice::from_raw_parts(
-                                        field.as_ptr().cast::<u8>(),
-                                        std::mem::size_of_val(field.as_ref()),
-                                    )
-                                };
-                                stage[cursor..cursor + bytes.len()].copy_from_slice(bytes);
-                                cursor += bytes.len();
-                            }
-                        }
-                        let producer_base = producer_bases[arena.kind() as usize];
-                        producer_bases[arena.kind() as usize] += arena.len();
-                        work.push(FusedRangeWorkItem {
-                            tag: registration.tag,
-                            layout: arena.layout() as u32,
-                            row_count: u32::try_from(arena.len()).unwrap(),
-                            producer_base: u32::try_from(producer_base).unwrap(),
-                            producer_total: packed_producer_total(arena.kind(), registration.rows),
-                            num_cols: u32::try_from(registration.num_cols).unwrap(),
-                            arg0: registration.arg0,
-                            arg1: registration.arg1,
-                            num_col_entries: u32::try_from(registration.num_col_entries).unwrap(),
-                            input_fields: offsets,
-                            compact_stride: if arena.is_compact() {
-                                u32::try_from(arena.layout().compact_bytes()).unwrap()
-                            } else {
-                                0
-                            },
-                            range_start: arena.range_start(),
-                            pc_base: arena.pc_base(),
-                            compact_opcode: arena.compact_opcode(),
-                            output_ptr: registration.output.as_ref().unwrap().device_ptr() as u64,
-                            cols_ptr: registration.cols.device_ptr() as u64,
-                        });
-                    }
-                    assert_eq!(cursor, stage.len(), "typed stage fill mismatch");
+        let mut compact_families = [&[][..]; InsnKind::COUNT * 13];
+        let mut family_count = 0usize;
+        let mut work = [FusedRangeWorkItem::default(); InsnKind::COUNT];
+        let mut work_count = 0usize;
+        let mut cursor = 0usize;
+        for arena in range
+            .typed
+            .iter()
+            .flatten()
+            .filter(|arena| !arena.is_empty())
+        {
+            let arena: &GpuTypedSoaArena = arena;
+            let index = registration_for_kind[arena.kind() as usize];
+            if index == usize::MAX {
+                return Err(ZKVMError::InvalidWitness(
+                    "missing provisional registration".into(),
+                ));
+            }
+            let registration = &registrations[index];
+            let mut offsets = [0u32; 13];
+            if arena.is_compact() {
+                offsets[0] = u32::try_from(cursor).map_err(|_| {
+                    ZKVMError::InvalidWitness("typed compact offset exceeds u32".into())
+                })?;
+                let bytes = arena.payload_bytes();
+                compact_families[family_count] = bytes;
+                family_count += 1;
+                cursor = cursor.checked_add(bytes.len()).ok_or_else(|| {
+                    ZKVMError::InvalidWitness("typed compact cursor overflow".into())
+                })?;
+            } else {
+                for (field_index, field) in arena.fields().iter().enumerate() {
+                    offsets[field_index] = u32::try_from(cursor).map_err(|_| {
+                        ZKVMError::InvalidWitness("typed field offset exceeds u32".into())
+                    })?;
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts(
+                            field.as_ptr().cast::<u8>(),
+                            arena
+                                .len()
+                                .checked_mul(std::mem::size_of::<u32>())
+                                .ok_or_else(|| {
+                                    ZKVMError::InvalidWitness("typed field byte overflow".into())
+                                })?,
+                        )
+                    };
+                    compact_families[family_count] = bytes;
+                    family_count += 1;
+                    cursor = cursor.checked_add(bytes.len()).ok_or_else(|| {
+                        ZKVMError::InvalidWitness("typed field cursor overflow".into())
+                    })?;
+                }
+            }
+            let producer_base = producer_bases[arena.kind() as usize];
+            producer_bases[arena.kind() as usize] += arena.len();
+            work[work_count] = FusedRangeWorkItem {
+                tag: registration.tag,
+                layout: arena.layout() as u32,
+                row_count: u32::try_from(arena.len()).unwrap(),
+                producer_base: u32::try_from(producer_base).unwrap(),
+                producer_total: packed_producer_total(arena.kind(), registration.rows),
+                num_cols: u32::try_from(registration.num_cols).unwrap(),
+                arg0: registration.arg0,
+                arg1: registration.arg1,
+                num_col_entries: u32::try_from(registration.num_col_entries).unwrap(),
+                input_fields: offsets,
+                compact_stride: if arena.is_compact() {
+                    u32::try_from(arena.layout().compact_bytes()).unwrap()
+                } else {
+                    0
                 },
+                range_start: arena.range_start(),
+                pc_base: arena.pc_base(),
+                compact_opcode: arena.compact_opcode(),
+                output_ptr: registration.output.as_ref().unwrap().device_ptr() as u64,
+                cols_ptr: registration.cols.device_ptr() as u64,
+            };
+            work_count += 1;
+        }
+        if cursor != byte_len || work_count == 0 {
+            return Err(ZKVMError::InvalidWitness(
+                "typed direct-source descriptor closure mismatch".into(),
+            ));
+        }
+        let submit_started = session.profile_enabled.then(std::time::Instant::now);
+        super::cache::with_cached_shard_meta(|shard| {
+            let launched_slot = launcher.launch_direct(
+                &compact_families[..family_count],
+                &work[..work_count],
                 (session.identity.cycle_range.start as u64)
                     .saturating_sub(FullTracer::SUBCYCLES_PER_INSN),
                 MAX_TS_BITS,
                 mem_max_bits,
                 shard,
-            )
+            )?;
+            if launched_slot != fill_slot {
+                return Err(ceno_gpu::HalError::InvalidInput(
+                    "CPU/GPU fused slot identity mismatch".into(),
+                ));
+            }
+            Ok(())
         })
         .map_err(|e| ZKVMError::InvalidWitness(format!("provisional range launch: {e}").into()))?;
+        if let Some(started) = submit_started {
+            session.submit_count += 1;
+            session.submit_elapsed += started.elapsed();
+        }
+        session.observed_payload_bytes = session
+            .observed_payload_bytes
+            .checked_add(u64::try_from(byte_len).map_err(|_| {
+                ZKVMError::InvalidWitness("provisional observed bytes exceed u64".into())
+            })?)
+            .ok_or_else(|| {
+                ZKVMError::InvalidWitness("provisional observed byte total overflow".into())
+            })?;
         session.submitted_ranges += 1;
-        Ok(())
-    })
+        let recycled = if session.submitted_ranges >= 2 {
+            let wait_started = session.profile_enabled.then(std::time::Instant::now);
+            let recyclable = session.launcher.wait_next_slot_recyclable().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("provisional slot recycle: {e}").into())
+            })?;
+            if let Some(started) = wait_started {
+                session.recycle_wait_count += 1;
+                session.recycle_wait_elapsed += started.elapsed();
+            }
+            session.host_slots[recyclable].take()
+        } else {
+            None
+        };
+        Ok(recycled)
+    });
+    if result.is_err() {
+        abort_fused_session();
+    }
+    result
 }
 
 fn finish_provisional_fused_session(shard_ctx: &ShardContext) -> Result<(), ZKVMError> {
     let mut state = FUSED_INGRESS
         .with(|slot| slot.borrow_mut().take())
         .ok_or_else(|| ZKVMError::InvalidWitness("missing provisional fused session".into()))?;
-    let session = state.provisional.take().unwrap();
+    let mut session = state.provisional.take().unwrap();
     let canonical_identity = ProvisionalShardIdentity::from_context(shard_ctx);
     if session.identity != canonical_identity {
         return Err(ZKVMError::InvalidWitness(
@@ -552,6 +919,68 @@ fn finish_provisional_fused_session(shard_ctx: &ShardContext) -> Result<(), ZKVM
             "fused ordinary allocation profile"
         );
     }
+    if session.launcher.storage_fingerprint() != session.device_fingerprint {
+        return Err(ZKVMError::InvalidWitness(
+            "fused device fingerprint changed before final drain".into(),
+        ));
+    }
+    if session.submitted_ranges != session.expected_ranges
+        || session.observed_payload_bytes != session.expected_payload_bytes
+    {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "provisional payload closure mismatch: descriptors={}, submitted={}, expected_bytes={}, observed_bytes={}",
+                session.expected_ranges,
+                session.submitted_ranges,
+                session.expected_payload_bytes,
+                session.observed_payload_bytes
+            )
+            .into(),
+        ));
+    }
+    tracing::info!(
+        shard_id = shard_ctx.shard_id,
+        source_mode = if session.compact_source {
+            "packed"
+        } else {
+            "soa"
+        },
+        descriptors = session.expected_ranges,
+        expected_payload_bytes = session.expected_payload_bytes,
+        observed_payload_bytes = session.observed_payload_bytes,
+        "fused ordinary descriptor payload closure"
+    );
+    if session.profile_enabled {
+        tracing::info!(
+            shard_id = shard_ctx.shard_id,
+            submit_count = session.submit_count,
+            submit_ms = session.submit_elapsed.as_secs_f64() * 1_000.0,
+            recycle_wait_count = session.recycle_wait_count,
+            recycle_wait_ms = session.recycle_wait_elapsed.as_secs_f64() * 1_000.0,
+            "fused ordinary submit/recycle profile"
+        );
+    }
+    if session.expected_ranges >= 2 {
+        let [Some(first), Some(second)] = &session.host_fingerprints else {
+            return Err(ZKVMError::InvalidWitness(
+                "provisional session did not observe exactly two warmed CPU owners".into(),
+            ));
+        };
+        if first.typed_vec.0 == second.typed_vec.0
+            || first
+                .family_ptrs
+                .iter()
+                .zip(second.family_ptrs)
+                .zip(first.family_capacities)
+                .any(|((&left, right), capacity)| capacity != 0 && left == right)
+            || (first.fallback.1 != 0 && first.fallback.0 == second.fallback.0)
+        {
+            return Err(ZKVMError::InvalidWitness(
+                "provisional CPU owners alias storage".into(),
+            ));
+        }
+    }
+    let drained_host_slots = std::mem::take(&mut session.host_slots);
     let launch_count = session
         .launcher
         .finish()
@@ -589,30 +1018,60 @@ fn finish_provisional_fused_session(shard_ctx: &ShardContext) -> Result<(), ZKVM
             ));
         }
     }
-    for mut registration in state.registrations.drain(..) {
-        let finalized = registration.finalize.take().unwrap()(registration.output.take().unwrap())?;
-        if FUSED_ASSIGNMENTS
-            .with(|cache| cache.borrow_mut().insert(registration.owner, finalized))
-            .is_some()
-        {
-            return Err(ZKVMError::InvalidWitness(
-                "duplicate provisional assignment owner".into(),
-            ));
-        }
+    let drained_owner_count = drained_host_slots.iter().flatten().count();
+    if drained_owner_count != 1 {
+        return Err(ZKVMError::InvalidWitness(
+            format!("provisional final drain recovered {drained_owner_count} owners, expected 1")
+                .into(),
+        ));
     }
+    let mut owners = std::collections::HashSet::with_capacity(state.registrations.len());
+    if state
+        .registrations
+        .iter()
+        .any(|registration| !owners.insert(registration.owner))
+    {
+        return Err(ZKVMError::InvalidWitness(
+            "duplicate provisional assignment owner".into(),
+        ));
+    }
+    if let Err(error) = validate_fused_assignment_cache_disjoint(&owners) {
+        abort_fused_session();
+        return Err(error);
+    }
+    let mut finalized_assignments = Vec::with_capacity(state.registrations.len());
+    for mut registration in state.registrations.drain(..) {
+        let finalized =
+            match registration.finalize.take().unwrap()(registration.output.take().unwrap()) {
+                Ok(finalized) => finalized,
+                Err(error) => {
+                    abort_fused_session();
+                    return Err(error);
+                }
+            };
+        finalized_assignments.push((registration.owner, finalized));
+    }
+    if let Err(error) = publish_fused_assignments(finalized_assignments) {
+        abort_fused_session();
+        return Err(error);
+    }
+    state.drained_host_slots = drained_host_slots;
     state.launched = true;
     FUSED_INGRESS.with(|slot| *slot.borrow_mut() = Some(state));
     Ok(())
 }
 
-pub(crate) fn clear_compact_replay_arenas() {
-    FUSED_INGRESS.with(|slot| {
+pub(crate) fn clear_compact_replay_arenas() -> [Option<GpuReplayTypedRange>; 2] {
+    let recovered = FUSED_INGRESS.with(|slot| {
         if let Some(state) = slot.borrow_mut().take() {
             assert!(state.launched, "typed replay ranges were not launched");
             assert!(
                 state.registrations.is_empty(),
                 "fused registrations were not finalized"
             );
+            state.drained_host_slots
+        } else {
+            [None, None]
         }
     });
     FUSED_ASSIGNMENTS.with(|cache| {
@@ -621,6 +1080,7 @@ pub(crate) fn clear_compact_replay_arenas() {
             "fused assignment cache not empty"
         )
     });
+    recovered
 }
 
 fn compact_shard_fetch_params() -> Option<(u32, usize)> {
@@ -897,7 +1357,11 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
             .as_ref()
             .is_some_and(|state| state.provisional.is_some())
     }) {
-        return finish_provisional_fused_session(shard_ctx);
+        let result = finish_provisional_fused_session(shard_ctx);
+        if result.is_err() {
+            abort_fused_session();
+        }
+        return result;
     }
     let Some(mut state) = FUSED_INGRESS.with(|slot| slot.borrow_mut().take()) else {
         return Ok(());
@@ -1013,87 +1477,80 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
     }
     super::cache::with_cached_shard_meta(|shard| -> Result<(), ZKVMError> {
         for range in &state.arenas.ranges {
-            let byte_len = range
-                .typed
-                .iter()
-                .flatten()
-                .try_fold(0usize, |sum: usize, arena: &GpuTypedSoaArena| {
-                    if arena.is_compact() {
-                        sum.checked_add(arena.payload_bytes().len())
-                    } else {
-                        arena.fields().iter().try_fold(sum, |sum, field| {
-                            sum.checked_add(field.len().checked_mul(std::mem::size_of::<u32>())?)
-                        })
+            let mut sources = [&[][..]; InsnKind::COUNT * 13];
+            let mut source_count = 0usize;
+            let mut work = [FusedRangeWorkItem::default(); InsnKind::COUNT];
+            let mut work_count = 0usize;
+            let mut cursor = 0usize;
+            for arena in range.typed.iter().flatten() {
+                let registration =
+                    &state.registrations[registration_for_kind[arena.kind() as usize]];
+                let mut offsets = [0u32; 13];
+                if arena.is_compact() {
+                    offsets[0] = u32::try_from(cursor).map_err(|_| {
+                        ZKVMError::InvalidWitness("compact offset exceeds u32".into())
+                    })?;
+                    let bytes = arena.payload_bytes();
+                    sources[source_count] = bytes;
+                    source_count += 1;
+                    cursor = cursor.checked_add(bytes.len()).ok_or_else(|| {
+                        ZKVMError::InvalidWitness("typed compact cursor overflow".into())
+                    })?;
+                } else {
+                    for (field_index, field) in arena.fields().iter().enumerate() {
+                        offsets[field_index] = u32::try_from(cursor).map_err(|_| {
+                            ZKVMError::InvalidWitness("typed field offset exceeds u32".into())
+                        })?;
+                        let bytes = unsafe {
+                            std::slice::from_raw_parts(
+                                field.as_ptr().cast::<u8>(),
+                                std::mem::size_of_val(field.as_ref()),
+                            )
+                        };
+                        sources[source_count] = bytes;
+                        source_count += 1;
+                        cursor = cursor.checked_add(bytes.len()).ok_or_else(|| {
+                            ZKVMError::InvalidWitness("typed field cursor overflow".into())
+                        })?;
                     }
-                })
-                .ok_or_else(|| {
-                    ZKVMError::InvalidWitness("typed range byte size overflow".into())
-                })?;
-            launcher
-                .launch_filled(
-                    byte_len,
-                    |stage, work| {
-                        let mut cursor = 0usize;
-                        for arena in range.typed.iter().flatten() {
-                            let arena: &GpuTypedSoaArena = arena;
-                            let registration =
-                                &state.registrations[registration_for_kind[arena.kind() as usize]];
-                            let mut offsets = [0u32; 13];
-                            if arena.is_compact() {
-                                offsets[0] =
-                                    u32::try_from(cursor).expect("compact offset exceeds u32");
-                                let bytes = arena.payload_bytes();
-                                stage[cursor..cursor + bytes.len()].copy_from_slice(bytes);
-                                cursor += bytes.len();
-                            } else {
-                                for (field_index, field) in arena.fields().iter().enumerate() {
-                                    offsets[field_index] = u32::try_from(cursor)
-                                        .expect("typed field offset exceeds u32");
-                                    let bytes = unsafe {
-                                        std::slice::from_raw_parts(
-                                            field.as_ptr().cast::<u8>(),
-                                            std::mem::size_of_val(field.as_ref()),
-                                        )
-                                    };
-                                    stage[cursor..cursor + bytes.len()].copy_from_slice(bytes);
-                                    cursor += bytes.len();
-                                }
-                            }
-                            let producer_base = producer_bases[arena.kind() as usize];
-                            producer_bases[arena.kind() as usize] += arena.len();
-                            work.push(FusedRangeWorkItem {
-                                tag: registration.tag,
-                                layout: arena.layout() as u32,
-                                row_count: u32::try_from(arena.len())
-                                    .expect("typed row count exceeds u32"),
-                                producer_base: u32::try_from(producer_base)
-                                    .expect("producer base exceeds u32"),
-                                producer_total: packed_producer_total(
-                                    arena.kind(),
-                                    registration.rows,
-                                ),
-                                num_cols: u32::try_from(registration.num_cols)
-                                    .expect("column count exceeds u32"),
-                                arg0: registration.arg0,
-                                arg1: registration.arg1,
-                                num_col_entries: u32::try_from(registration.num_col_entries)
-                                    .expect("column map exceeds u32"),
-                                input_fields: offsets,
-                                compact_stride: if arena.is_compact() {
-                                    u32::try_from(arena.layout().compact_bytes()).unwrap()
-                                } else {
-                                    0
-                                },
-                                range_start: arena.range_start(),
-                                pc_base: arena.pc_base(),
-                                compact_opcode: arena.compact_opcode(),
-                                output_ptr: registration.output.as_ref().unwrap().device_ptr()
-                                    as u64,
-                                cols_ptr: registration.cols.device_ptr() as u64,
-                            });
-                        }
-                        assert_eq!(cursor, stage.len(), "typed stage fill mismatch");
+                }
+                let producer_base = producer_bases[arena.kind() as usize];
+                producer_bases[arena.kind() as usize] += arena.len();
+                work[work_count] = FusedRangeWorkItem {
+                    tag: registration.tag,
+                    layout: arena.layout() as u32,
+                    row_count: u32::try_from(arena.len()).expect("typed row count exceeds u32"),
+                    producer_base: u32::try_from(producer_base).expect("producer base exceeds u32"),
+                    producer_total: packed_producer_total(arena.kind(), registration.rows),
+                    num_cols: u32::try_from(registration.num_cols)
+                        .expect("column count exceeds u32"),
+                    arg0: registration.arg0,
+                    arg1: registration.arg1,
+                    num_col_entries: u32::try_from(registration.num_col_entries)
+                        .expect("column map exceeds u32"),
+                    input_fields: offsets,
+                    compact_stride: if arena.is_compact() {
+                        u32::try_from(arena.layout().compact_bytes()).unwrap()
+                    } else {
+                        0
                     },
+                    range_start: arena.range_start(),
+                    pc_base: arena.pc_base(),
+                    compact_opcode: arena.compact_opcode(),
+                    output_ptr: registration.output.as_ref().unwrap().device_ptr() as u64,
+                    cols_ptr: registration.cols.device_ptr() as u64,
+                };
+                work_count += 1;
+            }
+            if cursor == 0 || work_count == 0 {
+                return Err(ZKVMError::InvalidWitness(
+                    "typed direct-source descriptor closure mismatch".into(),
+                ));
+            }
+            launcher
+                .launch_direct(
+                    &sources[..source_count],
+                    &work[..work_count],
                     shard_ctx.current_shard_offset_cycle(),
                     MAX_TS_BITS,
                     mem_max_bits,
@@ -1135,17 +1592,35 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
             ));
         }
     }
+    let mut owners = std::collections::HashSet::with_capacity(state.registrations.len());
+    if state
+        .registrations
+        .iter()
+        .any(|registration| !owners.insert(registration.owner))
+    {
+        return Err(ZKVMError::InvalidWitness(
+            "duplicate fused assignment cache owner".into(),
+        ));
+    }
+    if let Err(error) = validate_fused_assignment_cache_disjoint(&owners) {
+        abort_fused_session();
+        return Err(error);
+    }
+    let mut finalized_assignments = Vec::with_capacity(state.registrations.len());
     for mut registration in state.registrations.drain(..) {
         let output = registration.output.take().unwrap();
-        let finalized = registration.finalize.take().unwrap()(output)?;
-        if FUSED_ASSIGNMENTS
-            .with(|cache| cache.borrow_mut().insert(registration.owner, finalized))
-            .is_some()
-        {
-            return Err(ZKVMError::InvalidWitness(
-                "duplicate fused assignment cache owner".into(),
-            ));
-        }
+        let finalized = match registration.finalize.take().unwrap()(output) {
+            Ok(finalized) => finalized,
+            Err(error) => {
+                abort_fused_session();
+                return Err(error);
+            }
+        };
+        finalized_assignments.push((registration.owner, finalized));
+    }
+    if let Err(error) = publish_fused_assignments(finalized_assignments) {
+        abort_fused_session();
+        return Err(error);
     }
     state.launched = true;
     FUSED_INGRESS.with(|slot| *slot.borrow_mut() = Some(state));
@@ -2525,6 +3000,104 @@ mod i017_tests {
         });
     }
 
+    #[test]
+    fn i061_l8_submit_error_clears_fused_thread_local_state() {
+        abort_fused_session();
+        install_compact_replay_arenas(GpuReplayShardArenas::provisional([0; InsnKind::COUNT]));
+        FUSED_ASSIGNMENTS.with(|cache| {
+            cache.borrow_mut().insert(TypeId::of::<u8>(), Box::new(7u8));
+        });
+
+        let error = submit_provisional_fused_range(GpuReplayTypedRange {
+            sequence: 0,
+            typed: empty_typed(),
+            fallback: Vec::new(),
+        })
+        .unwrap_err();
+        assert!(format!("{error:?}").contains("non-provisional session"));
+        FUSED_INGRESS.with(|slot| assert!(slot.borrow().is_none()));
+        FUSED_ASSIGNMENTS.with(|cache| assert!(cache.borrow().is_empty()));
+    }
+
+    #[test]
+    fn i061_l8_zero_row_and_nonzero_assignment_owners_merge_and_drain() {
+        abort_fused_session();
+        let zero_row_owner = TypeId::of::<u8>();
+        let nonzero_owner = TypeId::of::<u16>();
+        FUSED_ASSIGNMENTS.with(|cache| {
+            cache
+                .borrow_mut()
+                .insert(zero_row_owner, Box::new("zero-row"));
+        });
+
+        let nonzero_owners = std::collections::HashSet::from([nonzero_owner]);
+        validate_fused_assignment_cache_disjoint(&nonzero_owners).unwrap();
+        publish_fused_assignments(vec![(nonzero_owner, Box::new(17u32))]).unwrap();
+        FUSED_ASSIGNMENTS.with(|cache| assert_eq!(cache.borrow().len(), 2));
+
+        let colliding_owners = std::collections::HashSet::from([zero_row_owner]);
+        assert!(validate_fused_assignment_cache_disjoint(&colliding_owners).is_err());
+        assert!(publish_fused_assignments(vec![(zero_row_owner, Box::new(99u32))]).is_err());
+
+        FUSED_ASSIGNMENTS.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            assert_eq!(
+                *cache
+                    .remove(&zero_row_owner)
+                    .unwrap()
+                    .downcast::<&str>()
+                    .unwrap(),
+                "zero-row"
+            );
+            assert_eq!(
+                *cache
+                    .remove(&nonzero_owner)
+                    .unwrap()
+                    .downcast::<u32>()
+                    .unwrap(),
+                17
+            );
+            assert!(cache.is_empty());
+        });
+        FUSED_ASSIGNMENTS.with(|cache| {
+            assert!(
+                cache.borrow().is_empty(),
+                "fused assignment cache not empty"
+            )
+        });
+    }
+
+    #[test]
+    fn i061_l8_direct_source_uses_only_initialized_nonempty_prefixes() {
+        let mut add = GpuTypedSoaArena::new(InsnKind::ADD, 4).unwrap();
+        add.push_step(0, &StepRecord::default()).unwrap();
+        assert_eq!(add.capacity(), 4);
+        assert_eq!(add.len(), 1);
+        let initialized_add_bytes = if add.is_compact() {
+            add.layout().compact_bytes()
+        } else {
+            add.layout().bytes()
+        };
+        assert_eq!(initialized_typed_bytes(&add), Some(initialized_add_bytes));
+
+        let sub = GpuTypedSoaArena::new(InsnKind::SUB, 7).unwrap();
+        assert_eq!(sub.capacity(), 7);
+        assert!(sub.is_empty());
+        assert_eq!(initialized_typed_bytes(&sub), Some(0));
+
+        let mut typed = empty_typed();
+        typed[InsnKind::ADD as usize] = Some(add);
+        typed[InsnKind::SUB as usize] = Some(sub);
+        let bytes = typed
+            .iter()
+            .flatten()
+            .filter(|arena| !arena.is_empty())
+            .try_fold(0usize, |sum, arena| {
+                sum.checked_add(initialized_typed_bytes(arena)?)
+            });
+        assert_eq!(bytes, Some(initialized_add_bytes));
+    }
+
     #[cfg(feature = "u16limb_circuit")]
     #[test]
     fn i050_compact_and_typed_fused_assignments_match_every_layout() {
@@ -2645,7 +3218,7 @@ mod i017_tests {
                 if compact {
                     std::env::set_var("CENO_I050_COMPACT_SOURCE", "1");
                 } else {
-                    std::env::remove_var("CENO_I050_COMPACT_SOURCE");
+                    std::env::set_var("CENO_I050_COMPACT_SOURCE", "0");
                 }
             }
             let mut typed: Vec<Option<GpuTypedSoaArena>> =
