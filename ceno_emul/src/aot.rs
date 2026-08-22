@@ -523,10 +523,38 @@ const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
 const AOT_ABI_VERSION: u32 = 78;
-const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v5";
+const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v6";
+const AOT_EMITTER_SCHEMA: &str = "replay-emitter-schema1";
 const AOT_INITIAL_EVENT_SEED: usize = 20_000_000;
 const AOT_MAX_COMPILE_JOBS: usize = 32;
 const AOT_BLOCK_COMPILE_OVERHEAD: usize = 16;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AotEmitterVariant {
+    Standard,
+    SharedPacked,
+    FullyInlinedDiagnostic,
+}
+
+impl AotEmitterVariant {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::SharedPacked => "shared-packed",
+            Self::FullyInlinedDiagnostic => "fully-inlined-diagnostic",
+        }
+    }
+}
+
+fn selected_emitter_variant(trace_style: AssemblyTraceStyle) -> AotEmitterVariant {
+    if trace_style != AssemblyTraceStyle::GpuReplayDirect {
+        return AotEmitterVariant::Standard;
+    }
+    match std::env::var("CENO_AOT_GPU_REPLAY_EMITTER").as_deref() {
+        Ok("fully-inlined-diagnostic") => AotEmitterVariant::FullyInlinedDiagnostic,
+        _ => AotEmitterVariant::SharedPacked,
+    }
+}
 
 const AOT_TRACE_MODE_NONE: u32 = 0;
 const AOT_TRACE_MODE_CALLBACK: u32 = 1;
@@ -5106,12 +5134,39 @@ fn program_digest(program: &Program) -> [u8; 32] {
     keccak256(&bytes)
 }
 
+fn emitter_digest_for(variant: AotEmitterVariant, source: &[u8]) -> [u8; 32] {
+    let mut bytes =
+        Vec::with_capacity(AOT_EMITTER_SCHEMA.len() + variant.name().len() + source.len());
+    bytes.extend_from_slice(AOT_EMITTER_SCHEMA.as_bytes());
+    bytes.extend_from_slice(variant.name().as_bytes());
+    bytes.extend_from_slice(source);
+    keccak256(&bytes)
+}
+
+fn emitter_digest(variant: AotEmitterVariant) -> [u8; 32] {
+    // The generated assembly is private to this module. Binding its complete
+    // source makes every emitter/schema revision a distinct cache authority.
+    emitter_digest_for(variant, include_bytes!("aot.rs"))
+}
+
 fn aot_cache_key(program: &Program, trace_style: AssemblyTraceStyle) -> String {
+    if trace_style != AssemblyTraceStyle::GpuReplayDirect {
+        return format!(
+            "{}-abi{}-{}-{}-{}",
+            hex_digest(&program_digest(program)),
+            AOT_ABI_VERSION,
+            trace_style.cache_name(),
+            std::env::consts::ARCH,
+            std::env::consts::OS,
+        );
+    }
+    let emitter = emitter_digest(selected_emitter_variant(trace_style));
     format!(
-        "{}-abi{}-{}-{}-{}",
+        "{}-abi{}-{}-emit{}-{}-{}",
         hex_digest(&program_digest(program)),
         AOT_ABI_VERSION,
         trace_style.cache_name(),
+        hex_digest(&emitter)[..32].to_owned(),
         std::env::consts::ARCH,
         std::env::consts::OS,
     )
@@ -5152,6 +5207,8 @@ fn cache_temporary_paths(cache_dir: &Path, process_id: u32, sequence: u64) -> [P
 
 fn encode_cache_metadata(
     key: &str,
+    emitter_variant: AotEmitterVariant,
+    emitter_digest: &[u8; 32],
     so_digest: &[u8; 32],
     roots: &[u32],
     layout_profile: &AotLayoutProfile,
@@ -5170,7 +5227,9 @@ fn encode_cache_metadata(
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{AOT_CACHE_MAGIC}\n{key}\n{}\n{event_count}\n{event_capacity}\n{roots}\n{}\n{emission_order}\n",
+        "{AOT_CACHE_MAGIC}\n{key}\n{}\n{}\n{}\n{event_count}\n{event_capacity}\n{roots}\n{}\n{emission_order}\n",
+        emitter_variant.name(),
+        hex_digest(emitter_digest),
         hex_digest(so_digest),
         hex_digest(&layout_profile.digest),
     )
@@ -5178,10 +5237,27 @@ fn encode_cache_metadata(
 
 type DecodedCacheMetadata = ([u8; 32], Vec<u32>, usize, [u8; 32], Vec<u32>);
 
-fn decode_cache_metadata(metadata: &str, expected_key: &str) -> Result<DecodedCacheMetadata> {
+fn decode_cache_metadata(
+    metadata: &str,
+    expected_key: &str,
+    expected_variant: AotEmitterVariant,
+    expected_emitter_digest: &[u8; 32],
+) -> Result<DecodedCacheMetadata> {
     let mut lines = metadata.lines();
     if lines.next() != Some(AOT_CACHE_MAGIC) || lines.next() != Some(expected_key) {
         bail!("AOT cache program/ABI identity mismatch");
+    }
+    if lines.next() != Some(expected_variant.name()) {
+        bail!("AOT cache emitter variant mismatch");
+    }
+    let emitter_digest = decode_hex_digest(
+        lines
+            .next()
+            .ok_or_else(|| anyhow!("AOT cache emitter digest missing"))?,
+        "AOT cache emitter digest",
+    )?;
+    if &emitter_digest != expected_emitter_digest {
+        bail!("AOT cache emitter digest mismatch");
     }
     let digest_hex = lines
         .next()
@@ -5306,8 +5382,10 @@ fn load_cached_aot(
         metadata.len() as u64,
         "records=1",
     );
+    let emitter_variant = selected_emitter_variant(trace_style);
+    let expected_emitter_digest = emitter_digest(emitter_variant);
     let (expected_digest, roots, event_capacity, profile_digest, emission_order) =
-        decode_cache_metadata(&metadata, key)?;
+        decode_cache_metadata(&metadata, key, emitter_variant, &expected_emitter_digest)?;
     aot_diagnostic_marker(
         "METADATA_DECODE",
         "END",
@@ -5502,10 +5580,14 @@ fn compile_cached_aot(
         );
         let digest = artifact_digest(&so_tmp)?;
         let event_capacity = next_access_capacity(event_count);
+        let emitter_variant = selected_emitter_variant(trace_style);
+        let emitter_digest = emitter_digest(emitter_variant);
         fs::write(
             &meta_tmp,
             encode_cache_metadata(
                 key,
+                emitter_variant,
+                &emitter_digest,
                 &digest,
                 &roots,
                 &layout_profile,
@@ -5689,6 +5771,7 @@ fn write_assembly_part(
         let pure_counted_block = trace_style.uses_pure_block_admission()
             && block_supports_adaptive_cost_plan(program, block)?;
         let gpu_replay_packed_block = trace_style == AssemblyTraceStyle::GpuReplayDirect
+            && selected_emitter_variant(trace_style) == AotEmitterVariant::FullyInlinedDiagnostic
             && block_supports_adaptive_cost_plan(program, block)?;
         let pure_admitted_block = pure_counted_block
             || (matches!(
@@ -7844,7 +7927,11 @@ ceno_aot_gpu_replay_emit_step:
 .L_gpu_compact_pack_1:
     movl $0, 40(%rsp)
     call .L_gpu_compact_pack_common
-    movq 8(%r9), %r8
+    movl 32(%rsp), %r8d
+    shrl $1, %r8d
+    movl 36(%rsp), %r11d
+    shlq $26, %r11
+    orq %r11, %r8
     movl 16(%rsp), %edi
     cmpl $16, %edi
     jae .L_gpu_replay_bad_compact_mask
@@ -8147,22 +8234,26 @@ fn emit_after_native_step(
         if trace_style == AssemblyTraceStyle::GpuReplayDirect {
             writeln!(file, "{gpu_replay_label}:")?;
             emit_native_trace_metadata(&mut file, pc, program, insn)?;
-            let packed_label = format!(".L_gpu_replay_packed_static_{pc:x}");
-            let replay_done = format!(".L_gpu_replay_emit_done_{pc:x}");
-            writeln!(
-                file,
-                "    cmpl $0, {AOT_CTX_GPU_REPLAY_PACKED_BLOCK_OFFSET}(%r12)"
-            )?;
-            writeln!(file, "    jne {packed_label}")?;
-            writeln!(file, "    call ceno_aot_gpu_replay_emit_step")?;
-            writeln!(file, "    jmp {replay_done}")?;
-            writeln!(file, "{packed_label}:")?;
-            let reserved = reserved_block_step.ok_or_else(|| {
-                anyhow!("packed production row at {pc:#010x} is not block-admitted")
-            })?;
-            emit_gpu_replay_register_predecessors(&mut file, program, pc, reserved)?;
-            emit_gpu_replay_packed_static_row(&mut file, program, pc, insn, reserved)?;
-            writeln!(file, "{replay_done}:")?;
+            if selected_emitter_variant(trace_style) == AotEmitterVariant::SharedPacked {
+                writeln!(file, "    call ceno_aot_gpu_replay_emit_step")?;
+            } else {
+                let packed_label = format!(".L_gpu_replay_packed_static_{pc:x}");
+                let replay_done = format!(".L_gpu_replay_emit_done_{pc:x}");
+                writeln!(
+                    file,
+                    "    cmpl $0, {AOT_CTX_GPU_REPLAY_PACKED_BLOCK_OFFSET}(%r12)"
+                )?;
+                writeln!(file, "    jne {packed_label}")?;
+                writeln!(file, "    call ceno_aot_gpu_replay_emit_step")?;
+                writeln!(file, "    jmp {replay_done}")?;
+                writeln!(file, "{packed_label}:")?;
+                let reserved = reserved_block_step.ok_or_else(|| {
+                    anyhow!("packed production row at {pc:#010x} is not block-admitted")
+                })?;
+                emit_gpu_replay_register_predecessors(&mut file, program, pc, reserved)?;
+                emit_gpu_replay_packed_static_row(&mut file, program, pc, insn, reserved)?;
+                writeln!(file, "{replay_done}:")?;
+            }
             writeln!(file, "    jmp {done_label}")?;
         }
         writeln!(file, "{callback_label}:")?;
@@ -8170,7 +8261,9 @@ fn emit_after_native_step(
         writeln!(file, "    movq %r12, %rdi")?;
         writeln!(file, "    call *%r14")?;
         writeln!(file, "{done_label}:")?;
-        if trace_style == AssemblyTraceStyle::GpuReplayDirect {
+        if trace_style == AssemblyTraceStyle::GpuReplayDirect
+            && selected_emitter_variant(trace_style) == AotEmitterVariant::FullyInlinedDiagnostic
+        {
             let packed_done = format!(".L_gpu_replay_after_done_{pc:x}");
             writeln!(
                 file,
@@ -9388,7 +9481,9 @@ fn emit_gpu_replay_packed_family_rollback(
     trace_style: AssemblyTraceStyle,
     reserved_step: Option<ReservedBlockStep>,
 ) -> Result<Option<(usize, u32)>> {
-    if trace_style != AssemblyTraceStyle::GpuReplayDirect {
+    if trace_style != AssemblyTraceStyle::GpuReplayDirect
+        || selected_emitter_variant(trace_style) != AotEmitterVariant::FullyInlinedDiagnostic
+    {
         return Ok(None);
     }
     let reserved = reserved_step.expect("packed family rollback requires admitted block metadata");
@@ -14033,10 +14128,14 @@ mod tests {
             digest: [0x5a; 32],
         };
         let artifact_digest = [0xa5; 32];
+        let emitter_variant = AotEmitterVariant::SharedPacked;
+        let emitter_digest = emitter_digest(emitter_variant);
         let event_count = 17;
         let event_capacity = next_access_capacity(event_count);
         let encoded = encode_cache_metadata(
             "test-key",
+            emitter_variant,
+            &emitter_digest,
             &artifact_digest,
             &[0x1000, 0x1008],
             &profile,
@@ -14045,12 +14144,78 @@ mod tests {
         );
 
         let (decoded_artifact, roots, capacity, profile_digest, emission_order) =
-            decode_cache_metadata(&encoded, "test-key").unwrap();
+            decode_cache_metadata(&encoded, "test-key", emitter_variant, &emitter_digest).unwrap();
         assert_eq!(decoded_artifact, artifact_digest);
         assert_eq!(roots, vec![0x1000, 0x1008]);
         assert_eq!(capacity, event_capacity);
         assert_eq!(profile_digest, profile.digest);
         assert_eq!(emission_order, profile.emission_order);
+    }
+
+    #[test]
+    fn cache_metadata_rejects_missing_or_mismatched_emitter_provenance() {
+        let profile = AotLayoutProfile {
+            block_counts: Vec::new(),
+            edge_counts: BTreeMap::new(),
+            emission_order: vec![0x1000],
+            digest: [0x5a; 32],
+        };
+        let variant = AotEmitterVariant::SharedPacked;
+        let digest = emitter_digest(variant);
+        let encoded = encode_cache_metadata(
+            "test-key",
+            variant,
+            &digest,
+            &[0xa5; 32],
+            &[0x1000],
+            &profile,
+            17,
+            next_access_capacity(17),
+        );
+
+        let missing = format!("{AOT_CACHE_MAGIC}\ntest-key\n{}\n", variant.name());
+        assert!(
+            decode_cache_metadata(&missing, "test-key", variant, &digest)
+                .unwrap_err()
+                .to_string()
+                .contains("emitter digest")
+        );
+        assert!(
+            decode_cache_metadata(
+                &encoded,
+                "test-key",
+                AotEmitterVariant::FullyInlinedDiagnostic,
+                &emitter_digest(AotEmitterVariant::FullyInlinedDiagnostic),
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("emitter variant mismatch")
+        );
+        assert!(
+            decode_cache_metadata(&encoded, "test-key", variant, &[0x3c; 32])
+                .unwrap_err()
+                .to_string()
+                .contains("emitter digest mismatch")
+        );
+    }
+
+    #[test]
+    fn emitter_revisions_and_variants_have_distinct_cache_identity() {
+        let program = program(vec![encode_rv32(InsnKind::ADDI, 0, 0, 1, 1)]);
+        let standard = emitter_digest(AotEmitterVariant::Standard);
+        let shared = emitter_digest(AotEmitterVariant::SharedPacked);
+        let inline = emitter_digest(AotEmitterVariant::FullyInlinedDiagnostic);
+
+        assert_ne!(standard, shared);
+        assert_ne!(shared, inline);
+        assert_ne!(
+            emitter_digest_for(AotEmitterVariant::SharedPacked, b"revision-a"),
+            emitter_digest_for(AotEmitterVariant::SharedPacked, b"revision-b"),
+        );
+        assert!(
+            aot_cache_key(&program, AssemblyTraceStyle::GpuReplayDirect)
+                .contains(&format!("emit{}", &hex_digest(&shared)[..32]))
+        );
     }
 
     #[test]
@@ -19594,6 +19759,80 @@ mod tests {
     }
 
     #[test]
+    fn gpu_replay_shared_packed_emitter_is_default_and_has_forward_destination_stores() {
+        let layout_program = program(vec![
+            encode_rv32(InsnKind::ADD, 1, 2, 3, 0),
+            encode_rv32(InsnKind::ADDI, 1, 0, 3, 1),
+            encode_rv32(InsnKind::BEQ, 1, 2, 0, 4),
+            encode_rv32(InsnKind::JAL, 0, 0, 3, 4),
+            encode_rv32(InsnKind::JALR, 1, 0, 3, 0),
+            encode_rv32(InsnKind::LW, 20, 0, 3, 0),
+            encode_rv32(InsnKind::SW, 20, 2, 0, 0),
+            encode_rv32(InsnKind::LUI, 0, 0, 3, 0x12000),
+        ]);
+        let blocks = partition_basic_blocks_with_roots(
+            &layout_program,
+            (0..layout_program.instructions.len())
+                .map(|index| CENO_PLATFORM.pc_base() + (index * PC_STEP_SIZE) as u32)
+                .collect(),
+        )
+        .unwrap();
+        let order = blocks
+            .iter()
+            .map(|block| block.start_pc)
+            .collect::<Vec<_>>();
+        let dir = tempfile::tempdir().unwrap();
+        let assembly_path = dir.path().join("shared-packed.S");
+        write_assembly_with_planner(
+            &assembly_path,
+            &layout_program,
+            &blocks,
+            &order,
+            AssemblyTraceStyle::GpuReplayDirect,
+            None,
+        )
+        .unwrap();
+        let assembly = fs::read_to_string(assembly_path).unwrap();
+
+        assert_eq!(
+            selected_emitter_variant(AssemblyTraceStyle::GpuReplayDirect),
+            AotEmitterVariant::SharedPacked
+        );
+        assert!(assembly.contains("ceno_aot_gpu_replay_emit_step:"));
+        assert!(assembly.contains("call ceno_aot_gpu_replay_emit_step"));
+        assert!(!assembly.contains(".L_gpu_replay_packed_static_"));
+        assert!(!assembly.contains(&format!(
+            "movl $1, {AOT_CTX_GPU_REPLAY_PACKED_BLOCK_OFFSET}(%r12)"
+        )));
+
+        let compact = assembly
+            .split(".L_gpu_replay_compact:\n")
+            .nth(1)
+            .unwrap()
+            .split(".L_gpu_replay_bad_kind:\n")
+            .next()
+            .unwrap();
+        assert!(compact.contains(".L_gpu_compact_pack_1:"));
+        assert!(compact.contains(".L_gpu_compact_pack_2:"));
+        assert!(compact.contains(".L_gpu_compact_pack_3:"));
+        assert!(compact.contains(".L_gpu_compact_pack_u:"));
+        assert!(
+            !compact.lines().any(|line| line.contains("(%r9),")),
+            "shared compact packer must not load or RMW its destination"
+        );
+        for store in [
+            "movq %r8, 0(%r9)",
+            "movq %r8, 8(%r9)",
+            "movq %r8, 16(%r9)",
+            "movq %rdx, 24(%r9)",
+        ] {
+            assert!(compact.contains(store), "missing forward store {store}");
+        }
+        assert!(!assembly.contains("StepRecord"));
+    }
+
+    #[test]
+    #[ignore = "internal diagnostic emitter; run with CENO_AOT_GPU_REPLAY_EMITTER=fully-inlined-diagnostic"]
     fn i061_l8_gpu_replay_packed_blocks_use_transactional_static_exact_stores() {
         let layout_program = program(vec![
             encode_rv32(InsnKind::ADD, 1, 2, 3, 0),
