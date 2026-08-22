@@ -222,7 +222,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
 
     // Step 4: Ensure shard metadata cached
     info_span!("ensure_shard_meta")
-        .in_scope(|| ensure_shard_metadata_cached(hal, shard_ctx, steps.len()))?;
+        .in_scope(|| ensure_shard_metadata_cached(hal, shard_ctx, steps))?;
 
     // Snapshot shared addr count before kernel (for debug comparison)
     let addr_count_before = if crate::instructions::gpu::config::is_debug_compare_enabled() {
@@ -265,8 +265,12 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     };
 
     // Step 6: Collect LK multiplicity
-    let lk_multiplicity = info_span!("gpu_lk_d2h")
-        .in_scope(|| gpu_lk_counters_to_multiplicity(gpu_result.lk_counters))?;
+    let lk_multiplicity = if gpu_result.shard_lk_accumulated {
+        Multiplicity::default()
+    } else {
+        info_span!("gpu_lk_d2h")
+            .in_scope(|| gpu_lk_counters_to_multiplicity(gpu_result.lk_counters))?
+    };
 
     // Debug LK comparison is done in the unit test instead.
 

@@ -114,7 +114,7 @@ mod tests {
         }
     }
 
-    fn verify<E: ExtensionField, I: RIVInstruction>(
+    fn verify<E: ExtensionField, I: RIVInstruction + 'static>(
         name: &'static str,
         rs1_read: u32,
         rs2_read: u32,

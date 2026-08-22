@@ -1,10 +1,11 @@
 /// GPU witgen path-control helpers: kind tags, verified-kind queries, and
 /// environment-variable disable switches.
 ///
-/// Environment variables (3 total):
+/// Path-control environment variables:
 /// - `CENO_GPU_ENABLE_WITGEN` — opt-in GPU witgen (default: CPU)
 /// - `CENO_GPU_DISABLE_WITGEN_KINDS=add,sub,keccak,...` — per-kind disable (comma-separated tags)
 /// - `CENO_GPU_DEBUG_COMPARE_WITGEN` — enable GPU vs CPU comparison for all chips (witness, LK, shard, EC)
+/// - `CENO_GPU_LEGACY_LK_ACCUM` — retain per-chip lookup allocation and D2H
 use super::dispatch::GpuWitgenKind;
 use ceno_gpu::common::{CacheLevel, get_gpu_cache_level};
 
@@ -116,5 +117,20 @@ pub(crate) fn is_debug_compare_enabled() -> bool {
     *ENABLED.get_or_init(|| {
         let val = std::env::var("CENO_GPU_DEBUG_COMPARE_WITGEN").ok();
         matches!(val.as_deref(), Some("1"))
+    })
+}
+
+/// Accumulate GPU lookup counters once per shard unless the legacy control or
+/// per-chip debug comparison requires individual multiplicities.
+pub(crate) fn is_shard_lk_accum_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        is_gpu_witgen_enabled()
+            && !is_debug_compare_enabled()
+            && !matches!(
+                std::env::var("CENO_GPU_LEGACY_LK_ACCUM").ok().as_deref(),
+                Some("1")
+            )
     })
 }

@@ -76,6 +76,87 @@ use std::{
 use strum::{EnumCount, IntoEnumIterator};
 use tracing::info_span;
 
+#[cfg(feature = "gpu")]
+macro_rules! for_each_fused_opcode {
+    ($m:ident) => {
+        $m!(AddInstruction<E>, add_config, K::Add);
+        $m!(SubInstruction<E>, sub_config, K::Sub);
+        $m!(AndInstruction<E>, and_config, K::LogicR(0));
+        $m!(OrInstruction<E>, or_config, K::LogicR(1));
+        $m!(XorInstruction<E>, xor_config, K::LogicR(2));
+        $m!(SllInstruction<E>, sll_config, K::ShiftR(0));
+        $m!(SrlInstruction<E>, srl_config, K::ShiftR(1));
+        $m!(SraInstruction<E>, sra_config, K::ShiftR(2));
+        $m!(SltInstruction<E>, slt_config, K::Slt(1));
+        $m!(SltuInstruction<E>, sltu_config, K::Slt(0));
+        $m!(MulInstruction<E>, mul_config, K::Mul(0));
+        $m!(MulhInstruction<E>, mulh_config, K::Mul(1));
+        $m!(MulhsuInstruction<E>, mulhsu_config, K::Mul(3));
+        $m!(MulhuInstruction<E>, mulhu_config, K::Mul(2));
+        $m!(DivuInstruction<E>, divu_config, K::Div(1));
+        $m!(RemuInstruction<E>, remu_config, K::Div(3));
+        $m!(DivInstruction<E>, div_config, K::Div(0));
+        $m!(RemInstruction<E>, rem_config, K::Div(2));
+        $m!(AddiInstruction<E>, addi_config, K::Addi);
+        $m!(AndiInstruction<E>, andi_config, K::LogicI(0));
+        $m!(OriInstruction<E>, ori_config, K::LogicI(1));
+        $m!(XoriInstruction<E>, xori_config, K::LogicI(2));
+        $m!(SlliInstruction<E>, slli_config, K::ShiftI(0));
+        $m!(SrliInstruction<E>, srli_config, K::ShiftI(1));
+        $m!(SraiInstruction<E>, srai_config, K::ShiftI(2));
+        $m!(SltiInstruction<E>, slti_config, K::Slti(1));
+        $m!(SltiuInstruction<E>, sltiu_config, K::Slti(0));
+        #[cfg(feature = "u16limb_circuit")]
+        $m!(LuiInstruction<E>, lui_config, K::Lui);
+        #[cfg(feature = "u16limb_circuit")]
+        $m!(AuipcInstruction<E>, auipc_config, K::Auipc);
+        $m!(BeqInstruction<E>, beq_config, K::BranchEq(1));
+        $m!(BneInstruction<E>, bne_config, K::BranchEq(0));
+        $m!(BltInstruction<E>, blt_config, K::BranchCmp(1));
+        $m!(BltuInstruction<E>, bltu_config, K::BranchCmp(0));
+        $m!(BgeInstruction<E>, bge_config, K::BranchCmp(1));
+        $m!(BgeuInstruction<E>, bgeu_config, K::BranchCmp(0));
+        $m!(JalInstruction<E>, jal_config, K::Jal);
+        $m!(JalrInstruction<E>, jalr_config, K::Jalr);
+        $m!(LwInstruction<E>, lw_config, K::Lw);
+        $m!(
+            LbInstruction<E>,
+            lb_config,
+            K::LoadSub {
+                load_width: 8,
+                is_signed: 1
+            }
+        );
+        $m!(
+            LbuInstruction<E>,
+            lbu_config,
+            K::LoadSub {
+                load_width: 8,
+                is_signed: 0
+            }
+        );
+        $m!(
+            LhInstruction<E>,
+            lh_config,
+            K::LoadSub {
+                load_width: 16,
+                is_signed: 1
+            }
+        );
+        $m!(
+            LhuInstruction<E>,
+            lhu_config,
+            K::LoadSub {
+                load_width: 16,
+                is_signed: 0
+            }
+        );
+        $m!(SwInstruction<E>, sw_config, K::Sw);
+        $m!(ShInstruction<E>, sh_config, K::Sh);
+        $m!(SbInstruction<E>, sb_config, K::Sb);
+    };
+}
+
 pub mod mmu;
 
 const ECALL_HALT: u32 = Platform::ecall_halt();
@@ -811,6 +892,30 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &());
     }
 
+    #[cfg(feature = "gpu")]
+    pub(crate) fn prepare_provisional_fused_assignments(
+        &self,
+        cs: &ZKVMConstraintSystem<E>,
+        family_counts: &[usize; InsnKind::COUNT],
+    ) -> Result<(), ZKVMError> {
+        use crate::instructions::gpu::dispatch::{self, GpuWitgenKind as K};
+        macro_rules! prepare_opcode {
+            ($instruction:ty, $config:ident, $kind:expr) => {{
+                let chip_cs = cs.get_cs(&<$instruction>::name()).unwrap();
+                let kind = <$instruction>::inst_kinds()[0];
+                dispatch::prepare_fused_assignment::<E, $instruction>(
+                    &self.$config,
+                    chip_cs.zkvm_v1_css.num_witin as usize,
+                    chip_cs.zkvm_v1_css.num_structural_witin as usize,
+                    family_counts[kind as usize],
+                    $kind,
+                )?;
+            }};
+        }
+        for_each_fused_opcode!(prepare_opcode);
+        Ok(())
+    }
+
     pub fn assign_opcode_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
@@ -863,10 +968,24 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         macro_rules! assign_opcode {
             ($instruction:ty, $config:ident) => {{
+                let n = instrunction_dispatch_ctx
+                    .record_count_for_kinds::<E, $instruction>();
+                #[cfg(feature = "gpu")]
+                let records = if instrunction_dispatch_ctx.compact_counts_active {
+                    assert!(
+                        crate::instructions::gpu::dispatch::is_fused_ingress_active(),
+                        "compact counts require an active fused GPU assignment"
+                    );
+                    &[][..]
+                } else {
+                    instrunction_dispatch_ctx
+                        .records_for_kinds::<E, $instruction>()
+                        .unwrap_or(&[])
+                };
+                #[cfg(not(feature = "gpu"))]
                 let records = instrunction_dispatch_ctx
                     .records_for_kinds::<E, $instruction>()
                     .unwrap_or(&[]);
-                let n = records.len();
                 info_span!("assign_chip", chip = %<$instruction>::name(), n)
                     .in_scope(|| {
                         witness.assign_opcode_circuit::<$instruction>(
@@ -897,6 +1016,27 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                         )
                     })?;
             }};
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            use crate::instructions::gpu::dispatch::{self, GpuWitgenKind as K};
+            macro_rules! prepare_opcode {
+                ($instruction:ty, $config:ident, $kind:expr) => {{
+                    let expected_rows =
+                        instrunction_dispatch_ctx.record_count_for_kinds::<E, $instruction>();
+                    let chip_cs = cs.get_cs(&<$instruction>::name()).unwrap();
+                    dispatch::prepare_fused_assignment::<E, $instruction>(
+                        &self.$config,
+                        chip_cs.zkvm_v1_css.num_witin as usize,
+                        chip_cs.zkvm_v1_css.num_structural_witin as usize,
+                        expected_rows,
+                        $kind,
+                    )?;
+                }};
+            }
+            for_each_fused_opcode!(prepare_opcode);
+            dispatch::launch_fused_assignments(shard_ctx)?;
         }
 
         // alu
@@ -1297,6 +1437,8 @@ pub struct InstructionDispatchCtx {
     type_to_record_buffer: HashMap<TypeId, usize>,
     insn_kinds: Vec<InsnKind>,
     circuit_record_buffers: Vec<Vec<StepIndex>>,
+    compact_record_counts: Vec<usize>,
+    compact_counts_active: bool,
     fallback_record_buffers: Vec<Vec<StepIndex>>,
     ecall_record_buffers: BTreeMap<u32, Vec<StepIndex>>,
 }
@@ -1312,6 +1454,8 @@ impl InstructionDispatchCtx {
             type_to_record_buffer,
             insn_kinds: InsnKind::iter().collect(),
             circuit_record_buffers: (0..record_buffer_count).map(|_| Vec::new()).collect(),
+            compact_record_counts: vec![0; record_buffer_count],
+            compact_counts_active: false,
             fallback_record_buffers: (0..InsnKind::COUNT).map(|_| Vec::new()).collect(),
             ecall_record_buffers: BTreeMap::new(),
         }
@@ -1340,10 +1484,41 @@ impl InstructionDispatchCtx {
         }
     }
 
+    pub fn begin_compact_ingest(&mut self) {
+        assert!(
+            !self.compact_counts_active,
+            "compact instruction counts started twice"
+        );
+        self.compact_counts_active = true;
+    }
+
+    #[inline]
+    pub fn ingest_compact_count(&mut self, kind: InsnKind, count: usize) {
+        assert!(
+            self.compact_counts_active,
+            "compact instruction count before compact ingest"
+        );
+        let record_buffer_idx = self.insn_to_record_buffer[kind as usize]
+            .unwrap_or_else(|| panic!("ordinary instruction {kind:?} has no compact GPU circuit"));
+        self.compact_record_counts[record_buffer_idx] = self.compact_record_counts
+            [record_buffer_idx]
+            .checked_add(count)
+            .expect("compact instruction count overflow");
+    }
+
+    pub fn finish_compact_ingest(&mut self) {
+        assert!(
+            self.compact_counts_active,
+            "compact instruction counts were not started"
+        );
+    }
+
     fn reset_record_buffers(&mut self) {
         for record_buffer in &mut self.circuit_record_buffers {
             record_buffer.clear();
         }
+        self.compact_record_counts.fill(0);
+        self.compact_counts_active = false;
         for record_buffer in &mut self.fallback_record_buffers {
             record_buffer.clear();
         }
@@ -1373,7 +1548,11 @@ impl InstructionDispatchCtx {
                 .sum();
         }
         if let Some(idx) = self.insn_to_record_buffer[kind as usize] {
-            self.circuit_record_buffers[idx].len()
+            if self.compact_counts_active {
+                self.compact_record_counts[idx]
+            } else {
+                self.circuit_record_buffers[idx].len()
+            }
         } else {
             self.fallback_record_buffers[kind as usize].len()
         }
@@ -1396,6 +1575,18 @@ impl InstructionDispatchCtx {
         self.circuit_record_buffers
             .get(*record_buffer_id)
             .map(|records| records.as_slice())
+    }
+
+    fn record_count_for_kinds<E: ExtensionField, I: Instruction<E> + 'static>(&self) -> usize {
+        let record_buffer_id = self
+            .type_to_record_buffer
+            .get(&TypeId::of::<I>())
+            .expect("un-registered instruction circuit");
+        if self.compact_counts_active {
+            self.compact_record_counts[*record_buffer_id]
+        } else {
+            self.circuit_record_buffers[*record_buffer_id].len()
+        }
     }
 
     fn records_for_ecall_code(&self, code: u32) -> Option<&[StepIndex]> {
@@ -1573,5 +1764,58 @@ impl<E: ExtensionField> StepCellExtractor for Rv32imConfig<E> {
 
     fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
         Some(self.shard_cost_model.clone())
+    }
+}
+
+#[cfg(test)]
+mod compact_dispatch_tests {
+    use super::*;
+    use ff_ext::BabyBearExt4;
+
+    fn one_add_buffer() -> InstructionDispatchCtx {
+        let mut kinds = vec![None; InsnKind::COUNT];
+        kinds[InsnKind::ADD as usize] = Some(0);
+        InstructionDispatchCtx::new(
+            1,
+            kinds,
+            HashMap::from([(TypeId::of::<AddInstruction<BabyBearExt4>>(), 0)]),
+        )
+    }
+
+    #[test]
+    fn compact_counts_do_not_materialize_ordinals_and_reset_per_shard() {
+        let mut dispatch = one_add_buffer();
+        dispatch.begin_compact_ingest();
+        dispatch.ingest_compact_count(InsnKind::ADD, 7);
+        dispatch.ingest_compact_count(InsnKind::ADD, 5);
+        dispatch.finish_compact_ingest();
+
+        assert_eq!(dispatch.count_kind(InsnKind::ADD), 12);
+        assert_eq!(
+            dispatch.record_count_for_kinds::<BabyBearExt4, AddInstruction<BabyBearExt4>>(),
+            12
+        );
+        assert!(dispatch.circuit_record_buffers[0].is_empty());
+
+        dispatch.begin_shard();
+        assert!(!dispatch.compact_counts_active);
+        assert_eq!(dispatch.count_kind(InsnKind::ADD), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "compact instruction counts started twice")]
+    fn compact_counts_reject_duplicate_begin() {
+        let mut dispatch = one_add_buffer();
+        dispatch.begin_compact_ingest();
+        dispatch.begin_compact_ingest();
+    }
+
+    #[test]
+    #[should_panic(expected = "compact instruction count overflow")]
+    fn compact_counts_reject_overflow() {
+        let mut dispatch = one_add_buffer();
+        dispatch.begin_compact_ingest();
+        dispatch.compact_record_counts[0] = usize::MAX;
+        dispatch.ingest_compact_count(InsnKind::ADD, 1);
     }
 }

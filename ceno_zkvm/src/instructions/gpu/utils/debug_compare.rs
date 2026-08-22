@@ -22,7 +22,7 @@ use crate::{
     tables::{ShardRamConfig, TableCircuit},
 };
 
-use crate::instructions::gpu::dispatch::{GpuWitgenKind, set_force_cpu_path};
+use crate::instructions::gpu::dispatch::{GpuWitgenKind, is_force_cpu_path, set_force_cpu_path};
 
 // ---------------------------------------------------------------------------
 // DebugCompareReport: collects failures across shards/chips, panics at the end
@@ -1081,6 +1081,43 @@ pub(crate) fn log_combined_lk_diff<E: ExtensionField>(
 
 /// Compare GPU ShardRamCircuit witness against CPU baseline.
 /// Called from `try_gpu_assign_shard_ram` when inputs are already `ShardRamInput`.
+struct ForceCpuPathGuard {
+    previous: bool,
+}
+
+impl ForceCpuPathGuard {
+    fn enter() -> Self {
+        let previous = is_force_cpu_path();
+        set_force_cpu_path(true);
+        Self { previous }
+    }
+}
+
+impl Drop for ForceCpuPathGuard {
+    fn drop(&mut self) {
+        set_force_cpu_path(self.previous);
+    }
+}
+
+fn cpu_shard_ram_baseline<E: ExtensionField>(
+    config: &ShardRamConfig<E>,
+    num_witin: usize,
+    num_structural_witin: usize,
+    steps: &[crate::tables::ShardRamInput<E>],
+) -> Result<crate::tables::RMMCollections<E::BaseField>, ZKVMError> {
+    use crate::{tables::ShardRamCircuit, witness::LkMultiplicity};
+
+    let _force_cpu = ForceCpuPathGuard::enter();
+    let mut lk_multiplicity = LkMultiplicity::default();
+    ShardRamCircuit::<E>::assign_instances_with_lk_multiplicities(
+        config,
+        num_witin,
+        num_structural_witin,
+        &mut lk_multiplicity,
+        steps,
+    )
+}
+
 pub(crate) fn debug_compare_shard_ram_witness<E: ExtensionField>(
     config: &ShardRamConfig<E>,
     num_witin: usize,
@@ -1089,19 +1126,8 @@ pub(crate) fn debug_compare_shard_ram_witness<E: ExtensionField>(
     gpu_witin: &RowMajorMatrix<E::BaseField>,
     gpu_structural: &RowMajorMatrix<E::BaseField>,
 ) {
-    use crate::tables::ShardRamCircuit;
-
-    // Force CPU path to avoid recursion:
-    // assign_instances → try_gpu → debug_compare → assign_instances → ...
-    set_force_cpu_path(true);
-    let cpu_result = ShardRamCircuit::<E>::assign_instances(
-        config,
-        num_witin,
-        num_structural_witin,
-        &[], // ShardRam doesn't use LK multiplicity
-        steps,
-    );
-    set_force_cpu_path(false);
+    // Force CPU path to avoid recursion through the GPU assignment hook.
+    let cpu_result = cpu_shard_ram_baseline(config, num_witin, num_structural_witin, steps);
 
     let cpu_witness = match cpu_result {
         Ok(w) => w,
@@ -1137,7 +1163,6 @@ pub(crate) fn debug_compare_shard_ram_witness_from_device<E: ExtensionField>(
     gpu_witin: &RowMajorMatrix<E::BaseField>,
     gpu_structural: &RowMajorMatrix<E::BaseField>,
 ) {
-    use crate::tables::ShardRamCircuit;
     use ceno_gpu::Buffer;
 
     // D2H device records → raw bytes
@@ -1168,16 +1193,8 @@ pub(crate) fn debug_compare_shard_ram_witness_from_device<E: ExtensionField>(
 
     let steps: Vec<crate::tables::ShardRamInput<E>> = writes.into_iter().chain(reads).collect();
 
-    // Force CPU path to avoid recursion
-    set_force_cpu_path(true);
-    let cpu_result = ShardRamCircuit::<E>::assign_instances(
-        config,
-        num_witin,
-        num_structural_witin,
-        &[], // ShardRam doesn't use LK multiplicity
-        &steps,
-    );
-    set_force_cpu_path(false);
+    // Force CPU path to avoid recursion through the GPU assignment hook.
+    let cpu_result = cpu_shard_ram_baseline(config, num_witin, num_structural_witin, &steps);
 
     let cpu_witness = match cpu_result {
         Ok(w) => w,
@@ -1244,5 +1261,77 @@ fn compare_witness_matrices<E: ExtensionField>(
         );
     } else {
         tracing::info!("[GPU {label} debug] match ({} elements)", gpu_data.len());
+    }
+}
+
+#[cfg(test)]
+mod shard_ram_baseline_tests {
+    use ff_ext::{BabyBearExt4, PoseidonField};
+    use p3::babybear::BabyBear;
+
+    use super::{ForceCpuPathGuard, cpu_shard_ram_baseline};
+    use crate::{
+        circuit_builder::{CircuitBuilder, ConstraintSystem},
+        instructions::gpu::dispatch::{is_force_cpu_path, set_force_cpu_path},
+        structs::{ProgramParams, RAMType},
+        tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
+    };
+
+    type E = BabyBearExt4;
+
+    #[test]
+    fn force_cpu_guard_restores_previous_state_after_error() {
+        set_force_cpu_path(false);
+        let result: Result<(), ()> = {
+            let _guard = ForceCpuPathGuard::enter();
+            assert!(is_force_cpu_path());
+            Err(())
+        };
+        assert!(result.is_err());
+        assert!(!is_force_cpu_path());
+
+        set_force_cpu_path(true);
+        {
+            let _guard = ForceCpuPathGuard::enter();
+            assert!(is_force_cpu_path());
+        }
+        assert!(is_force_cpu_path());
+        set_force_cpu_path(false);
+    }
+
+    #[test]
+    fn concrete_shard_ram_baseline_builds_both_witness_roles_without_recursion() {
+        let mut cs = ConstraintSystem::<E>::new(|| "debug shard ram CPU baseline");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let (config, _) =
+            ShardRamCircuit::<E>::build_gkr_iop_circuit(&mut cb, &ProgramParams::default())
+                .unwrap();
+        let num_witin = cb.cs.num_witin as usize;
+        let num_structural_witin = cb.cs.num_structural_witin as usize;
+
+        let record = ShardRamRecord {
+            addr: 0x1000,
+            ram_type: RAMType::Memory,
+            value: 0x2000,
+            shard: 1,
+            local_clk: 1,
+            global_clk: 10,
+            is_to_write_set: true,
+        };
+        let perm = <BabyBear as PoseidonField>::get_default_perm();
+        let steps = [ShardRamInput {
+            name: "debug_baseline_test",
+            ec_point: record.to_ec_point::<E, _>(&perm),
+            record,
+        }];
+
+        set_force_cpu_path(false);
+        let [witness, structural] =
+            cpu_shard_ram_baseline(&config, num_witin, num_structural_witin, &steps).unwrap();
+        assert!(!is_force_cpu_path());
+        assert_eq!(witness.n_col(), num_witin);
+        assert_eq!(structural.n_col(), num_structural_witin);
+        assert!(!witness.values().is_empty());
+        assert!(!structural.values().is_empty());
     }
 }

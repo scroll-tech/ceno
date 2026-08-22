@@ -151,6 +151,49 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     witness_trace_rows: Option<usize>,
     structural_cached_on_device: bool,
 ) -> u64 {
+    estimate_chip_proof_reservations(
+        composed_cs,
+        input,
+        circuit_name,
+        witness_trace_rows,
+        structural_cached_on_device,
+    )
+    .whole_peak_bytes
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChipProofMemoryReservations {
+    pub(crate) whole_peak_bytes: u64,
+    pub(crate) post_tower_bytes: u64,
+    pub(crate) releasable_bytes: u64,
+}
+
+fn split_chip_reservation(
+    whole_peak_bytes: usize,
+    post_tower_bytes: usize,
+) -> ChipProofMemoryReservations {
+    let releasable_bytes = whole_peak_bytes.checked_sub(post_tower_bytes).unwrap_or_else(|| {
+        panic!(
+            "post-tower GPU reservation exceeds whole-chip peak: post_tower={post_tower_bytes}, whole_peak={whole_peak_bytes}"
+        )
+    });
+    ChipProofMemoryReservations {
+        whole_peak_bytes: whole_peak_bytes as u64,
+        post_tower_bytes: post_tower_bytes as u64,
+        releasable_bytes: releasable_bytes as u64,
+    }
+}
+
+pub(crate) fn estimate_chip_proof_reservations<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    input: &ProofInput<'_, GpuBackend<E, PCS>>,
+    circuit_name: &str,
+    witness_trace_rows: Option<usize>,
+    structural_cached_on_device: bool,
+) -> ChipProofMemoryReservations {
     let num_var_with_rotation =
         input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
     let occupied_rows = estimate_witness_occupied_rows(composed_cs, input, witness_trace_rows);
@@ -173,6 +216,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     } else {
         0
     };
+    let rotation_temporary_bytes = estimate_rotation_bytes(composed_cs, num_var_with_rotation);
 
     // Part 4: build/prove tower
     //
@@ -200,10 +244,15 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         .trace_temporary_bytes
         .max(tower_build_stage_bytes)
         .max(tower_prove_stage_bytes)
-        .max(ecc_quark_temporary_bytes);
+        .max(ecc_quark_temporary_bytes)
+        .max(rotation_temporary_bytes);
     let resident_bytes = trace_est.trace_resident_bytes;
     let total_usage_bytes =
         resident_bytes + stage_peak_usage_bytes + ESTIMATION_SAFETY_MARGIN_BYTES;
+    let post_tower_bytes = resident_bytes
+        + ecc_quark_temporary_bytes.max(rotation_temporary_bytes)
+        + ESTIMATION_SAFETY_MARGIN_BYTES;
+    let reservations = split_chip_reservation(total_usage_bytes, post_tower_bytes);
 
     let to_mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
     tracing::debug!(
@@ -212,7 +261,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         to_mb(trace_est.trace_resident_bytes),
     );
     tracing::debug!(
-        "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_backing={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_quark={:.2}MB",
+        "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_backing={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_quark={:.2}MB, rotation={:.2}MB",
         circuit_name,
         to_mb(trace_est.trace_temporary_bytes),
         to_mb(tower_build_stage_bytes),
@@ -220,17 +269,20 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         to_mb(tower_input_backing_bytes),
         to_mb(borrowed_tower_input_bytes),
         to_mb(ecc_quark_temporary_bytes),
+        to_mb(rotation_temporary_bytes),
     );
     tracing::debug!(
-        "[mem estimate][{}] total_usage={:.2}MB (resident={:.2}MB + temporary={:.2}MB)",
+        "[mem estimate][{}] whole_peak={:.2}MB, post_tower={:.2}MB, releasable={:.2}MB (resident={:.2}MB + peak_temporary={:.2}MB)",
         circuit_name,
         to_mb(total_usage_bytes),
+        to_mb(post_tower_bytes),
+        to_mb(reservations.releasable_bytes as usize),
         to_mb(resident_bytes),
         to_mb(stage_peak_usage_bytes),
     );
     if total_usage_bytes >= 8 * 1024 * 1024 * 1024 || circuit_name.contains("Keccak") {
         tracing::info!(
-            "[mem estimate][{}] rows={}, vars={}, resident={:.2}MB, trace_tmp={:.2}MB, main_witness={:.2}MB, tower_build={:.2}MB, tower_prove={:.2}MB, ecc={:.2}MB, total={:.2}MB",
+            "[mem estimate][{}] rows={}, vars={}, resident={:.2}MB, trace_tmp={:.2}MB, main_witness={:.2}MB, tower_build={:.2}MB, tower_prove={:.2}MB, ecc={:.2}MB, rotation={:.2}MB, whole_peak={:.2}MB, post_tower={:.2}MB, releasable={:.2}MB",
             circuit_name,
             occupied_rows,
             num_var_with_rotation,
@@ -240,10 +292,49 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             to_mb(tower_build_stage_bytes),
             to_mb(tower_prove_stage_bytes),
             to_mb(ecc_quark_temporary_bytes),
+            to_mb(rotation_temporary_bytes),
             to_mb(total_usage_bytes),
+            to_mb(post_tower_bytes),
+            to_mb(reservations.releasable_bytes as usize),
         );
     }
-    total_usage_bytes as u64
+    reservations
+}
+
+fn estimate_rotation_bytes<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    num_var_with_rotation: usize,
+) -> usize {
+    let Some(layer) = composed_cs
+        .gkr_circuit
+        .as_ref()
+        .and_then(|circuit| circuit.layers.first())
+    else {
+        return 0;
+    };
+    let rotation_exprs_len = layer.rotation_exprs.1.len();
+    if rotation_exprs_len == 0 || layer.rotation_sumcheck_expression_monomial_terms.is_none() {
+        return 0;
+    }
+
+    let full_len = 1usize << num_var_with_rotation;
+    let base_elem_size = std::mem::size_of::<BB31Base>();
+    let ext_elem_size = std::mem::size_of::<BB31Ext>();
+    // `build_rotation_mles_gpu` creates one dense base-field MLE per rotation.
+    // Selector construction temporarily holds both its dense output and an eq MLE.
+    let dense_rotation_bytes = rotation_exprs_len * full_len * base_elem_size;
+    let selector_and_eq_bytes = 2 * full_len * ext_elem_size;
+    let mle_count = rotation_exprs_len * 2 + 1;
+    let mle_num_vars_list = vec![num_var_with_rotation; mle_count];
+    let max_degree = (layer.max_expr_degree + 1).max(1);
+    let sumcheck = estimate_sumcheck_memory(
+        num_var_with_rotation,
+        max_degree,
+        &mle_num_vars_list,
+        ext_elem_size,
+    );
+
+    dense_rotation_bytes + selector_and_eq_bytes + sumcheck.total_bytes
 }
 
 fn estimate_witness_occupied_rows<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
@@ -1114,4 +1205,29 @@ pub(crate) fn estimate_ecc_quark_bytes_from_num_vars(n: usize) -> usize {
     let sumcheck_est = estimate_sumcheck_memory(n, 4, &mle_num_vars_list, elem_size);
 
     base_bytes + sumcheck_est.total_bytes
+}
+
+#[cfg(test)]
+mod reservation_tests {
+    use super::*;
+
+    #[test]
+    fn phase_reservation_is_checked_difference_from_whole_peak() {
+        let reservation = split_chip_reservation(10_000, 4_000);
+        assert_eq!(reservation.whole_peak_bytes, 10_000);
+        assert_eq!(reservation.post_tower_bytes, 4_000);
+        assert_eq!(reservation.releasable_bytes, 6_000);
+    }
+
+    #[test]
+    fn equal_phase_and_whole_reservations_release_nothing() {
+        let reservation = split_chip_reservation(4_000, 4_000);
+        assert_eq!(reservation.releasable_bytes, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "post-tower GPU reservation exceeds whole-chip peak")]
+    fn post_tower_reservation_cannot_exceed_whole_peak() {
+        let _ = split_chip_reservation(3_999, 4_000);
+    }
 }

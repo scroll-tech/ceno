@@ -10,10 +10,30 @@ pub use platform::{CENO_PLATFORM, Platform};
 
 mod tracer;
 pub use tracer::{
-    Change, ChipCostSpec, FullTracer, FullTracerConfig, LatestAccesses, MemOp, NextAccessEvent,
-    NextAccessPair, NextAccessTape, NextCycleAccess, PreflightTracer, PreflightTracerConfig,
-    ReadOp, ReplayChunk, ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel,
-    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
+    Change, ChipCostSpec, CombinedPreflightCapture, CrossShardPatch, FullTracer, FullTracerConfig,
+    GpuReplayChunk, GpuReplayFallbackRecord, GpuReplayStep, GpuReplayTracer, GpuReplayTracerConfig,
+    LatestAccesses, MemOp, NextAccessEvent, NextAccessPair, NextAccessTape, NextCycleAccess,
+    PatchRamClass, PatchSourceLane, PreflightTracer, PreflightTracerConfig, ReadOp, ReplayChunk,
+    ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel, ShardPlanBuilder,
+    StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
+};
+
+mod compact_journal;
+pub use compact_journal::{
+    COMPACT_SHARD_JOURNAL_MAGIC, COMPACT_SHARD_JOURNAL_VERSION, CompactArenaDescriptorV1,
+    CompactArenaKind, CompactMemoryAccessV1, CompactOpcodeRecordV1, CompactRegisterReadV1,
+    CompactRegisterWriteV1, CompactShardJournalV1, CompactShardSummaryV1, CompactSyscallAccessV1,
+    CompactSyscallRecordV1, CompactWitnessRecordSink, JournalValidationError,
+    LegacyWitnessRecordSink, WitnessRecordSink, compact_journal_layout_fingerprint,
+};
+
+mod gpu_replay;
+mod gpu_typed_ingress;
+pub use gpu_replay::{GpuReplayRoutingError, GpuReplayShardArenas, GpuReplayTypedRange};
+pub use gpu_typed_ingress::{
+    CONTINUATION_ADDRESS_SEND_BOUND, GpuReplayRangeDescriptor, GpuShardPreview, GpuTypedKindSpec,
+    GpuTypedLayout, GpuTypedSoaArena, MAX_SPARSE_ADDRESS_SENDS_PER_STEP, gpu_typed_kind_spec,
+    i050_compact_source_enabled,
 };
 
 mod vm_state;
