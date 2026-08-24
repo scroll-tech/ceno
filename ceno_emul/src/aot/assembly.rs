@@ -2541,35 +2541,6 @@ pub(super) fn emit_after_native_step(
             reserved_block_step.map(|step| step.cycle_offset),
             trace_style,
         )?;
-        let capture_done = format!(".L_preflight_capture_done_{pc:x}");
-        writeln!(
-            file,
-            "    cmpl ${AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
-        )?;
-        writeln!(file, "    jne {capture_done}")?;
-        // Preflight block emitters carry admission state in r10/r11. Preserve
-        // it in dedicated context slots so metadata's fixed guest-stack offsets
-        // remain valid.
-        let saved = [
-            "%rax", "%rcx", "%rdx", "%rsi", "%rdi", "%r8", "%r9", "%r10", "%r11",
-        ];
-        for (index, register) in saved.into_iter().enumerate() {
-            writeln!(
-                file,
-                "    movq {register}, {}(%r12)",
-                AOT_CTX_COMBINED_SAVED_OFFSET + index * 8
-            )?;
-        }
-        emit_preflight_capture_trace_metadata(&mut file, insn)?;
-        writeln!(file, "    call ceno_aot_gpu_replay_emit_step")?;
-        for (index, register) in saved.into_iter().enumerate() {
-            writeln!(
-                file,
-                "    movq {}(%r12), {register}",
-                AOT_CTX_COMBINED_SAVED_OFFSET + index * 8
-            )?;
-        }
-        writeln!(file, "{capture_done}:")?;
         if !batched_block {
             emit_after_step(&mut file)?;
         }
@@ -2697,13 +2668,7 @@ pub(super) fn emit_sync_preflight_direct(mut file: impl Write) -> Result<()> {
         file,
         "    cmpl ${AOT_TRACE_MODE_PREFLIGHT_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
     )?;
-    writeln!(file, "    je 2f")?;
-    writeln!(
-        file,
-        "    cmpl ${AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
-    )?;
     writeln!(file, "    jne 1f")?;
-    writeln!(file, "2:")?;
     writeln!(
         file,
         "    cmpq $0, {AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET}(%r12)"
@@ -5948,38 +5913,6 @@ pub(super) fn emit_native_trace_metadata(
     Ok(())
 }
 
-pub(super) fn emit_preflight_capture_trace_metadata(
-    mut file: impl Write,
-    insn: Instruction,
-) -> Result<()> {
-    writeln!(
-        file,
-        "    movl ${:#010x}, {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12)",
-        native_trace_flags(insn)
-    )?;
-    writeln!(
-        file,
-        "    movl ${}, {AOT_CTX_TRACE_RS1_IDX_OFFSET}(%r12)",
-        insn.rs1
-    )?;
-    writeln!(
-        file,
-        "    movl ${}, {AOT_CTX_TRACE_RS2_IDX_OFFSET}(%r12)",
-        insn.rs2
-    )?;
-    writeln!(
-        file,
-        "    movl ${}, {AOT_CTX_TRACE_RD_IDX_OFFSET}(%r12)",
-        insn.rd_internal()
-    )?;
-    writeln!(
-        file,
-        "    movl ${}, {AOT_CTX_TRACE_KIND_OFFSET}(%r12)",
-        insn.kind as u8
-    )?;
-    Ok(())
-}
-
 pub(super) fn native_trace_kind(kind: u32) -> InsnKind {
     match kind as u8 {
         x if x == InsnKind::ADD as u8 => InsnKind::ADD,
@@ -6666,12 +6599,6 @@ pub(super) fn emit_native_memory(
         writeln!(file, "    movq %rax, %rcx")?;
         writeln!(file, "    shrq $32, %rcx")?;
         if emits_memory_event_early {
-            if trace_style == AssemblyTraceStyle::PreflightProductionCapture {
-                writeln!(
-                    file,
-                    "    movq %rcx, {AOT_CTX_MEMORY_PREV_STAMP_OFFSET}(%r12)"
-                )?;
-            }
             emit_preflight_direct_memory_access_cached(
                 &mut file,
                 pc,

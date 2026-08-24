@@ -91,10 +91,7 @@ pub(super) unsafe extern "C" fn aot_exec_one<T: Tracer>(
         Ok(())
     })();
 
-    if matches!(
-        context.trace_mode,
-        AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
-    ) {
+    if context.trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
         let preflight_vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
         (context.preflight_event_cursor, context.preflight_event_end) =
             preflight_vm.tracer_mut().native_next_access_ptrs();
@@ -928,9 +925,7 @@ pub(super) unsafe extern "C" fn ceno_aot_preflight_fallback_callback(
     let context = unsafe { &mut *(raw_context as *mut AotRuntimeContext) };
     let vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
     invalidate_preflight_bucket_cache(context);
-    if context.trace_mode != AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
-        && context.fallback_reason == AOT_FALLBACK_ECALL
-    {
+    if context.fallback_reason == AOT_FALLBACK_ECALL {
         let code = unsafe { *context.registers.add(Platform::reg_ecall() as usize) };
         let arg0 = unsafe { *context.registers.add(Platform::reg_arg0() as usize) };
         let arg1 = unsafe { *context.registers.add(Platform::reg_arg1() as usize) };
@@ -1252,10 +1247,6 @@ pub(super) unsafe extern "C" fn ceno_aot_preflight_direct_callback(
                 }
             }
             vm.tracer_mut().record_native_shard_split();
-            if let Err(message) = vm.tracer_mut().sync_combined_capture() {
-                LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(anyhow!(message)));
-                return AOT_STATUS_ERROR;
-            }
             if let Some(count) = specialized_count {
                 let counts = unsafe {
                     std::slice::from_raw_parts_mut(
@@ -1341,10 +1332,6 @@ pub(super) unsafe extern "C" fn ceno_aot_preflight_direct_callback(
                     .collect::<Vec<_>>();
                 vm.tracer_mut()
                     .record_admitted_native_block(&descriptor.counts, &ordered_kinds);
-                if let Err(message) = vm.tracer_mut().sync_combined_capture() {
-                    LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(anyhow!(message)));
-                    return AOT_STATUS_ERROR;
-                }
                 context.preflight_pending_block = usize::MAX;
                 AOT_STATUS_CONTINUE
             }

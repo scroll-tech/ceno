@@ -22,13 +22,12 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, CombinedPreflightCapture, CompactWitnessRecordSink, Cycle,
-    EmuContext, FullTracer, FullTracerConfig, GpuReplayShardArenas, GpuReplayTracer,
-    GpuReplayTracerConfig, GpuTypedLayout, InsnKind, IterAddresses, LegacyWitnessRecordSink,
-    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, RegIdx,
-    ReplayChunk, ReplayEngine, ReplayStopReason, StepCellExtractor, StepIndex, StepRecord,
-    SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, WitnessRecordSink, Word, WordAddr,
-    host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, CompactWitnessRecordSink, Cycle, EmuContext, FullTracer,
+    FullTracerConfig, GpuReplayShardArenas, GpuReplayTracer, GpuReplayTracerConfig, InsnKind,
+    IterAddresses, LegacyWitnessRecordSink, NextCycleAccess, Platform, PreflightTracer,
+    PreflightTracerConfig, Program, RegIdx, ReplayChunk, ReplayEngine, ReplayStopReason,
+    StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
+    WORD_SIZE, WitnessRecordSink, Word, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -175,7 +174,6 @@ pub struct EmulationResult<'a> {
     pub replay_range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
     pub replay_shard_previews: Arc<Vec<ceno_emul::GpuShardPreview>>,
     pub replay_range_capacity: usize,
-    pub combined_capture: Option<CombinedPreflightCapture>,
     pub executed_steps: usize,
     /// Native AOT executor timing, excluding shard-plan finalization and replay
     /// artifact preparation. Present on the x86_64 AOT production path.
@@ -1195,293 +1193,6 @@ struct CompactReplayShard {
     summary: ShardStepSummary,
 }
 
-enum CompactStepSource {
-    Replay(CompactStepReplay),
-    Captured(CapturedStepReplay),
-}
-
-impl CompactStepSource {
-    fn streams_owned_ranges(&self) -> bool {
-        matches!(self, Self::Replay(_))
-    }
-
-    fn next_shard(
-        &mut self,
-        stream_owned_ranges: bool,
-        on_range: impl FnMut(ceno_emul::GpuReplayTypedRange) -> Option<ceno_emul::GpuReplayTypedRange>,
-    ) -> Option<CompactReplayShard> {
-        match self {
-            Self::Replay(replay) => replay.next_shard(stream_owned_ranges, on_range),
-            Self::Captured(captured) => {
-                assert!(
-                    !stream_owned_ranges,
-                    "captured ranges are immutable oracle owners"
-                );
-                captured.next_shard(on_range)
-            }
-        }
-    }
-
-    fn recycle_ranges(&mut self, ranges: [Option<ceno_emul::GpuReplayTypedRange>; 2]) {
-        match self {
-            Self::Replay(replay) => {
-                for range in ranges.into_iter().flatten() {
-                    replay.vm.tracer_mut().recycle_range(range);
-                }
-            }
-            Self::Captured(_) => assert!(ranges.into_iter().all(|range| range.is_none())),
-        }
-    }
-}
-
-struct CapturedStepReplay {
-    ranges: std::collections::VecDeque<ceno_emul::GpuReplayTypedRange>,
-    syscall_witnesses: Vec<SyscallWitness>,
-    shard_cycle_boundaries: Arc<Vec<Cycle>>,
-    shard_previews: Arc<Vec<ceno_emul::GpuShardPreview>>,
-    range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
-    next_range_descriptor: usize,
-    next_syscall_index: u32,
-    shard_id: usize,
-    patches: Vec<ceno_emul::CrossShardPatch>,
-    initialization_events: Vec<ceno_emul::NextAccessEvent>,
-}
-
-impl CapturedStepReplay {
-    fn new(
-        capture: CombinedPreflightCapture,
-        shard_cycle_boundaries: Arc<Vec<Cycle>>,
-        shard_previews: Arc<Vec<ceno_emul::GpuShardPreview>>,
-        range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
-    ) -> Self {
-        assert_eq!(
-            shard_previews.len() + 1,
-            shard_cycle_boundaries.len(),
-            "captured shard previews do not match cycle boundaries"
-        );
-        assert_eq!(
-            capture.ranges.len(),
-            range_descriptors.len(),
-            "captured range count does not match replay descriptors"
-        );
-        for pair in capture.patches.windows(2) {
-            assert!(
-                (pair[0].source_cycle, pair[0].address, pair[0].target_cycle)
-                    < (pair[1].source_cycle, pair[1].address, pair[1].target_cycle),
-                "captured cross-shard patches are not canonical"
-            );
-        }
-        tracing::info!(
-            ranges = capture.ranges.len(),
-            syscall_witnesses = capture.syscall_witnesses.len(),
-            cross_shard_patches = capture.patches.len(),
-            initialization_events = capture.initialization_events.len(),
-            vm_executions = 1,
-            replay_executions = 0,
-            ordinary_rust_callbacks = 0,
-            "I049 captured compact source selected"
-        );
-        Self {
-            ranges: capture.ranges.into(),
-            syscall_witnesses: capture.syscall_witnesses,
-            shard_cycle_boundaries,
-            shard_previews,
-            range_descriptors,
-            next_range_descriptor: 0,
-            next_syscall_index: 0,
-            shard_id: 0,
-            patches: capture.patches,
-            initialization_events: capture.initialization_events,
-        }
-    }
-
-    fn typed_row_identity(arena: &ceno_emul::GpuTypedSoaArena, row: usize) -> (u32, Addr, Addr) {
-        let fields = arena.fields();
-        let ordinal = fields[0][row];
-        let pc_before = fields[1][row];
-        let pc_after = match arena.layout() {
-            GpuTypedLayout::Branch | GpuTypedLayout::Jal | GpuTypedLayout::Jalr => fields[3][row],
-            GpuTypedLayout::R
-            | GpuTypedLayout::I
-            | GpuTypedLayout::Load
-            | GpuTypedLayout::Store
-            | GpuTypedLayout::U => pc_before.wrapping_add(WORD_SIZE as u32),
-        };
-        (ordinal, pc_before, pc_after)
-    }
-
-    fn next_shard(
-        &mut self,
-        mut on_range: impl FnMut(
-            ceno_emul::GpuReplayTypedRange,
-        ) -> Option<ceno_emul::GpuReplayTypedRange>,
-    ) -> Option<CompactReplayShard> {
-        let cycle_range = self
-            .shard_cycle_boundaries
-            .get(self.shard_id..=self.shard_id + 1)?;
-        let preview = *self
-            .shard_previews
-            .get(self.shard_id)
-            .expect("captured shard preview missing");
-        assert_eq!(preview.shard_id as usize, self.shard_id);
-        assert_eq!(preview.cycle_start, cycle_range[0]);
-        assert_eq!(preview.cycle_end, cycle_range[1]);
-
-        let descriptor_start = self.next_range_descriptor;
-        let descriptor_end = descriptor_start
-            + self.range_descriptors[descriptor_start..]
-                .iter()
-                .take_while(|descriptor| descriptor.shard_id as usize == self.shard_id)
-                .count();
-        assert!(
-            descriptor_end > descriptor_start,
-            "captured shard has no descriptors"
-        );
-        let descriptors = &self.range_descriptors[descriptor_start..descriptor_end];
-        let mut local_range_start = 0u32;
-        for descriptor in descriptors {
-            assert_eq!(
-                descriptor.range_start, local_range_start,
-                "captured descriptor range_start is not shard-local and contiguous"
-            );
-            local_range_start = local_range_start
-                .checked_add(descriptor.range_len)
-                .expect("captured shard-local descriptor range overflow");
-        }
-
-        let mut ranges = Vec::with_capacity(descriptors.len());
-        for descriptor in descriptors {
-            let range = self.ranges.pop_front().expect("captured range missing");
-            assert_eq!(range.sequence, descriptor.sequence);
-            ranges.push(on_range(range).expect("captured range owner was not retained"));
-        }
-        self.next_range_descriptor = descriptor_end;
-
-        let first_ordinal = cycle_range[0]
-            .checked_sub(FullTracer::SUBCYCLES_PER_INSN)
-            .expect("captured shard begins before first instruction")
-            / FullTracer::SUBCYCLES_PER_INSN;
-        let first_ordinal =
-            u32::try_from(first_ordinal).expect("captured shard first global ordinal exceeds u32");
-        let expected_steps =
-            usize::try_from((cycle_range[1] - cycle_range[0]) / FullTracer::SUBCYCLES_PER_INSN)
-                .expect("captured shard step count exceeds usize");
-        assert_eq!(local_range_start as usize, expected_steps);
-
-        let mut arenas = GpuReplayShardArenas::from_ranges(ranges);
-        arenas
-            .validate_supported()
-            .unwrap_or_else(|err| panic!("captured replay routing failed: {err}"));
-        let mut first: Option<(u32, Addr)> = None;
-        let mut last: Option<(u32, Addr)> = None;
-        let mut covered_steps = 0usize;
-        for arena in arenas
-            .ranges
-            .iter()
-            .flat_map(|range| range.typed.iter().flatten())
-        {
-            covered_steps += arena.len();
-            for row in 0..arena.len() {
-                let (ordinal, pc_before, pc_after) = Self::typed_row_identity(arena, row);
-                if first.is_none_or(|value| ordinal < value.0) {
-                    first = Some((ordinal, pc_before));
-                }
-                if last.is_none_or(|value| ordinal > value.0) {
-                    last = Some((ordinal, pc_after));
-                }
-            }
-        }
-        for fallback in &arenas.fallback {
-            covered_steps += 1;
-            if first.is_none_or(|value| fallback.ordinal < value.0) {
-                first = Some((fallback.ordinal, fallback.record.pc().before.0));
-            }
-            if last.is_none_or(|value| fallback.ordinal > value.0) {
-                last = Some((fallback.ordinal, fallback.record.pc().after.0));
-            }
-        }
-        assert_eq!(covered_steps, expected_steps);
-        assert_eq!(first.map(|value| value.0), Some(first_ordinal));
-        assert_eq!(
-            last.map(|value| value.0),
-            Some(
-                first_ordinal
-                    .checked_add(u32::try_from(expected_steps - 1).unwrap())
-                    .expect("captured shard final global ordinal overflow")
-            )
-        );
-
-        let mut syscall_indices = arenas
-            .fallback
-            .iter()
-            .filter_map(|fallback| fallback.record.syscall_index())
-            .collect::<Vec<_>>();
-        syscall_indices.sort_unstable();
-        syscall_indices.dedup();
-        for (offset, index) in syscall_indices.iter().copied().enumerate() {
-            assert_eq!(
-                index,
-                self.next_syscall_index + u32::try_from(offset).unwrap(),
-                "captured syscall indexes are not globally contiguous"
-            );
-        }
-        let shard_syscall_count = syscall_indices.len();
-        assert!(shard_syscall_count <= self.syscall_witnesses.len());
-        let syscall_witnesses = self
-            .syscall_witnesses
-            .drain(..shard_syscall_count)
-            .collect::<Vec<_>>();
-        for fallback in &mut arenas.fallback {
-            fallback
-                .record
-                .remap_syscall_index(self.next_syscall_index, shard_syscall_count)
-                .unwrap_or_else(|err| panic!("captured syscall remap failed: {err}"));
-        }
-        self.next_syscall_index = self
-            .next_syscall_index
-            .checked_add(u32::try_from(shard_syscall_count).unwrap())
-            .expect("captured global syscall index overflow");
-
-        let mut fallback = std::mem::take(&mut arenas.fallback);
-        fallback.sort_unstable_by_key(|record| record.ordinal);
-        let fallback_steps = fallback.into_iter().map(|record| record.record).collect();
-        let summary = ShardStepSummary {
-            step_count: expected_steps,
-            first_cycle: cycle_range[0],
-            last_cycle: cycle_range[1] - FullTracer::SUBCYCLES_PER_INSN,
-            first_pc_before: first.unwrap().1,
-            last_pc_after: last.unwrap().1,
-            first_heap_before: preview.heap_start,
-            last_heap_after: preview.heap_end,
-            first_hint_before: preview.hint_start,
-            last_hint_after: preview.hint_end,
-        };
-        self.shard_id += 1;
-        if self.shard_id + 1 == self.shard_cycle_boundaries.len() {
-            assert!(
-                self.ranges.is_empty(),
-                "captured ranges remain after final shard"
-            );
-            assert!(
-                self.syscall_witnesses.is_empty(),
-                "captured syscall witnesses remain after final shard"
-            );
-            tracing::info!(
-                shards = self.shard_id,
-                cross_shard_patches = self.patches.len(),
-                initialization_events = self.initialization_events.len(),
-                "I049 captured compact source drained"
-            );
-        }
-        Some(CompactReplayShard {
-            arenas,
-            fallback_steps,
-            syscall_witnesses,
-            summary,
-        })
-    }
-}
-
 struct CompactStepReplay {
     vm: VMState<GpuReplayTracer>,
     shard_step_counts: Vec<usize>,
@@ -1949,24 +1660,13 @@ pub fn emulate_program<'a>(
         (256 * 1024..=1024 * 1024).contains(&replay_range_capacity),
         "CENO_GPU_REPLAY_CHUNK_CAPACITY must be between 256K and 1M records"
     );
-    let combined_capture_enabled = match std::env::var_os("CENO_I049_COMBINED_CAPTURE") {
-        None => false,
-        Some(value) if value == std::ffi::OsStr::new("1") => true,
-        Some(_) => panic!("CENO_I049_COMBINED_CAPTURE must be exactly 1 when set"),
-    };
-    #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
-    assert!(
-        !combined_capture_enabled,
-        "CENO_I049_COMBINED_CAPTURE requires the native x86_64 AOT path"
-    );
     let tracer_config = PreflightTracerConfig::new(
         true,
         multi_prover.max_cell_per_shard,
         multi_prover.max_cycle_per_shard,
     )
     .with_step_cell_extractor(step_cell_extractor)
-    .with_replay_range_capacity(replay_range_capacity)
-    .with_combined_capture(combined_capture_enabled);
+    .with_replay_range_capacity(replay_range_capacity);
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let aot_tracer_config = tracer_config.clone();
     let preflight_program = program.clone();
@@ -1982,39 +1682,25 @@ pub fn emulate_program<'a>(
     });
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    let aot_program = match (combined_capture_enabled, precompiled_aot) {
-        (false, Some(aot)) => aot,
-        (capture, _) => {
-            let aot = if capture {
-                ceno_emul::aot::AotProgram::load_or_train_preflight_capture_with_config(
-                    platform,
-                    program.clone(),
-                    hints_init
-                        .iter()
-                        .map(|record| (record.addr.into(), record.value)),
-                    aot_tracer_config,
-                )
-            } else {
-                ceno_emul::aot::AotProgram::load_or_train_preflight_with_config(
-                    platform,
-                    program.clone(),
-                    hints_init
-                        .iter()
-                        .map(|record| (record.addr.into(), record.value)),
-                    aot_tracer_config,
-                )
-            }
-            .unwrap_or_else(|err| panic!("AOT compile failed during preflight: {err}"));
-            let report = aot.report();
-            tracing::info!(
-                "AOT compile/load completed in {:?}; blocks={}, reachable_instructions={}",
-                report.compile_load_time,
-                report.block_count,
-                report.reachable_instruction_count
-            );
-            Arc::new(aot)
-        }
-    };
+    let aot_program = precompiled_aot.unwrap_or_else(|| {
+        let aot = ceno_emul::aot::AotProgram::load_or_train_preflight_with_config(
+            platform,
+            program.clone(),
+            hints_init
+                .iter()
+                .map(|record| (record.addr.into(), record.value)),
+            aot_tracer_config,
+        )
+        .unwrap_or_else(|err| panic!("AOT compile failed during preflight: {err}"));
+        let report = aot.report();
+        tracing::info!(
+            "AOT compile/load completed in {:?}; blocks={}, reachable_instructions={}",
+            report.compile_load_time,
+            report.block_count,
+            report.reachable_instruction_count
+        );
+        Arc::new(aot)
+    });
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let mut preflight_execution = None;
@@ -2231,35 +1917,7 @@ pub fn emulate_program<'a>(
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let replay_aot_program = require_fulltracer_aot_program(precompiled_fulltracer_aot);
     let tracer = vm.take_tracer();
-    let (plan_builder, next_accesses, replay_shard_previews, combined_capture) = tracer
-        .into_shard_plan_with_capture()
-        .unwrap_or_else(|err| panic!("combined preflight capture finalization failed: {err}"));
-    if let Some(capture) = combined_capture.as_ref() {
-        let typed_rows = capture
-            .ranges
-            .iter()
-            .flat_map(|range| range.typed.iter().flatten())
-            .map(ceno_emul::GpuTypedSoaArena::len)
-            .sum::<usize>();
-        let fallback_rows = capture
-            .ranges
-            .iter()
-            .map(|range| range.fallback.len())
-            .sum::<usize>();
-        tracing::info!(
-            executed_steps = insts,
-            ranges = capture.ranges.len(),
-            typed_rows,
-            fallback_rows,
-            syscall_witnesses = capture.syscall_witnesses.len(),
-            cross_shard_patches = capture.patches.len(),
-            initialization_events = capture.initialization_events.len(),
-            vm_executions = 1,
-            replay_executions = 0,
-            ordinary_rust_callbacks = 0,
-            "I049 combined preflight capture finalized"
-        );
-    }
+    let (plan_builder, next_accesses, replay_shard_previews) = tracer.into_shard_plan();
     let full_tracer_config = FullTracerConfig {
         max_step_shard: plan_builder.max_step_shard(),
     };
@@ -2290,7 +1948,6 @@ pub fn emulate_program<'a>(
         replay_range_descriptors,
         replay_shard_previews,
         replay_range_capacity,
-        combined_capture,
         executed_steps: insts,
         preflight_execution,
         full_tracer_config,
@@ -2503,10 +2160,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
     );
     #[cfg(not(feature = "gpu"))]
     let use_compact_replay = false;
-    assert!(
-        emul_result.combined_capture.is_none() || use_compact_replay,
-        "combined preflight capture requires the complete GPU compact witness path"
-    );
     let mut step_iter = (!use_compact_replay).then(|| {
         StepReplay::new(
             platform.clone(),
@@ -2522,26 +2175,17 @@ pub fn generate_witness<'a, E: ExtensionField>(
         )
     });
     let mut compact_iter = use_compact_replay.then(|| {
-        if let Some(capture) = emul_result.combined_capture.take() {
-            CompactStepSource::Captured(CapturedStepReplay::new(
-                capture,
-                emul_result.shard_cycle_boundaries.clone(),
-                emul_result.replay_shard_previews.clone(),
-                emul_result.replay_range_descriptors.clone(),
-            ))
-        } else {
-            CompactStepSource::Replay(CompactStepReplay::new(
-                platform.clone(),
-                program.clone(),
-                init_mem_state,
-                shard_ctx_builder.next_accesses(),
-                emul_result.shard_cycle_boundaries.clone(),
-                emul_result.replay_range_descriptors.clone(),
-                emul_result.replay_range_capacity,
-                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-                emul_result.replay_aot_program.clone(),
-            ))
-        }
+        CompactStepReplay::new(
+            platform.clone(),
+            program.clone(),
+            init_mem_state,
+            shard_ctx_builder.next_accesses(),
+            emul_result.shard_cycle_boundaries.clone(),
+            emul_result.replay_range_descriptors.clone(),
+            emul_result.replay_range_capacity,
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            emul_result.replay_aot_program.clone(),
+        )
     });
     let mut current_compact_shard: Option<CompactReplayShard> = None;
     std::iter::from_fn(move || {
@@ -2579,7 +2223,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             }
             let (mut shard_ctx, shard_summary) = if let Some(compact_iter) = compact_iter.as_mut() {
                 instrunction_dispatch_ctx.begin_compact_ingest();
-                let stream_owned_ranges = compact_iter.streams_owned_ranges();
+                let stream_owned_ranges = true;
                 #[cfg(feature = "gpu")]
                 if stream_owned_ranges
                     && !{
@@ -2899,10 +2543,12 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .in_scope(|| {
                         let recycled =
                             crate::instructions::gpu::dispatch::clear_compact_replay_arenas();
-                        compact_iter
+                        let compact_iter = compact_iter
                             .as_mut()
-                            .expect("compact owner recovery missing source")
-                            .recycle_ranges(recycled);
+                            .expect("compact owner recovery missing source");
+                        for range in recycled.into_iter().flatten() {
+                            compact_iter.vm.tracer_mut().recycle_range(range);
+                        }
                     });
             }
 
@@ -4652,9 +4298,8 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder};
     use ceno_emul::{
-        CENO_PLATFORM, CombinedPreflightCapture, Cycle, FullTracer, GpuReplayFallbackRecord,
-        GpuReplayRangeDescriptor, GpuReplayTypedRange, GpuShardPreview, InsnKind, NextCycleAccess,
-        StepIndex, StepRecord, SyscallWitness,
+        CENO_PLATFORM, Cycle, FullTracer, GpuReplayRangeDescriptor, GpuShardPreview, InsnKind,
+        NextCycleAccess, StepIndex, StepRecord, SyscallWitness,
     };
     use itertools::Itertools;
     use std::sync::Arc;
@@ -4849,87 +4494,6 @@ mod tests {
                 expected_shard,
             );
         }
-    }
-
-    #[test]
-    fn i049_captured_two_shards_use_boundary_global_ordinal_not_local_range_start() {
-        let empty_typed = || (0..InsnKind::COUNT).map(|_| None).collect::<Vec<_>>();
-        let step = |cycle: Cycle, pc: u32| StepRecord::new_ecall_any(cycle, pc.into());
-        let capture = CombinedPreflightCapture {
-            ranges: vec![
-                GpuReplayTypedRange {
-                    sequence: 0,
-                    typed: empty_typed(),
-                    fallback: vec![GpuReplayFallbackRecord {
-                        ordinal: 0,
-                        record: step(4, 0x1000),
-                    }],
-                },
-                GpuReplayTypedRange {
-                    sequence: 0,
-                    typed: empty_typed(),
-                    fallback: vec![GpuReplayFallbackRecord {
-                        ordinal: 1,
-                        record: step(8, 0x1004),
-                    }],
-                },
-            ],
-            syscall_witnesses: Vec::new(),
-            patches: Vec::new(),
-            initialization_events: Vec::new(),
-        };
-        let descriptors = Arc::new(vec![
-            GpuReplayRangeDescriptor {
-                shard_id: 0,
-                sequence: 0,
-                range_start: 0,
-                range_len: 1,
-                family_counts: [0; InsnKind::COUNT],
-                fallback_count: 1,
-                unsupported_count: 0,
-            },
-            GpuReplayRangeDescriptor {
-                shard_id: 1,
-                sequence: 0,
-                // Descriptor ordinals restart for each shard.
-                range_start: 0,
-                range_len: 1,
-                family_counts: [0; InsnKind::COUNT],
-                fallback_count: 1,
-                unsupported_count: 0,
-            },
-        ]);
-        let boundaries = Arc::new(vec![4, 8, 12]);
-        let previews = Arc::new(vec![
-            GpuShardPreview {
-                shard_id: 0,
-                cycle_start: 4,
-                cycle_end: 8,
-                heap_start: CENO_PLATFORM.heap.start,
-                heap_end: CENO_PLATFORM.heap.start,
-                hint_start: CENO_PLATFORM.hints.start,
-                hint_end: CENO_PLATFORM.hints.start,
-            },
-            GpuShardPreview {
-                shard_id: 1,
-                cycle_start: 8,
-                cycle_end: 12,
-                heap_start: CENO_PLATFORM.heap.start,
-                heap_end: CENO_PLATFORM.heap.start,
-                hint_start: CENO_PLATFORM.hints.start,
-                hint_end: CENO_PLATFORM.hints.start,
-            },
-        ]);
-        let mut replay =
-            super::CapturedStepReplay::new(capture, boundaries, previews, descriptors.clone());
-
-        let shard0 = replay.next_shard(|range| Some(range)).unwrap();
-        let shard1 = replay.next_shard(|range| Some(range)).unwrap();
-        assert_eq!(descriptors[1].range_start, 0);
-        assert_eq!(shard0.summary.first_cycle, 4);
-        assert_eq!(shard1.summary.first_cycle, 8);
-        assert_eq!(shard1.fallback_steps[0].cycle(), 8);
-        assert!(replay.next_shard(|range| Some(range)).is_none());
     }
 
     fn test_single_shard_ctx_helper(

@@ -474,10 +474,6 @@ fn aot_runtime_context_offsets_match_assembly_constants() {
         AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET
     );
     assert_eq!(
-        std::mem::offset_of!(AotRuntimeContext, preflight_num_chips),
-        AOT_CTX_PREFLIGHT_NUM_CHIPS_OFFSET
-    );
-    assert_eq!(
         std::mem::offset_of!(AotRuntimeContext, preflight_pending_block),
         AOT_CTX_PREFLIGHT_PENDING_BLOCK_OFFSET
     );
@@ -714,10 +710,6 @@ fn aot_runtime_context_offsets_match_assembly_constants() {
         AOT_CTX_GPU_REPLAY_ORDINARY_CALLBACKS_OFFSET
     );
     assert_eq!(
-        std::mem::offset_of!(AotRuntimeContext, combined_saved),
-        AOT_CTX_COMBINED_SAVED_OFFSET
-    );
-    assert_eq!(
         std::mem::offset_of!(AotRuntimeContext, layered_rs1_previous),
         AOT_CTX_LAYERED_RS1_PREVIOUS_OFFSET
     );
@@ -752,47 +744,12 @@ fn aot_runtime_context_offsets_match_assembly_constants() {
 }
 
 #[test]
-fn next_cost_bucket_ceiling_matches_ceil_log2_transitions() {
-    assert_eq!(next_cost_bucket_ceiling(0), 1);
-    assert_eq!(next_cost_bucket_ceiling(1), 2);
-    assert_eq!(next_cost_bucket_ceiling(2), 3);
-    assert_eq!(next_cost_bucket_ceiling(3), 5);
-    assert_eq!(next_cost_bucket_ceiling(4), 5);
-    assert_eq!(next_cost_bucket_ceiling(5), 9);
-}
-
-#[test]
 fn invalid_instruction_errors_if_executed() {
     let program = Arc::new(program(vec![encode_rv32(InsnKind::INVALID, 0, 0, 0, 0)]));
     let aot = AotProgram::compile_fulltracer(program.clone()).unwrap();
     let mut vm = VMState::new(CENO_PLATFORM.clone(), program);
     let err = aot.run_to_halt(&mut vm, 1).unwrap_err().to_string();
     assert!(err.contains("IllegalInstruction"));
-}
-
-#[test]
-fn native_opcode_family_keeps_unsupported_ops_on_slow_path() {
-    assert_eq!(
-        native_opcode_family(InsnKind::ADD),
-        Some(NativeOpcodeFamily::Compute)
-    );
-    assert_eq!(
-        native_opcode_family(InsnKind::BEQ),
-        Some(NativeOpcodeFamily::ControlFlow)
-    );
-    assert_eq!(
-        native_opcode_family(InsnKind::LW),
-        Some(NativeOpcodeFamily::Memory)
-    );
-    assert_eq!(
-        native_opcode_family(InsnKind::DIV),
-        Some(NativeOpcodeFamily::Compute)
-    );
-    assert_eq!(
-        native_opcode_family(InsnKind::JALR),
-        Some(NativeOpcodeFamily::ControlFlow)
-    );
-    assert_eq!(native_opcode_family(InsnKind::ECALL), None);
 }
 
 #[test]
@@ -939,266 +896,6 @@ fn aot_preflight_direct_grows_tape_without_changing_accesses() {
     );
 }
 
-#[test]
-fn i049_preflight_capture_emits_exact_typed_ranges_and_sparse_halt() {
-    let program = Arc::new(program(vec![
-        encode_rv32(InsnKind::ADDI, 0, 0, 1, 7),
-        encode_rv32(InsnKind::ADDI, 1, 0, 2, 5),
-        encode_rv32(
-            InsnKind::ADDI,
-            0,
-            0,
-            Platform::reg_ecall().into(),
-            Platform::ecall_halt() as i32,
-        ),
-        encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-    ]));
-    let mut reference = VMState::<crate::FullTracer>::new_with_tracer_config(
-        CENO_PLATFORM.clone(),
-        program.clone(),
-        crate::FullTracerConfig { max_step_shard: 64 },
-    );
-    while reference.next_step_record().unwrap().is_some() {}
-
-    let config = crate::PreflightTracerConfig::new(true, 2, Cycle::MAX)
-        .with_step_cell_extractor(Arc::new(OneCellPerNativeStep))
-        .with_replay_range_capacity(2)
-        .with_combined_capture(true);
-    let aot = AotProgram::compile_preflight_capture_with_extra_roots(program.clone(), Vec::new())
-        .unwrap();
-    let mut vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
-        CENO_PLATFORM.clone(),
-        program,
-        config,
-    );
-    let report = aot.run_to_halt(&mut vm, 16).unwrap();
-    assert_eq!(report.executed_steps, 4);
-    let (ranges, syscalls, patches, initialization) =
-        vm.tracer_mut().finish_combined_capture_for_test().unwrap();
-    let patch_events = patches
-        .iter()
-        .map(|patch| {
-            crate::NextAccessEvent::new(patch.source_cycle, patch.target_cycle, patch.address)
-        })
-        .chain(initialization.iter().copied())
-        .collect::<Vec<_>>();
-    reference
-        .tracer_mut()
-        .apply_next_access_events_for_test(&patch_events);
-    assert_eq!(ranges.len(), 3);
-    assert!(ranges.iter().all(|range| {
-        range
-            .typed
-            .iter()
-            .flatten()
-            .map(crate::GpuTypedSoaArena::len)
-            .sum::<usize>()
-            + range.fallback.len()
-            <= 2
-    }));
-    let ordinary = ranges
-        .iter()
-        .flat_map(|range| range.typed.iter().flatten())
-        .map(crate::GpuTypedSoaArena::len)
-        .sum::<usize>();
-    let fallback = ranges
-        .iter()
-        .map(|range| range.fallback.len())
-        .sum::<usize>();
-    assert_eq!((ordinary, fallback, syscalls.len()), (3, 1, 0));
-    let ordinals = ranges
-        .iter()
-        .filter_map(|range| range.typed[InsnKind::ADDI as usize].as_ref())
-        .flat_map(|arena| arena.fields()[0][..arena.len()].iter().copied())
-        .collect::<Vec<_>>();
-    assert_eq!(ordinals, [0, 1, 2]);
-    assert_eq!(ranges.last().unwrap().fallback[0].ordinal, 3);
-    let expected = reference.tracer().recorded_steps();
-    for range in ranges {
-        for arena in range.typed.iter().flatten() {
-            for row in 0..arena.len() {
-                let ordinal = arena.fields()[0][row] as usize;
-                let mut oracle = crate::GpuTypedSoaArena::new(arena.kind(), 1).unwrap();
-                oracle
-                    .push_step(ordinal as u32, &expected[ordinal])
-                    .unwrap();
-                for (field_index, (actual, expected)) in
-                    arena.fields().iter().zip(oracle.fields()).enumerate()
-                {
-                    assert_eq!(
-                        actual[row],
-                        expected[0],
-                        "typed word mismatch kind={:?} ordinal={ordinal} field={field_index}",
-                        arena.kind()
-                    );
-                }
-            }
-        }
-        for fallback in &range.fallback {
-            assert_eq!(
-                fallback.record, expected[fallback.ordinal as usize],
-                "sparse record mismatch ordinal={}",
-                fallback.ordinal
-            );
-        }
-    }
-}
-
-#[test]
-fn i049_preflight_capture_matches_fulltracer_for_memory_and_multishard_reuse() {
-    let base = CENO_PLATFORM.heap.start;
-    let program = Arc::new(program(vec![
-        encode_rv32(InsnKind::LW, 20, 0, 1, 0),
-        encode_rv32(InsnKind::SW, 20, 1, 0, 4),
-        encode_rv32(InsnKind::LW, 20, 0, 2, 4),
-        encode_rv32(InsnKind::LW, 20, 0, 3, 0),
-        encode_rv32(
-            InsnKind::ADDI,
-            0,
-            0,
-            Platform::reg_ecall().into(),
-            Platform::ecall_halt() as i32,
-        ),
-        encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-    ]));
-    let mut reference = VMState::<crate::FullTracer>::new_with_tracer_config(
-        CENO_PLATFORM.clone(),
-        program.clone(),
-        crate::FullTracerConfig { max_step_shard: 64 },
-    );
-    reference.init_register_unsafe(20, base);
-    reference.init_memory(ByteAddr(base).waddr(), 37);
-    reference.init_memory(ByteAddr(base + 4).waddr(), 0);
-    while reference.next_step_record().unwrap().is_some() {}
-
-    let config = crate::PreflightTracerConfig::new(true, 1, Cycle::MAX)
-        .with_step_cell_extractor(Arc::new(OneCellPerNativeStep))
-        .with_replay_range_capacity(2)
-        .with_combined_capture(true);
-    let roots = (1..6)
-        .map(|index| CENO_PLATFORM.pc_base() + index * PC_STEP_SIZE as u32)
-        .collect();
-    let aot =
-        AotProgram::compile_preflight_capture_with_extra_roots(program.clone(), roots).unwrap();
-    let mut vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
-        CENO_PLATFORM.clone(),
-        program,
-        config,
-    );
-    vm.init_register_unsafe(20, base);
-    vm.init_memory(ByteAddr(base).waddr(), 37);
-    vm.init_memory(ByteAddr(base + 4).waddr(), 0);
-    assert_eq!(aot.run_to_halt(&mut vm, 16).unwrap().executed_steps, 6);
-    let (ranges, syscalls, patches, initialization) =
-        vm.tracer_mut().finish_combined_capture_for_test().unwrap();
-    assert!(syscalls.is_empty());
-    assert!(!initialization.is_empty());
-    assert!(patches.iter().any(|patch| {
-        patch.ram_class == crate::tracer::PatchRamClass::Memory
-            && patch.target_shard > patch.source_shard + 1
-    }));
-    let events = patches
-        .iter()
-        .map(|patch| {
-            crate::NextAccessEvent::new(patch.source_cycle, patch.target_cycle, patch.address)
-        })
-        .chain(initialization.iter().copied())
-        .collect::<Vec<_>>();
-    reference
-        .tracer_mut()
-        .apply_next_access_events_for_test(&events);
-    let expected = reference.tracer().recorded_steps();
-    for range in ranges {
-        for arena in range.typed.iter().flatten() {
-            for row in 0..arena.len() {
-                let ordinal = arena.fields()[0][row] as usize;
-                let mut oracle = crate::GpuTypedSoaArena::new(arena.kind(), 1).unwrap();
-                oracle
-                    .push_step(ordinal as u32, &expected[ordinal])
-                    .unwrap();
-                for (actual, expected) in arena.fields().iter().zip(oracle.fields()) {
-                    assert_eq!(actual[row], expected[0]);
-                }
-            }
-        }
-        for fallback in &range.fallback {
-            assert_eq!(fallback.record, expected[fallback.ordinal as usize]);
-        }
-    }
-}
-
-#[test]
-fn i049_preflight_capture_matches_fulltracer_for_multiop_syscall() {
-    let base = CENO_PLATFORM.heap.start;
-    let program = Arc::new(program(vec![
-        encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-        encode_rv32(InsnKind::LW, 20, 0, 1, 0),
-        encode_rv32(
-            InsnKind::ADDI,
-            0,
-            0,
-            Platform::reg_ecall().into(),
-            Platform::ecall_halt() as i32,
-        ),
-        encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-    ]));
-    let input: [Word; crate::syscalls::secp256k1::SECP256K1_ARG_WORDS] =
-        crate::syscalls::secp256k1::SecpMaybePoint(secp::Point::generator().into()).into();
-    let mut reference = VMState::<crate::FullTracer>::new_with_tracer_config(
-        CENO_PLATFORM.clone(),
-        program.clone(),
-        crate::FullTracerConfig { max_step_shard: 64 },
-    );
-    let config = crate::PreflightTracerConfig::new(true, 1, Cycle::MAX)
-        .with_step_cell_extractor(Arc::new(OneCellPerNativeStep))
-        .with_replay_range_capacity(2)
-        .with_combined_capture(true);
-    let mut vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
-        CENO_PLATFORM.clone(),
-        program.clone(),
-        config,
-    );
-    for state in [
-        &mut reference as &mut dyn SyscallTestVm,
-        &mut vm as &mut dyn SyscallTestVm,
-    ] {
-        state.init_register(Platform::reg_ecall(), crate::SECP256K1_DOUBLE);
-        state.init_register(Platform::reg_arg0(), base);
-        state.init_register(20, base);
-        for (offset, value) in input.into_iter().enumerate() {
-            state.init_word(ByteAddr(base).waddr() + offset, value);
-        }
-    }
-    while reference.next_step_record().unwrap().is_some() {}
-    let roots = (1..4)
-        .map(|index| CENO_PLATFORM.pc_base() + index * PC_STEP_SIZE as u32)
-        .collect();
-    let aot = AotProgram::compile_preflight_capture_with_extra_roots(program, roots).unwrap();
-    assert_eq!(aot.run_to_halt(&mut vm, 16).unwrap().executed_steps, 4);
-    let (ranges, syscalls, patches, initialization) =
-        vm.tracer_mut().finish_combined_capture_for_test().unwrap();
-    let events = patches
-        .iter()
-        .map(|patch| {
-            crate::NextAccessEvent::new(patch.source_cycle, patch.target_cycle, patch.address)
-        })
-        .chain(initialization.iter().copied())
-        .collect::<Vec<_>>();
-    reference
-        .tracer_mut()
-        .apply_next_access_events_for_test(&events);
-    assert_eq!(syscalls, reference.tracer().syscall_witnesses());
-    let expected = reference.tracer().recorded_steps();
-    for fallback in ranges.iter().flat_map(|range| &range.fallback) {
-        assert_eq!(fallback.record, expected[fallback.ordinal as usize]);
-    }
-    assert!(patches.iter().any(|patch| matches!(
-        patch.source_lane,
-        crate::tracer::PatchSourceLane::SyscallMemory
-            | crate::tracer::PatchSourceLane::SyscallRegister
-    )));
-}
-
 trait SyscallTestVm {
     fn init_register(&mut self, index: RegIdx, value: Word);
     fn init_word(&mut self, address: WordAddr, value: Word);
@@ -1211,123 +908,6 @@ impl<T: crate::Tracer> SyscallTestVm for VMState<T> {
 
     fn init_word(&mut self, address: WordAddr, value: Word) {
         self.init_memory(address, value);
-    }
-}
-
-#[test]
-fn i049_production_capture_syscalls_match_canonical_raw_next_access_tape() {
-    let codes = [267, 268, 270, 65801, 65802, 65840];
-    assert_eq!(crate::SECP256K1_DOUBLE, codes[0]);
-    assert_eq!(crate::SECP256K1_DECOMPRESS, codes[1]);
-    assert_eq!(crate::SECP256K1_SCALAR_INVERT, codes[2]);
-    assert_eq!(crate::KECCAK_PERMUTE, codes[3]);
-    assert_eq!(crate::SECP256K1_ADD, codes[4]);
-    assert_eq!(crate::KECCAK_XORIN, codes[5]);
-
-    let program = Arc::new(program(vec![
-        encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-        encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-        encode_rv32(
-            InsnKind::ADDI,
-            0,
-            0,
-            Platform::reg_ecall().into(),
-            Platform::ecall_halt() as i32,
-        ),
-        encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-    ]));
-    let roots = (1..4)
-        .map(|index| CENO_PLATFORM.pc_base() + index * PC_STEP_SIZE as u32)
-        .collect::<Vec<_>>();
-    let production =
-        AotProgram::compile_preflight_with_extra_roots(program.clone(), roots.clone()).unwrap();
-    let capture =
-        AotProgram::compile_preflight_capture_with_extra_roots(program.clone(), roots).unwrap();
-    let generator: [Word; crate::syscalls::secp256k1::SECP256K1_ARG_WORDS] =
-        crate::syscalls::secp256k1::SecpMaybePoint(secp::Point::generator().into()).into();
-    let doubled = crate::syscalls::secp256k1::double_words(generator);
-
-    for code in codes {
-        let first = CENO_PLATFORM.heap.start;
-        let second = first + 256;
-        let arg1 = if code == crate::SECP256K1_DECOMPRESS {
-            0
-        } else {
-            second
-        };
-        let config = crate::PreflightTracerConfig::new(true, 1, Cycle::MAX)
-            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
-        let mut expected = VMState::<crate::PreflightTracer>::new_with_tracer_config(
-            CENO_PLATFORM.clone(),
-            program.clone(),
-            config.clone(),
-        );
-        let mut actual = VMState::<crate::PreflightTracer>::new_with_tracer_config(
-            CENO_PLATFORM.clone(),
-            program.clone(),
-            config.with_combined_capture(true),
-        );
-        let mut first_words = [0; 64];
-        let mut second_words = [0; 64];
-        match code {
-            crate::SECP256K1_DOUBLE | crate::SECP256K1_ADD => {
-                first_words[..generator.len()].copy_from_slice(&generator);
-                second_words[..doubled.len()].copy_from_slice(&doubled);
-            }
-            crate::SECP256K1_DECOMPRESS => {
-                let encoded = secp::Point::generator().serialize_uncompressed();
-                let x: [u8; 32] = encoded[1..33].try_into().unwrap();
-                let x: [Word; crate::syscalls::secp256k1::COORDINATE_WORDS] =
-                    unsafe { std::mem::transmute(x) };
-                first_words[..x.len()].copy_from_slice(&x);
-            }
-            crate::SECP256K1_SCALAR_INVERT => {
-                first_words[..crate::syscalls::secp256k1::COORDINATE_WORDS].fill(1);
-            }
-            _ => {
-                for (offset, (first, second)) in
-                    first_words.iter_mut().zip(&mut second_words).enumerate()
-                {
-                    *first = offset as Word;
-                    *second = !*first;
-                }
-            }
-        }
-        for vm in [&mut expected, &mut actual] {
-            vm.init_register_unsafe(Platform::reg_ecall(), code);
-            vm.init_register_unsafe(Platform::reg_arg0(), first);
-            vm.init_register_unsafe(Platform::reg_arg1(), arg1);
-            for offset in 0usize..64 {
-                vm.init_memory(ByteAddr(first).waddr() + offset, first_words[offset]);
-                vm.init_memory(ByteAddr(second).waddr() + offset, second_words[offset]);
-            }
-        }
-
-        let expected_report = production.run_to_halt(&mut expected, 16).unwrap();
-        let actual_report = capture.run_to_halt(&mut actual, 16).unwrap();
-        assert_eq!(expected_report.executed_steps, 4, "code={code}");
-        assert_eq!(actual_report.executed_steps, 4, "code={code}");
-        assert_eq!(
-            expected_report.fallback.ecall_by_code[&code], 2,
-            "code={code}"
-        );
-        assert_eq!(
-            actual_report.fallback.ecall_by_code[&code], 2,
-            "code={code}"
-        );
-        let expected_events = expected.tracer().raw_next_access_events_for_test().to_vec();
-        let actual_events = actual.tracer().raw_next_access_events_for_test().to_vec();
-        assert_eq!(
-            actual_events, expected_events,
-            "raw tape differs for code={code}"
-        );
-        let (expected_plan, _, _) = expected.take_tracer().into_shard_plan();
-        let (actual_plan, _, _) = actual.take_tracer().into_shard_plan();
-        assert_eq!(
-            actual_plan.shard_cycle_boundaries(),
-            expected_plan.shard_cycle_boundaries(),
-            "shard boundaries differ for code={code}",
-        );
     }
 }
 
@@ -1891,11 +1471,6 @@ fn preflight_block_plan_only_accepts_static_register_blocks() {
         end_pc: ecall.base_address + 4,
     };
     assert!(!block_supports_preflight_block_plan(&ecall, &block).unwrap());
-}
-
-#[test]
-fn preflight_register_mask_covers_internal_x0_sink() {
-    assert_eq!(preflight_register_bit(32), 1u64 << 32);
 }
 
 #[test]
@@ -5670,24 +5245,6 @@ fn production_preflight_uses_admitted_block_emitter() {
     let assembly = String::from_utf8(production).unwrap();
     assert!(assembly.contains("preflight_bucket_special_fail"));
     assert!(!assembly.contains(".L_preflight_cost_loop_0:"));
-}
-
-#[test]
-fn i049_capture_requires_memory_address_when_release_events_emit_early() {
-    let trace_style = AssemblyTraceStyle::PreflightProductionCapture;
-    assert!(trace_style.needs_callback_values());
-    assert!(!trace_style.preflight_feature_enabled(PreflightFeature::MmioBounds));
-    assert!(trace_style.uses_preflight_block_plan());
-    assert!(should_publish_trace_memory_address(
-        trace_style,
-        false,
-        true
-    ));
-    assert!(!should_publish_trace_memory_address(
-        AssemblyTraceStyle::PreflightProduction,
-        false,
-        true,
-    ));
 }
 
 #[test]

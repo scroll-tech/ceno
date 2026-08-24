@@ -3209,9 +3209,7 @@ mod i017_tests {
 
         fn arenas(steps: &[StepRecord], compact: bool) -> GpuReplayShardArenas {
             let old_compact = std::env::var_os("CENO_I050_COMPACT_SOURCE");
-            let old_combined = std::env::var_os("CENO_I049_COMBINED_CAPTURE");
             unsafe {
-                std::env::remove_var("CENO_I049_COMBINED_CAPTURE");
                 if compact {
                     std::env::set_var("CENO_I050_COMPACT_SOURCE", "1");
                 } else {
@@ -3229,10 +3227,6 @@ mod i017_tests {
                 match old_compact {
                     Some(value) => std::env::set_var("CENO_I050_COMPACT_SOURCE", value),
                     None => std::env::remove_var("CENO_I050_COMPACT_SOURCE"),
-                }
-                match old_combined {
-                    Some(value) => std::env::set_var("CENO_I049_COMBINED_CAPTURE", value),
-                    None => std::env::remove_var("CENO_I049_COMBINED_CAPTURE"),
                 }
             }
             GpuReplayShardArenas::from_ranges(vec![GpuReplayTypedRange {

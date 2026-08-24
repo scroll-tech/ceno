@@ -120,9 +120,6 @@ enum AssemblyTraceStyle {
     /// Production preflight execution. Block admission selects the private
     /// register-only, memory, or scalar emission strategy per block.
     PreflightProduction,
-    /// Internal I049 feasibility image: production preflight block planning
-    /// plus explicit trace values for same-execution compact capture.
-    PreflightProductionCapture,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,7 +148,6 @@ impl AssemblyTraceStyle {
                 | Self::PreflightFutureAccessL5
                 | Self::FullTracerDirect
                 | Self::GpuReplayDirect
-                | Self::PreflightProductionCapture
         )
     }
 
@@ -184,7 +180,6 @@ impl AssemblyTraceStyle {
                 | Self::PreflightAdmittedRegisterBlock
                 | Self::PreflightAdmittedMemoryBlock
                 | Self::PreflightProduction
-                | Self::PreflightProductionCapture
         )
     }
 
@@ -194,7 +189,6 @@ impl AssemblyTraceStyle {
             Self::PreflightAdmittedRegisterBlock
                 | Self::PreflightAdmittedMemoryBlock
                 | Self::PreflightProduction
-                | Self::PreflightProductionCapture
         )
     }
 
@@ -206,7 +200,6 @@ impl AssemblyTraceStyle {
         !(matches!(
             self,
             Self::PreflightProduction
-                | Self::PreflightProductionCapture
                 | Self::PreflightScalar
                 | Self::PreflightAdmittedRegisterBlock
                 | Self::PreflightAdmittedMemoryBlock
@@ -235,18 +228,11 @@ impl AssemblyTraceStyle {
             Self::PreflightAdmittedRegisterBlock => "preflight-admitted-register-block",
             Self::PreflightAdmittedMemoryBlock => "preflight-block-memory-atomic-registers",
             Self::PreflightProduction => "preflight-production",
-            // Keep the experimental capture image independently cache-busted:
-            // release block-atomic memory rows now publish trace_mem_addr even
-            // when their next-access event was emitted early.
-            Self::PreflightProductionCapture => "preflight-production-capture-sync2",
         }
     }
 
     fn is_preflight_production(self) -> bool {
-        matches!(
-            self,
-            Self::PreflightProduction | Self::PreflightProductionCapture
-        )
+        self == Self::PreflightProduction
     }
 
     fn uses_pure_block_admission(self) -> bool {
@@ -452,8 +438,6 @@ const AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET: usize = 392;
 const AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET: usize = 400;
 const AOT_CTX_PREFLIGHT_COST_TABLE_OFFSET: usize = 408;
 const AOT_CTX_PREFLIGHT_NUM_INSTANCES_OFFSET: usize = 416;
-#[allow(dead_code)]
-const AOT_CTX_PREFLIGHT_NUM_CHIPS_OFFSET: usize = 424;
 const AOT_CTX_PREFLIGHT_PENDING_BLOCK_OFFSET: usize = 432;
 const AOT_CTX_PREFLIGHT_PLANNER_CUR_TRACE_OFFSET: usize = 440;
 const AOT_CTX_PREFLIGHT_PLANNER_CUR_MAIN_OFFSET: usize = 448;
@@ -522,21 +506,20 @@ const AOT_CTX_GPU_REPLAY_EVENT_CURSOR_OFFSET: usize = 912;
 const AOT_CTX_GPU_REPLAY_ERROR_OFFSET: usize = 920;
 #[cfg(test)]
 const AOT_CTX_GPU_REPLAY_ORDINARY_CALLBACKS_OFFSET: usize = 928;
-const AOT_CTX_COMBINED_SAVED_OFFSET: usize = 936;
-const AOT_CTX_LAYERED_RS1_PREVIOUS_OFFSET: usize = 1008;
-const AOT_CTX_LAYERED_RS2_PREVIOUS_OFFSET: usize = 1016;
-const AOT_CTX_LAYERED_RD_PREVIOUS_OFFSET: usize = 1024;
-const AOT_CTX_COMPACT_BYTES_CURSOR_OFFSET: usize = 1032;
-const AOT_CTX_LAYERED_NEXT_ACCESS_EVENTS_OFFSET: usize = 1040;
-const AOT_CTX_LAYERED_NEXT_ACCESS_EVENTS_LEN_OFFSET: usize = 1048;
-const AOT_CTX_LAYERED_NEXT_ACCESS_CURSOR_OFFSET: usize = 1056;
-const AOT_CTX_GPU_REPLAY_PACKED_BLOCK_OFFSET: usize = 1064;
+const AOT_CTX_LAYERED_RS1_PREVIOUS_OFFSET: usize = 936;
+const AOT_CTX_LAYERED_RS2_PREVIOUS_OFFSET: usize = 944;
+const AOT_CTX_LAYERED_RD_PREVIOUS_OFFSET: usize = 952;
+const AOT_CTX_COMPACT_BYTES_CURSOR_OFFSET: usize = 960;
+const AOT_CTX_LAYERED_NEXT_ACCESS_EVENTS_OFFSET: usize = 968;
+const AOT_CTX_LAYERED_NEXT_ACCESS_EVENTS_LEN_OFFSET: usize = 976;
+const AOT_CTX_LAYERED_NEXT_ACCESS_CURSOR_OFFSET: usize = 984;
+const AOT_CTX_GPU_REPLAY_PACKED_BLOCK_OFFSET: usize = 992;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 78;
+const AOT_ABI_VERSION: u32 = 79;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v6";
 const AOT_EMITTER_SCHEMA: &str = "replay-emitter-schema1";
 const AOT_INITIAL_EVENT_SEED: usize = 20_000_000;
@@ -575,7 +558,6 @@ const AOT_TRACE_MODE_CALLBACK: u32 = 1;
 const AOT_TRACE_MODE_PREFLIGHT_DIRECT: u32 = 2;
 const AOT_TRACE_MODE_FULLTRACER_DIRECT: u32 = 3;
 const AOT_TRACE_MODE_GPU_REPLAY_DIRECT: u32 = 4;
-const AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT: u32 = 5;
 const AOT_TRACE_MODE_SKELETON_L1: u32 = 6;
 const AOT_TRACE_MODE_VALUES_L2: u32 = 7;
 const AOT_TRACE_MODE_REGISTERS_L3: u32 = 8;
@@ -975,7 +957,6 @@ struct AotRuntimeContext {
     gpu_replay_event_cursor: *mut usize,
     gpu_replay_error: *mut u32,
     gpu_replay_ordinary_callbacks: u64,
-    combined_saved: [u64; 9],
     layered_rs1_previous: Cycle,
     layered_rs2_previous: Cycle,
     layered_rd_previous: Cycle,
@@ -2712,18 +2693,6 @@ impl AotProgram {
     }
 
     #[cfg(test)]
-    fn compile_preflight_capture_with_extra_roots(
-        program: Arc<Program>,
-        extra_roots: Vec<u32>,
-    ) -> Result<Self> {
-        Self::compile_with_extra_roots_and_trace_style(
-            program,
-            extra_roots,
-            AssemblyTraceStyle::PreflightProductionCapture,
-        )
-    }
-
-    #[cfg(test)]
     fn compile_fulltracer(program: Arc<Program>) -> Result<Self> {
         Self::compile_with_extra_roots_and_trace_style(
             program,
@@ -2757,24 +2726,6 @@ impl AotProgram {
             init_memory,
             config,
             &default_aot_cache_dir(),
-        )
-    }
-
-    /// Internal I049 feasibility loader. This keeps the production preflight
-    /// cache key and image unchanged while enabling same-execution capture.
-    pub fn load_or_train_preflight_capture_with_config(
-        platform: &Platform,
-        program: Arc<Program>,
-        init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
-        config: PreflightTracerConfig,
-    ) -> Result<Self> {
-        Self::load_or_train_preflight_style_in(
-            platform,
-            program,
-            init_memory,
-            config,
-            &default_aot_cache_dir(),
-            AssemblyTraceStyle::PreflightProductionCapture,
         )
     }
 
@@ -3520,25 +3471,6 @@ impl AotProgram {
             gpu_replay_event_cursor = state.next_access_cursor;
             gpu_replay_error = state.error;
         }
-        if trace_native_steps && TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
-            let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
-            if let Some(state) = preflight_vm.tracer_mut().prepare_combined_capture_native() {
-                trace_mode = AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT;
-                gpu_replay_kinds = state.kinds;
-                gpu_replay_kind_count = state.kind_count;
-                gpu_replay_ordinal = state.ordinal;
-                gpu_replay_pending_cycle = state.pending_cycle;
-                gpu_replay_latest_cells = state.latest_cells;
-                gpu_replay_latest_base = state.latest_base.0;
-                gpu_replay_latest_len = state.latest_len;
-                gpu_replay_max_heap = state.max_heap_addr_access;
-                gpu_replay_max_hint = state.max_hint_addr_access;
-                gpu_replay_events = state.next_access_events;
-                gpu_replay_events_len = state.next_access_len;
-                gpu_replay_event_cursor = state.next_access_cursor;
-                gpu_replay_error = state.error;
-            }
-        }
         let (
             layered_next_access_events,
             layered_next_access_events_len,
@@ -3549,10 +3481,7 @@ impl AotProgram {
         } else {
             (std::ptr::null(), 0, std::ptr::null_mut())
         };
-        let preflight_step_cells_table = if matches!(
-            trace_mode,
-            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
-        ) {
+        let preflight_step_cells_table = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             preflight_step_cells.as_ptr()
         } else {
             std::ptr::null()
@@ -3769,7 +3698,6 @@ impl AotProgram {
             gpu_replay_event_cursor,
             gpu_replay_error,
             gpu_replay_ordinary_callbacks: 0,
-            combined_saved: [0; 9],
             layered_rs1_previous: 0,
             layered_rs2_previous: 0,
             layered_rd_previous: 0,
@@ -3821,10 +3749,7 @@ impl AotProgram {
             std::ptr::null()
         } else if trace_native_steps {
             if TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
-                if matches!(
-                    trace_mode,
-                    AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
-                ) {
+                if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
                     (ceno_aot_preflight_direct_callback as AotTraceFn) as *const c_void
                 } else {
                     (aot_trace_native_preflight as AotTraceFn) as *const c_void
@@ -3839,10 +3764,7 @@ impl AotProgram {
             ceno_aot_skeleton_l1_callback as AotInsnFn
         } else if self.trace_style.is_pure() && !trace_native_steps {
             ceno_aot_pure_ecall_callback as AotInsnFn
-        } else if matches!(
-            trace_mode,
-            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
-        ) {
+        } else if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             ceno_aot_preflight_fallback_callback as AotInsnFn
         } else {
             aot_exec_one::<T>
@@ -3886,10 +3808,7 @@ impl AotProgram {
                 vm.get_pc().0
             ),
         );
-        if matches!(
-            trace_mode,
-            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
-        ) {
+        if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             aot_plan_commit_diagnostic_state("HOST_BEFORE_NATIVE", "host", &context);
         }
         let started = Instant::now();
@@ -3908,10 +3827,7 @@ impl AotProgram {
                 vm.get_pc().0,
             )
         };
-        if matches!(
-            trace_mode,
-            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
-        ) {
+        if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             aot_plan_commit_diagnostic_state("HOST_AFTER_NATIVE", "host", &context);
         }
         if let Some(watchdog) = native_watchdog.as_mut() {
@@ -3945,10 +3861,7 @@ impl AotProgram {
             diagnostic_bytes,
             &format!("trace_mode={trace_mode}"),
         );
-        if matches!(
-            trace_mode,
-            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
-        ) {
+        if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
             unsafe {
                 preflight_vm
@@ -3956,10 +3869,6 @@ impl AotProgram {
                     .sync_native_next_access_tape(context.preflight_event_cursor)
             };
             preflight_vm.tracer_mut().finish_deferred_mmio_bounds();
-            preflight_vm
-                .tracer_mut()
-                .sync_combined_capture()
-                .map_err(|message| anyhow!(message))?;
         } else if trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT {
             let replay_vm = unsafe { &mut *(vm_ptr as *mut VMState<crate::GpuReplayTracer>) };
             replay_vm
@@ -4175,10 +4084,7 @@ impl AotProgram {
             next_access_growths,
             next_access_growth_bytes,
             next_access_growth_time,
-        ) = if matches!(
-            trace_mode,
-            AOT_TRACE_MODE_PREFLIGHT_DIRECT | AOT_TRACE_MODE_PREFLIGHT_CAPTURE_DIRECT
-        ) {
+        ) = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             let preflight_vm = unsafe { &*(vm_ptr as *const VMState<PreflightTracer>) };
             preflight_vm.tracer().next_access_tape_stats()
         } else {

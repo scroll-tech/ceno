@@ -675,47 +675,6 @@ pub struct NextAccessEvent {
     pub address: WordAddr,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum PatchRamClass {
-    Register = 0,
-    Memory = 1,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum PatchSourceLane {
-    Rs1 = 0,
-    Rs2 = 1,
-    Rd = 2,
-    Memory = 3,
-    SyscallRegister = 4,
-    SyscallMemory = 5,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub struct CrossShardPatch {
-    pub source_cycle: Cycle,
-    pub target_cycle: Cycle,
-    pub address: WordAddr,
-    pub prior_value: Word,
-    pub source_shard: u32,
-    pub target_shard: u32,
-    pub ram_class: PatchRamClass,
-    pub source_lane: PatchSourceLane,
-    pub syscall_op_index: u16,
-    pub syscall_witness_index: u32,
-}
-
-#[derive(Debug)]
-pub struct CombinedPreflightCapture {
-    pub ranges: Vec<crate::GpuReplayTypedRange>,
-    pub syscall_witnesses: Vec<SyscallWitness>,
-    pub patches: Vec<CrossShardPatch>,
-    pub initialization_events: Vec<NextAccessEvent>,
-}
-
 impl NextAccessEvent {
     pub fn new(source_cycle: Cycle, target_cycle: Cycle, address: WordAddr) -> Self {
         Self {
@@ -2680,27 +2639,6 @@ impl FullTracer {
         &self.records[..self.len]
     }
 
-    #[cfg(test)]
-    pub(crate) fn apply_next_access_events_for_test(&mut self, events: &[NextAccessEvent]) {
-        self.next_accesses = Arc::new(NextAccessTape::from_unsorted(events.to_vec()));
-        self.next_access_cursor = 0;
-        for record in &mut self.records[..self.len] {
-            record.future_access_mask = 0;
-        }
-        for witness in &mut self.syscall_witnesses {
-            witness.reg_future_access.fill(0);
-            witness.mem_future_access.fill(0);
-        }
-        for event in events {
-            if event.source_cycle == 0 {
-                continue;
-            }
-            let ordinal = ((event.source_cycle - Self::SUBCYCLES_PER_INSN)
-                / Self::SUBCYCLES_PER_INSN) as usize;
-            self.annotate_event(ordinal, *event);
-        }
-    }
-
     pub fn record_buffer_bytes(&self) -> usize {
         self.records.capacity() * std::mem::size_of::<StepRecord>()
     }
@@ -3078,343 +3016,7 @@ pub struct PreflightTracer {
     platform_heap_start: ByteAddr,
     platform_hint_start: ByteAddr,
     defer_mmio_bounds: bool,
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    combined_capture: Option<PreflightCombinedCapture>,
     config: PreflightTracerConfig,
-}
-
-#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-struct PreflightCombinedCapture {
-    typed: Vec<Option<crate::GpuTypedSoaArena>>,
-    native_kinds: [crate::gpu_typed_ingress::GpuTypedNativeKindState; InsnKind::COUNT],
-    ordinal: usize,
-    pending_cycle: Cycle,
-    register_latest: LatestAccesses,
-    max_heap_addr_access: ByteAddr,
-    max_hint_addr_access: ByteAddr,
-    event_cursor: usize,
-    error: u32,
-    sealed: Vec<crate::GpuReplayTypedRange>,
-    descriptor_cursor: usize,
-    range_capacity: usize,
-    pending: StepRecord,
-    fallback: Vec<GpuReplayFallbackRecord>,
-    syscall_witnesses: Vec<SyscallWitness>,
-    patches: Vec<CrossShardPatch>,
-    initialization_events: Vec<NextAccessEvent>,
-    patches_resolved: bool,
-}
-
-#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-impl PreflightCombinedCapture {
-    fn new(platform: &Platform, range_capacity: usize) -> Self {
-        let scratch_capacity = range_capacity
-            .checked_mul(2)
-            .expect("combined capture scratch capacity overflow");
-        Self {
-            typed: InsnKind::iter()
-                .map(|kind| crate::GpuTypedSoaArena::new(kind, scratch_capacity))
-                .collect(),
-            native_kinds: [crate::gpu_typed_ingress::GpuTypedNativeKindState::default();
-                InsnKind::COUNT],
-            ordinal: 0,
-            pending_cycle: FullTracer::SUBCYCLES_PER_INSN,
-            register_latest: LatestAccesses::new(platform),
-            max_heap_addr_access: ByteAddr::from(platform.heap.start),
-            max_hint_addr_access: ByteAddr::from(platform.hints.start),
-            event_cursor: 0,
-            error: 0,
-            sealed: Vec::new(),
-            descriptor_cursor: 0,
-            range_capacity,
-            pending: StepRecord {
-                cycle: FullTracer::SUBCYCLES_PER_INSN,
-                heap_maxtouch_addr: Change::new(
-                    ByteAddr::from(platform.heap.start),
-                    ByteAddr::from(platform.heap.start),
-                ),
-                hint_maxtouch_addr: Change::new(
-                    ByteAddr::from(platform.hints.start),
-                    ByteAddr::from(platform.hints.start),
-                ),
-                ..StepRecord::default()
-            },
-            fallback: Vec::new(),
-            syscall_witnesses: Vec::new(),
-            patches: Vec::new(),
-            initialization_events: Vec::new(),
-            patches_resolved: false,
-        }
-    }
-
-    fn shard_for_cycle(boundaries: &[Cycle], cycle: Cycle) -> Result<u32, &'static str> {
-        if boundaries.first().copied() != Some(FullTracer::SUBCYCLES_PER_INSN) {
-            return Err("deferred patch shard boundaries have invalid start");
-        }
-        let shard = boundaries.partition_point(|boundary| *boundary <= cycle);
-        if shard == 0 || shard >= boundaries.len() {
-            return Err("deferred patch cycle is outside finalized shard boundaries");
-        }
-        u32::try_from(shard - 1).map_err(|_| "deferred patch shard exceeds u32")
-    }
-
-    fn resolve_patches(
-        &mut self,
-        events: &[NextAccessEvent],
-        boundaries: &[Cycle],
-    ) -> Result<(), &'static str> {
-        if self.patches_resolved {
-            return Err("combined capture deferred patches resolved multiple times");
-        }
-        let mut events = events.to_vec();
-        events
-            .sort_unstable_by_key(|event| (event.source_cycle, event.address, event.target_cycle));
-        for pair in events.windows(2) {
-            if (pair[0].source_cycle, pair[0].address) == (pair[1].source_cycle, pair[1].address) {
-                return Err("duplicate deferred patch source/address");
-            }
-        }
-        for event in events {
-            if event.target_cycle <= event.source_cycle {
-                return Err("deferred patch target does not follow source");
-            }
-            if event.source_cycle == 0 {
-                Self::shard_for_cycle(boundaries, event.target_cycle)?;
-                self.initialization_events.push(event);
-                continue;
-            }
-            let ordinal = event
-                .source_cycle
-                .checked_sub(FullTracer::SUBCYCLES_PER_INSN)
-                .ok_or("deferred patch source precedes first instruction")?
-                / FullTracer::SUBCYCLES_PER_INSN;
-            let ordinal =
-                u32::try_from(ordinal).map_err(|_| "deferred patch ordinal exceeds u32")?;
-            let (mask, lane, ram_class) = match event.source_cycle % 4 {
-                FullTracer::SUBCYCLE_RS1 => (
-                    StepRecord::FUTURE_ACCESS_RS1,
-                    PatchSourceLane::Rs1,
-                    PatchRamClass::Register,
-                ),
-                FullTracer::SUBCYCLE_RS2 => (
-                    StepRecord::FUTURE_ACCESS_RS2,
-                    PatchSourceLane::Rs2,
-                    PatchRamClass::Register,
-                ),
-                FullTracer::SUBCYCLE_RD => (
-                    StepRecord::FUTURE_ACCESS_RD,
-                    PatchSourceLane::Rd,
-                    PatchRamClass::Register,
-                ),
-                FullTracer::SUBCYCLE_MEM => (
-                    StepRecord::FUTURE_ACCESS_MEM,
-                    PatchSourceLane::Memory,
-                    PatchRamClass::Memory,
-                ),
-                _ => unreachable!(),
-            };
-            let mut matches = 0;
-            let mut prior_value = 0;
-            for arena in self
-                .sealed
-                .iter_mut()
-                .flat_map(|range| range.typed.iter_mut().flatten())
-            {
-                if let Some(value) =
-                    arena.patch_future_access_checked(ordinal, mask, event.address)?
-                {
-                    matches += 1;
-                    prior_value = value;
-                }
-            }
-            let mut resolved_lane = lane;
-            let mut resolved_class = ram_class;
-            let mut syscall_op_index = u16::MAX;
-            let mut syscall_witness_index = u32::MAX;
-            for fallback in self
-                .sealed
-                .iter_mut()
-                .flat_map(|range| range.fallback.iter_mut())
-                .filter(|record| record.ordinal == ordinal)
-            {
-                matches += 1;
-                let record = &mut fallback.record;
-                let subcycle = event.source_cycle - record.cycle;
-                match subcycle {
-                    FullTracer::SUBCYCLE_RS1
-                        if record.has_rs1 && record.rs1.addr == event.address =>
-                    {
-                        record.future_access_mask |= StepRecord::FUTURE_ACCESS_RS1;
-                        prior_value = record.rs1.value;
-                    }
-                    FullTracer::SUBCYCLE_RS2
-                        if record.has_rs2 && record.rs2.addr == event.address =>
-                    {
-                        record.future_access_mask |= StepRecord::FUTURE_ACCESS_RS2;
-                        prior_value = record.rs2.value;
-                    }
-                    FullTracer::SUBCYCLE_RD if record.has_rd && record.rd.addr == event.address => {
-                        record.future_access_mask |= StepRecord::FUTURE_ACCESS_RD;
-                        prior_value = record.rd.value.after;
-                    }
-                    FullTracer::SUBCYCLE_MEM
-                        if record.has_memory_op && record.memory_op.addr == event.address =>
-                    {
-                        record.future_access_mask |= StepRecord::FUTURE_ACCESS_MEM;
-                        prior_value = record.memory_op.value.after;
-                    }
-                    FullTracer::SUBCYCLE_RD if record.syscall_index != StepRecord::NO_SYSCALL => {
-                        let witness = &mut self.syscall_witnesses[record.syscall_index as usize];
-                        let index = witness
-                            .reg_ops
-                            .iter()
-                            .rposition(|op| op.addr == event.address)
-                            .ok_or("deferred patch syscall register address missing")?;
-                        witness.reg_future_access[index] = 1;
-                        prior_value = witness.reg_ops[index].value.after;
-                        resolved_lane = PatchSourceLane::SyscallRegister;
-                        syscall_op_index = u16::try_from(index)
-                            .map_err(|_| "deferred patch syscall operation exceeds u16")?;
-                        syscall_witness_index = record.syscall_index;
-                    }
-                    FullTracer::SUBCYCLE_MEM if record.syscall_index != StepRecord::NO_SYSCALL => {
-                        let witness = &mut self.syscall_witnesses[record.syscall_index as usize];
-                        let index = witness
-                            .mem_ops
-                            .iter()
-                            .rposition(|op| op.addr == event.address)
-                            .ok_or("deferred patch syscall memory address missing")?;
-                        witness.mem_future_access[index] = 1;
-                        prior_value = witness.mem_ops[index].value.after;
-                        resolved_lane = PatchSourceLane::SyscallMemory;
-                        resolved_class = PatchRamClass::Memory;
-                        syscall_op_index = u16::try_from(index)
-                            .map_err(|_| "deferred patch syscall operation exceeds u16")?;
-                        syscall_witness_index = record.syscall_index;
-                    }
-                    _ => return Err("deferred patch does not match sparse source record"),
-                }
-            }
-            if matches != 1 {
-                return Err("deferred patch source ordinal does not resolve exactly once");
-            }
-            let source_shard = Self::shard_for_cycle(boundaries, event.source_cycle)?;
-            let target_shard = Self::shard_for_cycle(boundaries, event.target_cycle)?;
-            if source_shard >= target_shard {
-                return Err("deferred patch does not cross a shard boundary");
-            }
-            self.patches.push(CrossShardPatch {
-                source_cycle: event.source_cycle,
-                target_cycle: event.target_cycle,
-                address: event.address,
-                prior_value,
-                source_shard,
-                target_shard,
-                ram_class: resolved_class,
-                source_lane: resolved_lane,
-                syscall_op_index,
-                syscall_witness_index,
-            });
-        }
-        self.patches_resolved = true;
-        Ok(())
-    }
-
-    fn native_state(&mut self) -> GpuReplayNativeTraceState {
-        self.error = 0;
-        for (index, slot) in self.native_kinds.iter_mut().enumerate() {
-            *slot = self.typed[index]
-                .as_mut()
-                .map_or_else(Default::default, crate::GpuTypedSoaArena::native_state);
-        }
-        GpuReplayNativeTraceState {
-            kinds: self.native_kinds.as_mut_ptr(),
-            kind_count: InsnKind::COUNT,
-            ordinal: &mut self.ordinal,
-            pending_cycle: &mut self.pending_cycle,
-            latest_cells: self.register_latest.cells_mut_ptr(),
-            latest_base: self.register_latest.base(),
-            latest_len: &mut self.register_latest.len,
-            max_heap_addr_access: &mut self.max_heap_addr_access,
-            max_hint_addr_access: &mut self.max_hint_addr_access,
-            next_access_events: std::ptr::null(),
-            next_access_len: 0,
-            next_access_cursor: &mut self.event_cursor,
-            error: &mut self.error,
-        }
-    }
-
-    fn sync_native(&mut self) -> Result<(), &'static str> {
-        if self.error != 0 {
-            return Err("combined preflight native capture reported an ABI or cursor error");
-        }
-        for (index, state) in self.native_kinds.iter().enumerate() {
-            match self.typed[index].as_mut() {
-                Some(arena) => arena.sync_native_state(state)?,
-                None if state.capacity == 0 && state.cursor == 0 => {}
-                None => return Err("combined preflight capture used an absent family"),
-            }
-        }
-        Ok(())
-    }
-
-    fn seal_available(
-        &mut self,
-        descriptors: &[crate::GpuReplayRangeDescriptor],
-    ) -> Result<(), &'static str> {
-        self.sync_native()?;
-        while let Some(descriptor) = descriptors.get(self.descriptor_cursor) {
-            if descriptor.range_len as usize > self.range_capacity {
-                return Err("combined capture descriptor exceeds 262144-row range bound");
-            }
-            if descriptor.unsupported_count != 0 {
-                return Err("combined preflight unsupported fallback capture is not implemented");
-            }
-            if self
-                .typed
-                .iter()
-                .zip(descriptor.family_counts)
-                .any(|(arena, rows)| arena.as_ref().map_or(0, crate::GpuTypedSoaArena::len) < rows)
-            {
-                break;
-            }
-            if self.fallback.len() < descriptor.fallback_count {
-                break;
-            }
-            let typed = self
-                .typed
-                .iter_mut()
-                .zip(descriptor.family_counts)
-                .map(|(arena, rows)| {
-                    if rows == 0 {
-                        Ok(None)
-                    } else {
-                        arena
-                            .as_mut()
-                            .ok_or("combined capture descriptor names absent family")?
-                            .drain_prefix(rows)
-                            .map(Some)
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let fallback = self
-                .fallback
-                .drain(..descriptor.fallback_count)
-                .collect::<Vec<_>>();
-            self.sealed.push(crate::GpuReplayTypedRange {
-                sequence: descriptor.sequence,
-                typed,
-                fallback,
-            });
-            self.descriptor_cursor += 1;
-        }
-        for (index, arena) in self.typed.iter_mut().enumerate() {
-            if let Some(arena) = arena {
-                self.native_kinds[index] = arena.native_state();
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg_attr(
@@ -3499,7 +3101,6 @@ pub struct PreflightTracerConfig {
     max_cycle_per_shard: Cycle,
     step_cell_extractor: Option<Arc<dyn StepCellExtractor>>,
     replay_range_capacity: usize,
-    combined_capture: bool,
 }
 
 impl fmt::Debug for PreflightTracer {
@@ -3544,7 +3145,6 @@ impl PreflightTracerConfig {
             max_cycle_per_shard,
             step_cell_extractor: None,
             replay_range_capacity: 256 * 1024,
-            combined_capture: false,
         }
     }
 
@@ -3571,11 +3171,6 @@ impl PreflightTracerConfig {
         self
     }
 
-    pub fn with_combined_capture(mut self, enabled: bool) -> Self {
-        self.combined_capture = enabled;
-        self
-    }
-
     pub fn step_cell_extractor(&self) -> Option<Arc<dyn StepCellExtractor>> {
         self.step_cell_extractor.clone()
     }
@@ -3589,7 +3184,6 @@ impl Default for PreflightTracerConfig {
             max_cycle_per_shard: Cycle::MAX,
             step_cell_extractor: None,
             replay_range_capacity: 256 * 1024,
-            combined_capture: false,
         }
     }
 }
@@ -3652,117 +3246,19 @@ impl PreflightTracer {
             platform_heap_start: ByteAddr::from(platform.heap.start),
             platform_hint_start: ByteAddr::from(platform.hints.start),
             defer_mmio_bounds: false,
-            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-            combined_capture: config
-                .combined_capture
-                .then(|| PreflightCombinedCapture::new(platform, config.replay_range_capacity)),
             config,
         };
         tracer.reset_register_tracking();
         tracer
     }
 
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    pub(crate) fn prepare_combined_capture_native(&mut self) -> Option<GpuReplayNativeTraceState> {
-        self.combined_capture
-            .as_mut()
-            .map(PreflightCombinedCapture::native_state)
-    }
-
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    pub(crate) fn sync_combined_capture(&mut self) -> Result<(), &'static str> {
-        let descriptors = self
-            .planner
-            .as_ref()
-            .expect("shard planner missing")
-            .replay_descriptors
-            .clone();
-        if let Some(capture) = self.combined_capture.as_mut() {
-            capture.seal_available(&descriptors)?;
-        }
-        Ok(())
-    }
-
-    #[cfg(all(
-        test,
-        feature = "aot-x86_64",
-        target_arch = "x86_64",
-        target_os = "linux"
-    ))]
-    pub(crate) fn finish_combined_capture_for_test(
-        &mut self,
-    ) -> Result<
-        (
-            &[crate::GpuReplayTypedRange],
-            &[SyscallWitness],
-            &[CrossShardPatch],
-            &[NextAccessEvent],
-        ),
-        &'static str,
-    > {
-        let planner = self.planner.as_mut().expect("shard planner missing");
-        if !planner.finalized {
-            planner.finalize(self.cycle);
-        }
-        self.sync_combined_capture()?;
-        let boundaries = self
-            .planner
-            .as_ref()
-            .expect("shard planner missing")
-            .shard_cycle_boundaries()
-            .to_vec();
-        let events = self.next_access_events.clone();
-        if let Some(capture) = self.combined_capture.as_mut()
-            && !capture.patches_resolved
-        {
-            capture.resolve_patches(&events, &boundaries)?;
-        }
-        let capture = self
-            .combined_capture
-            .as_ref()
-            .expect("combined capture missing");
-        Ok((
-            &capture.sealed,
-            &capture.syscall_witnesses,
-            &capture.patches,
-            &capture.initialization_events,
-        ))
-    }
-
-    #[cfg(all(
-        test,
-        feature = "aot-x86_64",
-        target_arch = "x86_64",
-        target_os = "linux"
-    ))]
-    pub(crate) fn raw_next_access_events_for_test(&self) -> &[NextAccessEvent] {
-        &self.next_access_events
-    }
-
     pub fn into_shard_plan(
-        self,
+        mut self,
     ) -> (
         ShardPlanBuilder,
         NextCycleAccess,
         Vec<crate::GpuShardPreview>,
     ) {
-        let (planner, next_accesses, previews, _) = self
-            .into_shard_plan_with_capture()
-            .expect("combined preflight capture finalization failed");
-        (planner, next_accesses, previews)
-    }
-
-    pub fn into_shard_plan_with_capture(
-        mut self,
-    ) -> Result<
-        (
-            ShardPlanBuilder,
-            NextCycleAccess,
-            Vec<crate::GpuShardPreview>,
-            Option<CombinedPreflightCapture>,
-        ),
-        &'static str,
-    > {
         if self
             .planner
             .as_ref()
@@ -3776,33 +3272,11 @@ impl PreflightTracer {
         if !planner.finalized {
             planner.finalize(self.cycle);
         }
-        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-        let capture = if let Some(mut capture) = self.combined_capture.take() {
-            capture.seal_available(&planner.replay_descriptors)?;
-            if !capture.patches_resolved {
-                capture
-                    .resolve_patches(&self.next_access_events, planner.shard_cycle_boundaries())?;
-            }
-            if capture.descriptor_cursor != planner.replay_descriptors.len() {
-                return Err("combined preflight capture did not seal every descriptor");
-            }
-            Some(CombinedPreflightCapture {
-                ranges: capture.sealed,
-                syscall_witnesses: capture.syscall_witnesses,
-                patches: capture.patches,
-                initialization_events: capture.initialization_events,
-            })
-        } else {
-            None
-        };
-        #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
-        let capture = None;
-        Ok((
+        (
             planner,
             NextAccessTape::from_unsorted(self.next_access_events),
             self.replay_shard_previews,
-            capture,
-        ))
+        )
     }
 
     fn mmio_region_end(&self, start: ByteAddr) -> ByteAddr {
@@ -4257,30 +3731,6 @@ impl Tracer for PreflightTracer {
 
     #[inline(always)]
     fn advance(&mut self) -> Self::Record {
-        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-        if self.last_kind == InsnKind::ECALL {
-            if let Some(capture) = self.combined_capture.as_mut() {
-                capture.fallback.push(GpuReplayFallbackRecord {
-                    ordinal: u32::try_from(capture.ordinal)
-                        .expect("combined capture ordinal exceeds u32"),
-                    record: capture.pending,
-                });
-                capture.ordinal += 1;
-                capture.pending_cycle += Self::SUBCYCLES_PER_INSN;
-                capture.pending = StepRecord {
-                    cycle: capture.pending_cycle,
-                    heap_maxtouch_addr: Change::new(
-                        capture.max_heap_addr_access,
-                        capture.max_heap_addr_access,
-                    ),
-                    hint_maxtouch_addr: Change::new(
-                        capture.max_hint_addr_access,
-                        capture.max_hint_addr_access,
-                    ),
-                    ..StepRecord::default()
-                };
-            }
-        }
         self.cycle += Self::SUBCYCLES_PER_INSN;
         self.reset_register_tracking();
     }
@@ -4292,10 +3742,6 @@ impl Tracer for PreflightTracer {
     #[inline(always)]
     fn store_pc(&mut self, pc: ByteAddr) {
         self.pc.after = pc;
-        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-        if let Some(capture) = self.combined_capture.as_mut() {
-            capture.pending.pc.after = pc;
-        }
     }
 
     #[inline(always)]
@@ -4303,16 +3749,6 @@ impl Tracer for PreflightTracer {
         self.pc.before = pc.baddr();
         self.last_kind = value.kind;
         self.last_rs1 = None;
-        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-        if let Some(capture) = self.combined_capture.as_mut() {
-            capture.pending.cycle = capture.pending_cycle;
-            capture.pending.heap_maxtouch_addr =
-                Change::new(capture.max_heap_addr_access, capture.max_heap_addr_access);
-            capture.pending.hint_maxtouch_addr =
-                Change::new(capture.max_hint_addr_access, capture.max_hint_addr_access);
-            capture.pending.pc.before = pc.baddr();
-            capture.pending.insn = value;
-        }
         if !matches!(value.kind, InsnKind::ECALL) {
             self.observe_current_step(None);
         }
@@ -4337,37 +3773,13 @@ impl Tracer for PreflightTracer {
             self.last_rs1 = Some(value);
             self.observe_current_step(Some(value));
         }
-        let previous_cycle = self.track_access(addr, subcycle);
-        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-        if let Some(capture) = self.combined_capture.as_mut() {
-            let op = ReadOp {
-                addr,
-                value,
-                previous_cycle,
-            };
-            if subcycle == Self::SUBCYCLE_RS1 {
-                capture.pending.rs1 = op;
-                capture.pending.has_rs1 = true;
-            } else {
-                capture.pending.rs2 = op;
-                capture.pending.has_rs2 = true;
-            }
-        }
+        self.track_access(addr, subcycle);
     }
 
     #[inline(always)]
-    fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
+    fn store_register(&mut self, idx: RegIdx, _value: Change<Word>) {
         let addr = Platform::register_vma(idx).into();
-        let previous_cycle = self.track_access(addr, Self::SUBCYCLE_RD);
-        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-        if let Some(capture) = self.combined_capture.as_mut() {
-            capture.pending.rd = WriteOp {
-                addr,
-                value,
-                previous_cycle,
-            };
-            capture.pending.has_rd = true;
-        }
+        self.track_access(addr, Self::SUBCYCLE_RD);
     }
 
     #[inline(always)]
@@ -4376,18 +3788,9 @@ impl Tracer for PreflightTracer {
     }
 
     #[inline(always)]
-    fn store_memory(&mut self, addr: WordAddr, value: Change<Word>, previous_cycle: Cycle) {
+    fn store_memory(&mut self, addr: WordAddr, _value: Change<Word>, previous_cycle: Cycle) {
         self.update_mmio_bounds(addr);
         self.record_memory_access(addr, previous_cycle);
-        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-        if let Some(capture) = self.combined_capture.as_mut() {
-            capture.pending.memory_op = WriteOp {
-                addr,
-                value,
-                previous_cycle,
-            };
-            capture.pending.has_memory_op = true;
-        }
     }
 
     #[inline(always)]
@@ -4395,15 +3798,7 @@ impl Tracer for PreflightTracer {
         for op in effects.iter_mem_ops_mut() {
             self.record_memory_access(op.addr, op.previous_cycle);
         }
-        let witness = effects.finalize(self);
-        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-        if let Some(capture) = self.combined_capture.as_mut() {
-            let index = capture.syscall_witnesses.len();
-            capture.syscall_witnesses.push(witness);
-            let syscall_index =
-                u32::try_from(index).expect("combined capture syscall witness index exceeds u32");
-            capture.pending.syscall_index = syscall_index;
-        }
+        effects.finalize(self);
     }
 
     #[inline(always)]
@@ -5289,9 +4684,8 @@ mod tests {
         );
     }
 
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     #[test]
-    fn i049_deferred_mmio_repair_advances_pending_preview_starts() {
+    fn deferred_mmio_repair_advances_pending_preview_starts() {
         let mut tracer = PreflightTracer::new(
             &CENO_PLATFORM,
             PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX),
@@ -5316,93 +4710,6 @@ mod tests {
         assert_eq!(second.hint_start, first.hint_end);
         assert_eq!(second.heap_end, (heap_start + 10usize).baddr().0);
         assert_eq!(second.hint_end, (hint_start + 6usize).baddr().0);
-    }
-
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    #[test]
-    fn i049_deferred_patch_initialization_boundary_and_rejections() {
-        fn capture_with_one_add() -> PreflightCombinedCapture {
-            let mut capture = PreflightCombinedCapture::new(&CENO_PLATFORM, 2);
-            let step = StepRecord::new_r_instruction(
-                4,
-                ByteAddr(CENO_PLATFORM.pc_base()),
-                crate::encode_rv32(InsnKind::ADD, 1, 2, 3, 0),
-                11,
-                22,
-                Change::new(0, 33),
-                0,
-            );
-            let mut add = crate::GpuTypedSoaArena::new(InsnKind::ADD, 1).unwrap();
-            add.push_step(0, &step).unwrap();
-            let mut typed = (0..InsnKind::COUNT).map(|_| None).collect::<Vec<_>>();
-            typed[InsnKind::ADD as usize] = Some(add);
-            capture.sealed.push(crate::GpuReplayTypedRange {
-                sequence: 0,
-                typed,
-                fallback: Vec::new(),
-            });
-            capture
-        }
-
-        let boundaries = [4, 8, 12, 16];
-        let rd = Platform::register_vma(3).into();
-        let mut valid = capture_with_one_add();
-        valid
-            .resolve_patches(
-                &[
-                    NextAccessEvent::new(0, 12, WordAddr(99)),
-                    NextAccessEvent::new(6, 12, rd),
-                ],
-                &boundaries,
-            )
-            .unwrap();
-        assert_eq!(valid.initialization_events.len(), 1);
-        assert_eq!(valid.patches.len(), 1);
-        assert_eq!(
-            (valid.patches[0].source_shard, valid.patches[0].target_shard),
-            (0, 2)
-        );
-        assert_eq!(valid.patches[0].prior_value, 33);
-
-        let mut duplicate = capture_with_one_add();
-        assert_eq!(
-            duplicate.resolve_patches(
-                &[
-                    NextAccessEvent::new(6, 8, rd),
-                    NextAccessEvent::new(6, 12, rd),
-                ],
-                &boundaries,
-            ),
-            Err("duplicate deferred patch source/address")
-        );
-
-        let mut order = capture_with_one_add();
-        assert_eq!(
-            order.resolve_patches(&[NextAccessEvent::new(6, 6, rd)], &boundaries),
-            Err("deferred patch target does not follow source")
-        );
-
-        let mut missing = capture_with_one_add();
-        assert_eq!(
-            missing.resolve_patches(&[NextAccessEvent::new(10, 12, rd)], &boundaries,),
-            Err("deferred patch source ordinal does not resolve exactly once")
-        );
-
-        let mut capacity = PreflightCombinedCapture::new(&CENO_PLATFORM, 2);
-        let _ = capacity.native_state();
-        let descriptor = crate::GpuReplayRangeDescriptor {
-            shard_id: 0,
-            sequence: 0,
-            range_start: 0,
-            range_len: 3,
-            family_counts: [0; InsnKind::COUNT],
-            fallback_count: 0,
-            unsupported_count: 0,
-        };
-        assert_eq!(
-            capacity.seal_available(&[descriptor]),
-            Err("combined capture descriptor exceeds 262144-row range bound")
-        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::{InsnKind, StepRecord, WordAddr};
+use crate::{InsnKind, StepRecord};
 use std::mem::MaybeUninit;
 use strum::{EnumCount, IntoEnumIterator};
 
@@ -32,13 +32,7 @@ pub(crate) const GPU_COMPACT_NATIVE_SENTINEL: u32 = 0x4930_3530;
 pub(crate) const GPU_COMPACT_CYCLE_BITS: usize = 32;
 const GPU_COMPACT_TAIL_PADDING: usize = 31;
 
-fn compact_source_enabled_from(
-    source_override: Option<&std::ffi::OsStr>,
-    combined_capture: bool,
-) -> bool {
-    if combined_capture {
-        return false;
-    }
+fn compact_source_enabled_from(source_override: Option<&std::ffi::OsStr>) -> bool {
     match source_override {
         None => true,
         Some(value) if value == std::ffi::OsStr::new("1") => true,
@@ -49,11 +43,7 @@ fn compact_source_enabled_from(
 
 pub fn i050_compact_source_enabled() -> bool {
     let source_override = std::env::var_os("CENO_I050_COMPACT_SOURCE");
-    compact_source_enabled_from(
-        source_override.as_deref(),
-        std::env::var_os("CENO_I049_COMBINED_CAPTURE").as_deref()
-            == Some(std::ffi::OsStr::new("1")),
-    )
+    compact_source_enabled_from(source_override.as_deref())
 }
 
 /// Stable, pointer-only ABI for one preallocated typed-SoA family. Native AOT
@@ -385,103 +375,6 @@ impl GpuTypedSoaArena {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn patch_future_access(
-        &mut self,
-        ordinal: u32,
-        mask: u8,
-    ) -> Result<bool, &'static str> {
-        if self.is_compact() {
-            return self.patch_compact_future_access(ordinal, mask);
-        }
-        let ordinals = &self.fields[0][..self.len];
-        let Ok(row) = ordinals.binary_search(&ordinal) else {
-            return Ok(false);
-        };
-        let mask_field = self
-            .fields
-            .last_mut()
-            .ok_or("typed replay arena has no future-access field")?;
-        mask_field[row] |= u32::from(mask) << 8;
-        Ok(true)
-    }
-
-    pub(crate) fn patch_future_access_checked(
-        &mut self,
-        ordinal: u32,
-        mask: u8,
-        address: WordAddr,
-    ) -> Result<Option<u32>, &'static str> {
-        if self.is_compact() {
-            return Err("compact deferred patching requires decoded source validation");
-        }
-        let ordinals = &self.fields[0][..self.len];
-        let Ok(row) = ordinals.binary_search(&ordinal) else {
-            return Ok(None);
-        };
-        let (expected_memory_address, prior_value) = match (self.layout, mask) {
-            (GpuTypedLayout::R, StepRecord::FUTURE_ACCESS_RS1)
-            | (GpuTypedLayout::I, StepRecord::FUTURE_ACCESS_RS1)
-            | (GpuTypedLayout::Load, StepRecord::FUTURE_ACCESS_RS1) => (None, self.fields[4][row]),
-            (GpuTypedLayout::Branch, StepRecord::FUTURE_ACCESS_RS1)
-            | (GpuTypedLayout::Jalr, StepRecord::FUTURE_ACCESS_RS1) => (None, self.fields[5][row]),
-            (GpuTypedLayout::Store, StepRecord::FUTURE_ACCESS_RS1) => (None, self.fields[4][row]),
-            (GpuTypedLayout::U, StepRecord::FUTURE_ACCESS_RS1) => (None, 0),
-            (GpuTypedLayout::R, StepRecord::FUTURE_ACCESS_RS2) => (None, self.fields[6][row]),
-            (GpuTypedLayout::Branch, StepRecord::FUTURE_ACCESS_RS2) => (None, self.fields[7][row]),
-            (GpuTypedLayout::Store, StepRecord::FUTURE_ACCESS_RS2) => (None, self.fields[6][row]),
-            (GpuTypedLayout::R, StepRecord::FUTURE_ACCESS_RD) => (None, self.fields[9][row]),
-            (GpuTypedLayout::I, StepRecord::FUTURE_ACCESS_RD)
-            | (GpuTypedLayout::Load, StepRecord::FUTURE_ACCESS_RD) => (None, self.fields[7][row]),
-            (GpuTypedLayout::Jal, StepRecord::FUTURE_ACCESS_RD)
-            | (GpuTypedLayout::U, StepRecord::FUTURE_ACCESS_RD) => (None, self.fields[6][row]),
-            (GpuTypedLayout::Jalr, StepRecord::FUTURE_ACCESS_RD) => (None, self.fields[8][row]),
-            (GpuTypedLayout::Load, StepRecord::FUTURE_ACCESS_MEM) => {
-                (Some(WordAddr(self.fields[9][row])), self.fields[11][row])
-            }
-            (GpuTypedLayout::Store, StepRecord::FUTURE_ACCESS_MEM) => {
-                (Some(WordAddr(self.fields[8][row])), self.fields[10][row])
-            }
-            _ => return Err("deferred patch lane is invalid for typed layout"),
-        };
-        // Register addresses are owned by the authoritative next-access event:
-        // `Instruction::raw` is diagnostic-only and can remain non-semantic
-        // after an instruction is transformed. Exact ordinal plus the checked
-        // layout/lane identifies the register source. Memory addresses are
-        // explicit replay fields and remain subject to strict equality.
-        if expected_memory_address.is_some_and(|expected| expected != address) {
-            return Err("deferred patch address does not match typed source row");
-        }
-        let mask_field = self
-            .fields
-            .last_mut()
-            .ok_or("typed replay arena has no future-access field")?;
-        mask_field[row] |= u32::from(mask) << 8;
-        Ok(Some(prior_value))
-    }
-
-    pub(crate) fn drain_prefix(&mut self, rows: usize) -> Result<Self, &'static str> {
-        if rows > self.len {
-            return Err("typed replay drain exceeds populated rows");
-        }
-        let mut exact = Self::new_with_mode(self.kind, rows, self.range_start, self.is_compact())
-            .ok_or("typed replay kind has no layout")?;
-        exact.pc_base = self.pc_base;
-        if let (Some(dst), Some(src)) = (&mut exact.compact, &mut self.compact) {
-            let bytes = rows * self.layout.compact_bytes();
-            dst[..bytes].copy_from_slice(&src[..bytes]);
-            src.copy_within(bytes..self.len * self.layout.compact_bytes(), 0);
-        } else {
-            for (dst, src) in exact.fields.iter_mut().zip(&mut self.fields) {
-                dst.copy_from_slice(&src[..rows]);
-                src.copy_within(rows..self.len, 0);
-            }
-        }
-        exact.len = rows;
-        self.len -= rows;
-        Ok(exact)
-    }
-
     pub(crate) fn native_state(&mut self) -> GpuTypedNativeKindState {
         let mut state = GpuTypedNativeKindState {
             capacity: u32::try_from(self.capacity()).expect("typed replay capacity exceeds u32"),
@@ -649,33 +542,6 @@ impl GpuTypedSoaArena {
             return Err("compact record exceeds layout stride");
         }
         Ok(())
-    }
-
-    #[cfg(test)]
-    fn patch_compact_future_access(
-        &mut self,
-        ordinal: u32,
-        mask: u8,
-    ) -> Result<bool, &'static str> {
-        let local = ordinal
-            .checked_sub(self.range_start)
-            .ok_or("compact patch ordinal precedes range")?;
-        let stride = self.layout.compact_bytes();
-        let compact = self.compact.as_mut().unwrap();
-        // SAFETY: deferred patching scans only the initialized `len` rows.
-        let compact = unsafe {
-            std::slice::from_raw_parts_mut(compact.as_mut_ptr().cast::<u8>(), self.len * stride)
-        };
-        for row in 0..self.len {
-            let record = &mut compact[row * stride..(row + 1) * stride];
-            if read_compact_bits(record, 0, 18)? == local {
-                let mask_bit = compact_mask_bit(self.layout);
-                let current = read_compact_bits(record, mask_bit, 4)?;
-                write_compact_bits(record, mask_bit, 4, current | u32::from(mask))?;
-                return Ok(true);
-            }
-        }
-        Ok(false)
     }
 }
 
@@ -1132,105 +998,6 @@ mod i017_tests {
     }
 
     #[test]
-    fn i049_combined_capture_drains_prefix_and_patches_by_ordinal() {
-        let mut arena = GpuTypedSoaArena::new(InsnKind::ADD, 3).unwrap();
-        let step = record(GpuTypedLayout::R);
-        arena.push_step(4, &step).unwrap();
-        arena.push_step(9, &step).unwrap();
-        arena.push_step(12, &step).unwrap();
-
-        let mut first = arena.drain_prefix(2).unwrap();
-        assert_eq!(first.fields()[0].as_ref(), &[4, 9]);
-        assert_eq!(&arena.fields()[0][..arena.len()], &[12]);
-        assert!(
-            first
-                .patch_future_access(9, StepRecord::FUTURE_ACCESS_RD)
-                .unwrap()
-        );
-        assert!(
-            !first
-                .patch_future_access(12, StepRecord::FUTURE_ACCESS_RD)
-                .unwrap()
-        );
-        assert_eq!(
-            first.fields().last().unwrap()[1],
-            u32::from(StepRecord::FUTURE_ACCESS_RD) << 8
-        );
-    }
-
-    #[test]
-    fn i049_deferred_register_patches_use_authoritative_event_addresses() {
-        let layouts = [
-            GpuTypedLayout::R,
-            GpuTypedLayout::I,
-            GpuTypedLayout::Branch,
-            GpuTypedLayout::Jal,
-            GpuTypedLayout::Jalr,
-            GpuTypedLayout::Load,
-            GpuTypedLayout::Store,
-            GpuTypedLayout::U,
-        ];
-        for layout in layouts {
-            let step = record(layout);
-            let mut arena = GpuTypedSoaArena::new(step.insn().kind, 1).unwrap();
-            arena.push_step(7, &step).unwrap();
-            // `raw` is diagnostic-only and may not describe transformed
-            // structured register fields. It must not override the event tape.
-            arena.fields[2][0] = u32::MAX;
-            let lanes: &[(u8, u32)] = match layout {
-                GpuTypedLayout::R => &[
-                    (StepRecord::FUTURE_ACCESS_RS1, 0x11),
-                    (StepRecord::FUTURE_ACCESS_RS2, 0x22),
-                    (StepRecord::FUTURE_ACCESS_RD, 0x44),
-                ],
-                GpuTypedLayout::I | GpuTypedLayout::Jalr | GpuTypedLayout::Load => &[
-                    (StepRecord::FUTURE_ACCESS_RS1, 0x11),
-                    (StepRecord::FUTURE_ACCESS_RD, 0x44),
-                ],
-                GpuTypedLayout::Branch | GpuTypedLayout::Store => &[
-                    (StepRecord::FUTURE_ACCESS_RS1, 0x11),
-                    (StepRecord::FUTURE_ACCESS_RS2, 0x22),
-                ],
-                GpuTypedLayout::Jal => &[(StepRecord::FUTURE_ACCESS_RD, 0x44)],
-                GpuTypedLayout::U => &[
-                    (StepRecord::FUTURE_ACCESS_RS1, 0),
-                    (StepRecord::FUTURE_ACCESS_RD, 0x44),
-                ],
-            };
-            for &(lane, prior_value) in lanes {
-                assert_eq!(
-                    arena
-                        .patch_future_access_checked(7, lane, WordAddr(0xdead_beef))
-                        .unwrap(),
-                    Some(prior_value),
-                    "layout={layout:?} lane={lane}"
-                );
-            }
-        }
-
-        for layout in [GpuTypedLayout::Load, GpuTypedLayout::Store] {
-            let step = record(layout);
-            let mut arena = GpuTypedSoaArena::new(step.insn().kind, 1).unwrap();
-            arena.push_step(7, &step).unwrap();
-            assert_eq!(
-                arena.patch_future_access_checked(
-                    7,
-                    StepRecord::FUTURE_ACCESS_MEM,
-                    WordAddr(0xdead_beef),
-                ),
-                Err("deferred patch address does not match typed source row"),
-                "layout={layout:?}"
-            );
-            assert!(
-                arena
-                    .patch_future_access_checked(7, StepRecord::FUTURE_ACCESS_MEM, WordAddr(0x88),)
-                    .unwrap()
-                    .is_some()
-            );
-        }
-    }
-
-    #[test]
     fn i017_descriptor_totals_and_conservative_address_bounds_fail_closed() {
         let mut descriptor = GpuReplayRangeDescriptor {
             shard_id: 0,
@@ -1266,25 +1033,16 @@ mod i017_tests {
 
     #[test]
     fn i061_l8_packed_source_is_default_with_explicit_soa_oracle_override() {
-        assert!(compact_source_enabled_from(None, false));
-        assert!(compact_source_enabled_from(
-            Some(std::ffi::OsStr::new("1")),
-            false
-        ));
-        assert!(!compact_source_enabled_from(
-            Some(std::ffi::OsStr::new("0")),
-            false
-        ));
-        assert!(!compact_source_enabled_from(None, true));
-        assert!(!compact_source_enabled_from(
-            Some(std::ffi::OsStr::new("1")),
-            true
-        ));
+        assert!(compact_source_enabled_from(None));
+        assert!(compact_source_enabled_from(Some(std::ffi::OsStr::new("1"))));
+        assert!(!compact_source_enabled_from(Some(std::ffi::OsStr::new(
+            "0"
+        ))));
     }
 
     #[test]
     #[should_panic(expected = "CENO_I050_COMPACT_SOURCE must be 0 or 1")]
     fn i061_l8_invalid_compact_source_override_fails_closed() {
-        compact_source_enabled_from(Some(std::ffi::OsStr::new("invalid")), false);
+        compact_source_enabled_from(Some(std::ffi::OsStr::new("invalid")));
     }
 }
