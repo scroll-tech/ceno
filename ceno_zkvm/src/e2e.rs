@@ -1484,7 +1484,6 @@ impl CapturedStepReplay {
 
 struct CompactStepReplay {
     vm: VMState<GpuReplayTracer>,
-    program: Arc<Program>,
     shard_step_counts: Vec<usize>,
     shard_id: usize,
     range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
@@ -1567,7 +1566,7 @@ impl CompactStepReplay {
             .collect();
         let mut vm = VMState::<GpuReplayTracer>::new_with_tracer_config_and_next_accesses(
             platform,
-            program.clone(),
+            program,
             GpuReplayTracerConfig { chunk_capacity },
             Some(next_accesses),
         );
@@ -1578,7 +1577,6 @@ impl CompactStepReplay {
         }
         Self {
             vm,
-            program,
             shard_step_counts,
             shard_id: 0,
             range_descriptors,

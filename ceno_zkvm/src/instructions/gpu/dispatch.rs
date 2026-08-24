@@ -1083,10 +1083,6 @@ pub(crate) fn clear_compact_replay_arenas() -> [Option<GpuReplayTypedRange>; 2] 
     recovered
 }
 
-fn compact_shard_fetch_params() -> Option<(u32, usize)> {
-    FUSED_INGRESS.with(|slot| slot.borrow().as_ref().map(|state| state.fetch))
-}
-
 pub(crate) fn prepare_fused_assignment<
     E: ExtensionField,
     I: Instruction<E, InsnType = InsnKind> + 'static,

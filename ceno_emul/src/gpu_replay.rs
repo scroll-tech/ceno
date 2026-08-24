@@ -1,9 +1,5 @@
 use crate::{GpuReplayFallbackRecord, GpuTypedSoaArena, InsnKind};
-use std::{
-    fmt,
-    sync::{Arc, Mutex, mpsc::sync_channel},
-    thread,
-};
+use std::fmt;
 use strum::EnumCount;
 
 #[derive(Debug)]

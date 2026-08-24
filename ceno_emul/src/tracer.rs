@@ -166,6 +166,7 @@ impl StepRecord {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn l1_disabled_fields_are_poisoned(&self) -> bool {
         let poisoned_change = |value: Change<Word>| {
             value.before == Self::L1_POISON_WORD && value.after == Self::L1_POISON_WORD
@@ -279,6 +280,7 @@ impl StepRecord {
         record
     }
 
+    #[cfg(test)]
     pub(crate) fn l2_later_fields_are_poisoned(&self) -> bool {
         self.heap_maxtouch_addr.before.0 == Self::L1_POISON_WORD
             && self.heap_maxtouch_addr.after.0 == Self::L1_POISON_WORD
@@ -293,6 +295,7 @@ impl StepRecord {
             && self._padding == [0xa5; 3]
     }
 
+    #[cfg(test)]
     pub(crate) fn l3_later_fields_are_poisoned(&self) -> bool {
         self.heap_maxtouch_addr.before.0 == Self::L1_POISON_WORD
             && self.heap_maxtouch_addr.after.0 == Self::L1_POISON_WORD
@@ -304,18 +307,21 @@ impl StepRecord {
             && self._padding == [0xa5; 3]
     }
 
+    #[cfg(test)]
     pub(crate) fn l4_later_fields_are_poisoned(&self) -> bool {
         self.syscall_index == Self::L1_POISON_WORD
             && self.future_access_mask == 0xa5
             && self._padding == [0xa5; 3]
     }
 
+    #[cfg(test)]
     pub(crate) fn l5_later_fields_are_poisoned(&self) -> bool {
         self.syscall_index == Self::L1_POISON_WORD && self._padding == [0xa5; 3]
     }
 
     /// Finish the private layered representation after its exceptional side
     /// stream has been decoded. Ordinary instructions use `NO_SYSCALL`.
+    #[cfg(test)]
     pub(crate) fn complete_l6(
         &mut self,
         syscall_index: Option<u32>,
@@ -2084,27 +2090,6 @@ impl GpuReplayChunk {
         }
     }
 
-    fn from_descriptor(
-        descriptor: &crate::GpuReplayRangeDescriptor,
-        shard_start_cycle: Cycle,
-    ) -> Self {
-        let typed = InsnKind::iter()
-            .zip(descriptor.family_counts)
-            .map(|(kind, rows)| {
-                (rows > 0).then(|| {
-                    crate::GpuTypedSoaArena::new_with_range(kind, rows, descriptor.range_start)
-                        .unwrap()
-                })
-            })
-            .collect();
-        Self {
-            sequence: descriptor.sequence,
-            shard_start_cycle,
-            typed,
-            fallback: Vec::with_capacity(descriptor.fallback_count),
-        }
-    }
-
     fn warmed(
         family_capacities: [usize; InsnKind::COUNT],
         fallback_capacity: usize,
@@ -2496,10 +2481,6 @@ impl GpuReplayTracer {
         self.config
             .chunk_capacity
             .saturating_sub(self.current.len())
-    }
-
-    fn checked_cycle(cycle: Cycle) -> u32 {
-        u32::try_from(cycle).expect("GPU replay predecessor cycle exceeds u32")
     }
 
     fn annotate_pending(&mut self) {
@@ -3679,11 +3660,6 @@ impl PreflightTracer {
         };
         tracer.reset_register_tracking();
         tracer
-    }
-
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    pub(crate) fn combined_capture_enabled(&self) -> bool {
-        self.combined_capture.is_some()
     }
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]

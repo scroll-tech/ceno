@@ -96,17 +96,6 @@ pub(crate) fn upload_shard_steps_cached(
     })
 }
 
-/// Compatibility entry point for compact replay users which still provide a
-/// resident `StepRecord` slice. Typed ordinary ingress itself does not call
-/// this: its field-major arenas are staged directly by the fused launcher.
-pub(crate) fn upload_compact_steps_cached(
-    hal: &CudaHalBB31,
-    shard_steps: &[StepRecord],
-    shard_id: usize,
-) -> Result<(), ZKVMError> {
-    upload_shard_steps_cached(hal, shard_steps, shard_id)
-}
-
 /// Borrow the cached device buffer for kernel launch.
 /// Panics if `upload_shard_steps_cached` was not called first.
 pub(crate) fn with_cached_shard_steps<R>(f: impl FnOnce(&CudaSlice<u8>) -> R) -> R {

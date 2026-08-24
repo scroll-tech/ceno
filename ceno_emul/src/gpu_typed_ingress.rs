@@ -29,6 +29,7 @@ pub enum GpuTypedLayout {
 pub(crate) const GPU_TYPED_NATIVE_MAX_FIELDS: usize = 13;
 pub(crate) const GPU_TYPED_NATIVE_SENTINEL: u32 = 0x4750_5544;
 pub(crate) const GPU_COMPACT_NATIVE_SENTINEL: u32 = 0x4930_3530;
+pub(crate) const GPU_COMPACT_CYCLE_BITS: usize = 32;
 const GPU_COMPACT_TAIL_PADDING: usize = 31;
 
 fn compact_source_enabled_from(
@@ -105,10 +106,10 @@ impl GpuTypedLayout {
 
     pub const fn compact_bytes(self) -> usize {
         match self {
-            Self::R | Self::Load | Self::Store => 31,
-            Self::I | Self::Branch | Self::Jalr => 24,
-            Self::Jal => 16,
-            Self::U => 20,
+            Self::R | Self::Load | Self::Store => 33,
+            Self::I | Self::Branch | Self::Jalr => 25,
+            Self::Jal => 17,
+            Self::U => 21,
         }
     }
 }
@@ -384,6 +385,7 @@ impl GpuTypedSoaArena {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn patch_future_access(
         &mut self,
         ordinal: u32,
@@ -596,10 +598,7 @@ impl GpuTypedSoaArena {
             value: u32,
         ) -> Result<(), &'static str> {
             let cycle = u32::try_from(cycle).map_err(|_| "compact access cycle exceeds u32")?;
-            if cycle >= 1 << 27 {
-                return Err("compact access cycle exceeds width");
-            }
-            values.extend([(cycle, 27), (value, 32)]);
+            values.extend([(cycle, GPU_COMPACT_CYCLE_BITS), (value, 32)]);
             Ok(())
         }
         match self.layout {
@@ -629,10 +628,7 @@ impl GpuTypedSoaArena {
             }
             GpuTypedLayout::U => {
                 let cycle = u32::try_from(rs1.previous_cycle).map_err(|_| "compact x0 cycle")?;
-                if cycle >= 1 << 27 {
-                    return Err("compact x0 cycle exceeds width");
-                }
-                values.push((cycle, 27));
+                values.push((cycle, GPU_COMPACT_CYCLE_BITS));
                 append_access(&mut values, rd.previous_cycle, rd.value.before)?;
             }
         }
@@ -655,6 +651,7 @@ impl GpuTypedSoaArena {
         Ok(())
     }
 
+    #[cfg(test)]
     fn patch_compact_future_access(
         &mut self,
         ordinal: u32,
@@ -682,12 +679,13 @@ impl GpuTypedSoaArena {
     }
 }
 
+#[cfg(test)]
 const fn compact_mask_bit(layout: GpuTypedLayout) -> usize {
     match layout {
-        GpuTypedLayout::R | GpuTypedLayout::Load | GpuTypedLayout::Store => 240,
-        GpuTypedLayout::I | GpuTypedLayout::Branch | GpuTypedLayout::Jalr => 181,
-        GpuTypedLayout::Jal => 122,
-        GpuTypedLayout::U => 149,
+        GpuTypedLayout::R | GpuTypedLayout::Load | GpuTypedLayout::Store => 255,
+        GpuTypedLayout::I | GpuTypedLayout::Branch | GpuTypedLayout::Jalr => 191,
+        GpuTypedLayout::Jal => 127,
+        GpuTypedLayout::U => 159,
     }
 }
 
@@ -902,14 +900,14 @@ mod i017_tests {
             assert_eq!(layout.words(), words);
             assert_eq!(layout.bytes(), bytes);
         }
-        assert_eq!(GpuTypedLayout::R.compact_bytes(), 31);
-        assert_eq!(GpuTypedLayout::I.compact_bytes(), 24);
-        assert_eq!(GpuTypedLayout::Branch.compact_bytes(), 24);
-        assert_eq!(GpuTypedLayout::Jal.compact_bytes(), 16);
-        assert_eq!(GpuTypedLayout::Jalr.compact_bytes(), 24);
-        assert_eq!(GpuTypedLayout::Load.compact_bytes(), 31);
-        assert_eq!(GpuTypedLayout::Store.compact_bytes(), 31);
-        assert_eq!(GpuTypedLayout::U.compact_bytes(), 20);
+        assert_eq!(GpuTypedLayout::R.compact_bytes(), 33);
+        assert_eq!(GpuTypedLayout::I.compact_bytes(), 25);
+        assert_eq!(GpuTypedLayout::Branch.compact_bytes(), 25);
+        assert_eq!(GpuTypedLayout::Jal.compact_bytes(), 17);
+        assert_eq!(GpuTypedLayout::Jalr.compact_bytes(), 25);
+        assert_eq!(GpuTypedLayout::Load.compact_bytes(), 33);
+        assert_eq!(GpuTypedLayout::Store.compact_bytes(), 33);
+        assert_eq!(GpuTypedLayout::U.compact_bytes(), 21);
 
         for kind in InsnKind::iter() {
             match kind {
@@ -972,7 +970,7 @@ mod i017_tests {
             let rd = step.rd().unwrap_or_default();
             let memory = step.memory_op().unwrap_or_default();
             let mut check_access = |cycle: u64, value: u32| {
-                assert_eq!(take(27), u32::try_from(cycle).unwrap());
+                assert_eq!(take(GPU_COMPACT_CYCLE_BITS), u32::try_from(cycle).unwrap());
                 assert_eq!(take(32), value);
             };
             match layout {
@@ -1001,8 +999,14 @@ mod i017_tests {
                     check_access(memory.previous_cycle, memory.value.before);
                 }
                 GpuTypedLayout::U => {
-                    assert_eq!(take(27), u32::try_from(rs1.previous_cycle).unwrap());
-                    assert_eq!(take(27), u32::try_from(rd.previous_cycle).unwrap());
+                    assert_eq!(
+                        take(GPU_COMPACT_CYCLE_BITS),
+                        u32::try_from(rs1.previous_cycle).unwrap()
+                    );
+                    assert_eq!(
+                        take(GPU_COMPACT_CYCLE_BITS),
+                        u32::try_from(rd.previous_cycle).unwrap()
+                    );
                     assert_eq!(take(32), rd.value.before);
                 }
             }
@@ -1010,6 +1014,38 @@ mod i017_tests {
             assert_eq!(bit, compact_mask_bit(layout) + 4);
             assert!(source[bit.div_ceil(8)..].iter().all(|byte| *byte == 0));
         }
+    }
+
+    #[test]
+    fn i050_compact_source_preserves_absolute_cycles_past_27_bits() {
+        let shard_offset = 1u64 << 27;
+        let ordinal = 10;
+        let previous_cycle = shard_offset + 7;
+        let step = StepRecord::new_r_instruction(
+            shard_offset + u64::from(ordinal) * 4,
+            ByteAddr(0x1000),
+            encode_rv32(InsnKind::OR, 1, 2, 3, 0),
+            0x11,
+            0x22,
+            Change::new(0x33, 0x44),
+            previous_cycle,
+        );
+        let mut arena = GpuTypedSoaArena::new_with_mode(InsnKind::OR, 1, 0, true).unwrap();
+        arena.push_step(ordinal, &step).unwrap();
+
+        let source = arena.payload_bytes();
+        assert_eq!(
+            read_compact_bits(source, 63, 32).unwrap(),
+            previous_cycle as u32
+        );
+        assert_eq!(
+            read_compact_bits(source, 127, 32).unwrap(),
+            previous_cycle as u32
+        );
+        assert_eq!(
+            read_compact_bits(source, 191, 32).unwrap(),
+            previous_cycle as u32
+        );
     }
 
     #[test]
