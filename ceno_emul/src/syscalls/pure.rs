@@ -15,7 +15,7 @@ use super::{
     secp256k1::{self, COORDINATE_WORDS, SECP256K1_ARG_WORDS},
     secp256r1, sha256,
 };
-use crate::{ByteAddr, Platform, WORD_SIZE, Word, WordAddr};
+use crate::{Platform, WORD_SIZE, Word};
 
 const VALUE_MASK: u64 = u32::MAX as u64;
 const DOUBLE_CACHE_ENTRIES: usize = 1 << 15;
@@ -124,46 +124,6 @@ pub(crate) fn access_plan(code: Word, arg0: Word, arg1: Word) -> Option<AccessPl
         SECP256R1_SCALAR_INVERT => Some(AccessPlan::one(arg0, secp256r1::COORDINATE_WORDS, 1)),
         _ => None,
     }
-}
-
-/// Exact address order needed to apply the authoritative cross-shard tape
-/// without materializing a generic syscall witness.
-pub(crate) fn future_access_addresses(
-    code: Word,
-    arg0: Word,
-    arg1: Word,
-) -> Option<(Vec<WordAddr>, Vec<WordAddr>)> {
-    let reg_count = if code == SHA_EXTEND {
-        1
-    } else {
-        access_plan(code, arg0, arg1)?.register_count
-    };
-    let registers = [Platform::reg_arg0(), Platform::reg_arg1()]
-        .into_iter()
-        .take(reg_count)
-        .map(|index| Platform::register_vma(index).into())
-        .collect();
-    let memory = if code == SHA_EXTEND {
-        let base = ByteAddr(arg0).waddr();
-        vec![
-            WordAddr(base.0 - 2),
-            WordAddr(base.0 - 7),
-            WordAddr(base.0 - 15),
-            WordAddr(base.0 - 16),
-            base,
-        ]
-    } else {
-        let plan = access_plan(code, arg0, arg1)?;
-        plan.regions
-            .into_iter()
-            .take(plan.region_count)
-            .flat_map(|region| {
-                let base = ByteAddr(region.byte_addr).waddr();
-                (0..region.words).map(move |offset| WordAddr(base.0 + offset as u32))
-            })
-            .collect()
-    };
-    Some((registers, memory))
 }
 
 fn disjoint(first: Word, first_words: usize, second: Word, second_words: usize) -> bool {

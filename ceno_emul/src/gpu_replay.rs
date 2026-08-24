@@ -87,7 +87,7 @@ impl fmt::Display for GpuReplayRoutingError {
 impl std::error::Error for GpuReplayRoutingError {}
 
 #[cfg(test)]
-mod i017_tests {
+mod tests {
     use super::*;
     use crate::GpuReplayFallbackRecord;
 
@@ -96,7 +96,7 @@ mod i017_tests {
     }
 
     #[test]
-    fn i017_ranges_are_canonical_and_family_totals_are_exact() {
+    fn ranges_are_canonical_and_family_totals_are_exact() {
         let mut add = GpuTypedSoaArena::new(InsnKind::ADD, 1).unwrap();
         add.push_step(0, &Default::default()).unwrap();
         let mut typed = empty_typed();
@@ -139,7 +139,7 @@ mod i017_tests {
     }
 
     #[test]
-    fn i017_range_gap_and_unsupported_records_reject_without_repair() {
+    fn range_gap_and_unsupported_records_reject_without_repair() {
         let gap = std::panic::catch_unwind(|| {
             GpuReplayShardArenas::from_ranges(vec![GpuReplayTypedRange {
                 sequence: 1,

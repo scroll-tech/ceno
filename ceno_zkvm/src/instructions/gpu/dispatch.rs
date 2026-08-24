@@ -48,23 +48,6 @@ use crate::{
 const PACKED_PRODUCER_COUNT_BITS: u32 = 24;
 const PRODUCER_PRIORITY_ROW_BITS: u32 = 23;
 
-fn fused_launcher_capacities(
-    stage_capacity: usize,
-    work_capacity: usize,
-) -> Result<(usize, usize), ZKVMError> {
-    match std::env::var_os("CENO_I057_PREFLIGHT_SIZED_FUSED") {
-        None => Ok((stage_capacity, work_capacity)),
-        Some(value) if value == std::ffi::OsStr::new("1") => Ok((stage_capacity, work_capacity)),
-        Some(value) if value == std::ffi::OsStr::new("0") => Ok((
-            ceno_gpu::common::witgen::typed_ingress::FUSED_STAGE_BYTES,
-            ceno_gpu::common::witgen::typed_ingress::FUSED_MAX_WORK_ITEMS,
-        )),
-        Some(_) => Err(ZKVMError::InvalidWitness(
-            "CENO_I057_PREFLIGHT_SIZED_FUSED must be 0 or 1".into(),
-        )),
-    }
-}
-
 fn packed_producer_total(kind: InsnKind, rows: usize) -> u32 {
     let rows = u32::try_from(rows).expect("producer total exceeds u32");
     assert!(
@@ -567,8 +550,6 @@ pub(crate) fn begin_provisional_fused_session(
         )?;
         super::cache::set_reserved_address_capacity(reserved_addresses);
         let pointers = super::cache::cached_shard_pointer_fingerprint();
-        let (stage_capacity, work_capacity) =
-            fused_launcher_capacities(stage_capacity, work_capacity)?;
         let launcher = ceno_gpu::common::witgen::typed_ingress::FusedRangeLauncher::new(
             hal.inner.clone(),
             stage_capacity,
@@ -1447,7 +1428,6 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
         .map(|range| range.typed.iter().flatten().count())
         .max()
         .ok_or_else(|| ZKVMError::InvalidWitness("installed fused shard has no ranges".into()))?;
-    let (stage_capacity, work_capacity) = fused_launcher_capacities(stage_capacity, work_capacity)?;
     let mut launcher = FusedRangeLauncher::new(hal.inner.clone(), stage_capacity, work_capacity)
         .map_err(|e| ZKVMError::InvalidWitness(format!("fused launcher init: {e}").into()))?;
     let mut producer_bases = [0usize; InsnKind::COUNT];
@@ -2940,7 +2920,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
 }
 
 #[cfg(test)]
-mod i017_tests {
+mod tests {
     use super::*;
 
     fn empty_typed() -> Vec<Option<GpuTypedSoaArena>> {
@@ -2959,13 +2939,13 @@ mod i017_tests {
     }
 
     #[test]
-    fn i042_lw_fused_abi_preserves_the_u16_imm_sign_column() {
+    fn lw_fused_abi_preserves_the_u16_imm_sign_column() {
         let (_, has_imm_sign, _) = GpuWitgenKind::Lw.fused_abi();
         assert_eq!(has_imm_sign, u32::from(cfg!(feature = "u16limb_circuit")));
     }
 
     #[test]
-    fn i017_cpu_dispatch_reserves_typed_plus_conservative_sparse_capacity_once() {
+    fn cpu_dispatch_reserves_typed_plus_conservative_sparse_capacity_once() {
         FUSED_INGRESS.with(|slot| assert!(slot.borrow().is_none()));
         let mut add = GpuTypedSoaArena::new(InsnKind::ADD, 1).unwrap();
         add.push_step(0, &StepRecord::default()).unwrap();
@@ -2998,7 +2978,7 @@ mod i017_tests {
     }
 
     #[test]
-    fn i061_l8_submit_error_clears_fused_thread_local_state() {
+    fn submit_error_clears_fused_thread_local_state() {
         abort_fused_session();
         install_compact_replay_arenas(GpuReplayShardArenas::provisional([0; InsnKind::COUNT]));
         FUSED_ASSIGNMENTS.with(|cache| {
@@ -3017,7 +2997,7 @@ mod i017_tests {
     }
 
     #[test]
-    fn i061_l8_zero_row_and_nonzero_assignment_owners_merge_and_drain() {
+    fn zero_row_and_nonzero_assignment_owners_merge_and_drain() {
         abort_fused_session();
         let zero_row_owner = TypeId::of::<u8>();
         let nonzero_owner = TypeId::of::<u16>();
@@ -3065,7 +3045,7 @@ mod i017_tests {
     }
 
     #[test]
-    fn i061_l8_direct_source_uses_only_initialized_nonempty_prefixes() {
+    fn direct_source_uses_only_initialized_nonempty_prefixes() {
         let mut add = GpuTypedSoaArena::new(InsnKind::ADD, 4).unwrap();
         add.push_step(0, &StepRecord::default()).unwrap();
         assert_eq!(add.capacity(), 4);
@@ -3097,7 +3077,7 @@ mod i017_tests {
 
     #[cfg(feature = "u16limb_circuit")]
     #[test]
-    fn i050_compact_and_typed_fused_assignments_match_every_layout() {
+    fn compact_and_field_soa_fused_assignments_match_every_layout() {
         use ceno_emul::{
             ByteAddr, Change, GpuReplayTypedRange, ReadOp, WordAddr, WriteOp, encode_rv32,
         };
@@ -3208,26 +3188,18 @@ mod i017_tests {
         ];
 
         fn arenas(steps: &[StepRecord], compact: bool) -> GpuReplayShardArenas {
-            let old_compact = std::env::var_os("CENO_I050_COMPACT_SOURCE");
-            unsafe {
-                if compact {
-                    std::env::set_var("CENO_I050_COMPACT_SOURCE", "1");
-                } else {
-                    std::env::set_var("CENO_I050_COMPACT_SOURCE", "0");
-                }
-            }
             let mut typed: Vec<Option<GpuTypedSoaArena>> =
                 (0..InsnKind::COUNT).map(|_| None).collect();
             for (ordinal, step) in steps.iter().enumerate() {
-                let arena = typed[step.insn().kind as usize]
-                    .get_or_insert_with(|| GpuTypedSoaArena::new(step.insn().kind, 1).unwrap());
+                let arena = typed[step.insn().kind as usize].get_or_insert_with(|| {
+                    if compact {
+                        GpuTypedSoaArena::new(step.insn().kind, 1)
+                    } else {
+                        GpuTypedSoaArena::new_field_soa_oracle(step.insn().kind, 1)
+                    }
+                    .unwrap()
+                });
                 arena.push_step(ordinal as u32, step).unwrap();
-            }
-            unsafe {
-                match old_compact {
-                    Some(value) => std::env::set_var("CENO_I050_COMPACT_SOURCE", value),
-                    None => std::env::remove_var("CENO_I050_COMPACT_SOURCE"),
-                }
             }
             GpuReplayShardArenas::from_ranges(vec![GpuReplayTypedRange {
                 sequence: 0,

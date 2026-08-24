@@ -1491,7 +1491,7 @@ mod tests {
     }
 
     #[test]
-    fn i017_four_segment_ordinals_and_bounds_are_exact() {
+    fn four_segment_ordinals_and_bounds_are_exact() {
         let limit = LEGACY_BUCKET_LIMIT;
         assert!(limit > 0);
         let segment0 =
@@ -1517,7 +1517,7 @@ mod tests {
     }
 
     #[test]
-    fn i017_emission_and_address_capacity_relations_fail_closed_without_repair() {
+    fn emission_and_address_capacity_relations_fail_closed_without_repair() {
         fn validate(
             observed_ec: u32,
             expected_writes: u32,
@@ -1548,7 +1548,7 @@ mod tests {
     }
 
     #[test]
-    fn i041_shard_ram_column_maps_cover_main_and_ec_tree_routes() {
+    fn shard_ram_column_maps_cover_main_and_ec_tree_routes() {
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
         let (config, _gkr_circuit) =
@@ -1593,7 +1593,7 @@ mod tests {
     }
 
     #[test]
-    fn i041_shard_ram_y6_lo_formula_and_little_endian_bytes_match_cpu() {
+    fn shard_ram_y6_lo_formula_and_little_endian_bytes_match_cpu() {
         const PRIME: u64 = 0x7800_0001;
         let y6 = 0x1234_567u64;
         let read = y6_lo_value::<E>(BabyBear::from_u64(y6), false);

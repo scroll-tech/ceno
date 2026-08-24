@@ -32,7 +32,6 @@ pub use gpu_replay::{GpuReplayRoutingError, GpuReplayShardArenas, GpuReplayTyped
 pub use gpu_typed_ingress::{
     CONTINUATION_ADDRESS_SEND_BOUND, GpuReplayRangeDescriptor, GpuShardPreview, GpuTypedKindSpec,
     GpuTypedLayout, GpuTypedSoaArena, MAX_SPARSE_ADDRESS_SENDS_PER_STEP, gpu_typed_kind_spec,
-    i050_compact_source_enabled,
 };
 
 mod vm_state;

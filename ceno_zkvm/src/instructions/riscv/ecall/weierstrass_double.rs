@@ -210,8 +210,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             ));
         }
         #[cfg(feature = "gpu")]
-        let use_gpu_relations = EC::CURVE_TYPE == CurveType::Secp256k1
-            && crate::instructions::gpu::chips::secp256k1::enabled();
+        let use_gpu_relations = EC::CURVE_TYPE == CurveType::Secp256k1;
         #[cfg(not(feature = "gpu"))]
         let use_gpu_relations = false;
         let nthreads = max_usable_threads();
@@ -351,9 +350,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                 .collect::<Result<_, _>>()
         })?;
 
-        let affine_results = if EC::CURVE_TYPE == CurveType::Secp256k1
-            && std::env::var_os("CENO_GPU_LEGACY_SECP_DOUBLE_ASSIGN").is_none()
-        {
+        let affine_results = if EC::CURVE_TYPE == CurveType::Secp256k1 {
             let span = tracing::info_span!(
                 "secp256k1_affine_batch",
                 operation = "double",
@@ -372,8 +369,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
         let used_gpu_relations = if use_gpu_relations {
             let affine = affine_results.as_deref().ok_or_else(|| {
                 ZKVMError::InvalidWitness(
-                    "I055 secp256k1 double requires compact affine results; legacy mode is unsupported"
-                        .into(),
+                    "direct GPU secp256k1 double requires compact affine results".into(),
                 )
             })?;
             let records = tracing::info_span!(

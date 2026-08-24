@@ -18,29 +18,6 @@ use std::{
 };
 use strum::{EnumCount, IntoEnumIterator};
 use tiny_keccak::{Hasher, Keccak};
-
-fn instruction_reads_rs1(kind: InsnKind) -> bool {
-    use crate::rv32im::InsnFormat::{B, I, R, S};
-    !matches!(kind, InsnKind::ECALL | InsnKind::INVALID)
-        && matches!(crate::rv32im::InsnFormat::from(kind), R | I | S | B)
-}
-
-fn instruction_reads_rs2(kind: InsnKind) -> bool {
-    use crate::rv32im::InsnFormat::{B, R, S};
-    matches!(crate::rv32im::InsnFormat::from(kind), R | S | B)
-}
-
-fn instruction_writes_rd(kind: InsnKind) -> bool {
-    !matches!(kind, InsnKind::ECALL | InsnKind::INVALID)
-        && matches!(
-            crate::rv32im::InsnFormat::from(kind),
-            crate::rv32im::InsnFormat::R
-                | crate::rv32im::InsnFormat::I
-                | crate::rv32im::InsnFormat::U
-                | crate::rv32im::InsnFormat::J
-        )
-}
-
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
 /// - Each instruction is divided into 4 subcycles with the operations on: rs1, rs2, rd, memory. Each op is assigned a unique `cycle + subcycle`.
@@ -88,277 +65,6 @@ impl StepRecord {
     pub const FUTURE_ACCESS_RS2: u8 = 1 << 1;
     pub const FUTURE_ACCESS_RD: u8 = 1 << 2;
     pub const FUTURE_ACCESS_MEM: u8 = 1 << 3;
-
-    pub(crate) const L1_POISON_WORD: u32 = 0xa5a5_a5a5;
-    pub(crate) const L1_POISON_CYCLE: Cycle = 0xa5a5_a5a5_a5a5_a5a5;
-
-    pub(crate) fn l1_skeleton(
-        cycle: Cycle,
-        pc: Change<ByteAddr>,
-        insn: Instruction,
-        memory_addr: Option<WordAddr>,
-    ) -> Self {
-        let poison_change = Change {
-            before: Self::L1_POISON_WORD,
-            after: Self::L1_POISON_WORD,
-        };
-        let poison_read = ReadOp {
-            addr: 0.into(),
-            value: Self::L1_POISON_WORD,
-            previous_cycle: Self::L1_POISON_CYCLE,
-        };
-        let poison_write = WriteOp {
-            addr: 0.into(),
-            value: poison_change,
-            previous_cycle: Self::L1_POISON_CYCLE,
-        };
-        let has_rs1 = instruction_reads_rs1(insn.kind);
-        let has_rs2 = instruction_reads_rs2(insn.kind);
-        let has_rd = instruction_writes_rd(insn.kind);
-        let has_memory_op = memory_addr.is_some();
-        Self {
-            cycle,
-            pc,
-            heap_maxtouch_addr: Change {
-                before: Self::L1_POISON_WORD.into(),
-                after: Self::L1_POISON_WORD.into(),
-            },
-            hint_maxtouch_addr: Change {
-                before: Self::L1_POISON_WORD.into(),
-                after: Self::L1_POISON_WORD.into(),
-            },
-            insn,
-            has_rs1,
-            has_rs2,
-            has_rd,
-            has_memory_op,
-            rs1: ReadOp {
-                addr: if has_rs1 {
-                    Platform::register_vma(insn.rs1).into()
-                } else {
-                    0.into()
-                },
-                ..poison_read
-            },
-            rs2: ReadOp {
-                addr: if has_rs2 {
-                    Platform::register_vma(insn.rs2).into()
-                } else {
-                    0.into()
-                },
-                ..poison_read
-            },
-            rd: WriteOp {
-                addr: if has_rd {
-                    Platform::register_vma(insn.rd_internal() as RegIdx).into()
-                } else {
-                    0.into()
-                },
-                ..poison_write
-            },
-            memory_op: WriteOp {
-                addr: memory_addr.unwrap_or_default(),
-                ..poison_write
-            },
-            syscall_index: Self::L1_POISON_WORD,
-            future_access_mask: 0xa5,
-            _padding: [0xa5; 3],
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn l1_disabled_fields_are_poisoned(&self) -> bool {
-        let poisoned_change = |value: Change<Word>| {
-            value.before == Self::L1_POISON_WORD && value.after == Self::L1_POISON_WORD
-        };
-        self.heap_maxtouch_addr.before.0 == Self::L1_POISON_WORD
-            && self.heap_maxtouch_addr.after.0 == Self::L1_POISON_WORD
-            && self.hint_maxtouch_addr.before.0 == Self::L1_POISON_WORD
-            && self.hint_maxtouch_addr.after.0 == Self::L1_POISON_WORD
-            && self.rs1.value == Self::L1_POISON_WORD
-            && self.rs1.previous_cycle == Self::L1_POISON_CYCLE
-            && self.rs2.value == Self::L1_POISON_WORD
-            && self.rs2.previous_cycle == Self::L1_POISON_CYCLE
-            && poisoned_change(self.rd.value)
-            && self.rd.previous_cycle == Self::L1_POISON_CYCLE
-            && poisoned_change(self.memory_op.value)
-            && self.memory_op.previous_cycle == Self::L1_POISON_CYCLE
-            && self.syscall_index == Self::L1_POISON_WORD
-            && self.future_access_mask == 0xa5
-            && self._padding == [0xa5; 3]
-    }
-
-    pub(crate) fn l2_values(
-        cycle: Cycle,
-        pc: Change<ByteAddr>,
-        insn: Instruction,
-        memory_addr: Option<WordAddr>,
-        rs1_value: Word,
-        rs2_value: Word,
-        rd_value: Change<Word>,
-        memory_value: Option<Change<Word>>,
-    ) -> Self {
-        let mut record = Self::l1_skeleton(cycle, pc, insn, memory_addr);
-        if record.has_rs1 {
-            record.rs1.value = rs1_value;
-        }
-        if record.has_rs2 {
-            record.rs2.value = rs2_value;
-        }
-        if record.has_rd {
-            record.rd.value = rd_value;
-        }
-        if let Some(memory_value) = memory_value {
-            record.memory_op.value = memory_value;
-        }
-        record
-    }
-
-    pub(crate) fn l3_registers(
-        cycle: Cycle,
-        pc: Change<ByteAddr>,
-        insn: Instruction,
-        memory_addr: Option<WordAddr>,
-        rs1_value: Word,
-        rs2_value: Word,
-        rd_value: Change<Word>,
-        memory_value: Option<Change<Word>>,
-        register_previous_cycles: [Cycle; 3],
-    ) -> Self {
-        let mut record = Self::l2_values(
-            cycle,
-            pc,
-            insn,
-            memory_addr,
-            rs1_value,
-            rs2_value,
-            rd_value,
-            memory_value,
-        );
-        if record.has_rs1 {
-            record.rs1.previous_cycle = register_previous_cycles[0];
-        }
-        if record.has_rs2 {
-            record.rs2.previous_cycle = register_previous_cycles[1];
-        }
-        if record.has_rd {
-            record.rd.previous_cycle = register_previous_cycles[2];
-        }
-        record
-    }
-
-    pub(crate) fn l4_memory(
-        cycle: Cycle,
-        pc: Change<ByteAddr>,
-        insn: Instruction,
-        memory_addr: Option<WordAddr>,
-        rs1_value: Word,
-        rs2_value: Word,
-        rd_value: Change<Word>,
-        memory_value: Option<Change<Word>>,
-        register_previous_cycles: [Cycle; 3],
-        memory_previous_cycle: Option<Cycle>,
-        heap_maxtouch_addr: Change<ByteAddr>,
-        hint_maxtouch_addr: Change<ByteAddr>,
-    ) -> Self {
-        let mut record = Self::l3_registers(
-            cycle,
-            pc,
-            insn,
-            memory_addr,
-            rs1_value,
-            rs2_value,
-            rd_value,
-            memory_value,
-            register_previous_cycles,
-        );
-        record.heap_maxtouch_addr = heap_maxtouch_addr;
-        record.hint_maxtouch_addr = hint_maxtouch_addr;
-        if let Some(previous_cycle) = memory_previous_cycle {
-            record.memory_op.previous_cycle = previous_cycle;
-        }
-        record
-    }
-
-    #[cfg(test)]
-    pub(crate) fn l2_later_fields_are_poisoned(&self) -> bool {
-        self.heap_maxtouch_addr.before.0 == Self::L1_POISON_WORD
-            && self.heap_maxtouch_addr.after.0 == Self::L1_POISON_WORD
-            && self.hint_maxtouch_addr.before.0 == Self::L1_POISON_WORD
-            && self.hint_maxtouch_addr.after.0 == Self::L1_POISON_WORD
-            && self.rs1.previous_cycle == Self::L1_POISON_CYCLE
-            && self.rs2.previous_cycle == Self::L1_POISON_CYCLE
-            && self.rd.previous_cycle == Self::L1_POISON_CYCLE
-            && self.memory_op.previous_cycle == Self::L1_POISON_CYCLE
-            && self.syscall_index == Self::L1_POISON_WORD
-            && self.future_access_mask == 0xa5
-            && self._padding == [0xa5; 3]
-    }
-
-    #[cfg(test)]
-    pub(crate) fn l3_later_fields_are_poisoned(&self) -> bool {
-        self.heap_maxtouch_addr.before.0 == Self::L1_POISON_WORD
-            && self.heap_maxtouch_addr.after.0 == Self::L1_POISON_WORD
-            && self.hint_maxtouch_addr.before.0 == Self::L1_POISON_WORD
-            && self.hint_maxtouch_addr.after.0 == Self::L1_POISON_WORD
-            && self.memory_op.previous_cycle == Self::L1_POISON_CYCLE
-            && self.syscall_index == Self::L1_POISON_WORD
-            && self.future_access_mask == 0xa5
-            && self._padding == [0xa5; 3]
-    }
-
-    #[cfg(test)]
-    pub(crate) fn l4_later_fields_are_poisoned(&self) -> bool {
-        self.syscall_index == Self::L1_POISON_WORD
-            && self.future_access_mask == 0xa5
-            && self._padding == [0xa5; 3]
-    }
-
-    #[cfg(test)]
-    pub(crate) fn l5_later_fields_are_poisoned(&self) -> bool {
-        self.syscall_index == Self::L1_POISON_WORD && self._padding == [0xa5; 3]
-    }
-
-    /// Finish the private layered representation after its exceptional side
-    /// stream has been decoded. Ordinary instructions use `NO_SYSCALL`.
-    #[cfg(test)]
-    pub(crate) fn complete_l6(
-        &mut self,
-        syscall_index: Option<u32>,
-        ecall_code: Option<(Word, Cycle)>,
-        ecall_arg0: Option<(Word, Cycle)>,
-    ) {
-        self.syscall_index = syscall_index.unwrap_or(Self::NO_SYSCALL);
-        if let Some((value, previous_cycle)) = ecall_code {
-            self.rs1 = ReadOp {
-                addr: Platform::register_vma(Platform::reg_ecall()).into(),
-                value,
-                previous_cycle,
-            };
-            self.has_rs1 = true;
-        }
-        if let Some((value, previous_cycle)) = ecall_arg0 {
-            self.rs2 = ReadOp {
-                addr: Platform::register_vma(Platform::reg_arg0()).into(),
-                value,
-                previous_cycle,
-            };
-            self.has_rs2 = true;
-        }
-        if !self.has_rs1 {
-            self.rs1 = ReadOp::default();
-        }
-        if !self.has_rs2 {
-            self.rs2 = ReadOp::default();
-        }
-        if !self.has_rd {
-            self.rd = WriteOp::default();
-        }
-        if !self.has_memory_op {
-            self.memory_op = WriteOp::default();
-        }
-        self._padding = [0; 3];
-    }
 }
 
 impl Default for StepRecord {
@@ -1955,14 +1661,6 @@ impl StepRecord {
     #[inline(always)]
     pub fn future_access_mask(&self) -> u8 {
         self.future_access_mask
-    }
-
-    pub(crate) fn set_future_access_mask(&mut self, mask: u8) {
-        self.future_access_mask |= mask;
-    }
-
-    pub(crate) fn clear_future_access_mask(&mut self) {
-        self.future_access_mask = 0;
     }
 
     #[inline(always)]
@@ -4487,7 +4185,7 @@ mod tests {
     }
 
     #[test]
-    fn i061_l8_replay_keeps_exactly_two_warmed_nonaliasing_owners() {
+    fn replay_keeps_exactly_two_warmed_nonaliasing_owners() {
         fn fingerprint(chunk: &GpuReplayChunk) -> ((usize, usize), (usize, usize), (usize, usize)) {
             let add = chunk.typed[InsnKind::ADD as usize].as_ref().unwrap();
             let add_ptr = if add.is_compact() {
@@ -4560,7 +4258,7 @@ mod tests {
     }
 
     #[test]
-    fn i061_l8_cross_shard_recycle_stays_empty_until_start_shard() {
+    fn cross_shard_recycle_stays_empty_until_start_shard() {
         fn fingerprint(chunk: &GpuReplayChunk) -> ((usize, usize), (usize, usize), (usize, usize)) {
             let add = chunk.typed[InsnKind::ADD as usize].as_ref().unwrap();
             let add_ptr = if add.is_compact() {

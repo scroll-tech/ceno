@@ -72,39 +72,6 @@ enum AssemblyTraceStyle {
     /// Pure execution in a block whose instruction budget is reserved at
     /// entry, while dynamic memory guards remain exact.
     PureCountedBlock,
-    /// I061-R L0: the production-preflight block image stripped to value-only
-    /// execution. It deliberately owns no planner, access, or record state.
-    PreflightPureL0,
-    /// I061-R L1: L0 execution plus poison-initialized generic skeleton rows.
-    PreflightSkeletonL1,
-    /// I061-R L1C: L1 semantics emitted directly as compact AoS rows.
-    PreflightCompactSkeletonL1C,
-    /// I061-R L2C: L2 values emitted directly as compact family rows.
-    PreflightCompactValuesL2C,
-    /// I061-R L3C: L3 register predecessors appended to compact value families.
-    PreflightCompactRegistersL3C,
-    /// I061-R L4C: L3C plus memory predecessors and exact MMIO bounds.
-    PreflightCompactMemoryL4C,
-    /// I061-R L5C: L4C plus direct compact future-access masks.
-    PreflightCompactFutureAccessL5C,
-    /// I061-R L6C: L5C plus exact exceptional and syscall side streams.
-    PreflightCompactExceptionalL6C,
-    /// I061-R L7: retained GPU compact bytes routed directly by family while
-    /// preserving the L6C exceptional side streams.
-    PreflightCompactClosureL7,
-    /// I061-R L2: L1 skeleton rows plus operand and memory values.
-    PreflightValuesL2,
-    /// I061-R L3: L2 rows plus exact register predecessor stamps.
-    PreflightRegistersL3,
-    /// I061-R L4: L3 rows plus packed-memory predecessor stamps and exact
-    /// heap/hint maximum-touch bounds.
-    PreflightMemoryL4,
-    /// I061-R L5: L4 rows plus authoritative cross-shard future-access masks.
-    PreflightFutureAccessL5,
-    /// Native code emits `StepRecord`s and maintains FullTracer access state
-    /// directly. Rust is entered only for fallback instructions and syscalls.
-    #[cfg_attr(not(test), allow(dead_code))]
-    FullTracerDirect,
     /// Native code emits ordinary `GpuReplayTracer` rows directly into the
     /// current preallocated typed-SoA range. The same image retains the
     /// FullTracer direct lane for the environment-gated CPU control.
@@ -134,43 +101,11 @@ enum PreflightFeature {
 
 impl AssemblyTraceStyle {
     fn needs_callback_values(self) -> bool {
-        matches!(
-            self,
-            Self::PreflightValuesL2
-                | Self::PreflightCompactValuesL2C
-                | Self::PreflightCompactRegistersL3C
-                | Self::PreflightCompactMemoryL4C
-                | Self::PreflightCompactFutureAccessL5C
-                | Self::PreflightCompactExceptionalL6C
-                | Self::PreflightCompactClosureL7
-                | Self::PreflightRegistersL3
-                | Self::PreflightMemoryL4
-                | Self::PreflightFutureAccessL5
-                | Self::FullTracerDirect
-                | Self::GpuReplayDirect
-        )
+        self == Self::GpuReplayDirect
     }
 
     fn is_pure(self) -> bool {
-        matches!(
-            self,
-            Self::Pure
-                | Self::PureBlock
-                | Self::PureCountedBlock
-                | Self::PreflightPureL0
-                | Self::PreflightSkeletonL1
-                | Self::PreflightCompactSkeletonL1C
-                | Self::PreflightCompactValuesL2C
-                | Self::PreflightCompactRegistersL3C
-                | Self::PreflightCompactMemoryL4C
-                | Self::PreflightCompactFutureAccessL5C
-                | Self::PreflightCompactExceptionalL6C
-                | Self::PreflightCompactClosureL7
-                | Self::PreflightValuesL2
-                | Self::PreflightRegistersL3
-                | Self::PreflightMemoryL4
-                | Self::PreflightFutureAccessL5
-        )
+        matches!(self, Self::Pure | Self::PureBlock | Self::PureCountedBlock)
     }
 
     fn is_preflight_direct(self) -> bool {
@@ -209,20 +144,6 @@ impl AssemblyTraceStyle {
     fn cache_name(self) -> &'static str {
         match self {
             Self::Pure | Self::PureBlock | Self::PureCountedBlock => "pure",
-            Self::PreflightPureL0 => "preflight-pure-l0-schema3",
-            Self::PreflightSkeletonL1 => "preflight-skeleton-l1-schema1",
-            Self::PreflightCompactSkeletonL1C => "preflight-compact-skeleton-l1c-schema1",
-            Self::PreflightCompactValuesL2C => "preflight-compact-values-l2c-schema1",
-            Self::PreflightCompactRegistersL3C => "preflight-compact-registers-l3c-schema1",
-            Self::PreflightCompactMemoryL4C => "preflight-compact-memory-l4c-schema1",
-            Self::PreflightCompactFutureAccessL5C => "preflight-compact-future-access-l5c-schema2",
-            Self::PreflightCompactExceptionalL6C => "preflight-compact-exceptional-l6c-schema2",
-            Self::PreflightCompactClosureL7 => "preflight-compact-closure-l7-schema1",
-            Self::PreflightValuesL2 => "preflight-values-l2-schema1",
-            Self::PreflightRegistersL3 => "preflight-registers-l3-schema1",
-            Self::PreflightMemoryL4 => "preflight-memory-l4-schema1",
-            Self::PreflightFutureAccessL5 => "preflight-future-access-l5-schema1",
-            Self::FullTracerDirect => "fulltracer-direct",
             Self::GpuReplayDirect => "gpu-replay-direct",
             Self::PreflightScalar => "preflight-scalar",
             Self::PreflightAdmittedRegisterBlock => "preflight-admitted-register-block",
@@ -236,131 +157,7 @@ impl AssemblyTraceStyle {
     }
 
     fn uses_pure_block_admission(self) -> bool {
-        matches!(
-            self,
-            Self::Pure
-                | Self::PreflightPureL0
-                | Self::PreflightSkeletonL1
-                | Self::PreflightCompactSkeletonL1C
-                | Self::PreflightCompactValuesL2C
-                | Self::PreflightCompactRegistersL3C
-                | Self::PreflightCompactMemoryL4C
-                | Self::PreflightCompactFutureAccessL5C
-                | Self::PreflightCompactExceptionalL6C
-                | Self::PreflightCompactClosureL7
-                | Self::PreflightValuesL2
-                | Self::PreflightRegistersL3
-                | Self::PreflightMemoryL4
-                | Self::PreflightFutureAccessL5
-        )
-    }
-
-    fn is_layered_record(self) -> bool {
-        matches!(
-            self,
-            Self::PreflightSkeletonL1
-                | Self::PreflightCompactSkeletonL1C
-                | Self::PreflightCompactValuesL2C
-                | Self::PreflightCompactRegistersL3C
-                | Self::PreflightCompactMemoryL4C
-                | Self::PreflightCompactFutureAccessL5C
-                | Self::PreflightCompactExceptionalL6C
-                | Self::PreflightCompactClosureL7
-                | Self::PreflightValuesL2
-                | Self::PreflightRegistersL3
-                | Self::PreflightMemoryL4
-                | Self::PreflightFutureAccessL5
-        )
-    }
-
-    fn is_generic_layered_record(self) -> bool {
-        self.is_layered_record()
-            && !matches!(
-                self,
-                Self::PreflightCompactSkeletonL1C
-                    | Self::PreflightCompactValuesL2C
-                    | Self::PreflightCompactRegistersL3C
-                    | Self::PreflightCompactMemoryL4C
-                    | Self::PreflightCompactFutureAccessL5C
-                    | Self::PreflightCompactExceptionalL6C
-                    | Self::PreflightCompactClosureL7
-            )
-    }
-
-    fn is_compact_skeleton(self) -> bool {
-        self == Self::PreflightCompactSkeletonL1C
-    }
-
-    fn is_compact_values(self) -> bool {
-        self == Self::PreflightCompactValuesL2C
-    }
-
-    fn is_compact_registers(self) -> bool {
-        self == Self::PreflightCompactRegistersL3C
-    }
-
-    fn is_compact_memory(self) -> bool {
-        self == Self::PreflightCompactMemoryL4C
-    }
-
-    fn is_compact_future_access(self) -> bool {
-        matches!(
-            self,
-            Self::PreflightCompactFutureAccessL5C
-                | Self::PreflightCompactExceptionalL6C
-                | Self::PreflightCompactClosureL7
-        )
-    }
-
-    fn is_compact_exceptional(self) -> bool {
-        matches!(
-            self,
-            Self::PreflightCompactExceptionalL6C | Self::PreflightCompactClosureL7
-        )
-    }
-
-    fn is_compact_layered(self) -> bool {
-        self.is_compact_skeleton()
-            || self.is_compact_values()
-            || self.is_compact_registers()
-            || self.is_compact_memory()
-            || self.is_compact_future_access()
-    }
-
-    fn has_layered_registers(self) -> bool {
-        matches!(
-            self,
-            Self::PreflightCompactRegistersL3C
-                | Self::PreflightCompactMemoryL4C
-                | Self::PreflightCompactFutureAccessL5C
-                | Self::PreflightCompactExceptionalL6C
-                | Self::PreflightCompactClosureL7
-                | Self::PreflightRegistersL3
-                | Self::PreflightMemoryL4
-                | Self::PreflightFutureAccessL5
-        )
-    }
-
-    fn has_layered_memory(self) -> bool {
-        matches!(
-            self,
-            Self::PreflightCompactMemoryL4C
-                | Self::PreflightCompactFutureAccessL5C
-                | Self::PreflightCompactExceptionalL6C
-                | Self::PreflightCompactClosureL7
-                | Self::PreflightMemoryL4
-                | Self::PreflightFutureAccessL5
-        )
-    }
-
-    fn has_layered_future_access(self) -> bool {
-        matches!(
-            self,
-            Self::PreflightFutureAccessL5
-                | Self::PreflightCompactFutureAccessL5C
-                | Self::PreflightCompactExceptionalL6C
-                | Self::PreflightCompactClosureL7
-        )
+        self == Self::Pure
     }
 }
 
@@ -506,22 +303,14 @@ const AOT_CTX_GPU_REPLAY_EVENT_CURSOR_OFFSET: usize = 912;
 const AOT_CTX_GPU_REPLAY_ERROR_OFFSET: usize = 920;
 #[cfg(test)]
 const AOT_CTX_GPU_REPLAY_ORDINARY_CALLBACKS_OFFSET: usize = 928;
-const AOT_CTX_LAYERED_RS1_PREVIOUS_OFFSET: usize = 936;
-const AOT_CTX_LAYERED_RS2_PREVIOUS_OFFSET: usize = 944;
-const AOT_CTX_LAYERED_RD_PREVIOUS_OFFSET: usize = 952;
-const AOT_CTX_COMPACT_BYTES_CURSOR_OFFSET: usize = 960;
-const AOT_CTX_LAYERED_NEXT_ACCESS_EVENTS_OFFSET: usize = 968;
-const AOT_CTX_LAYERED_NEXT_ACCESS_EVENTS_LEN_OFFSET: usize = 976;
-const AOT_CTX_LAYERED_NEXT_ACCESS_CURSOR_OFFSET: usize = 984;
-const AOT_CTX_GPU_REPLAY_PACKED_BLOCK_OFFSET: usize = 992;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 79;
-const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v6";
-const AOT_EMITTER_SCHEMA: &str = "replay-emitter-schema1";
+const AOT_ABI_VERSION: u32 = 80;
+const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v7";
+const AOT_EMITTER_SCHEMA: &str = "replay-emitter-schema2";
 const AOT_INITIAL_EVENT_SEED: usize = 20_000_000;
 const AOT_MAX_COMPILE_JOBS: usize = 32;
 const AOT_BLOCK_COMPILE_OVERHEAD: usize = 16;
@@ -530,7 +319,6 @@ const AOT_BLOCK_COMPILE_OVERHEAD: usize = 16;
 enum AotEmitterVariant {
     Standard,
     SharedPacked,
-    FullyInlinedDiagnostic,
 }
 
 impl AotEmitterVariant {
@@ -538,18 +326,15 @@ impl AotEmitterVariant {
         match self {
             Self::Standard => "standard",
             Self::SharedPacked => "shared-packed",
-            Self::FullyInlinedDiagnostic => "fully-inlined-diagnostic",
         }
     }
 }
 
 fn selected_emitter_variant(trace_style: AssemblyTraceStyle) -> AotEmitterVariant {
-    if trace_style != AssemblyTraceStyle::GpuReplayDirect {
-        return AotEmitterVariant::Standard;
-    }
-    match std::env::var("CENO_AOT_GPU_REPLAY_EMITTER").as_deref() {
-        Ok("fully-inlined-diagnostic") => AotEmitterVariant::FullyInlinedDiagnostic,
-        _ => AotEmitterVariant::SharedPacked,
+    if trace_style == AssemblyTraceStyle::GpuReplayDirect {
+        AotEmitterVariant::SharedPacked
+    } else {
+        AotEmitterVariant::Standard
     }
 }
 
@@ -558,18 +343,6 @@ const AOT_TRACE_MODE_CALLBACK: u32 = 1;
 const AOT_TRACE_MODE_PREFLIGHT_DIRECT: u32 = 2;
 const AOT_TRACE_MODE_FULLTRACER_DIRECT: u32 = 3;
 const AOT_TRACE_MODE_GPU_REPLAY_DIRECT: u32 = 4;
-const AOT_TRACE_MODE_SKELETON_L1: u32 = 6;
-const AOT_TRACE_MODE_VALUES_L2: u32 = 7;
-const AOT_TRACE_MODE_REGISTERS_L3: u32 = 8;
-const AOT_TRACE_MODE_MEMORY_L4: u32 = 9;
-const AOT_TRACE_MODE_FUTURE_ACCESS_L5: u32 = 10;
-const AOT_TRACE_MODE_COMPACT_SKELETON_L1C: u32 = 11;
-const AOT_TRACE_MODE_COMPACT_VALUES_L2C: u32 = 12;
-const AOT_TRACE_MODE_COMPACT_REGISTERS_L3C: u32 = 13;
-const AOT_TRACE_MODE_COMPACT_MEMORY_L4C: u32 = 14;
-const AOT_TRACE_MODE_COMPACT_FUTURE_ACCESS_L5C: u32 = 15;
-const AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C: u32 = 16;
-const AOT_TRACE_MODE_COMPACT_CLOSURE_L7: u32 = 17;
 
 const AOT_PREFLIGHT_HELPER_SYNC: u32 = 1;
 const AOT_PREFLIGHT_HELPER_BUSY_LOOP: u32 = 2;
@@ -957,775 +730,6 @@ struct AotRuntimeContext {
     gpu_replay_event_cursor: *mut usize,
     gpu_replay_error: *mut u32,
     gpu_replay_ordinary_callbacks: u64,
-    layered_rs1_previous: Cycle,
-    layered_rs2_previous: Cycle,
-    layered_rd_previous: Cycle,
-    compact_bytes_cursor: *mut usize,
-    layered_next_access_events: *const NextAccessEvent,
-    layered_next_access_events_len: usize,
-    layered_next_access_cursor: *mut usize,
-    gpu_replay_packed_block: u32,
-    _gpu_replay_packed_block_padding: u32,
-}
-
-/// L1C's complete physical row. Disabled L1 fields are absent and are
-/// synthesized only by the test decoder. Native code commits these words once
-/// in representation order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-struct CompactSkeletonRecord {
-    ordinal: u32,
-    pc_before: u32,
-    pc_after: u32,
-    memory_addr: u32,
-}
-
-const COMPACT_SKELETON_NO_MEMORY: u32 = u32::MAX;
-const _: () = assert!(std::mem::size_of::<CompactSkeletonRecord>() == 16);
-const _: () = assert!(std::mem::offset_of!(CompactSkeletonRecord, ordinal) == 0);
-const _: () = assert!(std::mem::offset_of!(CompactSkeletonRecord, pc_before) == 4);
-const _: () = assert!(std::mem::offset_of!(CompactSkeletonRecord, pc_after) == 8);
-const _: () = assert!(std::mem::offset_of!(CompactSkeletonRecord, memory_addr) == 12);
-
-impl CompactSkeletonRecord {
-    fn new(ordinal: usize, pc_before: u32, pc_after: u32, memory_addr: Option<WordAddr>) -> Self {
-        Self {
-            ordinal: u32::try_from(ordinal).expect("L1C ordinal exceeds u32"),
-            pc_before,
-            pc_after,
-            memory_addr: memory_addr.map_or(COMPACT_SKELETON_NO_MEMORY, |addr| addr.0),
-        }
-    }
-
-    #[cfg(test)]
-    fn decode(&self, program: &Program, cycle_start: Cycle) -> crate::StepRecord {
-        let instruction_index = self
-            .pc_before
-            .checked_sub(program.base_address)
-            .filter(|offset| offset % PC_STEP_SIZE as u32 == 0)
-            .map(|offset| offset as usize / PC_STEP_SIZE)
-            .expect("L1C PC is outside the program image");
-        let insn = *program
-            .instructions
-            .get(instruction_index)
-            .expect("L1C PC is outside the program image");
-        crate::StepRecord::l1_skeleton(
-            cycle_start + Cycle::from(self.ordinal) * crate::FullTracer::SUBCYCLES_PER_INSN,
-            Change::new(self.pc_before.into(), self.pc_after.into()),
-            insn,
-            (self.memory_addr != COMPACT_SKELETON_NO_MEMORY).then_some(WordAddr(self.memory_addr)),
-        )
-    }
-}
-
-/// L2C rows share the L1C header and append only the pre-state words required
-/// by their instruction family. Post-state is an immutable function of these
-/// words and the decoded instruction, so it is reconstructed by the test
-/// oracle without adding hot-path stores.
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactValuesR {
-    header: CompactSkeletonRecord,
-    rs1: Word,
-    rs2: Word,
-    rd_before: Word,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactValuesI {
-    header: CompactSkeletonRecord,
-    rs1: Word,
-    rd_before: Word,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactValuesBranch {
-    header: CompactSkeletonRecord,
-    rs1: Word,
-    rs2: Word,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactValuesJ {
-    header: CompactSkeletonRecord,
-    rd_before: Word,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactValuesLoad {
-    header: CompactSkeletonRecord,
-    rs1: Word,
-    rd_before: Word,
-    memory_before: Word,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactValuesStore {
-    header: CompactSkeletonRecord,
-    rs1: Word,
-    rs2: Word,
-    memory_before: Word,
-}
-
-const COMPACT_VALUES_MAX_BYTES: usize = 28;
-const _: () = assert!(std::mem::size_of::<CompactValuesR>() == 28);
-const _: () = assert!(std::mem::size_of::<CompactValuesI>() == 24);
-const _: () = assert!(std::mem::size_of::<CompactValuesBranch>() == 24);
-const _: () = assert!(std::mem::size_of::<CompactValuesJ>() == 20);
-const _: () = assert!(std::mem::size_of::<CompactValuesLoad>() == 28);
-const _: () = assert!(std::mem::size_of::<CompactValuesStore>() == 28);
-const _: () = assert!(std::mem::offset_of!(CompactValuesR, rs1) == 16);
-const _: () = assert!(std::mem::offset_of!(CompactValuesR, rs2) == 20);
-const _: () = assert!(std::mem::offset_of!(CompactValuesR, rd_before) == 24);
-const _: () = assert!(std::mem::offset_of!(CompactValuesLoad, memory_before) == 24);
-const _: () = assert!(std::mem::offset_of!(CompactValuesStore, memory_before) == 24);
-
-/// L3C uses the established 27-bit predecessor-cycle encoding. Execution order
-/// is authoritative, so the row ordinal is carried by the independent row
-/// cursor rather than repeated in every physical row.
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactRegistersHeader([u8; 6]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactRegistersExceptional([u8; 10]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactRegistersR([u8; 28]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactRegistersI([u8; 21]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactRegistersBranch([u8; 21]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactRegistersJ([u8; 13]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactRegistersLoad([u8; 25]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactRegistersStore([u8; 25]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactMemoryExceptional([u8; 18]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactMemoryLoad([u8; 28]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactMemoryStore([u8; 28]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactFutureJ([u8; 14]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactFutureLoad([u8; 29]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactFutureStore([u8; 29]);
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct CompactFutureR([u8; 29]);
-
-const COMPACT_FUTURE_SYSCALL_MASK_BYTES: usize = 9;
-
-/// L5C syscall masks are kept in one compact arena rather than allocating the
-/// generic witness's two `Vec<u8>` masks. Address order and lengths are
-/// validated while the authoritative tape cursor is consumed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-struct CompactFutureSyscallMask {
-    reg_count: u8,
-    mem_count: u8,
-    bits: [u8; COMPACT_FUTURE_SYSCALL_MASK_BYTES],
-}
-
-/// One fixed record per ECALL. The row stays in the L5C arena; this side
-/// record supplies the ECALL-code read and either a complete generic syscall
-/// index plus a slice in the compact operation stream, or `NO_SYSCALL` for an
-/// ECALL such as HALT that produces no witness.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-struct CompactL6SyscallHeader([u8; 30]);
-
-/// Packed `WriteOp` representation used by the L6C variable syscall stream.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-struct CompactL6WriteOp([u8; 20]);
-
-impl CompactL6SyscallHeader {
-    fn new(
-        cycle: Cycle,
-        syscall_index: u32,
-        op_offset: u32,
-        reg_count: u8,
-        mem_count: u8,
-        ecall_code: Word,
-        ecall_previous_cycle: Cycle,
-    ) -> Self {
-        let mut bytes = [0; 30];
-        bytes[0..8].copy_from_slice(&cycle.to_le_bytes());
-        bytes[8..12].copy_from_slice(&syscall_index.to_le_bytes());
-        bytes[12..16].copy_from_slice(&op_offset.to_le_bytes());
-        bytes[16] = reg_count;
-        bytes[17] = mem_count;
-        bytes[18..22].copy_from_slice(&ecall_code.to_le_bytes());
-        bytes[22..30].copy_from_slice(&ecall_previous_cycle.to_le_bytes());
-        Self(bytes)
-    }
-
-    #[cfg(test)]
-    fn cycle(self) -> Cycle {
-        Cycle::from_le_bytes(self.0[0..8].try_into().unwrap())
-    }
-
-    #[cfg(test)]
-    fn syscall_index(self) -> u32 {
-        u32::from_le_bytes(self.0[8..12].try_into().unwrap())
-    }
-
-    #[cfg(test)]
-    fn op_offset(self) -> usize {
-        u32::from_le_bytes(self.0[12..16].try_into().unwrap()) as usize
-    }
-
-    #[cfg(test)]
-    fn reg_count(self) -> usize {
-        self.0[16] as usize
-    }
-
-    #[cfg(test)]
-    fn mem_count(self) -> usize {
-        self.0[17] as usize
-    }
-
-    #[cfg(test)]
-    fn ecall_code(self) -> Word {
-        Word::from_le_bytes(self.0[18..22].try_into().unwrap())
-    }
-
-    #[cfg(test)]
-    fn ecall_previous_cycle(self) -> Cycle {
-        Cycle::from_le_bytes(self.0[22..30].try_into().unwrap())
-    }
-}
-
-impl CompactL6WriteOp {
-    fn new(op: crate::WriteOp) -> Self {
-        let mut bytes = [0; 20];
-        bytes[0..4].copy_from_slice(&op.addr.0.to_le_bytes());
-        bytes[4..8].copy_from_slice(&op.value.before.to_le_bytes());
-        bytes[8..12].copy_from_slice(&op.value.after.to_le_bytes());
-        bytes[12..20].copy_from_slice(&op.previous_cycle.to_le_bytes());
-        Self(bytes)
-    }
-
-    #[cfg(test)]
-    fn decode(self) -> crate::WriteOp {
-        crate::WriteOp {
-            addr: WordAddr(u32::from_le_bytes(self.0[0..4].try_into().unwrap())),
-            value: Change::new(
-                Word::from_le_bytes(self.0[4..8].try_into().unwrap()),
-                Word::from_le_bytes(self.0[8..12].try_into().unwrap()),
-            ),
-            previous_cycle: Cycle::from_le_bytes(self.0[12..20].try_into().unwrap()),
-        }
-    }
-}
-
-const COMPACT_REGISTERS_PC_BITS: usize = 20;
-const COMPACT_REGISTERS_RAW_BITS: usize = 25;
-const COMPACT_REGISTERS_CYCLE_BITS: usize = 27;
-const COMPACT_REGISTERS_MAX_BYTES: usize = 28;
-const _: () = assert!(std::mem::size_of::<CompactRegistersHeader>() == 6);
-const _: () = assert!(std::mem::size_of::<CompactRegistersExceptional>() == 10);
-const _: () = assert!(std::mem::size_of::<CompactRegistersR>() == 28);
-const _: () = assert!(std::mem::size_of::<CompactRegistersI>() == 21);
-const _: () = assert!(std::mem::size_of::<CompactRegistersBranch>() == 21);
-const _: () = assert!(std::mem::size_of::<CompactRegistersJ>() == 13);
-const _: () = assert!(std::mem::size_of::<CompactRegistersLoad>() == 25);
-const _: () = assert!(std::mem::size_of::<CompactRegistersStore>() == 25);
-const _: () = assert!(std::mem::size_of::<CompactMemoryExceptional>() == 18);
-const _: () = assert!(std::mem::size_of::<CompactMemoryLoad>() == 28);
-const _: () = assert!(std::mem::size_of::<CompactMemoryStore>() == 28);
-const _: () = assert!(std::mem::size_of::<CompactFutureJ>() == 14);
-const _: () = assert!(std::mem::size_of::<CompactFutureLoad>() == 29);
-const _: () = assert!(std::mem::size_of::<CompactFutureStore>() == 29);
-const _: () = assert!(std::mem::size_of::<CompactFutureR>() == 29);
-const _: () = assert!(std::mem::size_of::<CompactFutureSyscallMask>() == 11);
-const _: () = assert!(std::mem::size_of::<CompactL6SyscallHeader>() == 30);
-const _: () = assert!(std::mem::size_of::<CompactL6WriteOp>() == 20);
-const _: () = assert!(std::mem::size_of::<NextAccessEvent>() == 24);
-const _: () = assert!(std::mem::offset_of!(NextAccessEvent, source_cycle) == 0);
-const _: () = assert!(std::mem::offset_of!(NextAccessEvent, address) == 16);
-
-fn compact_values_row_size(insn: Instruction) -> usize {
-    16 + 4 * usize::from(native_step_reads_rs1(insn.kind))
-        + 4 * usize::from(native_step_reads_rs2(insn.kind))
-        + 4 * usize::from(native_step_writes_rd(insn.kind))
-        + 4 * usize::from(
-            native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind),
-        )
-}
-
-fn compact_registers_row_size(insn: Instruction) -> usize {
-    let bits = COMPACT_REGISTERS_PC_BITS
-        + COMPACT_REGISTERS_RAW_BITS
-        + (COMPACT_REGISTERS_CYCLE_BITS + 32)
-            * (usize::from(native_step_reads_rs1(insn.kind))
-                + usize::from(native_step_reads_rs2(insn.kind))
-                + usize::from(native_step_writes_rd(insn.kind)))
-        + 32 * usize::from(
-            native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind),
-        )
-        + 32 * usize::from(insn.kind == InsnKind::ECALL);
-    bits.div_ceil(8)
-}
-
-fn compact_memory_row_size(insn: Instruction) -> usize {
-    let memory =
-        usize::from(native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind));
-    let bits = COMPACT_REGISTERS_PC_BITS
-        + COMPACT_REGISTERS_RAW_BITS
-        + (COMPACT_REGISTERS_CYCLE_BITS + 32)
-            * (usize::from(native_step_reads_rs1(insn.kind))
-                + usize::from(native_step_reads_rs2(insn.kind))
-                + usize::from(native_step_writes_rd(insn.kind)))
-        + (32 + COMPACT_REGISTERS_CYCLE_BITS) * memory
-        + 96 * usize::from(insn.kind == InsnKind::ECALL);
-    bits.div_ceil(8)
-}
-
-fn compact_future_access_row_size(insn: Instruction) -> usize {
-    let row_mask_bits = usize::from(native_step_reads_rs1(insn.kind))
-        + usize::from(native_step_reads_rs2(insn.kind))
-        + usize::from(native_step_writes_rd(insn.kind))
-        + usize::from(native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind));
-    let memory =
-        usize::from(native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind));
-    let bits = COMPACT_REGISTERS_PC_BITS
-        + COMPACT_REGISTERS_RAW_BITS
-        + (COMPACT_REGISTERS_CYCLE_BITS + 32)
-            * (usize::from(native_step_reads_rs1(insn.kind))
-                + usize::from(native_step_reads_rs2(insn.kind))
-                + usize::from(native_step_writes_rd(insn.kind)))
-        + (32 + COMPACT_REGISTERS_CYCLE_BITS) * memory
-        + 96 * usize::from(insn.kind == InsnKind::ECALL)
-        + row_mask_bits;
-    bits.div_ceil(8)
-}
-
-#[cfg(test)]
-fn compact_values_rd_after(
-    insn: Instruction,
-    pc: u32,
-    rs1: Word,
-    rs2: Word,
-    memory_before: Word,
-    memory_addr: Option<WordAddr>,
-) -> Word {
-    let imm = insn.imm as u32;
-    match insn.kind {
-        InsnKind::ADD => rs1.wrapping_add(rs2),
-        InsnKind::SUB => rs1.wrapping_sub(rs2),
-        InsnKind::XOR => rs1 ^ rs2,
-        InsnKind::OR => rs1 | rs2,
-        InsnKind::AND => rs1 & rs2,
-        InsnKind::SLL => rs1 << (rs2 & 0x1f),
-        InsnKind::SRL => rs1 >> (rs2 & 0x1f),
-        InsnKind::SRA => ((rs1 as i32) >> (rs2 & 0x1f)) as u32,
-        InsnKind::SLT => u32::from((rs1 as i32) < (rs2 as i32)),
-        InsnKind::SLTU => u32::from(rs1 < rs2),
-        InsnKind::MUL => rs1.wrapping_mul(rs2),
-        InsnKind::MULH => (((rs1 as i32 as i64).wrapping_mul(rs2 as i32 as i64)) >> 32) as u32,
-        InsnKind::MULHSU => ((rs1 as i32 as i64).wrapping_mul(rs2 as i64) >> 32) as u32,
-        InsnKind::MULHU => ((rs1 as u64).wrapping_mul(rs2 as u64) >> 32) as u32,
-        InsnKind::DIV => {
-            if rs2 == 0 {
-                u32::MAX
-            } else {
-                (rs1 as i32).wrapping_div(rs2 as i32) as u32
-            }
-        }
-        InsnKind::DIVU => {
-            if rs2 == 0 {
-                u32::MAX
-            } else {
-                rs1 / rs2
-            }
-        }
-        InsnKind::REM => {
-            if rs2 == 0 {
-                rs1
-            } else {
-                (rs1 as i32).wrapping_rem(rs2 as i32) as u32
-            }
-        }
-        InsnKind::REMU => {
-            if rs2 == 0 {
-                rs1
-            } else {
-                rs1 % rs2
-            }
-        }
-        InsnKind::ADDI => rs1.wrapping_add(imm),
-        InsnKind::XORI => rs1 ^ imm,
-        InsnKind::ORI => rs1 | imm,
-        InsnKind::ANDI => rs1 & imm,
-        InsnKind::SLLI => rs1 << (imm & 0x1f),
-        InsnKind::SRLI => rs1 >> (imm & 0x1f),
-        InsnKind::SRAI => ((rs1 as i32) >> (imm & 0x1f)) as u32,
-        InsnKind::SLTI => u32::from((rs1 as i32) < (imm as i32)),
-        InsnKind::SLTIU => u32::from(rs1 < imm),
-        InsnKind::JAL | InsnKind::JALR => pc.wrapping_add(PC_STEP_SIZE as u32),
-        InsnKind::LB | InsnKind::LH | InsnKind::LW | InsnKind::LBU | InsnKind::LHU => {
-            let byte_addr = rs1.wrapping_add(imm);
-            debug_assert_eq!(memory_addr, Some(ByteAddr(byte_addr).waddr()));
-            let shift = 8 * (byte_addr & 3);
-            match insn.kind {
-                InsnKind::LB => ((memory_before >> shift) as u8 as i8 as i32) as u32,
-                InsnKind::LH => ((memory_before >> shift) as u16 as i16 as i32) as u32,
-                InsnKind::LW => memory_before,
-                InsnKind::LBU => (memory_before >> shift) & 0xff,
-                InsnKind::LHU => (memory_before >> shift) & 0xffff,
-                _ => unreachable!(),
-            }
-        }
-        #[cfg(feature = "u16limb_circuit")]
-        InsnKind::LUI => imm,
-        #[cfg(feature = "u16limb_circuit")]
-        InsnKind::AUIPC => pc.wrapping_add(imm),
-        _ => crate::StepRecord::L1_POISON_WORD,
-    }
-}
-
-#[cfg(test)]
-fn compact_values_memory_after(
-    insn: Instruction,
-    rs1: Word,
-    rs2: Word,
-    memory_before: Word,
-) -> Word {
-    if native_step_loads_memory(insn.kind) {
-        return memory_before;
-    }
-    let byte_addr = rs1.wrapping_add(insn.imm as u32);
-    let shift = 8 * (byte_addr & 3);
-    match insn.kind {
-        InsnKind::SB => (memory_before & !(0xff << shift)) | ((rs2 & 0xff) << shift),
-        InsnKind::SH => (memory_before & !(0xffff << shift)) | ((rs2 & 0xffff) << shift),
-        InsnKind::SW => rs2,
-        _ => crate::StepRecord::L1_POISON_WORD,
-    }
-}
-
-#[cfg(test)]
-fn decode_compact_values(
-    bytes: &[u8],
-    program: &Program,
-    cycle_start: Cycle,
-) -> Vec<crate::StepRecord> {
-    fn word(bytes: &[u8], offset: &mut usize) -> Word {
-        let value = Word::from_le_bytes(bytes[*offset..*offset + 4].try_into().unwrap());
-        *offset += 4;
-        value
-    }
-
-    let mut records = Vec::new();
-    let mut offset = 0;
-    while offset < bytes.len() {
-        let row_start = offset;
-        let ordinal = word(bytes, &mut offset);
-        let pc_before = word(bytes, &mut offset);
-        let pc_after = word(bytes, &mut offset);
-        let encoded_memory_addr = word(bytes, &mut offset);
-        let instruction_index = pc_before
-            .checked_sub(program.base_address)
-            .filter(|pc_offset| pc_offset % PC_STEP_SIZE as u32 == 0)
-            .map(|pc_offset| pc_offset as usize / PC_STEP_SIZE)
-            .expect("L2C PC is outside the program image");
-        let insn = *program
-            .instructions
-            .get(instruction_index)
-            .expect("L2C PC is outside the program image");
-        let rs1 = if native_step_reads_rs1(insn.kind) {
-            word(bytes, &mut offset)
-        } else {
-            crate::StepRecord::L1_POISON_WORD
-        };
-        let rs2 = if native_step_reads_rs2(insn.kind) {
-            word(bytes, &mut offset)
-        } else {
-            crate::StepRecord::L1_POISON_WORD
-        };
-        let rd_before = if native_step_writes_rd(insn.kind) {
-            word(bytes, &mut offset)
-        } else {
-            crate::StepRecord::L1_POISON_WORD
-        };
-        let memory_before =
-            if native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind) {
-                word(bytes, &mut offset)
-            } else {
-                crate::StepRecord::L1_POISON_WORD
-            };
-        assert_eq!(offset - row_start, compact_values_row_size(insn));
-        let memory_addr = (encoded_memory_addr != COMPACT_SKELETON_NO_MEMORY)
-            .then_some(WordAddr(encoded_memory_addr));
-        let rd_after =
-            compact_values_rd_after(insn, pc_before, rs1, rs2, memory_before, memory_addr);
-        let memory_value = memory_addr.map(|_| {
-            Change::new(
-                memory_before,
-                compact_values_memory_after(insn, rs1, rs2, memory_before),
-            )
-        });
-        records.push(crate::StepRecord::l2_values(
-            cycle_start + Cycle::from(ordinal) * crate::FullTracer::SUBCYCLES_PER_INSN,
-            Change::new(pc_before.into(), pc_after.into()),
-            insn,
-            memory_addr,
-            rs1,
-            rs2,
-            Change::new(rd_before, rd_after),
-            memory_value,
-        ));
-    }
-    records
-}
-
-#[cfg(test)]
-fn decode_compact_registers(
-    bytes: &[u8],
-    program: &Program,
-    cycle_start: Cycle,
-    memory_l4: Option<(
-        ByteAddr,
-        ByteAddr,
-        &std::ops::Range<u32>,
-        &std::ops::Range<u32>,
-    )>,
-    future_l5: bool,
-) -> Vec<crate::StepRecord> {
-    fn bits(bytes: &[u8], row_start: usize, bit: &mut usize, width: usize) -> u32 {
-        let mut value = 0u64;
-        for byte_index in 0..width.div_ceil(8) + 1 {
-            let source = row_start + (*bit / 8) + byte_index;
-            if source < bytes.len() {
-                value |= u64::from(bytes[source]) << (byte_index * 8);
-            }
-        }
-        value >>= *bit % 8;
-        *bit += width;
-        (value & ((1u64 << width) - 1)) as u32
-    }
-    fn access(bytes: &[u8], row_start: usize, bit: &mut usize) -> (Cycle, Word) {
-        (
-            Cycle::from(bits(bytes, row_start, bit, COMPACT_REGISTERS_CYCLE_BITS)),
-            bits(bytes, row_start, bit, 32),
-        )
-    }
-    fn next_pc(insn: Instruction, pc: u32, rs1: Word, rs2: Word) -> u32 {
-        let sequential = pc.wrapping_add(PC_STEP_SIZE as u32);
-        match insn.kind {
-            InsnKind::BEQ => (rs1 == rs2).then(|| pc.wrapping_add(insn.imm as u32)),
-            InsnKind::BNE => (rs1 != rs2).then(|| pc.wrapping_add(insn.imm as u32)),
-            InsnKind::BLT => {
-                ((rs1 as i32) < (rs2 as i32)).then(|| pc.wrapping_add(insn.imm as u32))
-            }
-            InsnKind::BGE => {
-                ((rs1 as i32) >= (rs2 as i32)).then(|| pc.wrapping_add(insn.imm as u32))
-            }
-            InsnKind::BLTU => (rs1 < rs2).then(|| pc.wrapping_add(insn.imm as u32)),
-            InsnKind::BGEU => (rs1 >= rs2).then(|| pc.wrapping_add(insn.imm as u32)),
-            InsnKind::JAL => return pc.wrapping_add(insn.imm as u32),
-            InsnKind::JALR => return rs1.wrapping_add(insn.imm as u32) & !1,
-            _ => return sequential,
-        }
-        .unwrap_or(sequential)
-    }
-
-    let mut records = Vec::new();
-    let mut offset = 0;
-    let (mut max_heap, mut max_hint) = memory_l4
-        .map(|(max_heap, max_hint, _, _)| (max_heap, max_hint))
-        .unwrap_or_default();
-    while offset < bytes.len() {
-        let row_start = offset;
-        let mut bit = 0;
-        let instruction_index =
-            bits(bytes, row_start, &mut bit, COMPACT_REGISTERS_PC_BITS) as usize;
-        let pc_before = program
-            .base_address
-            .wrapping_add((instruction_index * PC_STEP_SIZE) as u32);
-        let insn = *program
-            .instructions
-            .get(instruction_index)
-            .unwrap_or_else(|| panic!("L3C PC index {instruction_index} is outside the program image at byte {row_start}"));
-        assert_eq!(
-            bits(bytes, row_start, &mut bit, COMPACT_REGISTERS_RAW_BITS,),
-            insn.raw >> 7,
-            "L3C raw instruction payload mismatch"
-        );
-        let (rs1_previous, rs1) = native_step_reads_rs1(insn.kind)
-            .then(|| access(bytes, row_start, &mut bit))
-            .unwrap_or((
-                crate::StepRecord::L1_POISON_CYCLE,
-                crate::StepRecord::L1_POISON_WORD,
-            ));
-        let (rs2_previous, rs2) = native_step_reads_rs2(insn.kind)
-            .then(|| access(bytes, row_start, &mut bit))
-            .unwrap_or((
-                crate::StepRecord::L1_POISON_CYCLE,
-                crate::StepRecord::L1_POISON_WORD,
-            ));
-        let (rd_previous, rd_before) = native_step_writes_rd(insn.kind)
-            .then(|| access(bytes, row_start, &mut bit))
-            .unwrap_or((
-                crate::StepRecord::L1_POISON_CYCLE,
-                crate::StepRecord::L1_POISON_WORD,
-            ));
-        let memory_before =
-            if native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind) {
-                bits(bytes, row_start, &mut bit, 32)
-            } else {
-                crate::StepRecord::L1_POISON_WORD
-            };
-        let memory_previous_cycle = if memory_l4.is_some()
-            && (native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind))
-        {
-            Some(Cycle::from(bits(
-                bytes,
-                row_start,
-                &mut bit,
-                COMPACT_REGISTERS_CYCLE_BITS,
-            )))
-        } else {
-            None
-        };
-        let pc_after = if insn.kind == InsnKind::ECALL {
-            bits(bytes, row_start, &mut bit, 32)
-        } else {
-            next_pc(insn, pc_before, rs1, rs2)
-        };
-        let bounds_before = (max_heap, max_hint);
-        if let Some((_, _, heap, hints)) = memory_l4 {
-            if insn.kind == InsnKind::ECALL {
-                max_heap = ByteAddr(bits(bytes, row_start, &mut bit, 32));
-                max_hint = ByteAddr(bits(bytes, row_start, &mut bit, 32));
-            } else if native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind) {
-                let start = rs1.wrapping_add(insn.imm as u32) & !3;
-                let access_end = ByteAddr(start.wrapping_add(WORD_SIZE as u32));
-                if heap.contains(&start) {
-                    max_heap = max_heap.max(access_end);
-                } else if hints.contains(&start) {
-                    max_hint = max_hint.max(access_end);
-                }
-            }
-        }
-        let mut future_access_mask = 0;
-        if future_l5 {
-            for (enabled, mask) in [
-                (
-                    native_step_reads_rs1(insn.kind),
-                    crate::StepRecord::FUTURE_ACCESS_RS1,
-                ),
-                (
-                    native_step_reads_rs2(insn.kind),
-                    crate::StepRecord::FUTURE_ACCESS_RS2,
-                ),
-                (
-                    native_step_writes_rd(insn.kind),
-                    crate::StepRecord::FUTURE_ACCESS_RD,
-                ),
-                (
-                    native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind),
-                    crate::StepRecord::FUTURE_ACCESS_MEM,
-                ),
-            ] {
-                if enabled && bits(bytes, row_start, &mut bit, 1) != 0 {
-                    future_access_mask |= mask;
-                }
-            }
-        }
-        let row_size = if future_l5 {
-            compact_future_access_row_size(insn)
-        } else if memory_l4.is_some() {
-            compact_memory_row_size(insn)
-        } else {
-            compact_registers_row_size(insn)
-        };
-        assert_eq!(bit.div_ceil(8), row_size);
-        offset += row_size;
-        let memory_addr = (native_step_loads_memory(insn.kind)
-            || native_step_stores_memory(insn.kind))
-        .then(|| ByteAddr(rs1.wrapping_add(insn.imm as u32)).waddr());
-        let rd_after =
-            compact_values_rd_after(insn, pc_before, rs1, rs2, memory_before, memory_addr);
-        let memory_value = memory_addr.map(|_| {
-            Change::new(
-                memory_before,
-                compact_values_memory_after(insn, rs1, rs2, memory_before),
-            )
-        });
-        let cycle = cycle_start
-            + Cycle::try_from(records.len()).unwrap() * crate::FullTracer::SUBCYCLES_PER_INSN;
-        let mut record = if memory_l4.is_some() {
-            crate::StepRecord::l4_memory(
-                cycle,
-                Change::new(pc_before.into(), pc_after.into()),
-                insn,
-                memory_addr,
-                rs1,
-                rs2,
-                Change::new(rd_before, rd_after),
-                memory_value,
-                [rs1_previous, rs2_previous, rd_previous],
-                memory_previous_cycle,
-                Change::new(bounds_before.0, max_heap),
-                Change::new(bounds_before.1, max_hint),
-            )
-        } else {
-            crate::StepRecord::l3_registers(
-                cycle,
-                Change::new(pc_before.into(), pc_after.into()),
-                insn,
-                memory_addr,
-                rs1,
-                rs2,
-                Change::new(rd_before, rd_after),
-                memory_value,
-                [rs1_previous, rs2_previous, rd_previous],
-            )
-        };
-        if future_l5 {
-            record.clear_future_access_mask();
-            record.set_future_access_mask(future_access_mask);
-        }
-        records.push(record);
-    }
-    records
 }
 
 const PURE_ECALL_CODES: [u32; 11] = [
@@ -1839,415 +843,6 @@ pub struct PureAotTracer {
     pc_before: ByteAddr,
     pc_after: ByteAddr,
     executed_fallbacks: usize,
-    layered_cycle: Cycle,
-    layered_registers_enabled: bool,
-    layered_register_latest: [Cycle; VMState::<PureAotTracer>::REG_COUNT],
-    layered_max_heap: ByteAddr,
-    layered_max_hint: ByteAddr,
-    layered_heap: std::ops::Range<u32>,
-    layered_hints: std::ops::Range<u32>,
-    layered_memory_enabled: bool,
-    layered_future_access_enabled: bool,
-    layered_compact_future_access_enabled: bool,
-    layered_compact_exceptional_enabled: bool,
-    layered_next_accesses: Arc<NextCycleAccess>,
-    layered_next_access_cursor: usize,
-    layered_syscall_future_accesses: Vec<LayeredSyscallFutureAccess>,
-    layered_compact_syscall_masks: Vec<CompactFutureSyscallMask>,
-    layered_compact_l6_syscalls: Vec<CompactL6SyscallHeader>,
-    layered_compact_l6_ops: Vec<CompactL6WriteOp>,
-    layered_compact_l6_latest: BTreeMap<WordAddr, Cycle>,
-    layered_compact_l6_pending_syscall: Option<(u32, u32, u8, u8)>,
-    layered_compact_l6_pending_ecall: Option<(Word, Cycle)>,
-    layered_compact_l6_pending_arg0: Option<(Word, Cycle)>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct LayeredSyscallFutureAccess {
-    cycle: Cycle,
-    reg_addresses: Vec<WordAddr>,
-    mem_addresses: Vec<WordAddr>,
-    reg_masks: Vec<u8>,
-    mem_masks: Vec<u8>,
-}
-
-struct LayeredRegisterState {
-    cycle: *mut Cycle,
-    latest: *mut Cycle,
-    max_heap: *mut ByteAddr,
-    max_hint: *mut ByteAddr,
-}
-
-impl PureAotTracer {
-    fn enable_layered_memory(&mut self) {
-        self.layered_registers_enabled = true;
-        self.layered_memory_enabled = true;
-    }
-
-    fn enable_layered_future_access(&mut self) {
-        self.layered_memory_enabled = true;
-        self.layered_future_access_enabled = true;
-    }
-
-    fn enable_compact_future_access(&mut self) {
-        self.enable_layered_future_access();
-        self.layered_compact_future_access_enabled = true;
-    }
-
-    fn enable_compact_exceptional(&mut self) {
-        self.enable_compact_future_access();
-        self.layered_compact_exceptional_enabled = true;
-    }
-
-    fn record_compact_l6_syscall(&mut self, witness: &SyscallWitness) {
-        if !self.layered_compact_exceptional_enabled {
-            return;
-        }
-        let reg_count =
-            u8::try_from(witness.reg_ops.len()).expect("L6C syscall reg count overflow");
-        let mem_count =
-            u8::try_from(witness.mem_ops.len()).expect("L6C syscall mem count overflow");
-        let op_offset = u32::try_from(self.layered_compact_l6_ops.len())
-            .expect("L6C syscall operation offset overflow");
-        let syscall_index = u32::try_from(self.layered_compact_syscall_masks.len() - 1)
-            .expect("L6C syscall index overflow");
-        self.layered_compact_l6_ops
-            .extend(witness.reg_ops.iter().copied().map(CompactL6WriteOp::new));
-        self.layered_compact_l6_ops
-            .extend(witness.mem_ops.iter().copied().map(CompactL6WriteOp::new));
-        assert!(
-            self.layered_compact_l6_pending_syscall
-                .replace((syscall_index, op_offset, reg_count, mem_count))
-                .is_none(),
-            "Only one syscall per L6C ECALL"
-        );
-    }
-
-    fn finish_compact_l6_ecall(&mut self) {
-        if !self.layered_compact_exceptional_enabled {
-            return;
-        }
-        let (ecall_code, ecall_previous_cycle) = self
-            .layered_compact_l6_pending_ecall
-            .take()
-            .expect("L6C ECALL must record its code-register read");
-        let (syscall_index, op_offset, reg_count, mem_count) =
-            if let Some(pending) = self.layered_compact_l6_pending_syscall.take() {
-                assert!(
-                    self.layered_compact_l6_pending_arg0.is_none(),
-                    "witness-producing L6C ECALL must not have a second direct register read"
-                );
-                pending
-            } else {
-                let op_offset = u32::try_from(self.layered_compact_l6_ops.len())
-                    .expect("L6C syscall operation offset overflow");
-                let reg_count = if let Some((value, previous_cycle)) =
-                    self.layered_compact_l6_pending_arg0.take()
-                {
-                    self.layered_compact_l6_ops
-                        .push(CompactL6WriteOp::new(crate::WriteOp {
-                            addr: Platform::register_vma(Platform::reg_arg0()).into(),
-                            value: Change::new(value, value),
-                            previous_cycle,
-                        }));
-                    1
-                } else {
-                    0
-                };
-                (crate::StepRecord::NO_SYSCALL, op_offset, reg_count, 0)
-            };
-        self.layered_compact_l6_syscalls
-            .push(CompactL6SyscallHeader::new(
-                self.layered_cycle,
-                syscall_index,
-                op_offset,
-                reg_count,
-                mem_count,
-                ecall_code,
-                ecall_previous_cycle,
-            ));
-    }
-
-    #[cfg(test)]
-    fn decode_compact_l6_syscalls(&self) -> Vec<SyscallWitness> {
-        self.layered_compact_l6_syscalls
-            .iter()
-            .copied()
-            .filter(|header| header.syscall_index() != crate::StepRecord::NO_SYSCALL)
-            .map(|header| {
-                let expected_index = header.syscall_index() as usize;
-                let start = header.op_offset();
-                let reg_end = start + header.reg_count();
-                let end = reg_end + header.mem_count();
-                let mask = self.layered_compact_syscall_masks[expected_index];
-                assert_eq!(mask.reg_count as usize, header.reg_count());
-                assert_eq!(mask.mem_count as usize, header.mem_count());
-                let future =
-                    |index: usize| u8::from(mask.bits[index / 8] & (1 << (index % 8)) != 0);
-                SyscallWitness {
-                    reg_ops: self.layered_compact_l6_ops[start..reg_end]
-                        .iter()
-                        .copied()
-                        .map(CompactL6WriteOp::decode)
-                        .collect(),
-                    mem_ops: self.layered_compact_l6_ops[reg_end..end]
-                        .iter()
-                        .copied()
-                        .map(CompactL6WriteOp::decode)
-                        .collect(),
-                    reg_future_access: (0..header.reg_count()).map(future).collect(),
-                    mem_future_access: (0..header.mem_count())
-                        .map(|index| future(header.reg_count() + index))
-                        .collect(),
-                }
-            })
-            .collect()
-    }
-
-    fn compact_future_access_native_state(
-        &mut self,
-    ) -> (*const NextAccessEvent, usize, *mut usize) {
-        (
-            self.layered_next_accesses.events().as_ptr(),
-            self.layered_next_accesses.events().len(),
-            &mut self.layered_next_access_cursor,
-        )
-    }
-
-    fn consume_compact_row_future_accesses(
-        &mut self,
-        cycle: Cycle,
-        accesses: &[(Cycle, WordAddr, u8)],
-    ) -> u8 {
-        if !self.layered_compact_future_access_enabled {
-            return 0;
-        }
-        let end_cycle = cycle + Self::SUBCYCLES_PER_INSN;
-        let mut mask = 0;
-        while let Some(event) = self
-            .layered_next_accesses
-            .events()
-            .get(self.layered_next_access_cursor)
-            .copied()
-        {
-            assert!(
-                event.source_cycle >= cycle,
-                "L5C skipped future-access event before compact row"
-            );
-            if event.source_cycle >= end_cycle {
-                break;
-            }
-            let subcycle = event.source_cycle - cycle;
-            let (_, _, bit) = accesses
-                .iter()
-                .find(|(expected_subcycle, address, _)| {
-                    *expected_subcycle == subcycle && *address == event.address
-                })
-                .unwrap_or_else(|| {
-                    panic!(
-                        "L5C access/tape mismatch at cycle {} address {:?}",
-                        event.source_cycle, event.address
-                    )
-                });
-            mask |= *bit;
-            self.layered_next_access_cursor += 1;
-        }
-        mask
-    }
-
-    fn consume_compact_syscall_future_accesses(
-        &mut self,
-        reg_addresses: &[WordAddr],
-        mem_addresses: &[WordAddr],
-    ) {
-        assert!(
-            reg_addresses.len() <= 2,
-            "L5C syscall register mask overflow"
-        );
-        assert!(
-            reg_addresses.len() + mem_addresses.len()
-                <= COMPACT_FUTURE_SYSCALL_MASK_BYTES * u8::BITS as usize,
-            "L5C syscall mask exceeds compact family"
-        );
-        let cycle = self.layered_cycle;
-        let end_cycle = cycle + Self::SUBCYCLES_PER_INSN;
-        let mut record = CompactFutureSyscallMask {
-            reg_count: reg_addresses.len() as u8,
-            mem_count: mem_addresses.len() as u8,
-            bits: [0; COMPACT_FUTURE_SYSCALL_MASK_BYTES],
-        };
-        while let Some(event) = self
-            .layered_next_accesses
-            .events()
-            .get(self.layered_next_access_cursor)
-            .copied()
-        {
-            assert!(
-                event.source_cycle >= cycle,
-                "L5C skipped future-access event before compact syscall"
-            );
-            if event.source_cycle >= end_cycle {
-                break;
-            }
-            let subcycle = event.source_cycle - cycle;
-            let (addresses, base) = match subcycle {
-                Self::SUBCYCLE_RD => (reg_addresses, 0),
-                Self::SUBCYCLE_MEM => (mem_addresses, reg_addresses.len()),
-                _ => panic!(
-                    "L5C syscall tape has non-syscall subcycle {} at cycle {}",
-                    subcycle, event.source_cycle
-                ),
-            };
-            let index = addresses
-                .iter()
-                .rposition(|address| *address == event.address)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "L5C syscall access/tape address mismatch: cycle={cycle} cursor={} event_cycle={} subcycle={subcycle} event_address={:?} reg_addresses={reg_addresses:?} mem_addresses={mem_addresses:?}",
-                        self.layered_next_access_cursor,
-                        event.source_cycle,
-                        event.address,
-                    )
-                });
-            let bit = base + index;
-            record.bits[bit / 8] |= 1 << (bit % 8);
-            self.layered_next_access_cursor += 1;
-        }
-        self.layered_compact_syscall_masks.push(record);
-    }
-
-    fn record_layered_syscall_addresses(
-        &mut self,
-        reg_addresses: Vec<WordAddr>,
-        mem_addresses: Vec<WordAddr>,
-    ) {
-        if !self.layered_future_access_enabled {
-            return;
-        }
-        if self.layered_compact_future_access_enabled {
-            self.consume_compact_syscall_future_accesses(&reg_addresses, &mem_addresses);
-            return;
-        }
-        self.layered_syscall_future_accesses
-            .push(LayeredSyscallFutureAccess {
-                cycle: self.layered_cycle,
-                reg_masks: vec![0; reg_addresses.len()],
-                mem_masks: vec![0; mem_addresses.len()],
-                reg_addresses,
-                mem_addresses,
-            });
-    }
-
-    fn annotate_layered_future_accesses(&mut self, records: &mut [crate::StepRecord]) {
-        if !self.layered_future_access_enabled || records.is_empty() {
-            return;
-        }
-        let start_cycle = records[0].cycle();
-        let end_cycle = records[records.len() - 1].cycle() + Self::SUBCYCLES_PER_INSN;
-        for record in records.iter_mut() {
-            record.clear_future_access_mask();
-        }
-        while let Some(event) = self
-            .layered_next_accesses
-            .events()
-            .get(self.layered_next_access_cursor)
-            .copied()
-        {
-            assert!(
-                event.source_cycle >= start_cycle,
-                "L5 skipped future-access event before replay range"
-            );
-            if event.source_cycle >= end_cycle {
-                break;
-            }
-            let index =
-                usize::try_from((event.source_cycle - start_cycle) / Self::SUBCYCLES_PER_INSN)
-                    .expect("L5 future-access record offset does not fit usize");
-            let record = &mut records[index];
-            let subcycle = event.source_cycle - record.cycle();
-            let mask = match subcycle {
-                Self::SUBCYCLE_RS1 if record.rs1().is_some_and(|op| op.addr == event.address) => {
-                    crate::StepRecord::FUTURE_ACCESS_RS1
-                }
-                Self::SUBCYCLE_RS2 if record.rs2().is_some_and(|op| op.addr == event.address) => {
-                    crate::StepRecord::FUTURE_ACCESS_RS2
-                }
-                Self::SUBCYCLE_RD if record.rd().is_some_and(|op| op.addr == event.address) => {
-                    crate::StepRecord::FUTURE_ACCESS_RD
-                }
-                Self::SUBCYCLE_MEM
-                    if record
-                        .memory_op()
-                        .is_some_and(|op| op.addr == event.address) =>
-                {
-                    crate::StepRecord::FUTURE_ACCESS_MEM
-                }
-                Self::SUBCYCLE_RD | Self::SUBCYCLE_MEM if record.insn().kind == InsnKind::ECALL => {
-                    let syscall = self
-                        .layered_syscall_future_accesses
-                        .iter_mut()
-                        .find(|syscall| syscall.cycle == record.cycle())
-                        .expect("L5 future-access event has no matching syscall");
-                    let (addresses, masks) = if subcycle == Self::SUBCYCLE_RD {
-                        (&syscall.reg_addresses, &mut syscall.reg_masks)
-                    } else {
-                        (&syscall.mem_addresses, &mut syscall.mem_masks)
-                    };
-                    let index = addresses
-                        .iter()
-                        .rposition(|address| *address == event.address)
-                        .expect("L5 syscall access/tape address mismatch");
-                    masks[index] = 1;
-                    0
-                }
-                _ => panic!("L5 access/tape mismatch at cycle {}", event.source_cycle),
-            };
-            record.set_future_access_mask(mask);
-            self.layered_next_access_cursor += 1;
-        }
-        assert!(
-            self.layered_next_accesses
-                .events()
-                .get(self.layered_next_access_cursor)
-                .is_none_or(|event| event.source_cycle >= end_cycle),
-            "L5 left a future-access event before replay range end"
-        );
-    }
-
-    fn assert_layered_future_accesses_consumed(&self) {
-        if self.layered_future_access_enabled {
-            assert_eq!(
-                self.layered_next_access_cursor,
-                self.layered_next_accesses.events().len(),
-                "L5 consumed {} of {} future-access events",
-                self.layered_next_access_cursor,
-                self.layered_next_accesses.events().len()
-            );
-        }
-    }
-
-    fn update_layered_bounds(&mut self, addr: WordAddr) {
-        if !self.layered_memory_enabled {
-            return;
-        }
-        let start = addr.baddr().0;
-        let access_end = ByteAddr(start.wrapping_add(WORD_SIZE as u32));
-        if self.layered_heap.contains(&start) {
-            self.layered_max_heap = self.layered_max_heap.max(access_end);
-        } else if self.layered_hints.contains(&start) {
-            self.layered_max_hint = self.layered_max_hint.max(access_end);
-        }
-    }
-
-    fn layered_register_state(&mut self) -> LayeredRegisterState {
-        self.layered_registers_enabled = true;
-        LayeredRegisterState {
-            cycle: &mut self.layered_cycle,
-            latest: self.layered_register_latest.as_mut_ptr(),
-            max_heap: &mut self.layered_max_heap,
-            max_hint: &mut self.layered_max_hint,
-        }
-    }
 }
 
 impl Tracer for PureAotTracer {
@@ -2261,38 +856,7 @@ impl Tracer for PureAotTracer {
             pc_before: 0.into(),
             pc_after: 0.into(),
             executed_fallbacks: 0,
-            layered_cycle: Self::SUBCYCLES_PER_INSN,
-            layered_registers_enabled: false,
-            layered_register_latest: [0; VMState::<PureAotTracer>::REG_COUNT],
-            layered_max_heap: ByteAddr::from(_platform.heap.start),
-            layered_max_hint: ByteAddr::from(_platform.hints.start),
-            layered_heap: _platform.heap.clone(),
-            layered_hints: _platform.hints.clone(),
-            layered_memory_enabled: false,
-            layered_future_access_enabled: false,
-            layered_compact_future_access_enabled: false,
-            layered_compact_exceptional_enabled: false,
-            layered_next_accesses: Arc::new(NextCycleAccess::default()),
-            layered_next_access_cursor: 0,
-            layered_syscall_future_accesses: Vec::new(),
-            layered_compact_syscall_masks: Vec::new(),
-            layered_compact_l6_syscalls: Vec::new(),
-            layered_compact_l6_ops: Vec::new(),
-            layered_compact_l6_latest: BTreeMap::new(),
-            layered_compact_l6_pending_syscall: None,
-            layered_compact_l6_pending_ecall: None,
-            layered_compact_l6_pending_arg0: None,
         }
-    }
-
-    fn with_next_accesses(
-        platform: &Platform,
-        config: Self::Config,
-        next_accesses: Option<Arc<NextCycleAccess>>,
-    ) -> Self {
-        let mut tracer = Self::new(platform, config);
-        tracer.layered_next_accesses = next_accesses.unwrap_or_default();
-        tracer
     }
 
     fn advance(&mut self) -> Self::Record {
@@ -2311,69 +875,19 @@ impl Tracer for PureAotTracer {
     fn fetch(&mut self, pc: WordAddr, _value: Instruction) {
         self.pc_before = pc.baddr();
         self.pc_after = self.pc_before + PC_STEP_SIZE;
-        if self.layered_compact_exceptional_enabled {
-            self.layered_compact_l6_pending_syscall = None;
-            self.layered_compact_l6_pending_ecall = None;
-            self.layered_compact_l6_pending_arg0 = None;
-        }
     }
 
     fn track_mmu_maxtouch_before(&mut self) {}
     fn track_mmu_maxtouch_after(&mut self) {}
-    fn load_register(&mut self, idx: RegIdx, value: Word) {
-        if self.layered_compact_exceptional_enabled && idx == Platform::reg_ecall() {
-            let previous_cycle =
-                self.track_access(Platform::register_vma(idx).into(), Self::SUBCYCLE_RS1);
-            assert!(
-                self.layered_compact_l6_pending_ecall
-                    .replace((value, previous_cycle))
-                    .is_none(),
-                "Only one ECALL-code read per L6C step"
-            );
-        } else if self.layered_compact_exceptional_enabled
-            && self.layered_compact_l6_pending_ecall.is_some()
-            && idx == Platform::reg_arg0()
-        {
-            let previous_cycle =
-                self.track_access(Platform::register_vma(idx).into(), Self::SUBCYCLE_RS2);
-            assert!(
-                self.layered_compact_l6_pending_arg0
-                    .replace((value, previous_cycle))
-                    .is_none(),
-                "Only one ECALL arg0 read per L6C step"
-            );
-        }
-    }
+    fn load_register(&mut self, _idx: RegIdx, _value: Word) {}
     fn store_register(&mut self, _idx: RegIdx, _value: Change<Word>) {}
-    fn load_memory(&mut self, addr: WordAddr, _value: Word, _previous_cycle: Cycle) {
-        self.update_layered_bounds(addr);
-    }
-    fn store_memory(&mut self, addr: WordAddr, _value: Change<Word>, _previous_cycle: Cycle) {
-        self.update_layered_bounds(addr);
-    }
+    fn load_memory(&mut self, _addr: WordAddr, _value: Word, _previous_cycle: Cycle) {}
+    fn store_memory(&mut self, _addr: WordAddr, _value: Change<Word>, _previous_cycle: Cycle) {}
     fn track_syscall(&mut self, effects: SyscallEffects) {
-        let witness = effects.finalize(self);
-        self.record_layered_syscall_addresses(
-            witness.reg_ops.iter().map(|op| op.addr).collect(),
-            witness.mem_ops.iter().map(|op| op.addr).collect(),
-        );
-        self.record_compact_l6_syscall(&witness);
+        effects.finalize(self);
     }
-    fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
-        if !self.layered_compact_exceptional_enabled {
-            return 0;
-        }
-        if let Some(index) = (0..VMState::<PureAotTracer>::REG_COUNT)
-            .find(|&index| WordAddr::from(Platform::register_vma(index as RegIdx)) == addr)
-        {
-            let previous = self.layered_register_latest[index];
-            self.layered_register_latest[index] = self.layered_cycle + subcycle;
-            previous
-        } else {
-            self.layered_compact_l6_latest
-                .insert(addr, self.layered_cycle + subcycle)
-                .unwrap_or(0)
-        }
+    fn track_access(&mut self, _addr: WordAddr, _subcycle: Cycle) -> Cycle {
+        0
     }
     fn final_register_accesses(&self) -> &LatestAccesses {
         panic!("pure AOT execution has no access history")
@@ -2382,11 +896,7 @@ impl Tracer for PureAotTracer {
         NextCycleAccess::default()
     }
     fn cycle(&self) -> Cycle {
-        if self.layered_registers_enabled {
-            self.layered_cycle
-        } else {
-            (self.executed_fallbacks as Cycle + 1) * Self::SUBCYCLES_PER_INSN
-        }
+        (self.executed_fallbacks as Cycle + 1) * Self::SUBCYCLES_PER_INSN
     }
     fn executed_insts(&self) -> usize {
         self.executed_fallbacks
@@ -2399,7 +909,7 @@ impl Tracer for PureAotTracer {
     }
 
     fn track_memory_accesses(&self) -> bool {
-        self.layered_memory_enabled
+        false
     }
 }
 
@@ -2734,26 +1244,7 @@ impl AotProgram {
     /// own cache entry.
     pub fn load_or_compile_fulltracer_replay(&self) -> Result<Self> {
         let cache_dir = default_aot_cache_dir();
-        let trace_style = match std::env::var_os("CENO_FULLTRACER_EXPERIMENT_LAYER") {
-            None => AssemblyTraceStyle::GpuReplayDirect,
-            Some(value) if value == "L0" => AssemblyTraceStyle::PreflightPureL0,
-            Some(value) if value == "L1" => AssemblyTraceStyle::PreflightSkeletonL1,
-            Some(value) if value == "L1C" => AssemblyTraceStyle::PreflightCompactSkeletonL1C,
-            Some(value) if value == "L2C" => AssemblyTraceStyle::PreflightCompactValuesL2C,
-            Some(value) if value == "L3C" => AssemblyTraceStyle::PreflightCompactRegistersL3C,
-            Some(value) if value == "L4C" => AssemblyTraceStyle::PreflightCompactMemoryL4C,
-            Some(value) if value == "L5C" => AssemblyTraceStyle::PreflightCompactFutureAccessL5C,
-            Some(value) if value == "L6C" => AssemblyTraceStyle::PreflightCompactExceptionalL6C,
-            Some(value) if value == "L7" => AssemblyTraceStyle::PreflightCompactClosureL7,
-            Some(value) if value == "L2" => AssemblyTraceStyle::PreflightValuesL2,
-            Some(value) if value == "L3" => AssemblyTraceStyle::PreflightRegistersL3,
-            Some(value) if value == "L4" => AssemblyTraceStyle::PreflightMemoryL4,
-            Some(value) if value == "L5" => AssemblyTraceStyle::PreflightFutureAccessL5,
-            Some(value) => bail!(
-                "CENO_FULLTRACER_EXPERIMENT_LAYER must be exactly L0, L1, L1C, L2, L2C, L3, L3C, L4, L4C, L5, L5C, L6C, or L7 when set, got {:?}",
-                value
-            ),
-        };
+        let trace_style = AssemblyTraceStyle::GpuReplayDirect;
         let key = format!(
             "{}-layout{}-{}",
             aot_cache_key(&self.program, trace_style),
@@ -2972,40 +1463,21 @@ impl AotProgram {
         let registers = vm.registers_mut_ptr();
         let pc_ptr = vm.pc_mut_ptr();
         let memory_cells = vm.memory_cells_mut_ptr();
-        if self.trace_style.has_layered_memory() {
-            if TypeId::of::<T>() != TypeId::of::<PureAotTracer>() {
-                bail!("L4 memory replay requires PureAotTracer state");
-            }
-            let pure_vm = unsafe { &mut *(vm_ptr as *mut VMState<PureAotTracer>) };
-            pure_vm.tracer_mut().enable_layered_memory();
-        }
-        if self.trace_style.has_layered_future_access() {
-            let pure_vm = unsafe { &mut *(vm_ptr as *mut VMState<PureAotTracer>) };
-            if self.trace_style.is_compact_exceptional() {
-                pure_vm.tracer_mut().enable_compact_exceptional();
-            } else if self.trace_style.is_compact_future_access() {
-                pure_vm.tracer_mut().enable_compact_future_access();
-            } else {
-                pure_vm.tracer_mut().enable_layered_future_access();
-            }
-        }
-        let memory_start_ordinal =
-            if self.trace_style.is_pure() && !self.trace_style.has_layered_memory() {
-                0
-            } else {
-                vm.tracer().cycle() >> 2
-            };
+        let memory_start_ordinal = if self.trace_style.is_pure() {
+            0
+        } else {
+            vm.tracer().cycle() >> 2
+        };
         if memory_start_ordinal > u64::from(u32::MAX) {
             bail!("packed memory access stamp exceeds u32::MAX");
         }
         // Bound the whole native invocation once, rather than checking every
         // memory instruction. A step at the final ordinal is representable.
-        let packed_step_limit =
-            if self.trace_style.is_pure() && !self.trace_style.has_layered_memory() {
-                usize::MAX
-            } else {
-                (u64::from(u32::MAX) - memory_start_ordinal + 1) as usize
-            };
+        let packed_step_limit = if self.trace_style.is_pure() {
+            usize::MAX
+        } else {
+            (u64::from(u32::MAX) - memory_start_ordinal + 1) as usize
+        };
         let native_max_steps = max_steps.min(packed_step_limit);
         let instructions = self.program.instructions.as_ptr();
         let program_base = self.program.base_address;
@@ -3232,50 +1704,6 @@ impl AotProgram {
                 );
             }
         }
-        let mut skeleton_records = if self.trace_style.is_generic_layered_record() {
-            Vec::<crate::StepRecord>::with_capacity(native_max_steps)
-        } else {
-            Vec::new()
-        };
-        let _compact_cycle_start = if self.trace_style.is_compact_layered() {
-            let pure_vm = unsafe { &*(vm_ptr as *const VMState<PureAotTracer>) };
-            pure_vm.tracer().cycle()
-        } else {
-            0
-        };
-        let _compact_bounds_start = if self.trace_style.is_compact_memory()
-            || self.trace_style.is_compact_future_access()
-        {
-            let pure_vm = unsafe { &*(vm_ptr as *const VMState<PureAotTracer>) };
-            Some((
-                pure_vm.tracer().layered_max_heap,
-                pure_vm.tracer().layered_max_hint,
-            ))
-        } else {
-            None
-        };
-        let mut compact_skeleton_records = if self.trace_style.is_compact_skeleton() {
-            Vec::<CompactSkeletonRecord>::with_capacity(native_max_steps)
-        } else {
-            Vec::new()
-        };
-        let mut compact_value_bytes = if self.trace_style.is_compact_values() {
-            Vec::<u8>::with_capacity(native_max_steps.saturating_mul(COMPACT_VALUES_MAX_BYTES))
-        } else if self.trace_style.is_compact_registers() {
-            Vec::<u8>::with_capacity(native_max_steps.saturating_mul(COMPACT_REGISTERS_MAX_BYTES))
-        } else if self.trace_style.is_compact_memory() {
-            Vec::<u8>::with_capacity(native_max_steps.saturating_mul(COMPACT_REGISTERS_MAX_BYTES))
-        } else if self.trace_style.is_compact_future_access() {
-            Vec::<u8>::with_capacity(
-                native_max_steps.saturating_mul(std::mem::size_of::<CompactFutureR>()),
-            )
-        } else {
-            Vec::new()
-        };
-        let mut compact_bytes_cursor = 0usize;
-        let mut skeleton_reserved_len = 0usize;
-        let mut skeleton_cursor = 0usize;
-        let mut skeleton_cycle = crate::FullTracer::SUBCYCLES_PER_INSN;
         let mut fulltracer_records = std::ptr::null_mut();
         let mut fulltracer_len = std::ptr::null_mut();
         let mut fulltracer_pending_index = std::ptr::null_mut();
@@ -3285,84 +1713,10 @@ impl AotProgram {
         let mut fulltracer_latest_len = std::ptr::null_mut();
         let mut fulltracer_max_heap = std::ptr::null_mut();
         let mut fulltracer_max_hint = std::ptr::null_mut();
-        if self.trace_style.is_layered_record() {
-            if self.trace_style.is_compact_layered()
-                && TypeId::of::<T>() != TypeId::of::<PureAotTracer>()
-            {
-                bail!("compact layered replay requires PureAotTracer state");
-            }
-            trace_mode = match self.trace_style {
-                AssemblyTraceStyle::PreflightCompactSkeletonL1C => {
-                    AOT_TRACE_MODE_COMPACT_SKELETON_L1C
-                }
-                AssemblyTraceStyle::PreflightCompactValuesL2C => AOT_TRACE_MODE_COMPACT_VALUES_L2C,
-                AssemblyTraceStyle::PreflightCompactRegistersL3C => {
-                    AOT_TRACE_MODE_COMPACT_REGISTERS_L3C
-                }
-                AssemblyTraceStyle::PreflightCompactMemoryL4C => AOT_TRACE_MODE_COMPACT_MEMORY_L4C,
-                AssemblyTraceStyle::PreflightCompactFutureAccessL5C => {
-                    AOT_TRACE_MODE_COMPACT_FUTURE_ACCESS_L5C
-                }
-                AssemblyTraceStyle::PreflightCompactExceptionalL6C => {
-                    AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C
-                }
-                AssemblyTraceStyle::PreflightCompactClosureL7 => AOT_TRACE_MODE_COMPACT_CLOSURE_L7,
-                AssemblyTraceStyle::PreflightMemoryL4 => AOT_TRACE_MODE_MEMORY_L4,
-                AssemblyTraceStyle::PreflightFutureAccessL5 => AOT_TRACE_MODE_FUTURE_ACCESS_L5,
-                AssemblyTraceStyle::PreflightRegistersL3 => AOT_TRACE_MODE_REGISTERS_L3,
-                AssemblyTraceStyle::PreflightValuesL2 => AOT_TRACE_MODE_VALUES_L2,
-                AssemblyTraceStyle::PreflightSkeletonL1 => AOT_TRACE_MODE_SKELETON_L1,
-                _ => unreachable!("layered record predicate admitted a non-layered style"),
-            };
-            fulltracer_records = if self.trace_style.is_compact_skeleton() {
-                compact_skeleton_records
-                    .as_mut_ptr()
-                    .cast::<crate::StepRecord>()
-            } else if self.trace_style.is_compact_values()
-                || self.trace_style.is_compact_registers()
-                || self.trace_style.is_compact_memory()
-                || self.trace_style.is_compact_future_access()
-            {
-                compact_value_bytes.as_mut_ptr().cast::<crate::StepRecord>()
-            } else {
-                skeleton_records.as_mut_ptr()
-            };
-            fulltracer_len = &mut skeleton_reserved_len;
-            fulltracer_pending_index = &mut skeleton_cursor;
-            fulltracer_pending_cycle = &mut skeleton_cycle;
-            if self.trace_style.has_layered_registers() {
-                if TypeId::of::<T>() != TypeId::of::<PureAotTracer>() {
-                    bail!("L3 register replay requires PureAotTracer state");
-                }
-                let pure_vm = unsafe { &mut *(vm_ptr as *mut VMState<PureAotTracer>) };
-                if self.trace_style.has_layered_memory() {
-                    pure_vm.tracer_mut().enable_layered_memory();
-                }
-                if self.trace_style.has_layered_future_access() {
-                    if self.trace_style.is_compact_exceptional() {
-                        pure_vm.tracer_mut().enable_compact_exceptional();
-                    } else if self.trace_style.is_compact_future_access() {
-                        pure_vm.tracer_mut().enable_compact_future_access();
-                    } else {
-                        pure_vm.tracer_mut().enable_layered_future_access();
-                    }
-                }
-                let state = pure_vm.tracer_mut().layered_register_state();
-                fulltracer_pending_cycle = state.cycle;
-                fulltracer_latest_cells = state.latest;
-                if self.trace_style.has_layered_memory() {
-                    fulltracer_max_heap = state.max_heap;
-                    fulltracer_max_hint = state.max_hint;
-                }
-            }
-        }
         if trace_native_steps
             && !cfg!(debug_assertions)
             && TypeId::of::<T>() == TypeId::of::<crate::FullTracer>()
-            && matches!(
-                self.trace_style,
-                AssemblyTraceStyle::FullTracerDirect | AssemblyTraceStyle::GpuReplayDirect
-            )
+            && self.trace_style == AssemblyTraceStyle::GpuReplayDirect
         {
             let fulltracer_vm = unsafe { &mut *(vm_ptr as *mut VMState<crate::FullTracer>) };
             let state = fulltracer_vm.tracer_mut().native_trace_state();
@@ -3390,65 +1744,6 @@ impl AotProgram {
         let mut gpu_replay_events_len = 0;
         let mut gpu_replay_event_cursor = std::ptr::null_mut();
         let mut gpu_replay_error = std::ptr::null_mut();
-        let mut l7_native_error = 0u32;
-        let mut l7_latest_len = 0usize;
-        let l7_host_setup_started = Instant::now();
-        let mut l7_arenas = if self.trace_style == AssemblyTraceStyle::PreflightCompactClosureL7 {
-            InsnKind::iter()
-                .map(|kind| {
-                    (kind != InsnKind::ECALL
-                        && crate::gpu_typed_kind_spec(kind).is_some()
-                        && self
-                            .program
-                            .instructions
-                            .iter()
-                            .any(|insn| insn.kind == kind))
-                    .then(|| {
-                        crate::GpuTypedSoaArena::new_compact_with_range(kind, native_max_steps, 0)
-                            .expect("L7 supported family has no compact layout")
-                    })
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-        let mut l7_native_kinds = if l7_arenas.is_empty() {
-            Vec::new()
-        } else {
-            l7_arenas
-                .iter_mut()
-                .map(|arena| {
-                    arena
-                        .as_mut()
-                        .map_or_else(Default::default, |arena| arena.native_state())
-                })
-                .collect::<Vec<_>>()
-        };
-        if self.trace_style == AssemblyTraceStyle::PreflightCompactClosureL7 {
-            let pure_vm = unsafe { &mut *(vm_ptr as *mut VMState<PureAotTracer>) };
-            let state = pure_vm.tracer_mut().layered_register_state();
-            let (events, event_count, event_cursor) =
-                pure_vm.tracer_mut().compact_future_access_native_state();
-            gpu_replay_kinds = l7_native_kinds.as_mut_ptr();
-            gpu_replay_kind_count = l7_native_kinds.len();
-            gpu_replay_ordinal = &mut skeleton_cursor;
-            gpu_replay_pending_cycle = state.cycle;
-            gpu_replay_latest_cells = state.latest;
-            gpu_replay_latest_base = 0;
-            gpu_replay_latest_len = &mut l7_latest_len;
-            gpu_replay_max_heap = state.max_heap;
-            gpu_replay_max_hint = state.max_hint;
-            gpu_replay_events = events;
-            gpu_replay_events_len = event_count;
-            gpu_replay_event_cursor = event_cursor;
-            gpu_replay_error = &mut l7_native_error;
-        }
-        let mut l7_host_reservation_routing_time =
-            if self.trace_style == AssemblyTraceStyle::PreflightCompactClosureL7 {
-                l7_host_setup_started.elapsed()
-            } else {
-                Duration::ZERO
-            };
         if trace_native_steps
             && !cfg!(debug_assertions)
             && TypeId::of::<T>() == TypeId::of::<crate::GpuReplayTracer>()
@@ -3471,16 +1766,6 @@ impl AotProgram {
             gpu_replay_event_cursor = state.next_access_cursor;
             gpu_replay_error = state.error;
         }
-        let (
-            layered_next_access_events,
-            layered_next_access_events_len,
-            layered_next_access_cursor,
-        ) = if self.trace_style.is_compact_future_access() {
-            let pure_vm = unsafe { &mut *(vm_ptr as *mut VMState<PureAotTracer>) };
-            pure_vm.tracer_mut().compact_future_access_native_state()
-        } else {
-            (std::ptr::null(), 0, std::ptr::null_mut())
-        };
         let preflight_step_cells_table = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             preflight_step_cells.as_ptr()
         } else {
@@ -3698,15 +1983,6 @@ impl AotProgram {
             gpu_replay_event_cursor,
             gpu_replay_error,
             gpu_replay_ordinary_callbacks: 0,
-            layered_rs1_previous: 0,
-            layered_rs2_previous: 0,
-            layered_rd_previous: 0,
-            compact_bytes_cursor: &mut compact_bytes_cursor,
-            layered_next_access_events,
-            layered_next_access_events_len,
-            layered_next_access_cursor,
-            gpu_replay_packed_block: 0,
-            _gpu_replay_packed_block_padding: 0,
         };
         aot_diagnostic_marker(
             "RUNTIME_CONTEXT",
@@ -3731,20 +2007,7 @@ impl AotProgram {
         );
         let trace_fn = if matches!(
             trace_mode,
-            AOT_TRACE_MODE_FULLTRACER_DIRECT
-                | AOT_TRACE_MODE_GPU_REPLAY_DIRECT
-                | AOT_TRACE_MODE_SKELETON_L1
-                | AOT_TRACE_MODE_VALUES_L2
-                | AOT_TRACE_MODE_REGISTERS_L3
-                | AOT_TRACE_MODE_MEMORY_L4
-                | AOT_TRACE_MODE_FUTURE_ACCESS_L5
-                | AOT_TRACE_MODE_COMPACT_SKELETON_L1C
-                | AOT_TRACE_MODE_COMPACT_VALUES_L2C
-                | AOT_TRACE_MODE_COMPACT_REGISTERS_L3C
-                | AOT_TRACE_MODE_COMPACT_MEMORY_L4C
-                | AOT_TRACE_MODE_COMPACT_FUTURE_ACCESS_L5C
-                | AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C
-                | AOT_TRACE_MODE_COMPACT_CLOSURE_L7
+            AOT_TRACE_MODE_FULLTRACER_DIRECT | AOT_TRACE_MODE_GPU_REPLAY_DIRECT
         ) {
             std::ptr::null()
         } else if trace_native_steps {
@@ -3760,9 +2023,7 @@ impl AotProgram {
         } else {
             std::ptr::null()
         };
-        let exec_fn = if self.trace_style.is_layered_record() {
-            ceno_aot_skeleton_l1_callback as AotInsnFn
-        } else if self.trace_style.is_pure() && !trace_native_steps {
+        let exec_fn = if self.trace_style.is_pure() && !trace_native_steps {
             ceno_aot_pure_ecall_callback as AotInsnFn
         } else if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             ceno_aot_preflight_fallback_callback as AotInsnFn
@@ -3833,10 +2094,6 @@ impl AotProgram {
         if let Some(watchdog) = native_watchdog.as_mut() {
             watchdog.stop();
         }
-        // This is intentionally an inclusive native-entry measurement. It
-        // covers guest execution plus generated L7 admission, routing, and
-        // compact packing without adding a timestamp pair to every hot row.
-        let native_entry_elapsed = started.elapsed();
         aot_native_diagnostic_marker(
             "NATIVE_ENTRY",
             "RETURN",
@@ -3875,19 +2132,6 @@ impl AotProgram {
                 .tracer_mut()
                 .sync_native_range()
                 .map_err(|message| anyhow!(message))?;
-        } else if trace_mode == AOT_TRACE_MODE_COMPACT_CLOSURE_L7 {
-            let routing_sync_started = Instant::now();
-            if l7_native_error != 0 {
-                bail!("L7 compact family emitter failed with code {l7_native_error:#010x}");
-            }
-            for (arena, state) in l7_arenas.iter_mut().zip(&l7_native_kinds) {
-                match arena {
-                    Some(arena) => arena.sync_native_state(state).map_err(anyhow::Error::msg)?,
-                    None if state.capacity == 0 && state.cursor == 0 => {}
-                    None => bail!("L7 compact emitter used an absent family"),
-                }
-            }
-            l7_host_reservation_routing_time += routing_sync_started.elapsed();
         }
         aot_native_diagnostic_marker(
             "POST_RETURN_NEXT_ACCESS",
@@ -3925,141 +2169,6 @@ impl AotProgram {
         }
         if native_status != AOT_STATUS_HALTED {
             bail!("AOT native entry returned invalid status {native_status}");
-        }
-        if matches!(
-            trace_mode,
-            AOT_TRACE_MODE_SKELETON_L1
-                | AOT_TRACE_MODE_VALUES_L2
-                | AOT_TRACE_MODE_REGISTERS_L3
-                | AOT_TRACE_MODE_MEMORY_L4
-                | AOT_TRACE_MODE_FUTURE_ACCESS_L5
-                | AOT_TRACE_MODE_COMPACT_SKELETON_L1C
-                | AOT_TRACE_MODE_COMPACT_VALUES_L2C
-                | AOT_TRACE_MODE_COMPACT_REGISTERS_L3C
-                | AOT_TRACE_MODE_COMPACT_MEMORY_L4C
-                | AOT_TRACE_MODE_COMPACT_FUTURE_ACCESS_L5C
-                | AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C
-                | AOT_TRACE_MODE_COMPACT_CLOSURE_L7
-        ) {
-            if skeleton_cursor != executed_steps as usize {
-                bail!(
-                    "layered record cursor {} does not match executed steps {executed_steps}",
-                    skeleton_cursor
-                );
-            }
-            if trace_mode == AOT_TRACE_MODE_COMPACT_SKELETON_L1C {
-                // SAFETY: the compact native/fallback recorders initialize one
-                // complete 16-byte row before advancing the shared cursor.
-                unsafe { compact_skeleton_records.set_len(skeleton_cursor) };
-                #[cfg(test)]
-                skeleton_records.extend(
-                    compact_skeleton_records
-                        .iter()
-                        .map(|record| record.decode(&self.program, _compact_cycle_start)),
-                );
-            } else if matches!(
-                trace_mode,
-                AOT_TRACE_MODE_COMPACT_VALUES_L2C
-                    | AOT_TRACE_MODE_COMPACT_REGISTERS_L3C
-                    | AOT_TRACE_MODE_COMPACT_MEMORY_L4C
-                    | AOT_TRACE_MODE_COMPACT_FUTURE_ACCESS_L5C
-                    | AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C
-                    | AOT_TRACE_MODE_COMPACT_CLOSURE_L7
-            ) {
-                if compact_bytes_cursor > compact_value_bytes.capacity() {
-                    bail!(
-                        "compact byte cursor {compact_bytes_cursor} exceeds capacity {}",
-                        compact_value_bytes.capacity()
-                    );
-                }
-                // SAFETY: native and fallback emitters commit complete rows and
-                // advance the byte cursor only after the final forward store.
-                unsafe { compact_value_bytes.set_len(compact_bytes_cursor) };
-                #[cfg(test)]
-                if trace_mode == AOT_TRACE_MODE_COMPACT_VALUES_L2C {
-                    skeleton_records.extend(decode_compact_values(
-                        &compact_value_bytes,
-                        &self.program,
-                        _compact_cycle_start,
-                    ));
-                } else {
-                    skeleton_records.extend(decode_compact_registers(
-                        &compact_value_bytes,
-                        &self.program,
-                        _compact_cycle_start,
-                        matches!(
-                            trace_mode,
-                            AOT_TRACE_MODE_COMPACT_MEMORY_L4C
-                                | AOT_TRACE_MODE_COMPACT_FUTURE_ACCESS_L5C
-                                | AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C
-                                | AOT_TRACE_MODE_COMPACT_CLOSURE_L7
-                        )
-                        .then(|| {
-                            let (max_heap, max_hint) = _compact_bounds_start.unwrap();
-                            (max_heap, max_hint, &heap, &hints)
-                        }),
-                        matches!(
-                            trace_mode,
-                            AOT_TRACE_MODE_COMPACT_FUTURE_ACCESS_L5C
-                                | AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C
-                                | AOT_TRACE_MODE_COMPACT_CLOSURE_L7
-                        ),
-                    ));
-                }
-            } else {
-                // SAFETY: every generic native/fallback recorder initializes
-                // exactly one complete StepRecord before advancing the cursor.
-                unsafe { skeleton_records.set_len(skeleton_cursor) };
-            }
-            if trace_mode == AOT_TRACE_MODE_FUTURE_ACCESS_L5 {
-                let pure_vm = unsafe { &mut *(vm_ptr as *mut VMState<PureAotTracer>) };
-                pure_vm
-                    .tracer_mut()
-                    .annotate_layered_future_accesses(&mut skeleton_records);
-                if pure_vm.halted() {
-                    pure_vm.tracer().assert_layered_future_accesses_consumed();
-                }
-            }
-            if matches!(
-                trace_mode,
-                AOT_TRACE_MODE_COMPACT_FUTURE_ACCESS_L5C
-                    | AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C
-                    | AOT_TRACE_MODE_COMPACT_CLOSURE_L7
-            ) {
-                let pure_vm = unsafe { &*(vm_ptr as *const VMState<PureAotTracer>) };
-                if pure_vm.halted() {
-                    pure_vm.tracer().assert_layered_future_accesses_consumed();
-                }
-            }
-            #[cfg(test)]
-            if matches!(
-                trace_mode,
-                AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C | AOT_TRACE_MODE_COMPACT_CLOSURE_L7
-            ) {
-                let pure_vm = unsafe { &*(vm_ptr as *const VMState<PureAotTracer>) };
-                for record in &mut skeleton_records {
-                    let header = pure_vm
-                        .tracer()
-                        .layered_compact_l6_syscalls
-                        .iter()
-                        .copied()
-                        .find(|header| header.cycle() == record.cycle());
-                    let syscall_index = header.map(CompactL6SyscallHeader::syscall_index);
-                    let ecall_code =
-                        header.map(|header| (header.ecall_code(), header.ecall_previous_cycle()));
-                    let ecall_arg0 = header
-                        .filter(|header| {
-                            header.syscall_index() == crate::StepRecord::NO_SYSCALL
-                                && header.reg_count() == 1
-                        })
-                        .map(|header| {
-                            let op = pure_vm.tracer().layered_compact_l6_ops[header.op_offset()]
-                                .decode();
-                            (op.value.before, op.previous_cycle)
-                        });
-                    record.complete_l6(syscall_index, ecall_code, ecall_arg0);
-                }
-            }
         }
         aot_native_diagnostic_marker(
             "POST_RETURN_STATUS",
@@ -4112,111 +2221,6 @@ impl AotProgram {
                     .or_insert(count as usize);
             }
         }
-        let l7_family_rows = l7_arenas
-            .iter()
-            .map(|arena| arena.as_ref().map_or(0, crate::GpuTypedSoaArena::len))
-            .collect::<Vec<_>>();
-        let l7_family_bytes = l7_arenas
-            .iter()
-            .filter_map(Option::as_ref)
-            .map(|arena| arena.len() * arena.layout().compact_bytes())
-            .sum::<usize>();
-        let l7_family_stores = l7_arenas
-            .iter()
-            .filter_map(Option::as_ref)
-            .map(|arena| {
-                let stores_per_row = match arena.layout().compact_bytes() {
-                    16 | 24 => arena.layout().compact_bytes() / 8,
-                    20 | 31 => arena.layout().compact_bytes() / 8 + 1,
-                    _ => unreachable!("unknown L7 compact stride"),
-                };
-                arena.len() * stores_per_row
-            })
-            .sum::<usize>();
-        let compact_bytes_written = compact_bytes_cursor
-            + compact_skeleton_records.len() * std::mem::size_of::<CompactSkeletonRecord>()
-            + l7_family_bytes;
-        if trace_mode == AOT_TRACE_MODE_COMPACT_VALUES_L2C {
-            tracing::info!(
-                "i061-r-l2c physical shard bytes_written={} records={} fallback_steps={}",
-                compact_bytes_written,
-                executed_steps,
-                context.fallback_steps,
-            );
-        }
-        if trace_mode == AOT_TRACE_MODE_COMPACT_REGISTERS_L3C {
-            tracing::info!(
-                "i061-r-l3c physical shard bytes_written={} records={} fallback_steps={}",
-                compact_bytes_written,
-                executed_steps,
-                context.fallback_steps,
-            );
-        }
-        if trace_mode == AOT_TRACE_MODE_COMPACT_MEMORY_L4C {
-            tracing::info!(
-                "i061-r-l4c physical shard bytes_written={} records={} fallback_steps={}",
-                compact_bytes_written,
-                executed_steps,
-                context.fallback_steps,
-            );
-        }
-        if trace_mode == AOT_TRACE_MODE_COMPACT_FUTURE_ACCESS_L5C {
-            tracing::info!(
-                "i061-r-l5c physical shard bytes_written={} records={} fallback_steps={} syscall_mask_bytes={}",
-                compact_bytes_written,
-                executed_steps,
-                context.fallback_steps,
-                unsafe { &*(vm_ptr as *const VMState<PureAotTracer>) }
-                    .tracer()
-                    .layered_compact_syscall_masks
-                    .len()
-                    * std::mem::size_of::<CompactFutureSyscallMask>(),
-            );
-        }
-        if matches!(
-            trace_mode,
-            AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C | AOT_TRACE_MODE_COMPACT_CLOSURE_L7
-        ) {
-            let pure_vm = unsafe { &*(vm_ptr as *const VMState<PureAotTracer>) };
-            tracing::info!(
-                "i061-r-l6c physical shard bytes_written={} records={} fallback_steps={} syscall_header_bytes={} syscall_op_bytes={} syscall_mask_bytes={}",
-                compact_bytes_written,
-                executed_steps,
-                context.fallback_steps,
-                pure_vm.tracer().layered_compact_l6_syscalls.len()
-                    * std::mem::size_of::<CompactL6SyscallHeader>(),
-                pure_vm.tracer().layered_compact_l6_ops.len()
-                    * std::mem::size_of::<CompactL6WriteOp>(),
-                pure_vm.tracer().layered_compact_syscall_masks.len()
-                    * std::mem::size_of::<CompactFutureSyscallMask>(),
-            );
-        }
-        if trace_mode == AOT_TRACE_MODE_COMPACT_CLOSURE_L7 {
-            let pure_vm = unsafe { &*(vm_ptr as *const VMState<PureAotTracer>) };
-            let header_bytes = pure_vm.tracer().layered_compact_l6_syscalls.len()
-                * std::mem::size_of::<CompactL6SyscallHeader>();
-            let op_bytes = pure_vm.tracer().layered_compact_l6_ops.len()
-                * std::mem::size_of::<CompactL6WriteOp>();
-            let mask_bytes = pure_vm.tracer().layered_compact_syscall_masks.len()
-                * std::mem::size_of::<CompactFutureSyscallMask>();
-            tracing::info!(
-                "i061-r-l7 physical shard compact_bytes_written={} family_bytes={} family_stores={} ecall_row_bytes={} syscall_header_bytes={} syscall_op_bytes={} syscall_mask_bytes={} total_physical_bytes={} generic_logical_bytes={} host_reservation_routing_ns={} native_pack_route_inclusive_ns={} family_rows={:?}",
-                compact_bytes_written,
-                l7_family_bytes,
-                l7_family_stores,
-                compact_bytes_cursor,
-                header_bytes,
-                op_bytes,
-                mask_bytes,
-                compact_bytes_written + header_bytes + op_bytes + mask_bytes,
-                executed_steps as usize * std::mem::size_of::<crate::StepRecord>(),
-                l7_host_reservation_routing_time.as_nanos(),
-                native_entry_elapsed
-                    .saturating_sub(Duration::from_nanos(context.fallback_time_ns))
-                    .as_nanos(),
-                l7_family_rows,
-            );
-        }
         Ok(AotRunReport {
             executed_steps: executed_steps as usize,
             fallback_steps: context.fallback_steps as usize,
@@ -4233,34 +2237,6 @@ impl AotProgram {
             next_access_growths,
             next_access_growth_bytes,
             next_access_growth_time,
-            #[cfg(test)]
-            compact_bytes_written,
-            #[cfg(test)]
-            l1_skeleton_records: skeleton_records,
-            #[cfg(test)]
-            l6_syscall_witnesses: if matches!(
-                trace_mode,
-                AOT_TRACE_MODE_COMPACT_EXCEPTIONAL_L6C | AOT_TRACE_MODE_COMPACT_CLOSURE_L7
-            ) {
-                unsafe { &*(vm_ptr as *const VMState<PureAotTracer>) }
-                    .tracer()
-                    .decode_compact_l6_syscalls()
-            } else {
-                Vec::new()
-            },
-            #[cfg(test)]
-            l7_family_payloads: l7_arenas
-                .iter()
-                .filter_map(|arena| arena.as_ref())
-                .map(|arena| {
-                    (
-                        arena.kind(),
-                        arena.range_start(),
-                        arena.pc_base(),
-                        arena.payload_bytes().to_vec(),
-                    )
-                })
-                .collect(),
         })
     }
 }
@@ -4277,15 +2253,6 @@ pub struct AotRunReport {
     pub next_access_growths: usize,
     pub next_access_growth_bytes: usize,
     pub next_access_growth_time: Duration,
-    #[cfg(test)]
-    compact_bytes_written: usize,
-    #[cfg(test)]
-    l1_skeleton_records: Vec<crate::StepRecord>,
-    #[cfg(test)]
-    l6_syscall_witnesses: Vec<SyscallWitness>,
-    #[cfg(test)]
-    #[cfg_attr(debug_assertions, allow(dead_code))]
-    l7_family_payloads: Vec<(InsnKind, u32, u32, Vec<u8>)>,
 }
 
 impl AotRunReport {

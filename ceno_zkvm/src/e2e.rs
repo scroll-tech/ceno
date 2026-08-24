@@ -1461,7 +1461,7 @@ impl CompactStepReplay {
             streamed_descriptor_payload_totals(
                 &self.range_descriptors
                     [self.next_range_descriptor - expected_range_count..self.next_range_descriptor],
-                ceno_emul::i050_compact_source_enabled(),
+                true,
             )
         } else {
             arenas
@@ -2275,7 +2275,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                                         )
                                         .expect("shard address reservation overflow");
                                 }
-                                let compact_source = ceno_emul::i050_compact_source_enabled();
+                                let compact_source = true;
                                 let stage_capacity = descriptors
                                     .iter()
                                     .map(|descriptor| {
@@ -4308,7 +4308,7 @@ mod tests {
 
     #[cfg(feature = "gpu")]
     #[test]
-    fn i061_l8_exhausted_streamed_iterator_stops_before_shard_side_effects() {
+    fn exhausted_streamed_iterator_stops_before_shard_side_effects() {
         let shard_cycle_boundaries = Arc::new(vec![4, 8, 12]);
         let replay_shard_previews = Arc::new(vec![
             GpuShardPreview {
@@ -4370,7 +4370,7 @@ mod tests {
 
     #[cfg(feature = "gpu")]
     #[test]
-    fn i061_l8_legacy_selector_remains_independent_of_typed_source_mode() {
+    fn compact_replay_selector_rejects_legacy_or_incompatible_modes() {
         assert!(super::compact_replay_selected(true, false, false, false));
         assert!(!super::compact_replay_selected(true, false, false, true));
         assert!(!super::compact_replay_selected(false, false, false, false));
@@ -4379,7 +4379,7 @@ mod tests {
     }
 
     #[test]
-    fn i061_l8_streamed_descriptor_payload_skips_zero_unsupported_families() {
+    fn streamed_descriptor_payload_skips_zero_unsupported_families() {
         let mut descriptor = GpuReplayRangeDescriptor {
             shard_id: 0,
             sequence: 0,
@@ -4408,7 +4408,7 @@ mod tests {
     }
 
     #[test]
-    fn i061_l8_two_shard_descriptor_topology_closes_at_53_plus_22() {
+    fn two_shard_descriptor_topology_closes_at_53_plus_22() {
         let descriptors = (0..53)
             .map(|sequence| GpuReplayRangeDescriptor {
                 shard_id: 0,
@@ -4454,7 +4454,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "nonzero unsupported typed family: kind=ECALL, rows=1")]
-    fn i061_l8_streamed_descriptor_payload_rejects_nonzero_unsupported_family() {
+    fn streamed_descriptor_payload_rejects_nonzero_unsupported_family() {
         let mut descriptor = GpuReplayRangeDescriptor {
             shard_id: 0,
             sequence: 0,

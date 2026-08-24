@@ -28,23 +28,9 @@ pub enum GpuTypedLayout {
 
 pub(crate) const GPU_TYPED_NATIVE_MAX_FIELDS: usize = 13;
 pub(crate) const GPU_TYPED_NATIVE_SENTINEL: u32 = 0x4750_5544;
-pub(crate) const GPU_COMPACT_NATIVE_SENTINEL: u32 = 0x4930_3530;
+pub(crate) const GPU_COMPACT_NATIVE_SENTINEL: u32 = 0x4350_4143;
 pub(crate) const GPU_COMPACT_CYCLE_BITS: usize = 32;
 const GPU_COMPACT_TAIL_PADDING: usize = 31;
-
-fn compact_source_enabled_from(source_override: Option<&std::ffi::OsStr>) -> bool {
-    match source_override {
-        None => true,
-        Some(value) if value == std::ffi::OsStr::new("1") => true,
-        Some(value) if value == std::ffi::OsStr::new("0") => false,
-        Some(value) => panic!("CENO_I050_COMPACT_SOURCE must be 0 or 1, got {:?}", value),
-    }
-}
-
-pub fn i050_compact_source_enabled() -> bool {
-    let source_override = std::env::var_os("CENO_I050_COMPACT_SOURCE");
-    compact_source_enabled_from(source_override.as_deref())
-}
 
 /// Stable, pointer-only ABI for one preallocated typed-SoA family. Native AOT
 /// updates only `cursor` and the pointed-to field storage.
@@ -230,18 +216,13 @@ impl GpuTypedSoaArena {
         Self::new_with_range(kind, rows, 0)
     }
 
-    pub(crate) fn new_with_range(kind: InsnKind, rows: usize, range_start: u32) -> Option<Self> {
-        Self::new_with_mode(kind, rows, range_start, i050_compact_source_enabled())
+    /// Field-major reference storage retained for equality tests.
+    #[doc(hidden)]
+    pub fn new_field_soa_oracle(kind: InsnKind, rows: usize) -> Option<Self> {
+        Self::new_with_mode(kind, rows, 0, false)
     }
 
-    /// Internal compact-first replay constructor. Unlike the retained I050
-    /// environment switch, layered L7 selects the byte representation as part
-    /// of its cache identity and must never allocate the field-SoA oracle.
-    pub(crate) fn new_compact_with_range(
-        kind: InsnKind,
-        rows: usize,
-        range_start: u32,
-    ) -> Option<Self> {
+    pub(crate) fn new_with_range(kind: InsnKind, rows: usize, range_start: u32) -> Option<Self> {
         Self::new_with_mode(kind, rows, range_start, true)
     }
 
@@ -655,7 +636,7 @@ fn typed_words(layout: GpuTypedLayout, ordinal: u32, record: &StepRecord) -> Vec
 }
 
 #[cfg(test)]
-mod i017_tests {
+mod tests {
     use super::*;
     use crate::{ByteAddr, Change, ReadOp, WordAddr, WriteOp, encode_rv32};
 
@@ -751,7 +732,7 @@ mod i017_tests {
     }
 
     #[test]
-    fn i017_layout_width_arity_and_kind_coverage_are_exact() {
+    fn layout_width_arity_and_kind_coverage_are_exact() {
         let widths = [
             (GpuTypedLayout::R, 11, 44),
             (GpuTypedLayout::I, 9, 36),
@@ -800,7 +781,7 @@ mod i017_tests {
     }
 
     #[test]
-    fn i050_compact_source_round_trips_every_layout_and_exact_width() {
+    fn compact_source_round_trips_every_layout_and_exact_width() {
         let cases = [
             (GpuTypedLayout::R, InsnKind::ADD),
             (GpuTypedLayout::I, InsnKind::ADDI),
@@ -883,7 +864,7 @@ mod i017_tests {
     }
 
     #[test]
-    fn i050_compact_source_preserves_absolute_cycles_past_27_bits() {
+    fn compact_source_preserves_absolute_cycles_past_27_bits() {
         let shard_offset = 1u64 << 27;
         let ordinal = 10;
         let previous_cycle = shard_offset + 7;
@@ -915,7 +896,7 @@ mod i017_tests {
     }
 
     #[test]
-    fn i050_compact_source_rejects_out_of_range_inputs() {
+    fn compact_source_rejects_out_of_range_inputs() {
         let step = record(GpuTypedLayout::R);
         let mut arena = GpuTypedSoaArena::new_with_mode(InsnKind::ADD, 1, 10, true).unwrap();
         assert_eq!(
@@ -930,7 +911,7 @@ mod i017_tests {
     }
 
     #[test]
-    fn i017_field_major_packing_matches_cpu_reference_for_every_layout() {
+    fn field_major_packing_matches_cpu_reference_for_every_layout() {
         let cases = [
             (GpuTypedLayout::R, InsnKind::ADD),
             (GpuTypedLayout::I, InsnKind::ADDI),
@@ -946,7 +927,7 @@ mod i017_tests {
             let step = record(layout);
             let expected = typed_words(layout, 19, &step);
             assert_eq!(expected.len(), layout.words());
-            let mut arena = GpuTypedSoaArena::new(kind, 1).unwrap();
+            let mut arena = GpuTypedSoaArena::new_field_soa_oracle(kind, 1).unwrap();
             arena.push_step(19, &step).unwrap();
             let packed: Vec<_> = arena.fields().iter().map(|field| field[0]).collect();
             assert_eq!(packed, expected, "layout {layout:?}");
@@ -969,21 +950,14 @@ mod i017_tests {
     }
 
     #[test]
-    fn i017_exact_cursor_capacity_pointer_stability_and_determinism() {
+    fn exact_cursor_capacity_pointer_stability_and_determinism() {
         let step = record(GpuTypedLayout::R);
         let mut first = GpuTypedSoaArena::new(InsnKind::ADD, 2).unwrap();
-        let pointers: Vec<_> = first.fields().iter().map(|field| field.as_ptr()).collect();
+        let pointer = first.compact.as_ref().unwrap().as_ptr();
         first.push_step(3, &step).unwrap();
         first.push_step(4, &step).unwrap();
         assert_eq!(first.len(), first.capacity());
-        assert_eq!(
-            pointers,
-            first
-                .fields()
-                .iter()
-                .map(|field| field.as_ptr())
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(pointer, first.compact.as_ref().unwrap().as_ptr());
         assert_eq!(
             first.push_step(5, &step),
             Err("typed replay cursor exceeded exact capacity")
@@ -992,13 +966,13 @@ mod i017_tests {
         let mut second = GpuTypedSoaArena::new(InsnKind::ADD, 2).unwrap();
         second.push_step(3, &step).unwrap();
         second.push_step(4, &step).unwrap();
-        assert_eq!(first.fields(), second.fields());
+        assert_eq!(first.payload_bytes(), second.payload_bytes());
         assert!(GpuTypedSoaArena::new(InsnKind::INVALID, 1).is_none());
         assert!(GpuTypedSoaArena::new(InsnKind::ECALL, 1).is_none());
     }
 
     #[test]
-    fn i017_descriptor_totals_and_conservative_address_bounds_fail_closed() {
+    fn descriptor_totals_and_conservative_address_bounds_fail_closed() {
         let mut descriptor = GpuReplayRangeDescriptor {
             shard_id: 0,
             sequence: 0,
@@ -1029,20 +1003,5 @@ mod i017_tests {
             Some(GpuTypedLayout::R.compact_bytes() + GpuTypedLayout::Jal.compact_bytes())
         );
         assert_eq!(descriptor.fused_work_items(), Some(2));
-    }
-
-    #[test]
-    fn i061_l8_packed_source_is_default_with_explicit_soa_oracle_override() {
-        assert!(compact_source_enabled_from(None));
-        assert!(compact_source_enabled_from(Some(std::ffi::OsStr::new("1"))));
-        assert!(!compact_source_enabled_from(Some(std::ffi::OsStr::new(
-            "0"
-        ))));
-    }
-
-    #[test]
-    #[should_panic(expected = "CENO_I050_COMPACT_SOURCE must be 0 or 1")]
-    fn i061_l8_invalid_compact_source_override_fails_closed() {
-        compact_source_enabled_from(Some(std::ffi::OsStr::new("invalid")));
     }
 }

@@ -6,10 +6,6 @@ use witness::{DeviceMatrixLayout, RowMajorMatrix};
 
 use crate::error::ZKVMError;
 
-pub(crate) fn enabled() -> bool {
-    std::env::var_os("CENO_I055_GPU_SECP_RELATIONS").is_none_or(|v| v != "0")
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn assign_relations<E: ExtensionField>(
     phase1_rows: &[E::BaseField],
@@ -25,21 +21,21 @@ pub(crate) fn assign_relations<E: ExtensionField>(
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>() {
         return Err(ZKVMError::InvalidWitness(
-            "I055 direct secp256k1 relations require BabyBear".into(),
+            "direct GPU secp256k1 relations require BabyBear".into(),
         ));
     }
     let hal = gkr_iop::gpu::get_cuda_hal().map_err(|e| {
-        ZKVMError::InvalidWitness(format!("I055 direct secp256k1 CUDA unavailable: {e}").into())
+        ZKVMError::InvalidWitness(format!("direct GPU secp256k1 CUDA unavailable: {e}").into())
     })?;
     if phase1_rows.len() != valid_rows * num_witin {
         return Err(ZKVMError::InvalidWitness(
-            "I055 invalid canonical phase-1 scratch shape".into(),
+            "invalid canonical direct GPU secp256k1 scratch shape".into(),
         ));
     }
     let arithmetic_end = first_wit_col + num_arithmetic_cols;
     if arithmetic_end > num_witin {
         return Err(ZKVMError::InvalidWitness(
-            "I055 arithmetic range exceeds witness width".into(),
+            "direct GPU secp256k1 arithmetic range exceeds witness width".into(),
         ));
     }
     let non_arithmetic_cols = num_witin - num_arithmetic_cols;
@@ -81,14 +77,20 @@ pub(crate) fn assign_relations<E: ExtensionField>(
             num_arithmetic_cols,
         )
     })
-    .map_err(|e| ZKVMError::InvalidWitness(format!("I055 secp256k1 GPU failed: {e}").into()))?;
+    .map_err(|e| {
+        ZKVMError::InvalidWitness(format!("secp256k1 GPU relation expansion failed: {e}").into())
+    })?;
 
     tracing::info_span!("secp256k1_gpu_completion_wait")
         .in_scope(|| result.completion.wait())
-        .map_err(|e| ZKVMError::InvalidWitness(format!("I055 completion failed: {e}").into()))?;
+        .map_err(|e| {
+            ZKVMError::InvalidWitness(format!("secp256k1 GPU completion failed: {e}").into())
+        })?;
     let counts = tracing::info_span!("secp256k1_gpu_lookup_d2h")
         .in_scope(|| result.double_u8.to_vec())
-        .map_err(|e| ZKVMError::InvalidWitness(format!("I055 lookup D2H failed: {e}").into()))?;
+        .map_err(|e| {
+            ZKVMError::InvalidWitness(format!("secp256k1 GPU lookup copy failed: {e}").into())
+        })?;
     for (key, count) in counts
         .into_iter()
         .enumerate()
