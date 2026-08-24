@@ -414,8 +414,57 @@ pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
         compact
     };
 
-    let mut rmm = RowMajorMatrix::<E::BaseField>::new(num_rows, num_cols, padding);
     // Keep the original col-major witness buffer as the source of truth for GPU commit.
-    rmm.set_device_backing(device_buffer, DeviceMatrixLayout::ColMajor);
-    Ok(rmm)
+    // The GPU path must not allocate and zero a duplicate padded host matrix merely to
+    // carry shape metadata for this already device-owned result.
+    Ok(RowMajorMatrix::<E::BaseField>::new_by_device_backing(
+        num_rows,
+        num_cols,
+        padding,
+        device_buffer,
+        DeviceMatrixLayout::ColMajor,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ceno_gpu::{Buffer, CudaHal, common::BufferImpl};
+    use ff_ext::BabyBearExt4;
+    use p3::{babybear::BabyBear, field::PrimeCharacteristicRing};
+
+    #[test]
+    fn device_owned_witness_preserves_compact_shape_layout_and_storage() {
+        let hal = gkr_iop::gpu::get_cuda_hal().unwrap();
+        let values = (1..=6).map(BabyBear::from_u64).collect::<Vec<_>>();
+        let device = hal.alloc_elems_from_host(&values, None).unwrap();
+        let matrix = gpu_witness_to_rmm::<BabyBearExt4>(
+            ceno_gpu::common::witgen::types::GpuWitnessResult {
+                device_buffer: device,
+                num_rows: 3,
+                num_cols: 2,
+                layout: DeviceMatrixLayout::ColMajor,
+            },
+            3,
+            2,
+            InstancePaddingStrategy::Default,
+        )
+        .unwrap();
+
+        assert_eq!(matrix.num_instances(), 3);
+        assert_eq!(matrix.height(), 4);
+        assert_eq!(matrix.width(), 2);
+        assert_eq!(
+            matrix.device_backing_layout(),
+            Some(DeviceMatrixLayout::ColMajor)
+        );
+        assert_eq!(
+            matrix
+                .device_backing_ref::<BufferImpl<'static, BabyBear>>()
+                .unwrap()
+                .to_vec()
+                .unwrap(),
+            values
+        );
+    }
 }

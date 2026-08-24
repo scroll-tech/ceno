@@ -2605,69 +2605,92 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 {
                     let preview = shard_ctx_builder.preview_current_shard();
                     let current_shard_id = shard_ctx_builder.cur_shard_id as u32;
-                    let descriptors = emul_result
-                        .replay_range_descriptors
-                        .iter()
-                        .filter(|descriptor| descriptor.shard_id == current_shard_id)
-                        .collect::<Vec<_>>();
-                    let mut family_totals = [0usize; InsnKind::COUNT];
-                    let mut reserved_addresses = ceno_emul::CONTINUATION_ADDRESS_SEND_BOUND;
-                    for descriptor in &descriptors {
-                        for (total, count) in family_totals
-                            .iter_mut()
-                            .zip(descriptor.family_counts)
-                {
-                            *total = total.checked_add(count).expect("family total overflow");
-                        }
-                        reserved_addresses = reserved_addresses
-                            .checked_add(
-                                descriptor
-                                    .conservative_address_reservation()
-                                    .expect("unsupported or overflowing address reservation"),
+                    let (descriptors, family_totals, reserved_addresses, compact_source, stage_capacity, work_capacity) =
+                        info_span!("gpu_provisional_descriptor_preparation", shard_id = current_shard_id)
+                            .in_scope(|| {
+                                let descriptors = emul_result
+                                    .replay_range_descriptors
+                                    .iter()
+                                    .filter(|descriptor| descriptor.shard_id == current_shard_id)
+                                    .collect::<Vec<_>>();
+                                let mut family_totals = [0usize; InsnKind::COUNT];
+                                let mut reserved_addresses =
+                                    ceno_emul::CONTINUATION_ADDRESS_SEND_BOUND;
+                                for descriptor in &descriptors {
+                                    for (total, count) in family_totals
+                                        .iter_mut()
+                                        .zip(descriptor.family_counts)
+                                    {
+                                        *total = total
+                                            .checked_add(count)
+                                            .expect("family total overflow");
+                                    }
+                                    reserved_addresses = reserved_addresses
+                                        .checked_add(
+                                            descriptor
+                                                .conservative_address_reservation()
+                                                .expect("unsupported or overflowing address reservation"),
+                                        )
+                                        .expect("shard address reservation overflow");
+                                }
+                                let compact_source = ceno_emul::i050_compact_source_enabled();
+                                let stage_capacity = descriptors
+                                    .iter()
+                                    .map(|descriptor| {
+                                        descriptor
+                                            .fused_payload_bytes(compact_source)
+                                            .expect("preflight fused payload capacity overflow")
+                                    })
+                                    .max()
+                                    .expect("shard 0 has no replay descriptors");
+                                let work_capacity = descriptors
+                                    .iter()
+                                    .map(|descriptor| {
+                                        descriptor
+                                            .fused_work_items()
+                                            .expect("preflight fused work capacity overflow")
+                                    })
+                                    .max()
+                                    .expect("shard 0 has no replay descriptors");
+                                (
+                                    descriptors,
+                                    family_totals,
+                                    reserved_addresses,
+                                    compact_source,
+                                    stage_capacity,
+                                    work_capacity,
+                                )
+                            });
+                    info_span!("gpu_provisional_session_setup", shard_id = current_shard_id)
+                        .in_scope(|| {
+                            crate::instructions::gpu::dispatch::begin_provisional_fused_session(
+                                family_totals,
+                                reserved_addresses,
+                                &descriptors
+                                    .iter()
+                                    .map(|descriptor| (*descriptor).clone())
+                                    .collect::<Vec<_>>(),
+                                compact_source,
+                                stage_capacity,
+                                work_capacity,
+                                (program.base_address, program.instructions.len()),
+                                &preview,
                             )
-                            .expect("shard address reservation overflow");
-                    }
-                    let compact_source = ceno_emul::i050_compact_source_enabled();
-                    let stage_capacity = descriptors
-                        .iter()
-                        .map(|descriptor| {
-                            descriptor
-                                .fused_payload_bytes(compact_source)
-                                .expect("preflight fused payload capacity overflow")
                         })
-                        .max()
-                        .expect("shard 0 has no replay descriptors");
-                    let work_capacity = descriptors
-                        .iter()
-                        .map(|descriptor| {
-                            descriptor
-                                .fused_work_items()
-                                .expect("preflight fused work capacity overflow")
-                        })
-                        .max()
-                        .expect("shard 0 has no replay descriptors");
-                    crate::instructions::gpu::dispatch::begin_provisional_fused_session(
-                        family_totals,
-                        reserved_addresses,
-                        &descriptors
-                            .iter()
-                            .map(|descriptor| (*descriptor).clone())
-                            .collect::<Vec<_>>(),
-                        compact_source,
-                        stage_capacity,
-                        work_capacity,
-                        (program.base_address, program.instructions.len()),
-                        &preview,
-                    )
-                    .unwrap();
-                    system_config
-                        .config
-                        .prepare_provisional_fused_assignments(
-                            &system_config.zkvm_cs,
-                            &family_totals,
-                        )
                         .unwrap();
-                    crate::instructions::gpu::dispatch::seal_provisional_fused_session().unwrap();
+                    info_span!("gpu_provisional_output_preparation", shard_id = current_shard_id)
+                        .in_scope(|| {
+                            system_config.config.prepare_provisional_fused_assignments(
+                                &system_config.zkvm_cs,
+                                &family_totals,
+                            )
+                        })
+                        .unwrap();
+                    info_span!("gpu_provisional_descriptor_seal", shard_id = current_shard_id)
+                        .in_scope(|| {
+                            crate::instructions::gpu::dispatch::seal_provisional_fused_session()
+                        })
+                        .unwrap();
                 }
                 let mut compact_shard = info_span!("position_compact_shard")
                     .in_scope(|| {
@@ -2852,26 +2875,37 @@ pub fn generate_witness<'a, E: ExtensionField>(
             #[cfg(not(feature = "gpu"))]
             let witgen_mem_baseline: Option<u64> = None;
 
-            info_span!("assign_opcode_circuits").in_scope(|| {
-                system_config
-                    .config
-                    .assign_opcode_circuit(
-                        &system_config.zkvm_cs,
-                        &mut shard_ctx,
-                        &mut instrunction_dispatch_ctx,
-                        shard_steps,
-                        &mut zkvm_witness,
-                    )
-            }).unwrap();
+            info_span!("assign_opcode_circuits", shard_id = shard_ctx.shard_id)
+                .in_scope(|| {
+                    #[cfg(feature = "gpu")]
+                    let _nvtx = nvtx::range!(
+                        "ceno.witness.assign-opcodes shard={}",
+                        shard_ctx.shard_id
+                    );
+                    info_span!("opcode_dispatch_and_result_assembly")
+                        .in_scope(|| {
+                            system_config.config.assign_opcode_circuit(
+                                &system_config.zkvm_cs,
+                                &mut shard_ctx,
+                                &mut instrunction_dispatch_ctx,
+                                shard_steps,
+                                &mut zkvm_witness,
+                            )
+                        })
+                })
+                .unwrap();
 
             #[cfg(feature = "gpu")]
             if current_compact_shard.is_some() {
-                let recycled =
-                    crate::instructions::gpu::dispatch::clear_compact_replay_arenas();
-                compact_iter
-                    .as_mut()
-                    .expect("compact owner recovery missing source")
-                    .recycle_ranges(recycled);
+                info_span!("gpu_provisional_owner_recycling", shard_id = shard_ctx.shard_id)
+                    .in_scope(|| {
+                        let recycled =
+                            crate::instructions::gpu::dispatch::clear_compact_replay_arenas();
+                        compact_iter
+                            .as_mut()
+                            .expect("compact owner recovery missing source")
+                            .recycle_ranges(recycled);
+                    });
             }
 
             // Flush shared EC/addr buffers from GPU after all opcode circuits are done.
@@ -2910,10 +2944,14 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // does not consume `combined_lk_mlt`, so running it pre-finalize
             // is safe — `assign_table_circuit` tolerates a not-yet-finalized
             // multiplicity by passing an empty slice.
-            info_span!("assign_continuation").in_scope(|| {
-                system_config
-                    .mmu_config
-                    .assign_continuation_circuit(
+            info_span!("assign_continuation", shard_id = shard_ctx.shard_id)
+                .in_scope(|| {
+                    #[cfg(feature = "gpu")]
+                    let _nvtx = nvtx::range!(
+                        "ceno.witness.assign-continuation shard={}",
+                        shard_ctx.shard_id
+                    );
+                    system_config.mmu_config.assign_continuation_circuit(
                         &system_config.zkvm_cs,
                         &shard_ctx,
                         &mut zkvm_witness,
@@ -2924,7 +2962,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &emul_result.final_mem_state.stack,
                         &emul_result.final_mem_state.heap,
                     )
-            }).unwrap();
+                })
+                .unwrap();
 
             // Assign the dynamic-init tables (heap + hints) before
             // `finalize_lk_multiplicities`: `HintsInitCircuit` range-checks its

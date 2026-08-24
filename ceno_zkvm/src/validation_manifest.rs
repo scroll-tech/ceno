@@ -711,12 +711,15 @@ fn encode_matrix<F: SmallField + 'static, W: DigestWrite>(
             }
             Ok(())
         }
-        Some(DeviceMatrixLayout::RowMajor) => Err(ManifestError(format!(
-            "unsupported row-major validation matrix for chip {chip_name:?}, input {input_name:?}, role {role}: actual_rows={actual_rows}, occupied_rows={}, height={}, width={}, layout=RowMajor",
-            matrix.occupied_physical_rows(),
-            matrix.height(),
-            matrix.width(),
-        ))),
+        Some(DeviceMatrixLayout::RowMajor) => encode_row_major_device_matrix(
+            out,
+            chip_name,
+            input_name,
+            role,
+            actual_rows,
+            matrix,
+            columns,
+        ),
         Some(DeviceMatrixLayout::ColMajor) => encode_col_major_device_matrix(
             out,
             chip_name,
@@ -727,6 +730,86 @@ fn encode_matrix<F: SmallField + 'static, W: DigestWrite>(
             columns,
         ),
     }
+}
+
+#[cfg(feature = "gpu")]
+fn encode_row_major_device_matrix<F: SmallField + 'static, W: DigestWrite>(
+    out: &mut W,
+    chip_name: &str,
+    input_name: &str,
+    role: usize,
+    actual_rows: usize,
+    matrix: &RowMajorMatrix<F>,
+    mut columns: Option<&mut Vec<MatrixColumnDetail>>,
+) -> Result<(), ManifestError> {
+    use ceno_gpu::{Buffer, common::buffer::BufferImpl};
+    use p3::babybear::BabyBear;
+    use std::any::TypeId;
+
+    if TypeId::of::<F>() != TypeId::of::<BabyBear>() {
+        return Err(ManifestError(
+            "GPU validation manifests only support BabyBear witness matrices".into(),
+        ));
+    }
+    let device = matrix
+        .device_backing_ref::<BufferImpl<'static, BabyBear>>()
+        .ok_or_else(|| ManifestError("row-major device backing type mismatch".into()))?;
+    let present_rows = resolve_col_major_present_rows(
+        device.len(),
+        actual_rows,
+        matrix.occupied_physical_rows(),
+        matrix.height(),
+        matrix.width(),
+    )
+    .map_err(|reason| {
+        ManifestError(format!(
+            "invalid row-major validation matrix for chip {chip_name:?}, input {input_name:?}, role {role}: {reason}; device_len={}, actual_rows={actual_rows}, occupied_rows={}, height={}, width={}, layout=RowMajor",
+            device.len(),
+            matrix.occupied_physical_rows(),
+            matrix.height(),
+            matrix.width(),
+        ))
+    })?;
+    let values = device
+        .to_vec()
+        .map_err(|err| ManifestError(format!("validation matrix D2H failed: {err}")))?;
+    for col in 0..matrix.width() {
+        if let Some(columns) = columns.as_deref_mut() {
+            columns.push(build_matrix_column_detail(
+                col,
+                actual_rows,
+                matrix.height(),
+                |row| {
+                    (row < present_rows)
+                        .then(|| values[row * matrix.width() + col].to_canonical_u64())
+                        .unwrap_or(0)
+                },
+            )?);
+        }
+        for row in 0..matrix.height() {
+            out.u64(
+                (row < present_rows)
+                    .then(|| values[row * matrix.width() + col].to_canonical_u64())
+                    .unwrap_or(0),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "gpu"))]
+fn encode_row_major_device_matrix<F: SmallField + 'static, W: DigestWrite>(
+    _out: &mut W,
+    _chip_name: &str,
+    _input_name: &str,
+    _role: usize,
+    _actual_rows: usize,
+    _matrix: &RowMajorMatrix<F>,
+    _columns: Option<&mut Vec<MatrixColumnDetail>>,
+) -> Result<(), ManifestError> {
+    Err(ManifestError(
+        "row-major device validation requires the gpu feature".into(),
+    ))
 }
 
 fn build_matrix_column_detail(
@@ -1047,6 +1130,37 @@ mod tests {
             Ok(())
         });
         assert_eq!(actual, expected);
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn validation_manifest_row_major_device_matches_host_canonical_encoding() {
+        use ceno_gpu::CudaHal;
+        use gkr_iop::gpu::get_cuda_hal;
+        use witness::DeviceMatrixLayout;
+
+        let values = vec![
+            F::from_u64(1),
+            F::from_u64(2),
+            F::from_u64(3),
+            F::from_u64(4),
+        ];
+        let host =
+            RowMajorMatrix::<F>::new_by_values(values.clone(), 2, InstancePaddingStrategy::Default);
+        let cuda_hal = get_cuda_hal().unwrap();
+        let device = cuda_hal.alloc_elems_from_host(&values, None).unwrap();
+        let device_row_major = RowMajorMatrix::<F>::new_by_device_backing(
+            2,
+            2,
+            InstancePaddingStrategy::Default,
+            device,
+            DeviceMatrixLayout::RowMajor,
+        );
+
+        let host_digest = digest(|out| encode_matrix(out, "test", "test", 0, 2, &host, None));
+        let device_digest =
+            digest(|out| encode_matrix(out, "test", "test", 0, 2, &device_row_major, None));
+        assert_eq!(device_digest, host_digest);
     }
 
     #[test]

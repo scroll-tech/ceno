@@ -28,7 +28,7 @@ use std::{
 };
 use strum::{EnumCount, IntoEnumIterator};
 use tracing::info_span;
-use witness::RowMajorMatrix;
+use witness::{DeviceMatrixLayout, RowMajorMatrix};
 
 use super::{
     config::{is_gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu},
@@ -1320,6 +1320,7 @@ pub(crate) fn prepare_fused_assignment<
             device_buffer: output,
             num_rows: expected_rows,
             num_cols: num_witin,
+            layout: DeviceMatrixLayout::ColMajor,
         };
         let mut main =
             gpu_witness_to_rmm::<E>(witness, expected_rows, num_witin, I::padding_strategy())?;

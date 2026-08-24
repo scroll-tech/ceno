@@ -432,13 +432,13 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
             InstancePaddingStrategy::Default,
         )
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_device_backing(
+            steps.len(),
             num_structural_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(gpu_structural.device_buffer, DeviceMatrixLayout::ColMajor);
-        rmm
+            gpu_structural.device_buffer,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     // 6. Main witness: keep device-resident only when cache policy keeps device backing.
@@ -489,13 +489,13 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
             ))
         })?
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_device_backing(
+            steps.len(),
             num_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(witness_buf, DeviceMatrixLayout::ColMajor);
-        rmm
+            witness_buf,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     tracing::info!(
@@ -645,13 +645,13 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
             InstancePaddingStrategy::Default,
         )
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_device_backing(
+            num_records,
             num_structural_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(gpu_structural.device_buffer, DeviceMatrixLayout::ColMajor);
-        rmm
+            gpu_structural.device_buffer,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     // Witness: keep device-resident only when cache policy keeps device backing.
@@ -702,13 +702,13 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
             ))
         })?
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_device_backing(
+            num_records,
             num_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(witness_buf, DeviceMatrixLayout::ColMajor);
-        rmm
+            witness_buf,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     tracing::info!(
@@ -881,13 +881,14 @@ pub(crate) fn try_gpu_assign_shard_ram_ec_tree_from_device<E: ExtensionField>(
             InstancePaddingStrategy::Default,
         )
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_rotation_device_backing(
+            num_records,
+            1,
             num_structural_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(gpu_structural.device_buffer, DeviceMatrixLayout::ColMajor);
-        rmm
+            gpu_structural.device_buffer,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
@@ -938,13 +939,14 @@ pub(crate) fn try_gpu_assign_shard_ram_ec_tree_from_device<E: ExtensionField>(
             ))
         })?
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_rotation_device_backing(
+            num_records,
+            1,
             num_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(gpu_witness.device_buffer, DeviceMatrixLayout::ColMajor);
-        rmm
+            gpu_witness.device_buffer,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     Ok(Some([raw_witin, raw_structural_witin]))
@@ -1294,8 +1296,8 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     // 6. Exactly one deterministic finalization feeds both consumers.
     let (partitioned_buf, num_writes, total_records, finalized_segments) =
         info_span!("gpu_merge_finalize").in_scope(|| {
-            if std::env::var_os("CENO_GPU_LEGACY_RECORD_FINALIZER").is_some() {
-                hal.witgen.merge_and_finalize_records(
+            if std::env::var_os("CENO_GPU_HOST_RECORD_FINALIZER").is_some() {
+                hal.witgen.merge_and_finalize_records_host_sorted(
                     &shared.ec_buf,
                     ec_count,
                     &cont_ec_buf,
@@ -1304,7 +1306,7 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
                     None,
                 )
             } else {
-                hal.witgen.merge_and_finalize_records_host_sorted(
+                hal.witgen.merge_and_finalize_records(
                     &shared.ec_buf,
                     ec_count,
                     &cont_ec_buf,
