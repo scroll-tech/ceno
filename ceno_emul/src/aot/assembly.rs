@@ -3088,6 +3088,8 @@ pub(super) fn emit_preflight_direct_block_plan_exit(
         histogram[instruction_at(program, pc)?.kind as usize] += 1;
         pc += PC_STEP_SIZE as u32;
     }
+    let mut fallback_count = 0usize;
+    let mut unsupported_count = 0usize;
     for (kind, count) in histogram
         .into_iter()
         .enumerate()
@@ -3100,18 +3102,24 @@ pub(super) fn emit_preflight_direct_block_plan_exit(
                 kind * size_of::<usize>()
             )?;
         } else if InsnKind::iter().nth(kind).unwrap() == InsnKind::ECALL {
-            writeln!(
-                file,
-                "    movq {AOT_CTX_PREFLIGHT_REPLAY_FALLBACK_COUNT_OFFSET}(%r12), %r8"
-            )?;
-            writeln!(file, "    addq ${count}, (%r8)")?;
+            fallback_count += count;
         } else {
-            writeln!(
-                file,
-                "    movq {AOT_CTX_PREFLIGHT_REPLAY_UNSUPPORTED_COUNT_OFFSET}(%r12), %r8"
-            )?;
-            writeln!(file, "    addq ${count}, (%r8)")?;
+            unsupported_count += count;
         }
+    }
+    if fallback_count != 0 {
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_REPLAY_FALLBACK_COUNT_OFFSET}(%r12), %r8"
+        )?;
+        writeln!(file, "    addq ${fallback_count}, (%r8)")?;
+    }
+    if unsupported_count != 0 {
+        writeln!(
+            file,
+            "    movq {AOT_CTX_PREFLIGHT_REPLAY_UNSUPPORTED_COUNT_OFFSET}(%r12), %r8"
+        )?;
+        writeln!(file, "    addq ${unsupported_count}, (%r8)")?;
     }
     writeln!(file, "    movq %r11, (%rax)")?;
     writeln!(file, "    jmp {done_label}")?;
