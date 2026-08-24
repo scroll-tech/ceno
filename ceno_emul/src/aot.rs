@@ -37,7 +37,7 @@ use std::{
     thread::JoinHandle,
     time::{Duration, Instant},
 };
-use strum::EnumCount;
+use strum::{EnumCount, IntoEnumIterator};
 use tiny_keccak::{Hasher, Keccak};
 
 mod assembly;
