@@ -52,6 +52,7 @@ pub(crate) fn batch_multiplicative_inverse(values: &[BigUint], modulus: &BigUint
     outputs
 }
 
+#[cfg(feature = "gpu")]
 pub(crate) fn write_fixed_biguint(dst: &mut [u8], offset: usize, width: usize, value: &BigUint) {
     let bytes = value.to_bytes_le();
     assert!(

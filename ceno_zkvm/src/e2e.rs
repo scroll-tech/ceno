@@ -742,6 +742,7 @@ pub struct ShardContextBuilder {
     prev_shard_hint_range: Vec<Addr>,
     platform: Platform,
     shard_cycle_boundaries: Arc<Vec<Cycle>>,
+    #[allow(dead_code)]
     replay_shard_previews: Arc<Vec<ceno_emul::GpuShardPreview>>,
     max_cycle: Cycle,
 }
@@ -2334,6 +2335,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         })
                         .unwrap();
                 }
+                #[allow(unused_mut)]
                 let mut compact_shard = info_span!("position_compact_shard")
                     .in_scope(|| {
                         compact_iter.next_shard(stream_owned_ranges, |range| {

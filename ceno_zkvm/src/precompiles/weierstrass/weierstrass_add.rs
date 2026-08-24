@@ -63,6 +63,10 @@ use sumcheck::{
 use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
+#[cfg(feature = "gpu")]
+use crate::precompiles::weierstrass::{
+    compact_field_relation::compact_relation_quotient, write_fixed_biguint,
+};
 use crate::{
     chip_handler::MemoryExpr,
     e2e::ShardContext,
@@ -74,8 +78,7 @@ use crate::{
         utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
         weierstrass::{
             EllipticCurveAddInstance, Secp256k1AffineResult, batch_multiplicative_inverse,
-            compact_field_relation::{CompactFieldRelationCols, compact_relation_quotient},
-            write_fixed_biguint,
+            compact_field_relation::CompactFieldRelationCols,
         },
     },
     scheme::utils::gkr_witness,

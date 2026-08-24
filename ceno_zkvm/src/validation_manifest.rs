@@ -861,6 +861,7 @@ fn build_matrix_column_detail(
     })
 }
 
+#[cfg(any(feature = "gpu", test))]
 fn resolve_col_major_present_rows(
     device_len: usize,
     actual_rows: usize,
