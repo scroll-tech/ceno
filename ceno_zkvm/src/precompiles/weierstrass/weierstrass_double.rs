@@ -137,6 +137,7 @@ pub struct WeierstrassDoubleAssignLayout<E: ExtensionField, EC: EllipticCurve> {
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
     WeierstrassDoubleAssignLayout<E, EC>
 {
+    #[cfg(feature = "gpu")]
     pub(crate) fn compact_secp256k1_gpu_records(
         instances: &[EllipticCurveDoubleInstance<EC::BaseField>],
         affine_results: &[Secp256k1AffineResult],

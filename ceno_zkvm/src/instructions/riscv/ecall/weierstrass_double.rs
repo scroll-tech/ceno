@@ -209,8 +209,11 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                 lk_multiplicity.into_finalize_result(),
             ));
         }
+        #[cfg(feature = "gpu")]
         let use_gpu_relations = EC::CURVE_TYPE == CurveType::Secp256k1
             && crate::instructions::gpu::chips::secp256k1::enabled();
+        #[cfg(not(feature = "gpu"))]
+        let use_gpu_relations = false;
         let nthreads = max_usable_threads();
         let num_instance_per_batch = step_indices.len().div_ceil(nthreads).max(1);
         // GPU relation expansion still needs the canonical instruction columns
@@ -365,30 +368,24 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             None
         };
 
-        let gpu_records = if use_gpu_relations {
+        #[cfg(feature = "gpu")]
+        let used_gpu_relations = if use_gpu_relations {
             let affine = affine_results.as_deref().ok_or_else(|| {
                 ZKVMError::InvalidWitness(
                     "I055 secp256k1 double requires compact affine results; legacy mode is unsupported"
                         .into(),
                 )
             })?;
-            Some(
-                tracing::info_span!(
-                    "secp256k1_gpu_pack",
-                    operation = "double",
-                    n = instances.len()
-                )
-                .in_scope(|| {
-                    WeierstrassDoubleAssignLayout::<E, EC>::compact_secp256k1_gpu_records(
-                        &instances, affine,
-                    )
-                }),
+            let records = tracing::info_span!(
+                "secp256k1_gpu_pack",
+                operation = "double",
+                n = instances.len()
             )
-        } else {
-            None
-        };
-
-        if let Some(records) = gpu_records.as_deref() {
+            .in_scope(|| {
+                WeierstrassDoubleAssignLayout::<E, EC>::compact_secp256k1_gpu_records(
+                    &instances, affine,
+                )
+            });
             let [gpu_witin, gpu_structural] = tracing::info_span!(
                 "secp256k1_expand_rows",
                 operation = "double",
@@ -397,7 +394,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             .in_scope(|| {
                 crate::instructions::gpu::chips::secp256k1::assign_relations::<E>(
                     gpu_phase1_rows.as_deref().expect("GPU phase-1 scratch"),
-                    records,
+                    &records,
                     true,
                     step_indices.len(),
                     num_witin,
@@ -409,34 +406,43 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             })?;
             raw_witin = Some(gpu_witin);
             raw_structural_witin = gpu_structural;
-        } else if let Some(affine_results) = affine_results.as_deref() {
-            tracing::info_span!(
-                "secp256k1_expand_rows",
-                operation = "double",
-                n = instances.len()
-            )
-            .in_scope(|| {
-                config.layout.phase1_witness_group_with_affine_results(
+            true
+        } else {
+            false
+        };
+        #[cfg(not(feature = "gpu"))]
+        let used_gpu_relations = false;
+
+        if !used_gpu_relations {
+            if let Some(affine_results) = affine_results.as_deref() {
+                tracing::info_span!(
+                    "secp256k1_expand_rows",
+                    operation = "double",
+                    n = instances.len()
+                )
+                .in_scope(|| {
+                    config.layout.phase1_witness_group_with_affine_results(
+                        WeierstrassDoubleAssignTrace { instances },
+                        affine_results,
+                        [
+                            raw_witin.as_mut().expect("CPU witness matrix"),
+                            &mut raw_structural_witin,
+                        ],
+                        &mut lk_multiplicity,
+                    );
+                });
+            } else {
+                config.layout.phase1_witness_group(
                     WeierstrassDoubleAssignTrace { instances },
-                    affine_results,
                     [
                         raw_witin.as_mut().expect("CPU witness matrix"),
                         &mut raw_structural_witin,
                     ],
                     &mut lk_multiplicity,
                 );
-            });
-        } else {
-            config.layout.phase1_witness_group(
-                WeierstrassDoubleAssignTrace { instances },
-                [
-                    raw_witin.as_mut().expect("CPU witness matrix"),
-                    &mut raw_structural_witin,
-                ],
-                &mut lk_multiplicity,
-            );
+            }
         }
-        if gpu_records.is_none() {
+        if !used_gpu_relations {
             raw_witin
                 .as_mut()
                 .expect("CPU witness matrix")
