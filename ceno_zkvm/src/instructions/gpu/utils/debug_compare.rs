@@ -791,7 +791,7 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
         return Ok(());
     }
 
-    // Guard against recursion: is_gpu_witgen_enabled() uses OnceLock so env var
+    // Guard against recursion: GPU witness generation is always enabled in GPU builds.
     // manipulation doesn't work. Use a thread-local flag instead.
     thread_local! {
         static IN_DEBUG_COMPARE: Cell<bool> = const { Cell::new(false) };
@@ -937,7 +937,7 @@ pub(crate) fn log_shard_ctx_diff(kind: &str, cpu: &ShardContext, gpu: &ShardCont
     // Skip write_records/read_records comparison when GPU witgen is enabled:
     // GPU path bypasses ShardContext records, using compact EC records instead.
     // Per-chip correctness is verified by debug_compare_shard_ec.
-    if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+    if crate::instructions::gpu::config::gpu_witgen_enabled() {
         return;
     }
 

@@ -622,7 +622,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         // Try the full GPU pipeline: keep data on device, minimal CPU roundtrips.
         // Only when GPU witgen is enabled (otherwise witgen must not touch GPU).
         #[cfg(feature = "gpu")]
-        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+        if crate::instructions::gpu::config::gpu_witgen_enabled() {
             let gpu_result = self.try_assign_shared_circuit_gpu(
                 cs,
                 shard_ctx,

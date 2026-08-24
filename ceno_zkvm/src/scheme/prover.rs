@@ -338,7 +338,7 @@ impl<
         mut transcript: impl ForkableTranscript<E> + 'static,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         #[cfg(feature = "gpu")]
-        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+        if crate::instructions::gpu::config::gpu_witgen_enabled() {
             crate::instructions::gpu::cache::release_all_shard_gpu_caches();
             crate::instructions::gpu::cache::assert_caches_released_before_prove();
         }
@@ -402,7 +402,7 @@ impl<
 
                 #[cfg(feature = "gpu")]
                 let use_gpu_witness_commit =
-                    crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                    crate::instructions::gpu::config::gpu_witgen_enabled()
                         && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
                             || is_babybear_jagged_pcs::<E, PCS>());
                 #[cfg(feature = "gpu")]
@@ -468,7 +468,7 @@ impl<
                 (0..name_and_instances.len())
                     .map(|i| {
                         #[cfg(feature = "gpu")]
-                        let has_trace = if crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                        let has_trace = if crate::instructions::gpu::config::gpu_witgen_enabled()
                             && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
                                 || is_babybear_jagged_pcs::<E, PCS>())
                         {
@@ -493,7 +493,7 @@ impl<
             let using_gpu_backend = std::any::TypeId::of::<PB>()
                 == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>();
             #[cfg(feature = "gpu")]
-            let use_gpu_witness_commit = crate::instructions::gpu::config::is_gpu_witgen_enabled()
+            let use_gpu_witness_commit = crate::instructions::gpu::config::gpu_witgen_enabled()
                 && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
                     || is_babybear_jagged_pcs::<E, PCS>())
                 && using_gpu_backend;

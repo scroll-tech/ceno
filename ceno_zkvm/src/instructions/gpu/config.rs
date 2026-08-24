@@ -2,7 +2,6 @@
 /// environment-variable disable switches.
 ///
 /// Path-control environment variables:
-/// - `CENO_GPU_ENABLE_WITGEN` — opt-in GPU witgen (default: CPU)
 /// - `CENO_GPU_DISABLE_WITGEN_KINDS=add,sub,keccak,...` — per-kind disable (comma-separated tags)
 /// - `CENO_GPU_DEBUG_COMPARE_WITGEN` — enable GPU vs CPU comparison for all chips (witness, LK, shard, EC)
 /// - `CENO_GPU_LEGACY_LK_ACCUM` — retain per-chip lookup allocation and D2H
@@ -62,36 +61,28 @@ pub(crate) fn is_kind_disabled(kind: GpuWitgenKind) -> bool {
     })
 }
 
-/// Set `CENO_GPU_ENABLE_WITGEN=1` to opt in; default disabled.
-pub(crate) fn is_gpu_witgen_enabled() -> bool {
-    use std::sync::OnceLock;
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        let val = std::env::var("CENO_GPU_ENABLE_WITGEN").ok();
-        let enabled = matches!(val.as_deref(), Some("1"));
-        enabled
-    })
+/// GPU builds always use GPU witness generation.
+pub(crate) const fn gpu_witgen_enabled() -> bool {
+    true
 }
 
 /// Whether initial witness assignment should materialize a GPU-backed trace RMM.
 ///
 /// This is independent from the later retention policy:
-/// - with GPU witgen off, witness is materialized in CPU form as before
-/// - with GPU witgen on, witness is first produced as device-backed so commit
+/// - witness is first produced as device-backed so commit
 ///   can consume the col-major GPU trace directly without a D2H/H2D round-trip
 pub(crate) fn should_materialize_witness_on_gpu() -> bool {
-    is_gpu_witgen_enabled()
+    gpu_witgen_enabled()
 }
 
 /// Whether replayable witness device backing should remain resident after commit.
 ///
 /// Policy:
-/// - `GPU_WITGEN=0`: no special retention
-/// - `GPU_WITGEN=1` and `CACHE_LEVEL > 0`: keep device backing resident
-/// - `GPU_WITGEN=1` and `CACHE_LEVEL = 0`: clear after commit and regenerate on
+/// - `CACHE_LEVEL > 0`: keep device backing resident
+/// - `CACHE_LEVEL = 0`: clear after commit and regenerate on
 ///   demand from shard-resident raw data during chip proof / PCS open
 pub(crate) fn should_retain_witness_device_backing_after_commit() -> bool {
-    is_gpu_witgen_enabled() && !matches!(get_gpu_cache_level(), CacheLevel::None)
+    gpu_witgen_enabled() && !matches!(get_gpu_cache_level(), CacheLevel::None)
 }
 
 /// Optional cap for Jagged q' reshape height.
@@ -126,7 +117,7 @@ pub(crate) fn is_shard_lk_accum_enabled() -> bool {
     use std::sync::OnceLock;
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
-        is_gpu_witgen_enabled()
+        gpu_witgen_enabled()
             && !is_debug_compare_enabled()
             && !matches!(
                 std::env::var("CENO_GPU_LEGACY_LK_ACCUM").ok().as_deref(),

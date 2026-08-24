@@ -2153,7 +2153,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
     let validate_compact_journal = std::env::var_os("CENO_COMPACT_JOURNAL_VALIDATE").is_some();
     #[cfg(feature = "gpu")]
     let use_compact_replay = compact_replay_selected(
-        crate::instructions::gpu::config::is_gpu_witgen_enabled(),
+        crate::instructions::gpu::config::gpu_witgen_enabled(),
         crate::instructions::gpu::config::is_debug_compare_enabled(),
         std::env::var_os("CENO_GPU_DISABLE_WITGEN_KINDS").is_some(),
         std::env::var_os("CENO_GPU_LEGACY_REPLAY").is_some(),
@@ -2495,7 +2495,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // frees from the previous shard's prove are counted.
             #[cfg(feature = "gpu")]
             let witgen_mem_baseline: Option<u64> = {
-                if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                if crate::instructions::gpu::config::gpu_witgen_enabled() {
                     match gkr_iop::gpu::get_cuda_hal() {
                         Ok(hal) => {
                             hal.inner
@@ -2833,7 +2833,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
             #[cfg(feature = "gpu")]
             if log_post_witgen_memory
-                && crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                && crate::instructions::gpu::config::gpu_witgen_enabled()
             {
                 crate::validation_manifest::log_post_witgen_vram(
                     shard_ctx.shard_id,
@@ -3975,106 +3975,10 @@ fn create_proofs_streaming<
         crate::instructions::gpu::utils::debug_compare::init_debug_compare_report();
     }
 
-    // Two pipeline modes:
-    //
-    // Default GPU backend (CENO_GPU_ENABLE_WITGEN=0):
-    //   Overlap: CPU witgen (thread A) and GPU prove (thread B) run in parallel.
-    //   CPU produces witness for shard N+1 while GPU proves shard N.
-    //   Uses a bounded(0) rendezvous channel for back-pressure.
-    //
-    // CENO_GPU_ENABLE_WITGEN=1 (GPU witgen) or CPU-only build:
-    //   Sequential: witgen → prove, one shard at a time.
-    //   When GPU witgen is on, GPU is shared between witgen and proving.
-
     let proofs = info_span!("[ceno] app_prove.inner").in_scope(|| {
-        #[cfg(feature = "gpu")]
-        {
-            // With GPU feature: check if GPU witgen is enabled to select pipeline mode.
-            if !crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                // Default: overlap CPU witgen with GPU proving.
-                use crossbeam::channel;
-                let (tx, rx) = channel::bounded(0);
-                return std::thread::scope(|s| {
-                    // CPU producer: generate witness shards
-                    s.spawn(move || {
-                        let wit_iter = generate_witness(
-                            &ctx.system_config,
-                            emulation_result,
-                            ctx.program.clone(),
-                            &ctx.platform,
-                            init_mem_state,
-                            target_shard_id,
-                        );
-
-                        let wit_iter: Box<dyn Iterator<Item = _>> =
-                            if let Some(target_shard_id) = target_shard_id {
-                                Box::new(wit_iter.skip(target_shard_id))
-                            } else {
-                                Box::new(wit_iter)
-                            };
-
-                        for proof_input in wit_iter {
-                            if tx.send(proof_input).is_err() {
-                                tracing::warn!(
-                                    "witness consumer dropped; stopping witness generation early"
-                                );
-                                break;
-                            }
-                        }
-                    });
-
-                    // GPU consumer: prove each shard as it arrives
-                    let mut proofs = Vec::new();
-                    while let Ok((zkvm_witness, shard_ctx, pi, _witgen_mem_baseline)) = rx.recv() {
-                        if is_mock_proving {
-                            MockProver::assert_satisfied_full(
-                                &shard_ctx,
-                                &ctx.system_config.zkvm_cs,
-                                ctx.zkvm_fixed_traces.clone(),
-                                &zkvm_witness,
-                                &pi,
-                                &ctx.program,
-                            );
-                            tracing::info!("Mock proving passed");
-                        }
-
-                        let transcript = Transcript::new(b"riscv");
-                        let start = std::time::Instant::now();
-                        let zkvm_proof =
-                            match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
-                                Ok(proof) => proof,
-                                Err(err) => {
-                                    eprintln!(
-                                        "create_proof failed for shard {}: {err:?}",
-                                        shard_ctx.shard_id
-                                    );
-                                    let _ = std::io::stderr().flush();
-                                    std::process::exit(1);
-                                }
-                            };
-                        tracing::debug!(
-                            "{}th shard proof created in {:?}",
-                            shard_ctx.shard_id,
-                            start.elapsed()
-                        );
-                        #[cfg(feature = "gpu")]
-                        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                            crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                        }
-                        #[cfg(feature = "gpu")]
-                        if let Some(baseline) = _witgen_mem_baseline {
-                            assert_witgen_mem_released(shard_ctx.shard_id, baseline);
-                        }
-                        proofs.push(zkvm_proof);
-                    }
-                    proofs
-                });
-            }
-            // Fall through: GPU witgen enabled → sequential path below.
-        }
-
-        // Sequential: witgen → prove, one shard at a time.
-        // Used by: GPU witgen mode (CENO_GPU_ENABLE_WITGEN=1) and CPU-only builds.
+        // Sequential: witgen → prove, one shard at a time. GPU witness
+        // generation and proving share the same device, so interleaving them
+        // would serialize on the GPU while adding thread and queue overhead.
         {
             let wit_iter = generate_witness(
                 &ctx.system_config,
@@ -4126,7 +4030,7 @@ fn create_proofs_streaming<
                         start.elapsed()
                     );
                     #[cfg(feature = "gpu")]
-                    if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                    if crate::instructions::gpu::config::gpu_witgen_enabled() {
                         crate::instructions::gpu::cache::release_all_shard_gpu_caches();
                     }
                     #[cfg(feature = "gpu")]

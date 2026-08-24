@@ -31,7 +31,7 @@ use tracing::info_span;
 use witness::{DeviceMatrixLayout, RowMajorMatrix};
 
 use super::{
-    config::{is_gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu},
+    config::{gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu},
     utils::debug_compare::{
         debug_compare_final_lk, debug_compare_shard_ec, debug_compare_shardram,
         debug_compare_witness,
@@ -1642,7 +1642,7 @@ pub(crate) fn try_gpu_assign_instances<
 ) -> Result<Option<(RMMCollections<E::BaseField>, Multiplicity<u64>)>, ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
 
-    if !is_gpu_witgen_enabled() || is_force_cpu_path() {
+    if !gpu_witgen_enabled() || is_force_cpu_path() {
         return Ok(None);
     }
 
@@ -3100,8 +3100,8 @@ mod tests {
         type MatrixSnapshot = (String, usize, usize, usize, Vec<BabyBear>);
 
         assert!(
-            super::super::config::is_gpu_witgen_enabled(),
-            "run with CENO_GPU_ENABLE_WITGEN=1"
+            super::super::config::gpu_witgen_enabled(),
+            "GPU witness generation is required"
         );
         assert!(!super::super::config::is_debug_compare_enabled());
 

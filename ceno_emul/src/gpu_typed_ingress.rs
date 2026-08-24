@@ -26,8 +26,11 @@ pub enum GpuTypedLayout {
     U,
 }
 
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) const GPU_TYPED_NATIVE_MAX_FIELDS: usize = 13;
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) const GPU_TYPED_NATIVE_SENTINEL: u32 = 0x4750_5544;
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) const GPU_COMPACT_NATIVE_SENTINEL: u32 = 0x4350_4143;
 pub(crate) const GPU_COMPACT_CYCLE_BITS: usize = 32;
 const GPU_COMPACT_TAIL_PADDING: usize = 31;
@@ -36,6 +39,7 @@ const GPU_COMPACT_TAIL_PADDING: usize = 31;
 /// updates only `cursor` and the pointed-to field storage.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) struct GpuTypedNativeKindState {
     pub fields: [*mut u32; GPU_TYPED_NATIVE_MAX_FIELDS],
     pub capacity: u32,
@@ -46,6 +50,7 @@ pub(crate) struct GpuTypedNativeKindState {
     pub pc_base: u32,
 }
 
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 impl Default for GpuTypedNativeKindState {
     fn default() -> Self {
         Self {
@@ -356,6 +361,7 @@ impl GpuTypedSoaArena {
         }
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub(crate) fn native_state(&mut self) -> GpuTypedNativeKindState {
         let mut state = GpuTypedNativeKindState {
             capacity: u32::try_from(self.capacity()).expect("typed replay capacity exceeds u32"),
@@ -380,6 +386,7 @@ impl GpuTypedSoaArena {
         state
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub(crate) fn sync_native_state(
         &mut self,
         state: &GpuTypedNativeKindState,

@@ -63,14 +63,15 @@ pub(crate) fn upload_shard_steps_cached(
     shard_id: usize,
 ) -> Result<(), ZKVMError> {
     let ptr = shard_steps.as_ptr() as usize;
-    let byte_len = shard_steps.len() * std::mem::size_of::<StepRecord>();
+    let byte_len = std::mem::size_of_val(shard_steps);
 
     SHARD_STEPS_DEVICE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if let Some(c) = cache.as_ref() {
-            if c.host_ptr == ptr && c.byte_len == byte_len {
-                return Ok(()); // cache hit
-            }
+        if let Some(c) = cache.as_ref()
+            && c.host_ptr == ptr
+            && c.byte_len == byte_len
+        {
+            return Ok(()); // cache hit
         }
         // Cache miss: upload
         let mb = byte_len as f64 / (1024.0 * 1024.0);
@@ -148,27 +149,6 @@ struct ShardMetadataCache {
 thread_local! {
     static SHARD_META_CACHE: RefCell<Option<ShardMetadataCache>> =
         const { RefCell::new(None) };
-
-    /// Test-only override: forces `flush_shared_ec_buffers` to D2H even when
-    /// GPU witgen is enabled (production consumes the buffers on-device instead).
-    static FORCE_FLUSH_D2H: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Test-only: force the D2H in `flush_shared_ec_buffers`.
-#[cfg(test)]
-pub(crate) fn set_force_flush_d2h(force: bool) {
-    FORCE_FLUSH_D2H.with(|f| f.set(force));
-}
-
-#[cfg(test)]
-fn is_force_flush_d2h() -> bool {
-    FORCE_FLUSH_D2H.with(|f| f.get())
-}
-
-#[cfg(not(test))]
-#[inline(always)]
-fn is_force_flush_d2h() -> bool {
-    false
 }
 
 // CPU mirror of GPU-side compact shard RAM records, populated only when
@@ -806,8 +786,7 @@ pub(crate) fn flush_shared_ec_buffers_with_validation(
     shard_ctx: &mut ShardContext,
     validation_enabled: bool,
 ) -> Result<(), ZKVMError> {
-    if crate::instructions::gpu::config::is_gpu_witgen_enabled()
-        && !is_force_flush_d2h()
+    if crate::instructions::gpu::config::gpu_witgen_enabled()
         && !crate::instructions::gpu::config::is_debug_compare_enabled()
         && !validation_enabled
     {

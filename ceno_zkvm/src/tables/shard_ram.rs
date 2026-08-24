@@ -621,16 +621,14 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         }
 
         #[cfg(feature = "gpu")]
-        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-            if let Some(result) = Self::try_gpu_assign_instances(
-                config,
-                num_witin,
-                num_structural_witin,
-                lk_multiplicity,
-                steps,
-            )? {
-                return Ok(result);
-            }
+        if let Some(result) = Self::try_gpu_assign_instances(
+            config,
+            num_witin,
+            num_structural_witin,
+            lk_multiplicity,
+            steps,
+        )? {
+            return Ok(result);
         }
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector

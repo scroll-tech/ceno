@@ -2477,26 +2477,25 @@ impl FullTracer {
             .mmio_min_max_access
             .as_mut()
             .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
+            && addr < *end_addr
         {
-            if addr < *end_addr {
-                if addr >= *max_addr {
-                    *max_addr = addr + WordAddr::from(WORD_SIZE as u32);
+            if addr >= *max_addr {
+                *max_addr = addr + WordAddr::from(WORD_SIZE as u32);
+            }
+            if addr < *min_addr {
+                *min_addr = addr;
+            }
+            if start_addr.baddr().0 == self.platform.heap.start {
+                let access_end = addr + WordAddr::from(WORD_SIZE as u32);
+                let access_end_baddr = access_end.baddr();
+                if access_end_baddr > self.max_heap_addr_access {
+                    self.max_heap_addr_access = access_end_baddr;
                 }
-                if addr < *min_addr {
-                    *min_addr = addr;
-                }
-                if start_addr.baddr().0 == self.platform.heap.start {
-                    let access_end = addr + WordAddr::from(WORD_SIZE as u32);
-                    let access_end_baddr = access_end.baddr();
-                    if access_end_baddr > self.max_heap_addr_access {
-                        self.max_heap_addr_access = access_end_baddr;
-                    }
-                } else if start_addr.baddr().0 == self.platform.hints.start {
-                    let access_end = addr + WordAddr::from(WORD_SIZE as u32);
-                    let access_end_baddr = access_end.baddr();
-                    if access_end_baddr > self.max_hint_addr_access {
-                        self.max_hint_addr_access = access_end_baddr;
-                    }
+            } else if start_addr.baddr().0 == self.platform.hints.start {
+                let access_end = addr + WordAddr::from(WORD_SIZE as u32);
+                let access_end_baddr = access_end.baddr();
+                if access_end_baddr > self.max_hint_addr_access {
+                    self.max_hint_addr_access = access_end_baddr;
                 }
             }
         }

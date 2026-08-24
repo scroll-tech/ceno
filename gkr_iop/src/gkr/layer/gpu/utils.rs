@@ -102,11 +102,8 @@ pub fn encode_common_term_plan(plan: &CommonFactoredTermPlan, total_mles: usize)
     }
 
     let num_groups = plan.groups.len();
-    let mut common_scalar_offsets = Vec::with_capacity(num_groups + 1);
+    let common_scalar_offsets = vec![0; num_groups + 1];
     let common_scalar_indices = Vec::new();
-    for _ in 0..=num_groups {
-        common_scalar_offsets.push(0);
-    }
 
     CommonTermPlan {
         term_offsets,

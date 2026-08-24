@@ -86,7 +86,7 @@ Within `generate_witness()` (e2e.rs), each shard executes:
 
 ```
 try_gpu_assign_instances():
-  1. is_gpu_witgen_enabled()?          → CPU fallback if not set
+  1. GPU feature enabled                → GPU witness generation
   2. is_force_cpu_path() thread-local? → CPU fallback (debug comparison)
   3. I::GPU_LK_SHARDRAM == false?      → CPU fallback
   4. is_kind_disabled(kind)?           → CPU fallback
@@ -125,23 +125,16 @@ Currently all non-Keccak kinds use **Path A**. Paths B-E are fallback/debug path
 ```
 create_proofs_streaming()
 │
-├─ Default GPU backend (CENO_GPU_ENABLE_WITGEN=0):
-│   Overlap pipeline:
-│     Thread A (CPU): witgen(shard 0) → witgen(shard 1) → witgen(shard 2) → ...
-│     Thread B (GPU): ................prove(shard 0) → prove(shard 1) → ...
-│     crossbeam::bounded(0) rendezvous channel for back-pressure
-│
-└─ CENO_GPU_ENABLE_WITGEN=1 (GPU witgen) or CPU-only build:
+└─ GPU feature enabled:
     Sequential pipeline:
-      witgen(shard 0) → prove(shard 0) → witgen(shard 1) → prove(shard 1) → ...
-      GPU shared between witgen and proving; no overlap possible.
+      GPU witgen(shard 0) → prove(shard 0) → GPU witgen(shard 1) → prove(shard 1) → ...
+      GPU shared between witgen and proving; no overlap or environment toggle.
 ```
 
 ## Environment Variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CENO_GPU_ENABLE_WITGEN` | `0` (CPU witgen) | Set to `1` to enable GPU witness generation. Sequential witgen+prove pipeline. |
 | `CENO_GPU_DISABLE_WITGEN_KINDS` | none | Comma-separated kind tags to disable specific chips' GPU path. Example: `add,keccak,lw`. Falls back to CPU for those chips. |
 | `CENO_GPU_DEBUG_COMPARE_WITGEN` | `0` | Set to `1` to enable GPU vs CPU comparison for all chips. Runs both paths and diffs results. |
 | `CENO_GPU_LEGACY_LK_ACCUM` | `0` | Set to `1` to use per-chip lookup counters and D2H instead of shard-wide accumulation. |
@@ -188,7 +181,7 @@ Detailed mismatches are logged via `tracing::error!` in real time; at pipeline e
 
 ```bash
 # All GPU tests (requires CUDA device)
-CENO_GPU_ENABLE_WITGEN=1 cargo test --features gpu,u16limb_circuit -p ceno_zkvm --lib -- "gpu"
+cargo test --features gpu,u16limb_circuit -p ceno_zkvm --lib -- "gpu"
 
 # Column map tests only (no CUDA device needed)
 cargo test --features gpu,u16limb_circuit -p ceno_zkvm --lib -- "test_extract_"
@@ -197,7 +190,7 @@ cargo test --features gpu,u16limb_circuit -p ceno_zkvm --lib -- "test_extract_"
 cargo test --features gpu,u16limb_circuit -p ceno_zkvm --lib -- "lk_shardram"
 
 # With debug comparison enabled
-CENO_GPU_ENABLE_WITGEN=1 CENO_GPU_DEBUG_COMPARE_WITGEN=1 cargo test --features gpu,u16limb_circuit -p ceno_host -- test_elf
+CENO_GPU_DEBUG_COMPARE_WITGEN=1 cargo test --features gpu,u16limb_circuit -p ceno_host -- test_elf
 ```
 
 ## Per-Chip Boilerplate Macros
