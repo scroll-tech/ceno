@@ -367,7 +367,7 @@ pub(super) fn write_assembly_part(
                         AOT_PREFLIGHT_HELPER_DIAGNOSTIC_BLOCK_PLAN_ENTRY,
                     )?;
                 }
-                emit_preflight_direct_block_plan_exit(&mut file, program, block_idx, block)?;
+                emit_preflight_direct_block_plan_exit(&mut file, block)?;
                 if block_idx == 0 && aot_native_diagnostic_only() {
                     emit_preflight_plan_commit_diagnostic(
                         &mut file,
@@ -397,7 +397,7 @@ pub(super) fn write_assembly_part(
                         AOT_PREFLIGHT_HELPER_DIAGNOSTIC_ADAPTIVE_ENTRY,
                     )?;
                 }
-                emit_preflight_direct_block_plan_exit(&mut file, program, block_idx, block)?;
+                emit_preflight_direct_block_plan_exit(&mut file, block)?;
                 if block_idx == 0 && aot_native_diagnostic_only() {
                     emit_preflight_plan_commit_diagnostic(
                         &mut file,
@@ -3049,8 +3049,6 @@ pub(super) fn emit_preflight_plan_commit_diagnostic(
 
 pub(super) fn emit_preflight_direct_block_plan_exit(
     mut file: impl Write,
-    program: &Program,
-    block_idx: usize,
     block: &BasicBlock,
 ) -> Result<()> {
     let block_steps = block_instruction_count(block);
@@ -3065,72 +3063,6 @@ pub(super) fn emit_preflight_direct_block_plan_exit(
         "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET}(%r12), %rax"
     )?;
     writeln!(file, "    addq ${block_steps}, (%rax)")?;
-    let cut_label = format!(".L_preflight_replay_cut_{block_idx}");
-    let done_label = format!(".L_preflight_replay_counted_{block_idx}");
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_REPLAY_RANGE_LEN_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    movq (%rax), %r10")?;
-    writeln!(file, "    leaq {block_steps}(%r10), %r11")?;
-    writeln!(
-        file,
-        "    cmpq {AOT_CTX_PREFLIGHT_REPLAY_RANGE_CAPACITY_OFFSET}(%r12), %r11"
-    )?;
-    writeln!(file, "    jae {cut_label}")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_REPLAY_FAMILY_COUNTS_OFFSET}(%r12), %r9"
-    )?;
-    let mut histogram = [0usize; InsnKind::COUNT];
-    let mut pc = block.start_pc;
-    while pc < block.end_pc {
-        histogram[instruction_at(program, pc)?.kind as usize] += 1;
-        pc += PC_STEP_SIZE as u32;
-    }
-    for (kind, count) in histogram
-        .into_iter()
-        .enumerate()
-        .filter(|(_, count)| *count != 0)
-    {
-        if crate::gpu_typed_kind_spec(InsnKind::iter().nth(kind).unwrap()).is_some() {
-            writeln!(
-                file,
-                "    addq ${count}, {}(%r9)",
-                kind * size_of::<usize>()
-            )?;
-        } else if InsnKind::iter().nth(kind).unwrap() == InsnKind::ECALL {
-            writeln!(
-                file,
-                "    movq {AOT_CTX_PREFLIGHT_REPLAY_FALLBACK_COUNT_OFFSET}(%r12), %r8"
-            )?;
-            writeln!(file, "    addq ${count}, (%r8)")?;
-        } else {
-            writeln!(
-                file,
-                "    movq {AOT_CTX_PREFLIGHT_REPLAY_UNSUPPORTED_COUNT_OFFSET}(%r12), %r8"
-            )?;
-            writeln!(file, "    addq ${count}, (%r8)")?;
-        }
-    }
-    writeln!(file, "    movq %r11, (%rax)")?;
-    writeln!(file, "    jmp {done_label}")?;
-    writeln!(file, "{cut_label}:")?;
-    writeln!(
-        file,
-        "    movq ${block_idx}, {AOT_CTX_PREFLIGHT_PENDING_BLOCK_OFFSET}(%r12)"
-    )?;
-    writeln!(
-        file,
-        "    movl ${AOT_PREFLIGHT_HELPER_REPLAY_BLOCK_CUT}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
-    )?;
-    writeln!(file, "    movq %r12, %rdi")?;
-    emit_flush_preflight_event_cursor(&mut file)?;
-    writeln!(file, "    call *%r14")?;
-    emit_reload_preflight_event_cursor(&mut file)?;
-    writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "    je ceno_aot_error")?;
-    writeln!(file, "{done_label}:")?;
     Ok(())
 }
 
