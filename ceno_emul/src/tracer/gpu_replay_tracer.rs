@@ -282,14 +282,24 @@ impl GpuReplayTracer {
         }
         assert_eq!(self.current.fallback.len(), descriptor.fallback_count);
         self.next_range_descriptor += 1;
+        let next_descriptor = self.range_descriptors.get(self.next_range_descriptor);
         let next = self.recyclable.take().map_or_else(
-            || GpuReplayChunk::empty(sequence + 1, self.shard_start_cycle),
+            || {
+                next_descriptor.map_or_else(
+                    || GpuReplayChunk::empty(sequence + 1, self.shard_start_cycle),
+                    |descriptor| {
+                        let mut next = GpuReplayChunk::warmed(
+                            descriptor.family_counts.map(|count| count as usize),
+                            descriptor.fallback_count as usize,
+                            self.shard_start_cycle,
+                        );
+                        next.reset_from_descriptor(descriptor, self.shard_start_cycle);
+                        next
+                    },
+                )
+            },
             |mut next| {
-                if let Some(descriptor) = self
-                    .range_descriptors
-                    .get(self.next_range_descriptor)
-                    .filter(|next| next.shard_id == shard_id)
-                {
+                if let Some(descriptor) = next_descriptor.filter(|next| next.shard_id == shard_id) {
                     next.reset_from_descriptor(descriptor, self.shard_start_cycle);
                 }
                 next
