@@ -934,32 +934,8 @@ pub(crate) fn log_shard_ctx_diff(kind: &str, cpu: &ShardContext, gpu: &ShardCont
         );
     }
 
-    // Skip write_records/read_records comparison when GPU witgen is enabled:
-    // GPU path bypasses ShardContext records, using compact EC records instead.
-    // Per-chip correctness is verified by debug_compare_shard_ec.
-    if crate::instructions::gpu::config::gpu_witgen_enabled() {
-        return;
-    }
-
-    let cpu_reads = flatten_ram_records(cpu.read_records());
-    let gpu_reads = flatten_ram_records(gpu.read_records());
-    if cpu_reads != gpu_reads {
-        record_failure(
-            kind,
-            "read_records",
-            format!("cpu={} gpu={}", cpu_reads.len(), gpu_reads.len()),
-        );
-    }
-
-    let cpu_writes = flatten_ram_records(cpu.write_records());
-    let gpu_writes = flatten_ram_records(gpu.write_records());
-    if cpu_writes != gpu_writes {
-        record_failure(
-            kind,
-            "write_records",
-            format!("cpu={} gpu={}", cpu_writes.len(), gpu_writes.len()),
-        );
-    }
+    // GPU witness generation bypasses ShardContext read/write records; the
+    // per-chip debug comparison validates the compact EC records instead.
 }
 
 /// Compare combined LK multiplicities between CPU and GPU witnesses (e2e shard-level debug).

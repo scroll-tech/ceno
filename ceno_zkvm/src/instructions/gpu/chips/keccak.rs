@@ -26,7 +26,7 @@ use crate::{
             ensure_shard_metadata_cached, read_shared_addr_count, read_shared_addr_range,
             with_cached_shard_meta,
         },
-        config::{gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu},
+        config::is_kind_disabled,
         dispatch::{GpuWitgenKind, compute_fetch_params, is_force_cpu_path},
         utils::{
             d2h::{gpu_compact_ec_d2h, gpu_lk_counters_to_multiplicity},
@@ -134,7 +134,7 @@ pub fn gpu_assign_keccak_instances<E: ExtensionField>(
     use gkr_iop::gpu::get_cuda_hal;
 
     // Guard: disabled or force-CPU
-    if !gpu_witgen_enabled() || is_force_cpu_path() {
+    if is_force_cpu_path() {
         return Ok(None);
     }
     // Check if keccak is disabled via CENO_GPU_DISABLE_WITGEN_KINDS=keccak
@@ -208,9 +208,6 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     let num_instances = step_indices.len();
     let num_rows = num_instances * 32; // 2^5 = 32 rows per instance
     let rotation = KECCAK_ROUNDS_CEIL_LOG2; // = 5
-    let materialize_initial_witness = should_materialize_witness_on_gpu()
-        || crate::instructions::gpu::config::is_debug_compare_enabled();
-
     // Step 1: Extract column map
     let col_map = info_span!("col_map").in_scope(|| extract_keccak_column_map(config, num_witin));
 
@@ -329,11 +326,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
 
     // Step 8: Keep witness on device only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_witin = if !materialize_initial_witness {
-        RowMajorMatrix::<E::BaseField>::empty()
-    } else if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !should_materialize_witness_on_gpu()
-    {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         let produced_rows = gpu_result.witness.num_rows;
         info_span!("transpose_d2h", rows = produced_rows, cols = num_witin).in_scope(|| {
             let gpu_data: Vec<<ff_ext::BabyBearExt4 as ExtensionField>::BaseField> =

@@ -1184,13 +1184,8 @@ struct CompactStepReplay {
 }
 
 #[cfg(feature = "gpu")]
-fn compact_replay_selected(
-    gpu_enabled: bool,
-    debug_compare: bool,
-    disabled_kinds: bool,
-    legacy_replay: bool,
-) -> bool {
-    gpu_enabled && !debug_compare && !disabled_kinds && !legacy_replay
+fn compact_replay_selected(debug_compare: bool, disabled_kinds: bool) -> bool {
+    !debug_compare && !disabled_kinds
 }
 
 fn streamed_descriptor_payload_totals(
@@ -2087,10 +2082,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
     let pi_template = emul_result.pi.clone();
     #[cfg(feature = "gpu")]
     let use_compact_replay = compact_replay_selected(
-        crate::instructions::gpu::config::gpu_witgen_enabled(),
         crate::instructions::gpu::config::is_debug_compare_enabled(),
         std::env::var_os("CENO_GPU_DISABLE_WITGEN_KINDS").is_some(),
-        false,
     );
     #[cfg(not(feature = "gpu"))]
     let use_compact_replay = false;
@@ -3824,9 +3817,7 @@ fn create_proofs_streaming<
                         start.elapsed()
                     );
                     #[cfg(feature = "gpu")]
-                    if crate::instructions::gpu::config::gpu_witgen_enabled() {
-                        crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                    }
+                    crate::instructions::gpu::cache::release_all_shard_gpu_caches();
                     tracing::info!("e2e proof stat: {}", zkvm_proof);
                     zkvm_proof
                 })
@@ -4064,12 +4055,10 @@ mod tests {
 
     #[cfg(feature = "gpu")]
     #[test]
-    fn compact_replay_selector_rejects_legacy_or_incompatible_modes() {
-        assert!(super::compact_replay_selected(true, false, false, false));
-        assert!(!super::compact_replay_selected(true, false, false, true));
-        assert!(!super::compact_replay_selected(false, false, false, false));
-        assert!(!super::compact_replay_selected(true, true, false, false));
-        assert!(!super::compact_replay_selected(true, false, true, false));
+    fn compact_replay_selector_rejects_incompatible_modes() {
+        assert!(super::compact_replay_selected(false, false));
+        assert!(!super::compact_replay_selected(true, false));
+        assert!(!super::compact_replay_selected(false, true));
     }
 
     #[test]

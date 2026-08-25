@@ -60,20 +60,6 @@ pub(crate) fn is_kind_disabled(kind: GpuWitgenKind) -> bool {
     })
 }
 
-/// GPU builds always use GPU witness generation.
-pub(crate) const fn gpu_witgen_enabled() -> bool {
-    true
-}
-
-/// Whether initial witness assignment should materialize a GPU-backed trace RMM.
-///
-/// This is independent from the later retention policy:
-/// - witness is first produced as device-backed so commit
-///   can consume the col-major GPU trace directly without a D2H/H2D round-trip
-pub(crate) fn should_materialize_witness_on_gpu() -> bool {
-    gpu_witgen_enabled()
-}
-
 /// Whether replayable witness device backing should remain resident after commit.
 ///
 /// Policy:
@@ -81,7 +67,7 @@ pub(crate) fn should_materialize_witness_on_gpu() -> bool {
 /// - `CACHE_LEVEL = 0`: clear after commit and regenerate on
 ///   demand from shard-resident raw data during chip proof / PCS open
 pub(crate) fn should_retain_witness_device_backing_after_commit() -> bool {
-    gpu_witgen_enabled() && !matches!(get_gpu_cache_level(), CacheLevel::None)
+    !matches!(get_gpu_cache_level(), CacheLevel::None)
 }
 
 /// Optional cap for Jagged q' reshape height.
@@ -115,5 +101,5 @@ pub(crate) fn is_debug_compare_enabled() -> bool {
 pub(crate) fn is_shard_lk_accum_enabled() -> bool {
     use std::sync::OnceLock;
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| gpu_witgen_enabled() && !is_debug_compare_enabled())
+    *ENABLED.get_or_init(|| !is_debug_compare_enabled())
 }
