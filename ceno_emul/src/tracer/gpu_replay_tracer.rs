@@ -288,9 +288,20 @@ impl GpuReplayTracer {
                 next_descriptor.map_or_else(
                     || GpuReplayChunk::empty(sequence + 1, self.shard_start_cycle),
                     |descriptor| {
+                        let mut family_capacities = [0usize; InsnKind::COUNT];
+                        let mut fallback_capacity = 0usize;
+                        for descriptor in self.range_descriptors.iter() {
+                            for (capacity, required) in
+                                family_capacities.iter_mut().zip(descriptor.family_counts)
+                            {
+                                *capacity = (*capacity).max(required as usize);
+                            }
+                            fallback_capacity =
+                                fallback_capacity.max(descriptor.fallback_count as usize);
+                        }
                         let mut next = GpuReplayChunk::warmed(
-                            descriptor.family_counts.map(|count| count as usize),
-                            descriptor.fallback_count as usize,
+                            family_capacities,
+                            fallback_capacity,
                             self.shard_start_cycle,
                         );
                         next.reset_from_descriptor(descriptor, self.shard_start_cycle);
