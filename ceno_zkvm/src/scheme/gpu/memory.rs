@@ -25,9 +25,7 @@ use std::ffi::c_void;
 use witness::next_pow2_instance_padding;
 
 #[cfg(feature = "gpu")]
-use crate::instructions::gpu::config::{
-    should_materialize_witness_on_gpu, should_retain_witness_device_backing_after_commit,
-};
+use crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit;
 use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 
 pub fn init_gpu_mem_tracker<'a>(
@@ -376,8 +374,6 @@ pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 
     let structural_mle_bytes = if structural_cached_on_device {
         0
-    } else if should_materialize_witness_on_gpu() {
-        estimate_structural_mle_bytes(cs.num_structural_witin as usize, num_var_with_rotation)
     } else {
         estimate_structural_mle_bytes(cs.num_structural_witin as usize, num_var_with_rotation)
     };
@@ -1158,22 +1154,12 @@ pub(crate) fn estimate_trace_extraction_bytes(
     let compact_poly_bytes = num_witin * occupied_rows * base_elem_size;
     let transpose_temporary_bytes = 2 * compact_poly_bytes;
 
-    if should_materialize_witness_on_gpu() {
-        if should_retain_witness_device_backing_after_commit() {
-            // Eager GPU cache path: committed traces stay resident and
-            // extraction builds view-based polynomials directly from the
-            // already-live device buffer.
-            return (0, 0);
-        }
-
-        // GPU witgen alone does not imply replayability. Non-replayable traces
-        // still go through basefold::get_trace in cache-none mode. The fallback
-        // transpose buffer is 2x the compact RMM backing, not 2x the logical
-        // domain length.
-        return (compact_poly_bytes, transpose_temporary_bytes);
-    }
-
-    if matches!(get_gpu_cache_level(), CacheLevel::None) {
+    if should_retain_witness_device_backing_after_commit() {
+        // Eager GPU cache path: committed traces stay resident and
+        // extraction builds view-based polynomials directly from the
+        // already-live device buffer.
+        return (0, 0);
+    } else if matches!(get_gpu_cache_level(), CacheLevel::None) {
         // Default cache level is None
         // get_trace allocates poly copies (resident) + temp_buffer over the
         // compact RMM backing (2x, freed after).

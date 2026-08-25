@@ -31,7 +31,7 @@ use tracing::info_span;
 use witness::{DeviceMatrixLayout, RowMajorMatrix};
 
 use super::{
-    config::{gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu},
+    config::is_kind_disabled,
     utils::debug_compare::{
         debug_compare_final_lk, debug_compare_shard_ec, debug_compare_shardram,
         debug_compare_witness,
@@ -1569,7 +1569,7 @@ pub(crate) fn try_gpu_assign_instances<
 ) -> Result<Option<(RMMCollections<E::BaseField>, Multiplicity<u64>)>, ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
 
-    if !gpu_witgen_enabled() || is_force_cpu_path() {
+    if is_force_cpu_path() {
         return Ok(None);
     }
 
@@ -1672,9 +1672,6 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     let num_structural_witin = num_structural_witin.max(1);
     let total_instances = step_indices.len();
-    let materialize_initial_witness = should_materialize_witness_on_gpu()
-        || crate::instructions::gpu::config::is_debug_compare_enabled();
-
     // Step 1: GPU fills witness matrix (+ LK counters + shard records for merged kinds)
     let (
         gpu_witness,
@@ -1861,11 +1858,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
 
     // Step 4: Keep witness on device only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H to build host-backed RMM.
-    let mut raw_witin = if !materialize_initial_witness {
-        RowMajorMatrix::<E::BaseField>::empty()
-    } else if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !should_materialize_witness_on_gpu()
-    {
+    let mut raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         info_span!("transpose_d2h", rows = total_instances, cols = num_witin).in_scope(|| {
             gpu_witness_to_rmm_d2h::<E>(
                 hal,
@@ -1883,19 +1876,17 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
             I::padding_strategy(),
         )?
     };
-    if materialize_initial_witness {
-        raw_witin.padding_by_strategy();
-        debug_compare_witness::<E, I>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-            kind,
-            &raw_witin,
-        )?;
-    }
+    raw_witin.padding_by_strategy();
+    debug_compare_witness::<E, I>(
+        config,
+        shard_ctx,
+        num_witin,
+        num_structural_witin,
+        shard_steps,
+        step_indices,
+        kind,
+        &raw_witin,
+    )?;
 
     Ok(([raw_witin, raw_structural], lk_multiplicity))
 }
@@ -3026,10 +3017,6 @@ mod tests {
         type E = BabyBearExt4;
         type MatrixSnapshot = (String, usize, usize, usize, Vec<BabyBear>);
 
-        assert!(
-            super::super::config::gpu_witgen_enabled(),
-            "GPU witness generation is required"
-        );
         assert!(!super::super::config::is_debug_compare_enabled());
 
         fn with_raw(mut insn: ceno_emul::Instruction, raw: u32) -> ceno_emul::Instruction {

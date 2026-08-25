@@ -297,9 +297,7 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
 
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
 
-    if !crate::instructions::gpu::config::gpu_witgen_enabled()
-        || crate::instructions::gpu::dispatch::is_force_cpu_path()
-    {
+    if crate::instructions::gpu::dispatch::is_force_cpu_path() {
         return Ok(None);
     }
 
@@ -382,9 +380,7 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
 
     // 5. Structural witness: keep device-resident only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         let struct_data = tracing::info_span!(
             "gpu_shard_ram_structural_transpose_d2h",
             rows = gpu_structural.num_rows,
@@ -443,9 +439,7 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
 
     // 6. Main witness: keep device-resident only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         tracing::info_span!(
             "gpu_shard_ram_witness_transpose_d2h",
             num_rows_padded,
@@ -595,9 +589,7 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
 
     // Structural witness: keep device-resident only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         let struct_data = tracing::info_span!(
             "gpu_shard_ram_structural_transpose_d2h_from_device",
             rows = gpu_structural.num_rows,
@@ -656,9 +648,7 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
 
     // Witness: keep device-resident only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         tracing::info_span!(
             "gpu_shard_ram_witness_transpose_d2h_from_device",
             num_rows_padded,
@@ -832,9 +822,7 @@ pub(crate) fn try_gpu_assign_shard_ram_ec_tree_from_device<E: ExtensionField>(
         },
     )?;
 
-    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         let struct_data = tracing::info_span!(
             "gpu_shard_ram_ec_tree_structural_transpose_d2h_from_device",
             rows = gpu_structural.num_rows,
@@ -891,9 +879,7 @@ pub(crate) fn try_gpu_assign_shard_ram_ec_tree_from_device<E: ExtensionField>(
         )
     };
 
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         tracing::info_span!(
             "gpu_shard_ram_ec_tree_witness_transpose_d2h_from_device",
             num_rows_padded,

@@ -779,9 +779,7 @@ pub(crate) fn read_shared_addr_range(start: usize, end: usize) -> Vec<u32> {
 /// `log_shard_ctx_diff` reads `shard_ctx.addr_accessed` to diff against the
 /// CPU baseline, so we keep the D2H alive to avoid false-positive mismatches.
 pub fn flush_shared_ec_buffers(shard_ctx: &mut ShardContext) -> Result<(), ZKVMError> {
-    if crate::instructions::gpu::config::gpu_witgen_enabled()
-        && !crate::instructions::gpu::config::is_debug_compare_enabled()
-    {
+    if !crate::instructions::gpu::config::is_debug_compare_enabled() {
         tracing::debug!(
             "[GPU shard] flush_shared_ec_buffers: GPU witgen on — skipping D2H \
              (try_gpu_assign_shared_circuit will consume shared buffers on device)"

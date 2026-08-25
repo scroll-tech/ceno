@@ -1633,7 +1633,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
                 }
             }
 
-            if crate::instructions::gpu::config::should_materialize_witness_on_gpu() {
+            {
                 let span = entered_span!("[gpu] normalize_trace_backing", profiling_2 = true);
                 let cuda_hal = get_cuda_hal().unwrap();
                 normalize_traces_to_device_col_major::<E>(
