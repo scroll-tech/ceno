@@ -46,12 +46,11 @@ use crate::{
 };
 
 const PACKED_PRODUCER_COUNT_BITS: u32 = 24;
-const PRODUCER_PRIORITY_ROW_BITS: u32 = 23;
 
 fn packed_producer_total(kind: InsnKind, rows: usize) -> u32 {
     let rows = u32::try_from(rows).expect("producer total exceeds u32");
     assert!(
-        rows < (1 << PRODUCER_PRIORITY_ROW_BITS),
+        rows < (1 << PACKED_PRODUCER_COUNT_BITS),
         "producer total exceeds packed priority row range"
     );
     let order = kind as u32;
@@ -2854,6 +2853,12 @@ mod tests {
         assert_eq!(add >> PACKED_PRODUCER_COUNT_BITS, InsnKind::ADD as u32);
         assert_eq!(sub >> PACKED_PRODUCER_COUNT_BITS, InsnKind::SUB as u32);
         assert_ne!(add, sub);
+    }
+
+    #[test]
+    fn packed_producer_total_accepts_full_packed_count_range() {
+        let packed = packed_producer_total(InsnKind::ADD, (1 << PACKED_PRODUCER_COUNT_BITS) - 1);
+        assert_eq!(packed & 0x00ff_ffff, 0x00ff_ffff);
     }
 
     #[test]
