@@ -30,9 +30,7 @@ pub struct SetLessThanConfig<E: ExtensionField> {
 
     pub(crate) uint_lt_config: UIntLimbsLTConfig<E>,
 }
-impl<E: ExtensionField, I: RIVInstruction + 'static> Instruction<E>
-    for SetLessThanInstruction<E, I>
-{
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruction<E, I> {
     type InstructionConfig = SetLessThanConfig<E>;
     type InsnType = InsnKind;
 

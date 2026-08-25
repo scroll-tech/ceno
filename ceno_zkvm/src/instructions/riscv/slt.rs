@@ -48,7 +48,7 @@ mod test {
     #[cfg(feature = "u16limb_circuit")]
     use slt_circuit_v2::SetLessThanInstruction;
 
-    fn verify<E: ExtensionField, I: RIVInstruction + 'static>(
+    fn verify<E: ExtensionField, I: RIVInstruction>(
         name: &'static str,
         rs1: Word,
         rs2: Word,

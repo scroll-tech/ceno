@@ -41,7 +41,7 @@ pub struct LoadConfig<E: ExtensionField> {
 
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
 
-impl<E: ExtensionField, I: RIVInstruction + 'static> Instruction<E> for LoadInstruction<E, I> {
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
     type InstructionConfig = LoadConfig<E>;
     type InsnType = InsnKind;
 

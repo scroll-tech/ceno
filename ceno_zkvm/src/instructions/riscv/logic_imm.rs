@@ -14,7 +14,7 @@ pub use crate::instructions::riscv::logic_imm::logic_imm_circuit_v2::LogicInstru
 mod test;
 
 /// This trait defines a logic instruction, connecting an instruction type to a lookup table.
-pub trait LogicOp {
+pub trait LogicOp: 'static {
     const INST_KIND: InsnKind;
     type OpsTable: OpsTable;
 }

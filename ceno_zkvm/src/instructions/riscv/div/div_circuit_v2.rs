@@ -52,7 +52,7 @@ pub struct DivRemConfig<E: ExtensionField> {
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 
-impl<E: ExtensionField, I: RIVInstruction + 'static> Instruction<E> for ArithInstruction<E, I> {
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = DivRemConfig<E>;
     type InsnType = InsnKind;
 

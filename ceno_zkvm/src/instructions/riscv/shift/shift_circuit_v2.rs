@@ -303,9 +303,7 @@ pub struct ShiftRTypeConfig<E: ExtensionField> {
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 
-impl<E: ExtensionField, I: RIVInstruction + 'static> Instruction<E>
-    for ShiftLogicalInstruction<E, I>
-{
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
     type InstructionConfig = ShiftRTypeConfig<E>;
     type InsnType = InsnKind;
 
@@ -428,7 +426,7 @@ pub struct ShiftImmConfig<E: ExtensionField> {
 
 pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
 
-impl<E: ExtensionField, I: RIVInstruction + 'static> Instruction<E> for ShiftImmInstruction<E, I> {
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;
     type InsnType = InsnKind;
 

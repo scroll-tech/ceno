@@ -38,7 +38,7 @@ pub struct MulhConfig<E: ExtensionField> {
     phantom: PhantomData<E>,
 }
 
-impl<E: ExtensionField, I: RIVInstruction + 'static> Instruction<E> for MulhInstructionBase<E, I> {
+impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBase<E, I> {
     type InstructionConfig = MulhConfig<E>;
     type InsnType = InsnKind;
 
