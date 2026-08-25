@@ -45,17 +45,14 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-const PACKED_PRODUCER_COUNT_BITS: u32 = 24;
+fn producer_count(rows: usize) -> u32 {
+    u32::try_from(rows).expect("producer count exceeds u32")
+}
 
-fn packed_producer_total(kind: InsnKind, rows: usize) -> u32 {
-    let rows = u32::try_from(rows).expect("producer total exceeds u32");
-    assert!(
-        rows < (1 << PACKED_PRODUCER_COUNT_BITS),
-        "producer total exceeds packed priority row range"
-    );
+fn producer_order(kind: InsnKind) -> u32 {
     let order = kind as u32;
     assert!(order < (1 << (31 - 25)));
-    (order << PACKED_PRODUCER_COUNT_BITS) | rows
+    order
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -755,7 +752,8 @@ pub(crate) fn submit_provisional_fused_range(
                 layout: arena.layout() as u32,
                 row_count: u32::try_from(arena.len()).unwrap(),
                 producer_base: u32::try_from(producer_base).unwrap(),
-                producer_total: packed_producer_total(arena.kind(), registration.rows),
+                producer_count: producer_count(registration.rows),
+                producer_order: producer_order(arena.kind()),
                 num_cols: u32::try_from(registration.num_cols).unwrap(),
                 arg0: registration.arg0,
                 arg1: registration.arg1,
@@ -1424,7 +1422,8 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                     layout: arena.layout() as u32,
                     row_count: u32::try_from(arena.len()).expect("typed row count exceeds u32"),
                     producer_base: u32::try_from(producer_base).expect("producer base exceeds u32"),
-                    producer_total: packed_producer_total(arena.kind(), registration.rows),
+                    producer_count: producer_count(registration.rows),
+                    producer_order: producer_order(arena.kind()),
                     num_cols: u32::try_from(registration.num_cols)
                         .expect("column count exceeds u32"),
                     arg0: registration.arg0,
@@ -2845,20 +2844,11 @@ mod tests {
     }
 
     #[test]
-    fn packed_producer_total_preserves_count_and_kind_priority() {
-        let add = packed_producer_total(InsnKind::ADD, 123);
-        let sub = packed_producer_total(InsnKind::SUB, 123);
-        assert_eq!(add & 0x00ff_ffff, 123);
-        assert_eq!(sub & 0x00ff_ffff, 123);
-        assert_eq!(add >> PACKED_PRODUCER_COUNT_BITS, InsnKind::ADD as u32);
-        assert_eq!(sub >> PACKED_PRODUCER_COUNT_BITS, InsnKind::SUB as u32);
-        assert_ne!(add, sub);
-    }
-
-    #[test]
-    fn packed_producer_total_accepts_full_packed_count_range() {
-        let packed = packed_producer_total(InsnKind::ADD, (1 << PACKED_PRODUCER_COUNT_BITS) - 1);
-        assert_eq!(packed & 0x00ff_ffff, 0x00ff_ffff);
+    fn producer_metadata_preserves_count_and_kind_priority() {
+        assert_eq!(producer_count(123), 123);
+        assert_eq!(producer_order(InsnKind::ADD), InsnKind::ADD as u32);
+        assert_eq!(producer_order(InsnKind::SUB), InsnKind::SUB as u32);
+        assert_ne!(producer_order(InsnKind::ADD), producer_order(InsnKind::SUB));
     }
 
     #[test]
