@@ -137,8 +137,6 @@ create_proofs_streaming()
 |----------|---------|---------|
 | `CENO_GPU_DISABLE_WITGEN_KINDS` | none | Comma-separated kind tags to disable specific chips' GPU path. Example: `add,keccak,lw`. Falls back to CPU for those chips. |
 | `CENO_GPU_DEBUG_COMPARE_WITGEN` | `0` | Set to `1` to enable GPU vs CPU comparison for all chips. Runs both paths and diffs results. |
-| `CENO_GPU_LEGACY_LK_ACCUM` | `0` | Set to `1` to use per-chip lookup counters and D2H instead of shard-wide accumulation. |
-| `CENO_GPU_LOG_LK_DIGEST` | `0` | Set to `1` to log a canonical digest and totals for the final combined lookup multiplicity. |
 
 ### `CENO_GPU_DEBUG_COMPARE_WITGEN` Coverage
 

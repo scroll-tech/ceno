@@ -19,7 +19,6 @@ pub mod stats;
 pub mod structs;
 mod uint;
 pub mod utils;
-mod validation_manifest;
 #[cfg(all(feature = "jemalloc", unix, not(test)))]
 pub use utils::print_allocated_bytes;
 mod witness;

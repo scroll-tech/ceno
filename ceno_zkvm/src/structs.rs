@@ -489,40 +489,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.combined_lk_mlt = Some(combined_lk_mlt);
     }
 
-    #[cfg(feature = "gpu")]
-    pub(crate) fn log_combined_lk_digest(&self) {
-        if !matches!(
-            std::env::var("CENO_GPU_LOG_LK_DIGEST").ok().as_deref(),
-            Some("1")
-        ) {
-            return;
-        }
-        use tiny_keccak::{Hasher, Keccak};
-
-        let mut hasher = Keccak::v256();
-        let mut total_entries = 0usize;
-        let mut total_multiplicity = 0usize;
-        for (table_idx, table) in self.combined_lk_mlt.as_ref().unwrap().iter().enumerate() {
-            let mut entries: Vec<_> = table.iter().map(|(&key, &value)| (key, value)).collect();
-            entries.sort_unstable();
-            total_entries += entries.len();
-            for (key, value) in entries {
-                total_multiplicity += value;
-                hasher.update(&(table_idx as u64).to_le_bytes());
-                hasher.update(&key.to_le_bytes());
-                hasher.update(&(value as u64).to_le_bytes());
-            }
-        }
-        let mut digest = [0u8; 32];
-        hasher.finalize(&mut digest);
-        tracing::info!(
-            ?digest,
-            total_entries,
-            total_multiplicity,
-            "combined lookup multiplicity digest"
-        );
-    }
-
     pub fn assign_table_circuit<TC: TableCircuit<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,

@@ -1085,34 +1085,22 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     // overflow or probe exhaustion can fall back to the existing exact sort.
     let addr_accessed: Vec<ceno_emul::WordAddr> = if addr_count > 0 {
         info_span!("gpu_unique_addr").in_scope(|| {
-            let use_legacy_sort = std::env::var_os("CENO_GPU_LEGACY_ADDR_SORT").is_some();
-            let deduped = if use_legacy_sort {
-                hal.witgen
-                    .sort_and_dedup_u32(&mut shared.addr_buf, addr_count, None)
-                    .map_err(|e| {
-                        ZKVMError::InvalidWitness(format!("GPU legacy sort addr: {e}").into())
-                    })?
-                    .0
-            } else {
-                match hal
-                    .witgen
-                    .hash_dedup_u32(&shared.addr_buf, addr_count, None)
-                    .map_err(|e| ZKVMError::InvalidWitness(format!("GPU hash addr: {e}").into()))?
-                {
-                    Some(addrs) => addrs,
-                    None => {
-                        tracing::warn!(
-                            "[GPU full pipeline] address hash table exhausted; falling back to sort"
-                        );
-                        hal.witgen
-                            .sort_and_dedup_u32(&mut shared.addr_buf, addr_count, None)
-                            .map_err(|e| {
-                                ZKVMError::InvalidWitness(
-                                    format!("GPU sort addr fallback: {e}").into(),
-                                )
-                            })?
-                            .0
-                    }
+            let deduped = match hal
+                .witgen
+                .hash_dedup_u32(&shared.addr_buf, addr_count, None)
+                .map_err(|e| ZKVMError::InvalidWitness(format!("GPU hash addr: {e}").into()))?
+            {
+                Some(addrs) => addrs,
+                None => {
+                    tracing::warn!(
+                        "[GPU full pipeline] address hash table exhausted; falling back to sort"
+                    );
+                    hal.witgen
+                        .sort_and_dedup_u32(&mut shared.addr_buf, addr_count, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(format!("GPU sort addr fallback: {e}").into())
+                        })?
+                        .0
                 }
             };
             let unique_count = deduped.len();
@@ -1296,8 +1284,8 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     // 6. Exactly one deterministic finalization feeds both consumers.
     let (partitioned_buf, num_writes, total_records, finalized_segments) =
         info_span!("gpu_merge_finalize").in_scope(|| {
-            if std::env::var_os("CENO_GPU_HOST_RECORD_FINALIZER").is_some() {
-                hal.witgen.merge_and_finalize_records_host_sorted(
+            hal.witgen
+                .merge_and_finalize_records(
                     &shared.ec_buf,
                     ec_count,
                     &cont_ec_buf,
@@ -1305,17 +1293,7 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
                     &finalization_expectations,
                     None,
                 )
-            } else {
-                hal.witgen.merge_and_finalize_records(
-                    &shared.ec_buf,
-                    ec_count,
-                    &cont_ec_buf,
-                    cont_total,
-                    &finalization_expectations,
-                    None,
-                )
-            }
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU merge+finalize: {e}").into()))
+                .map_err(|e| ZKVMError::InvalidWitness(format!("GPU merge+finalize: {e}").into()))
         })?;
 
     tracing::info!(

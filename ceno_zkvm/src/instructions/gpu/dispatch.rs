@@ -265,11 +265,6 @@ struct ProvisionalFusedSession {
     host_slots: [Option<GpuReplayTypedRange>; 2],
     host_fingerprints: [Option<HostOwnerFingerprint>; 2],
     device_fingerprint: ([u64; 2], usize, u64, usize),
-    profile_enabled: bool,
-    submit_count: usize,
-    submit_elapsed: std::time::Duration,
-    recycle_wait_count: usize,
-    recycle_wait_elapsed: std::time::Duration,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -573,12 +568,6 @@ pub(crate) fn begin_provisional_fused_session(
                 host_slots: [None, None],
                 host_fingerprints: [None, None],
                 device_fingerprint,
-                profile_enabled: std::env::var_os("CENO_GPU_ASSIGN_PROFILE").as_deref()
-                    == Some(std::ffi::OsStr::new("1")),
-                submit_count: 0,
-                submit_elapsed: std::time::Duration::ZERO,
-                recycle_wait_count: 0,
-                recycle_wait_elapsed: std::time::Duration::ZERO,
             });
         });
         Ok(())
@@ -791,7 +780,6 @@ pub(crate) fn submit_provisional_fused_range(
                 "typed direct-source descriptor closure mismatch".into(),
             ));
         }
-        let submit_started = session.profile_enabled.then(std::time::Instant::now);
         super::cache::with_cached_shard_meta(|shard| {
             let launched_slot = launcher.launch_direct(
                 &compact_families[..family_count],
@@ -810,10 +798,6 @@ pub(crate) fn submit_provisional_fused_range(
             Ok(())
         })
         .map_err(|e| ZKVMError::InvalidWitness(format!("provisional range launch: {e}").into()))?;
-        if let Some(started) = submit_started {
-            session.submit_count += 1;
-            session.submit_elapsed += started.elapsed();
-        }
         session.observed_payload_bytes = session
             .observed_payload_bytes
             .checked_add(u64::try_from(byte_len).map_err(|_| {
@@ -824,14 +808,9 @@ pub(crate) fn submit_provisional_fused_range(
             })?;
         session.submitted_ranges += 1;
         let recycled = if session.submitted_ranges >= 2 {
-            let wait_started = session.profile_enabled.then(std::time::Instant::now);
             let recyclable = session.launcher.wait_next_slot_recyclable().map_err(|e| {
                 ZKVMError::InvalidWitness(format!("provisional slot recycle: {e}").into())
             })?;
-            if let Some(started) = wait_started {
-                session.recycle_wait_count += 1;
-                session.recycle_wait_elapsed += started.elapsed();
-            }
             session.host_slots[recyclable].take()
         } else {
             None
@@ -879,27 +858,6 @@ fn finish_provisional_fused_session(shard_ctx: &ShardContext) -> Result<(), ZKVM
             "provisional/canonical output pointer mismatch".into(),
         ));
     }
-    if std::env::var_os("CENO_GPU_ASSIGN_PROFILE").as_deref() == Some(std::ffi::OsStr::new("1")) {
-        let output_bytes = state
-            .registrations
-            .iter()
-            .fold(0u64, |total, registration| {
-                total + registration.rows as u64 * registration.num_cols as u64 * 4
-            });
-        let column_map_bytes = state
-            .registrations
-            .iter()
-            .fold(0u64, |total, registration| {
-                total + registration.num_col_entries as u64 * 4
-            });
-        tracing::info!(
-            shard_id = shard_ctx.shard_id,
-            registrations = state.registrations.len(),
-            output_zero_and_write_bytes = output_bytes,
-            column_map_h2d_bytes = column_map_bytes,
-            "fused ordinary allocation profile"
-        );
-    }
     if session.launcher.storage_fingerprint() != session.device_fingerprint {
         return Err(ZKVMError::InvalidWitness(
             "fused device fingerprint changed before final drain".into(),
@@ -931,16 +889,6 @@ fn finish_provisional_fused_session(shard_ctx: &ShardContext) -> Result<(), ZKVM
         observed_payload_bytes = session.observed_payload_bytes,
         "fused ordinary descriptor payload closure"
     );
-    if session.profile_enabled {
-        tracing::info!(
-            shard_id = shard_ctx.shard_id,
-            submit_count = session.submit_count,
-            submit_ms = session.submit_elapsed.as_secs_f64() * 1_000.0,
-            recycle_wait_count = session.recycle_wait_count,
-            recycle_wait_ms = session.recycle_wait_elapsed.as_secs_f64() * 1_000.0,
-            "fused ordinary submit/recycle profile"
-        );
-    }
     if session.expected_ranges >= 2 {
         let [Some(first), Some(second)] = &session.host_fingerprints else {
             return Err(ZKVMError::InvalidWitness(
@@ -1431,27 +1379,6 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
     let mut launcher = FusedRangeLauncher::new(hal.inner.clone(), stage_capacity, work_capacity)
         .map_err(|e| ZKVMError::InvalidWitness(format!("fused launcher init: {e}").into()))?;
     let mut producer_bases = [0usize; InsnKind::COUNT];
-    if std::env::var_os("CENO_GPU_ASSIGN_PROFILE").as_deref() == Some(std::ffi::OsStr::new("1")) {
-        let output_bytes = state
-            .registrations
-            .iter()
-            .fold(0u64, |total, registration| {
-                total + registration.rows as u64 * registration.num_cols as u64 * 4
-            });
-        let column_map_bytes = state
-            .registrations
-            .iter()
-            .fold(0u64, |total, registration| {
-                total + registration.num_col_entries as u64 * 4
-            });
-        tracing::info!(
-            shard_id = shard_ctx.shard_id,
-            registrations = state.registrations.len(),
-            output_zero_and_write_bytes = output_bytes,
-            column_map_h2d_bytes = column_map_bytes,
-            "fused ordinary allocation profile"
-        );
-    }
     super::cache::with_cached_shard_meta(|shard| -> Result<(), ZKVMError> {
         for range in &state.arenas.ranges {
             let mut sources = [&[][..]; InsnKind::COUNT * 13];

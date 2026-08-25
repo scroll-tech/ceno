@@ -22,12 +22,12 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, CompactWitnessRecordSink, Cycle, EmuContext, FullTracer,
-    FullTracerConfig, GpuReplayShardArenas, GpuReplayTracer, GpuReplayTracerConfig, InsnKind,
-    IterAddresses, LegacyWitnessRecordSink, NextCycleAccess, Platform, PreflightTracer,
-    PreflightTracerConfig, Program, RegIdx, ReplayChunk, ReplayEngine, ReplayStopReason,
-    StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
-    WORD_SIZE, WitnessRecordSink, Word, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig,
+    GpuReplayShardArenas, GpuReplayTracer, GpuReplayTracerConfig, InsnKind, IterAddresses,
+    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, RegIdx,
+    ReplayChunk, ReplayEngine, ReplayStopReason, StepCellExtractor, StepIndex, StepRecord,
+    SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
+    host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -85,27 +85,6 @@ pub fn public_io_words_to_digest_words(words: &[u32]) -> [u32; 8] {
 
     // Reinterpret Keccak digest bytes as 8 little-endian u32 words.
     unsafe { core::mem::transmute::<[u8; 32], [u32; 8]>(digest) }
-}
-
-fn compact_public_value_words(pi: &PublicValues) -> Vec<u32> {
-    let mut words = Vec::with_capacity(12 + pi.public_io_digest.len() + pi.shard_rw_sum.len());
-    words.extend([
-        pi.exit_code,
-        pi.init_pc,
-        pi.init_cycle as u32,
-        (pi.init_cycle >> 32) as u32,
-        pi.end_pc,
-        pi.end_cycle as u32,
-        (pi.end_cycle >> 32) as u32,
-        pi.shard_id,
-        pi.heap_start_addr,
-        pi.heap_shard_len,
-        pi.hint_start_addr,
-        pi.hint_shard_len,
-    ]);
-    words.extend(pi.public_io_digest);
-    words.extend(pi.shard_rw_sum);
-    words
 }
 
 // define a relative small number to make first shard handle much less instruction
@@ -1322,9 +1301,9 @@ impl CompactStepReplay {
         let first_pc_before = self.vm.get_pc().0;
         let shard_start_cycle = self.vm.tracer().cycle();
         let mut executed = 0usize;
-        let (mut arenas, streamed_fallback, replay_elapsed, chunk_count) = info_span!("compact_replay_direct_ranges")
-            .in_scope(|| {
-                    let replay_started = std::time::Instant::now();
+        let (mut arenas, streamed_fallback, replay_elapsed, chunk_count) =
+            info_span!("compact_replay_direct_ranges").in_scope(|| {
+                let replay_started = std::time::Instant::now();
                 let mut ranges = Vec::with_capacity(if stream_owned_ranges {
                     0
                 } else {
@@ -1332,79 +1311,39 @@ impl CompactStepReplay {
                 });
                 let mut streamed_family_totals = [0usize; InsnKind::COUNT];
                 let mut streamed_fallback = Vec::new();
-                    while executed < expected_steps {
-                        let max_steps = (expected_steps - executed)
-                            .min(self.vm.tracer().remaining_chunk_capacity());
-                        assert!(max_steps > 0, "compact replay chunk made no progress");
-                        #[cfg(all(
-                            feature = "aot-x86_64",
-                            target_arch = "x86_64",
-                            target_os = "linux"
-                        ))]
-                    if ceno_emul::aot::aot_native_diagnostic_only() {
-                        assert_eq!(self.shard_id, 0, "native diagnostic must stop in shard 0");
-                        assert_eq!(executed, 0, "native diagnostic permits only the first chunk");
-                        assert_eq!(
-                            max_steps, 262_144,
-                            "native diagnostic first chunk capacity mismatch"
-                        );
-                        ceno_emul::aot::aot_native_diagnostic_boundary(
-                            "FIRST_FULLTRACER_CHUNK",
-                            "BEGIN",
-                            &format!("shard=0,chunk=0,max_steps={max_steps}"),
-                        );
-                    }
+                while executed < expected_steps {
+                    let max_steps = (expected_steps - executed)
+                        .min(self.vm.tracer().remaining_chunk_capacity());
+                    assert!(max_steps > 0, "compact replay chunk made no progress");
                     #[cfg(all(
                         feature = "aot-x86_64",
                         target_arch = "x86_64",
                         target_os = "linux"
                     ))]
-                        let ran = match self.aot.run_to_halt(&mut self.vm, max_steps) {
-                            Ok(result) => result.executed_steps,
-                            Err(err) => panic!(
-                                "AOT compact replay failed at pc={:#010x}: {err:?}",
-                                self.vm.get_pc().0
-                            ),
-                        };
-                    #[cfg(all(
+                    let ran = match self.aot.run_to_halt(&mut self.vm, max_steps) {
+                        Ok(result) => result.executed_steps,
+                        Err(err) => panic!(
+                            "AOT compact replay failed at pc={:#010x}: {err:?}",
+                            self.vm.get_pc().0
+                        ),
+                    };
+                    #[cfg(not(all(
                         feature = "aot-x86_64",
                         target_arch = "x86_64",
                         target_os = "linux"
-                    ))]
-                    if ceno_emul::aot::aot_native_diagnostic_only() {
-                        ceno_emul::aot::aot_native_diagnostic_boundary(
-                            "FIRST_FULLTRACER_CHUNK",
-                            "RETURN",
-                            &format!("shard=0,chunk=0,executed_steps={ran}"),
-                        );
-                        ceno_emul::aot::aot_native_diagnostic_boundary(
-                            "POST_FIRST_FULLTRACER_CHUNK_DIAGNOSTIC_STOP",
-                            "STOP",
-                            &format!(
-                                "executed_steps={ran},finish_chunks=0,take_sealed=0,on_range=0,gpu=0"
-                            ),
-                        );
-                        panic!(
-                            "CENO_AOT_NATIVE_DIAGNOSTIC_ONLY: POST_FIRST_FULLTRACER_CHUNK_DIAGNOSTIC_STOP"
-                        );
-                    }
-                        #[cfg(not(all(
-                            feature = "aot-x86_64",
-                            target_arch = "x86_64",
-                            target_os = "linux"
-                        )))]
-                        let ran = {
-                            for _ in 0..max_steps {
-                                self.vm
-                                    .next_step_record()
-                                    .unwrap_or_else(|err| panic!("compact replay failed: {err:?}"));
-                            }
-                            max_steps
-                        };
-                        assert_eq!(ran, max_steps);
-                        executed += ran;
-                        self.vm.tracer_mut().finish_chunks();
-                        for chunk in self.vm.tracer_mut().take_sealed_chunks() {
+                    )))]
+                    let ran = {
+                        for _ in 0..max_steps {
+                            self.vm
+                                .next_step_record()
+                                .unwrap_or_else(|err| panic!("compact replay failed: {err:?}"));
+                        }
+                        max_steps
+                    };
+                    assert_eq!(ran, max_steps);
+                    executed += ran;
+                    self.vm.tracer_mut().finish_chunks();
+                    for chunk in self.vm.tracer_mut().take_sealed_chunks() {
                         let mut range = ceno_emul::GpuReplayTypedRange {
                             sequence: chunk.sequence,
                             typed: chunk.typed,
@@ -1415,10 +1354,12 @@ impl CompactStepReplay {
                                 streamed_family_totals.iter_mut().zip(&range.typed)
                             {
                                 *total = total
-                                    .checked_add(arena.as_ref().map_or(0, ceno_emul::GpuTypedSoaArena::len))
+                                    .checked_add(
+                                        arena.as_ref().map_or(0, ceno_emul::GpuTypedSoaArena::len),
+                                    )
                                     .expect("streamed family total overflow");
                             }
-                            streamed_fallback.extend(range.fallback.drain(..));
+                            streamed_fallback.append(&mut range.fallback);
                             if let Some(recycled) = on_range(range) {
                                 self.vm.tracer_mut().recycle_range(recycled);
                             }
@@ -2136,13 +2077,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
         Option<u64>,
     ),
 > {
-    let validation_manifest_config =
-        crate::validation_manifest::ValidationManifestConfig::from_env()
-            .unwrap_or_else(|err| panic!("invalid validation manifest configuration: {err}"));
-    #[cfg(feature = "gpu")]
-    let log_post_witgen_memory = crate::validation_manifest::post_witgen_memory_enabled(
-        validation_manifest_config.is_some(),
-    );
     let mut shard_ctx_builder = std::mem::take(&mut emul_result.shard_ctx_builder);
     assert!(
         emul_result.executed_steps > 0,
@@ -2151,13 +2085,12 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
     let mut instrunction_dispatch_ctx = system_config.inst_dispatch_builder.to_dispatch_ctx();
     let pi_template = emul_result.pi.clone();
-    let validate_compact_journal = std::env::var_os("CENO_COMPACT_JOURNAL_VALIDATE").is_some();
     #[cfg(feature = "gpu")]
     let use_compact_replay = compact_replay_selected(
         crate::instructions::gpu::config::gpu_witgen_enabled(),
         crate::instructions::gpu::config::is_debug_compare_enabled(),
         std::env::var_os("CENO_GPU_DISABLE_WITGEN_KINDS").is_some(),
-        std::env::var_os("CENO_GPU_LEGACY_REPLAY").is_some(),
+        false,
     );
     #[cfg(not(feature = "gpu"))]
     let use_compact_replay = false;
@@ -2215,12 +2148,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 }
             } {
             instrunction_dispatch_ctx.begin_shard();
-            }
-            let mut legacy_sink = LegacyWitnessRecordSink::default();
-            let mut compact_sink = CompactWitnessRecordSink::default();
-            if validate_compact_journal {
-                legacy_sink.begin_shard(shard_ctx_builder.cur_shard_id as u32);
-                compact_sink.begin_shard(shard_ctx_builder.cur_shard_id as u32);
             }
             let (mut shard_ctx, shard_summary) = if let Some(compact_iter) = compact_iter.as_mut() {
                 instrunction_dispatch_ctx.begin_compact_ingest();
@@ -2377,10 +2304,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         step_iter.as_mut().expect("legacy replay missing"),
                         |idx, record| {
                             instrunction_dispatch_ctx.ingest_step(idx, record);
-                            if validate_compact_journal {
-                                legacy_sink.record_step(record);
-                                compact_sink.record_step(record);
-                            }
                         },
                     )
                 }) {
@@ -2399,9 +2322,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         .take_syscall_witnesses(),
                 )
             };
-            if validate_compact_journal {
-                compact_sink.record_syscalls(&shard_ctx.syscall_witnesses);
-            }
             let shard_steps = if let Some(compact_shard) = current_compact_shard.as_ref() {
                 compact_shard.fallback_steps.as_slice()
             } else {
@@ -2448,25 +2368,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 - shard_ctx.shard_hint_addr_range.start)
                 / (WORD_SIZE as u32);
 
-            if validate_compact_journal {
-                let public_value_words = compact_public_value_words(&pi);
-                compact_sink.record_public_values(&public_value_words);
-                legacy_sink.finish_shard();
-                compact_sink.finish_shard();
-                compact_sink
-                    .journal
-                    .validate_against(&legacy_sink, &shard_ctx.syscall_witnesses)
-                    .unwrap_or_else(|err| panic!("compact journal validation failed: {err}"));
-                assert_eq!(compact_sink.journal.public_values, public_value_words);
-                tracing::info!(
-                    shard_id = shard_ctx.shard_id,
-                    steps = compact_sink.journal.summary.step_count,
-                    bytes = compact_sink.journal.byte_len(),
-                    bytes_per_step = compact_sink.journal.bytes_per_step(),
-                    packing_time = ?compact_sink.journal.packing_time,
-                    "compact witness journal validated"
-                );
-            }
 
             if let Some(target_shard_id) = target_shard_id {
                 if shard_ctx.shard_id < target_shard_id {
@@ -2478,6 +2379,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 }
             }
 
+            #[allow(unused_variables)]
             let debug_shard_ctx_for_gpu = {
                 #[cfg(feature = "gpu")]
                 if crate::instructions::gpu::config::is_debug_compare_enabled() {
@@ -2491,33 +2393,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 #[cfg(not(feature = "gpu"))]
                 { None::<ShardContext<'static>> }
             };
-
-            // Snapshot VRAM before witgen; compared post-witgen to assert
-            // witgen frees every byte it allocates. sync() first so queued
-            // frees from the previous shard's prove are counted.
-            #[cfg(feature = "gpu")]
-            let witgen_mem_baseline: Option<u64> = {
-                if crate::instructions::gpu::config::gpu_witgen_enabled() {
-                    match gkr_iop::gpu::get_cuda_hal() {
-                        Ok(hal) => {
-                            hal.inner
-                                .synchronize()
-                                .expect("cuda synchronize before witgen baseline");
-                            Some(
-                                hal.inner
-                                    .mem_pool()
-                                    .get_used_size()
-                                    .expect("cudaMemPoolGetAttribute UsedMemCurrent"),
-                            )
-                        }
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                }
-            };
-            #[cfg(not(feature = "gpu"))]
-            let witgen_mem_baseline: Option<u64> = None;
 
             info_span!("assign_opcode_circuits", shard_id = shard_ctx.shard_id)
                 .in_scope(|| {
@@ -2558,10 +2433,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // This batch-D2Hs accumulated EC records and addr_accessed into shard_ctx.
             #[cfg(feature = "gpu")]
             info_span!("flush_shared_ec").in_scope(|| {
-                crate::instructions::gpu::cache::flush_shared_ec_buffers_with_validation(
-                    &mut shard_ctx,
-                    validation_manifest_config.is_some(),
-                )
+                crate::instructions::gpu::cache::flush_shared_ec_buffers(&mut shard_ctx)
             }).unwrap();
 
             #[cfg(feature = "gpu")]
@@ -2631,7 +2503,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 zkvm_witness.finalize_lk_multiplicities();
             });
             #[cfg(feature = "gpu")]
-            zkvm_witness.log_combined_lk_digest();
 
             // E2E shard-level debug: run all opcode circuits on CPU as baseline,
             // compare aggregated results (all chips combined) against GPU.
@@ -2833,49 +2704,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 });
             }
 
-            #[cfg(feature = "gpu")]
-            if log_post_witgen_memory
-                && crate::instructions::gpu::config::gpu_witgen_enabled()
-            {
-                crate::validation_manifest::log_post_witgen_vram(
-                    shard_ctx.shard_id,
-                    validation_manifest_config.is_some(),
-                )
-                .unwrap_or_else(|err| panic!("post-witgen VRAM observation failed: {err}"));
-            }
-
-            if let Some(report) =
-                crate::validation_manifest::ValidationManifestConfig::with_enabled(
-                    validation_manifest_config.as_ref(),
-                    |config| {
-                        crate::validation_manifest::write_shard(
-                            config,
-                            shard_ctx.shard_id,
-                            &zkvm_witness,
-                            &shard_ctx,
-                            &pi,
-                        )
-                    },
-                )
-            {
-                let report = report.unwrap_or_else(|err| {
-                    panic!("validation manifest generation failed: {err}")
-                });
-                tracing::info!(
-                    target: "ceno_validation",
-                    schema_version = 1u32,
-                    shard_id = shard_ctx.shard_id,
-                    root_digest = %crate::validation_manifest::hex_digest(&report.root_digest),
-                    path = %report.path.display(),
-                    matrix_count = report.matrix_count,
-                    lookup_entry_count = report.lookup_entry_count,
-                    address_count = report.address_count,
-                    elapsed_millis = report.elapsed_millis,
-                    "validation manifest written"
-                );
-            }
-
-            Some((zkvm_witness, shard_ctx, pi, witgen_mem_baseline))
+            Some((zkvm_witness, shard_ctx, pi, None))
         })
     })
 }
@@ -3411,43 +3240,6 @@ fn count_final_mem_source(
             !addr_accessed.contains(&waddr) && shard_ctx.after_current_shard_cycle(record.cycle)
         })
         .count()
-}
-
-#[cfg(feature = "gpu")]
-fn assert_witgen_mem_released(shard_id: usize, baseline: u64) {
-    use gkr_iop::gpu::gpu_prover::*;
-
-    let hal = get_cuda_hal().expect("cuda hal must be available if baseline was taken");
-    hal.inner
-        .synchronize()
-        .expect("cuda synchronize before witgen post-check");
-    let post_release = hal
-        .inner
-        .mem_pool()
-        .get_used_size()
-        .expect("cudaMemPoolGetAttribute UsedMemCurrent");
-    let delta_bytes = post_release as i64 - baseline as i64;
-    assert!(
-        post_release <= baseline,
-        "shard {} GPU pool usage grew after release: baseline={} B ({} MB), \
-         post_release={} B ({} MB), delta={} B ({:.2} MB)",
-        shard_id,
-        baseline,
-        baseline >> 20,
-        post_release,
-        post_release >> 20,
-        delta_bytes,
-        delta_bytes as f64 / (1024.0 * 1024.0),
-    );
-    println!(
-        "[witgen pool restoration] shard {}: pool used bytes did not grow, \
-         baseline = {} bytes ({} MB), post_release = {} bytes, delta = {} bytes",
-        shard_id,
-        baseline,
-        baseline >> 20,
-        post_release,
-        delta_bytes,
-    );
 }
 
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -3999,7 +3791,7 @@ fn create_proofs_streaming<
                 };
 
             wit_iter
-                .map(|(zkvm_witness, shard_ctx, pi, _witgen_mem_baseline)| {
+                .map(|(zkvm_witness, shard_ctx, pi, _)| {
                     if is_mock_proving {
                         MockProver::assert_satisfied_full(
                             &shard_ctx,
@@ -4034,10 +3826,6 @@ fn create_proofs_streaming<
                     #[cfg(feature = "gpu")]
                     if crate::instructions::gpu::config::gpu_witgen_enabled() {
                         crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                    }
-                    #[cfg(feature = "gpu")]
-                    if let Some(baseline) = _witgen_mem_baseline {
-                        assert_witgen_mem_released(shard_ctx.shard_id, baseline);
                     }
                     tracing::info!("e2e proof stat: {}", zkvm_proof);
                     zkvm_proof
@@ -4204,8 +3992,8 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder};
     use ceno_emul::{
-        CENO_PLATFORM, Cycle, FullTracer, GpuReplayRangeDescriptor, GpuShardPreview, InsnKind,
-        NextCycleAccess, StepIndex, StepRecord, SyscallWitness,
+        CENO_PLATFORM, Cycle, FullTracer, GpuReplayRangeDescriptor, InsnKind, NextCycleAccess,
+        StepIndex, StepRecord, SyscallWitness,
     };
     use itertools::Itertools;
     use std::sync::Arc;
@@ -4217,7 +4005,7 @@ mod tests {
     fn exhausted_streamed_iterator_stops_before_shard_side_effects() {
         let shard_cycle_boundaries = Arc::new(vec![4, 8, 12]);
         let replay_shard_previews = Arc::new(vec![
-            GpuShardPreview {
+            ceno_emul::GpuShardPreview {
                 shard_id: 0,
                 cycle_start: 4,
                 cycle_end: 8,
@@ -4226,7 +4014,7 @@ mod tests {
                 hint_start: CENO_PLATFORM.hints.start,
                 hint_end: CENO_PLATFORM.hints.start,
             },
-            GpuShardPreview {
+            ceno_emul::GpuShardPreview {
                 shard_id: 1,
                 cycle_start: 8,
                 cycle_end: 12,

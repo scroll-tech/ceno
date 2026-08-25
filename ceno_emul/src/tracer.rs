@@ -4381,6 +4381,7 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     #[test]
     fn deferred_mmio_repair_advances_pending_preview_starts() {
         let mut tracer = PreflightTracer::new(

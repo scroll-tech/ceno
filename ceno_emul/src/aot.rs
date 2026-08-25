@@ -361,10 +361,8 @@ thread_local! {
     static LAST_AOT_ERROR: RefCell<Option<anyhow::Error>> = const { RefCell::new(None) };
 }
 
-static AOT_STARTUP_DIAGNOSTIC_ONLY: OnceLock<bool> = OnceLock::new();
 static AOT_DIAGNOSTIC_EPOCH: OnceLock<Instant> = OnceLock::new();
 static AOT_DIAGNOSTIC_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-static AOT_NATIVE_DIAGNOSTIC_ONLY: OnceLock<bool> = OnceLock::new();
 static AOT_NATIVE_DIAGNOSTIC_EPOCH: OnceLock<Instant> = OnceLock::new();
 static AOT_NATIVE_DIAGNOSTIC_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static AOT_NATIVE_CALLBACK_FALLBACK: AtomicU64 = AtomicU64::new(0);
@@ -373,26 +371,12 @@ static AOT_NATIVE_CALLBACK_PREFLIGHT: AtomicU64 = AtomicU64::new(0);
 static AOT_CACHE_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn aot_startup_diagnostic_only() -> bool {
-    *AOT_STARTUP_DIAGNOSTIC_ONLY.get_or_init(|| {
-        std::env::var_os("CENO_AOT_STARTUP_DIAGNOSTIC_ONLY").as_deref()
-            == Some(std::ffi::OsStr::new("1"))
-    })
+    false
 }
 
 /// Private, fail-closed diagnostic gate for bounded native execution.
 pub fn aot_native_diagnostic_only() -> bool {
-    *AOT_NATIVE_DIAGNOSTIC_ONLY.get_or_init(|| {
-        let native = std::env::var_os("CENO_AOT_NATIVE_DIAGNOSTIC_ONLY");
-        let startup = std::env::var_os("CENO_AOT_STARTUP_DIAGNOSTIC_ONLY");
-        match (native.as_deref(), startup.as_deref()) {
-            (None, _) => false,
-            (Some(value), None) if value == std::ffi::OsStr::new("1") => true,
-            (Some(_), None) => panic!("CENO_AOT_NATIVE_DIAGNOSTIC_ONLY must be exactly 1"),
-            (Some(_), Some(_)) => panic!(
-                "CENO_AOT_NATIVE_DIAGNOSTIC_ONLY and CENO_AOT_STARTUP_DIAGNOSTIC_ONLY are mutually exclusive"
-            ),
-        }
-    })
+    false
 }
 
 pub fn aot_native_diagnostic_boundary(phase: &str, state: &str, counts: &str) {
@@ -419,7 +403,7 @@ fn aot_native_diagnostic_marker(
     let mut stderr = std::io::stderr().lock();
     let _ = writeln!(
         stderr,
-        "CENO_AOT_NATIVE_DIAGNOSTIC seq={sequence} monotonic_ns={monotonic_ns} phase={phase} state={state} pid={} tid={:?} role={role} key={key} path={} bytes={bytes} counts={counts}",
+        "AOT_NATIVE_DIAGNOSTIC seq={sequence} monotonic_ns={monotonic_ns} phase={phase} state={state} pid={} tid={:?} role={role} key={key} path={} bytes={bytes} counts={counts}",
         std::process::id(),
         std::thread::current().id(),
         path.display(),
@@ -578,7 +562,7 @@ fn aot_diagnostic_marker(
     let mut stderr = std::io::stderr().lock();
     let _ = writeln!(
         stderr,
-        "CENO_AOT_STARTUP_DIAGNOSTIC seq={sequence} monotonic_ns={monotonic_ns} phase={phase} state={state} pid={} tid={:?} role={role} key={key} path={} bytes={bytes} counts={counts}",
+        "AOT_STARTUP_DIAGNOSTIC seq={sequence} monotonic_ns={monotonic_ns} phase={phase} state={state} pid={} tid={:?} role={role} key={key} path={} bytes={bytes} counts={counts}",
         std::process::id(),
         std::thread::current().id(),
         path.display(),
@@ -2052,7 +2036,7 @@ impl AotProgram {
                 diagnostic_bytes,
                 &format!("native_entries=0,executed_steps={executed_steps}"),
             );
-            bail!("CENO_AOT_STARTUP_DIAGNOSTIC_ONLY: PRE_NATIVE_DIAGNOSTIC_STOP");
+            bail!("AOT startup diagnostic stop");
         }
         AOT_NATIVE_CALLBACK_FALLBACK.store(0, Ordering::Relaxed);
         AOT_NATIVE_CALLBACK_TRACE.store(0, Ordering::Relaxed);
