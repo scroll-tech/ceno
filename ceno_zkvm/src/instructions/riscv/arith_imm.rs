@@ -11,7 +11,7 @@ pub use crate::instructions::riscv::arith_imm::arith_imm_circuit::AddiInstructio
 
 use super::RIVInstruction;
 
-impl<E> RIVInstruction for AddiInstruction<E> {
+impl<E: 'static> RIVInstruction for AddiInstruction<E> {
     const INST_KIND: ceno_emul::InsnKind = ceno_emul::InsnKind::ADDI;
 }
 

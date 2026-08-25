@@ -26,7 +26,7 @@ use crate::{
             ensure_shard_metadata_cached, read_shared_addr_count, read_shared_addr_range,
             with_cached_shard_meta,
         },
-        config::{is_gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu},
+        config::is_kind_disabled,
         dispatch::{GpuWitgenKind, compute_fetch_params, is_force_cpu_path},
         utils::{
             d2h::{gpu_compact_ec_d2h, gpu_lk_counters_to_multiplicity},
@@ -134,7 +134,7 @@ pub fn gpu_assign_keccak_instances<E: ExtensionField>(
     use gkr_iop::gpu::get_cuda_hal;
 
     // Guard: disabled or force-CPU
-    if !is_gpu_witgen_enabled() || is_force_cpu_path() {
+    if is_force_cpu_path() {
         return Ok(None);
     }
     // Check if keccak is disabled via CENO_GPU_DISABLE_WITGEN_KINDS=keccak
@@ -180,6 +180,7 @@ pub fn gpu_assign_keccak_instances<E: ExtensionField>(
     tracing::debug!("[GPU witgen] keccak with {} instances", num_instances);
 
     info_span!("gpu_witgen_keccak", n = num_instances).in_scope(|| {
+        let _nvtx = nvtx::range!("ceno.witness.keccak instances={}", num_instances);
         gpu_assign_keccak_inner::<E>(
             config,
             shard_ctx,
@@ -207,9 +208,6 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     let num_instances = step_indices.len();
     let num_rows = num_instances * 32; // 2^5 = 32 rows per instance
     let rotation = KECCAK_ROUNDS_CEIL_LOG2; // = 5
-    let materialize_initial_witness = should_materialize_witness_on_gpu()
-        || crate::instructions::gpu::config::is_debug_compare_enabled();
-
     // Step 1: Extract column map
     let col_map = info_span!("col_map").in_scope(|| extract_keccak_column_map(config, num_witin));
 
@@ -222,7 +220,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
 
     // Step 4: Ensure shard metadata cached
     info_span!("ensure_shard_meta")
-        .in_scope(|| ensure_shard_metadata_cached(hal, shard_ctx, steps.len()))?;
+        .in_scope(|| ensure_shard_metadata_cached(hal, shard_ctx, steps))?;
 
     // Snapshot shared addr count before kernel (for debug comparison)
     let addr_count_before = if crate::instructions::gpu::config::is_debug_compare_enabled() {
@@ -251,6 +249,11 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
                 })
         })
     })?;
+    // Keep all post-kernel ownership transfers, optional D2H, structural
+    // construction, debug checks, and buffer destruction under one direct
+    // child so the parent has complete accounting even when a CUDA allocator
+    // defers work until a Rust owner is dropped.
+    let _result_assembly_span = info_span!("keccak_result_assembly").entered();
 
     // D2H keccak's addr entries from shared buffer (delta since before kernel)
     let gpu_keccak_addrs = if crate::instructions::gpu::config::is_debug_compare_enabled() {
@@ -265,8 +268,12 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     };
 
     // Step 6: Collect LK multiplicity
-    let lk_multiplicity = info_span!("gpu_lk_d2h")
-        .in_scope(|| gpu_lk_counters_to_multiplicity(gpu_result.lk_counters))?;
+    let lk_multiplicity = if gpu_result.shard_lk_accumulated {
+        Multiplicity::default()
+    } else {
+        info_span!("gpu_lk_d2h")
+            .in_scope(|| gpu_lk_counters_to_multiplicity(gpu_result.lk_counters))?
+    };
 
     // Debug LK comparison is done in the unit test instead.
 
@@ -319,31 +326,39 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
 
     // Step 8: Keep witness on device only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_witin = if !materialize_initial_witness {
-        RowMajorMatrix::<E::BaseField>::empty()
-    } else if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !should_materialize_witness_on_gpu()
-    {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         let produced_rows = gpu_result.witness.num_rows;
         info_span!("transpose_d2h", rows = produced_rows, cols = num_witin).in_scope(|| {
-            let mut rmm_buffer = hal
-                .alloc_elems_on_device(produced_rows * num_witin, false, None)
-                .map_err(|e| {
-                    ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
-                })?;
-            matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
-                &hal.inner,
-                &mut rmm_buffer,
-                &gpu_result.witness.device_buffer,
-                produced_rows,
-                num_witin,
-            )
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU transpose failed: {e}").into()))?;
-
             let gpu_data: Vec<<ff_ext::BabyBearExt4 as ExtensionField>::BaseField> =
-                rmm_buffer.to_vec().map_err(|e| {
-                    ZKVMError::InvalidWitness(format!("GPU D2H copy failed: {e}").into())
-                })?;
+                match gpu_result.witness.layout {
+                    DeviceMatrixLayout::RowMajor => {
+                        gpu_result.witness.device_buffer.to_vec().map_err(|e| {
+                            ZKVMError::InvalidWitness(format!("GPU D2H copy failed: {e}").into())
+                        })?
+                    }
+                    DeviceMatrixLayout::ColMajor => {
+                        let mut rmm_buffer = hal
+                            .alloc_elems_on_device(produced_rows * num_witin, false, None)
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU alloc for transpose failed: {e}").into(),
+                                )
+                            })?;
+                        matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+                            &hal.inner,
+                            &mut rmm_buffer,
+                            &gpu_result.witness.device_buffer,
+                            produced_rows,
+                            num_witin,
+                        )
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(format!("GPU transpose failed: {e}").into())
+                        })?;
+                        rmm_buffer.to_vec().map_err(|e| {
+                            ZKVMError::InvalidWitness(format!("GPU D2H copy failed: {e}").into())
+                        })?
+                    }
+                };
 
             // Safety: BabyBear is the only supported GPU field, and E::BaseField must match
             let data: Vec<E::BaseField> = unsafe {
@@ -365,17 +380,14 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
             Ok::<_, ZKVMError>(rmm)
         })?
     } else {
-        let mut rmm = RowMajorMatrix::<E::BaseField>::new_by_rotation(
+        RowMajorMatrix::<E::BaseField>::new_by_rotation_device_backing(
             num_instances,
             rotation,
             num_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(
             gpu_result.witness.device_buffer,
-            DeviceMatrixLayout::ColMajor,
-        );
-        rmm
+            gpu_result.witness.layout,
+        )
     };
 
     // Step 9: Build structural witness on CPU with selector indices
@@ -491,7 +503,17 @@ mod tests {
 
     #[test]
     fn test_gpu_witgen_keccak_correctness() {
-        use crate::e2e::ShardContext;
+        use crate::{
+            e2e::ShardContext,
+            instructions::gpu::{
+                cache::release_all_shard_gpu_caches, dispatch::set_force_cpu_path,
+            },
+        };
+
+        assert!(
+            crate::instructions::gpu::config::is_debug_compare_enabled(),
+            "set CENO_GPU_DEBUG_COMPARE_WITGEN=1 to materialize the GPU oracle"
+        );
 
         let mut cs = ConstraintSystem::<E>::new(|| "test_keccak_gpu");
         let mut cb = CircuitBuilder::new(&mut cs);
@@ -501,138 +523,127 @@ mod tests {
         let num_witin = cb.cs.num_witin as usize;
         let num_structural_witin = cb.cs.num_structural_witin as usize;
 
-        // Get test data from emulator
+        // Exercise both sides of a warp, power-of-two padding, and the shard-0
+        // workload size. Each case uses fresh shard caches so shared counters
+        // and compact records cannot leak across oracle comparisons.
         let (step, _program, syscall_witnesses) = ceno_emul::test_utils::keccak_step();
-        let steps = vec![step];
-        let step_indices: Vec<usize> = vec![0];
+        for num_instances in [1, 31, 32, 33, 64, 4096] {
+            release_all_shard_gpu_caches();
+            {
+                let steps = vec![step; num_instances];
+                let step_indices: Vec<usize> = (0..num_instances).collect();
 
-        // --- CPU path (force CPU via thread-local flag) ---
-        use crate::instructions::gpu::dispatch::set_force_cpu_path;
-        set_force_cpu_path(true);
-        let mut shard_ctx = ShardContext::default();
-        shard_ctx.syscall_witnesses = std::sync::Arc::new(syscall_witnesses.clone());
-        let (cpu_rmms, _cpu_lkm) = KeccakInstruction::<E>::assign_instances(
-            &config,
-            &mut shard_ctx,
-            num_witin,
-            num_structural_witin,
-            &steps,
-            &step_indices,
-        )
-        .unwrap();
-        set_force_cpu_path(false);
-        let cpu_witness = &cpu_rmms[0];
-        let cpu_structural = &cpu_rmms[1];
+                set_force_cpu_path(true);
+                let mut shard_ctx = ShardContext::default();
+                shard_ctx.syscall_witnesses = std::sync::Arc::new(syscall_witnesses.clone());
+                let (cpu_rmms, cpu_lk) = KeccakInstruction::<E>::assign_instances(
+                    &config,
+                    &mut shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    &steps,
+                    &step_indices,
+                )
+                .unwrap();
+                set_force_cpu_path(false);
 
-        // --- GPU path (full pipeline via gpu_assign_keccak_instances) ---
-        use super::gpu_assign_keccak_instances;
-        let mut shard_ctx_gpu = ShardContext::default();
-        shard_ctx_gpu.syscall_witnesses = std::sync::Arc::new(syscall_witnesses);
-        let (gpu_rmms, gpu_lk) = gpu_assign_keccak_instances::<E>(
-            &config,
-            &mut shard_ctx_gpu,
-            num_witin,
-            num_structural_witin,
-            &steps,
-            &step_indices,
-        )
-        .unwrap()
-        .expect("GPU path should not return None");
-        let gpu_witness = &gpu_rmms[0];
-        let gpu_structural = &gpu_rmms[1];
+                let mut shard_ctx_gpu = ShardContext::default();
+                shard_ctx_gpu.syscall_witnesses = std::sync::Arc::new(syscall_witnesses.clone());
+                let (gpu_rmms, gpu_lk) = gpu_assign_keccak_instances::<E>(
+                    &config,
+                    &mut shard_ctx_gpu,
+                    num_witin,
+                    num_structural_witin,
+                    &steps,
+                    &step_indices,
+                )
+                .unwrap()
+                .expect("GPU path should not return None");
 
-        // --- Compare witness (raw_witin) ---
-        let gpu_data = gpu_witness.values();
-        let cpu_data = cpu_witness.values();
-        assert_eq!(gpu_data.len(), cpu_data.len(), "witness size mismatch");
+                let gpu_data = gpu_rmms[0].values();
+                let cpu_data = cpu_rmms[0].values();
+                assert_eq!(gpu_data.len(), cpu_data.len(), "witness size mismatch");
+                let col_map = extract_keccak_column_map(&config, num_witin);
+                let kbase = col_map.keccak_base_col as usize;
+                let mut mismatch_groups = std::collections::BTreeMap::new();
+                let mut first_mismatches = Vec::new();
+                let mismatches = gpu_data
+                    .iter()
+                    .zip(cpu_data)
+                    .enumerate()
+                    .filter(|(index, (gpu, cpu))| {
+                        if gpu == cpu {
+                            return false;
+                        }
+                        let row = index / num_witin;
+                        let col = index % num_witin;
+                        let offset = col.checked_sub(kbase);
+                        let stage = match offset {
+                            Some(0..=199) => "input8",
+                            Some(200..=359) => "c_aux",
+                            Some(360..=399) => "c_temp",
+                            Some(400..=439) => "c_rot",
+                            Some(440..=479) => "d",
+                            Some(480..=679) => "theta",
+                            Some(680..=871) => "rho_witness",
+                            Some(872..=1071) => "rhopi",
+                            Some(1072..=1271) => "nonlinear",
+                            Some(1272..=1279) => "chi00",
+                            Some(1280..=1479) => "iota",
+                            Some(1480..=1487) => "round_constant",
+                            Some(_) => "keccak_other",
+                            None => "metadata",
+                        };
+                        *mismatch_groups.entry((stage, row)).or_insert(0usize) += 1;
+                        if first_mismatches.len() < 32 {
+                            first_mismatches.push((row, col, offset, *gpu, *cpu));
+                        }
+                        true
+                    })
+                    .count();
 
-        let mut mismatches = 0;
-        for (i, (g, c)) in gpu_data.iter().zip(cpu_data.iter()).enumerate() {
-            if g != c {
-                if mismatches < 20 {
-                    let row = i / num_witin;
-                    let col = i % num_witin;
-                    eprintln!(
-                        "Witness mismatch row={}, col={}: GPU={:?}, CPU={:?}",
-                        row, col, g, c
-                    );
+                if num_instances == 1 && mismatches != 0 {
+                    eprintln!("Keccak first mismatches: {first_mismatches:?}");
+                    eprintln!("Keccak mismatch groups (stage,row): {mismatch_groups:?}");
                 }
-                mismatches += 1;
-            }
-        }
-        eprintln!(
-            "Keccak witness: {} mismatches out of {} cells",
-            mismatches,
-            gpu_data.len()
-        );
 
-        // --- Compare structural witness ---
-        let gpu_struct_data = gpu_structural.values();
-        let cpu_struct_data = cpu_structural.values();
-        assert_eq!(
-            gpu_struct_data.len(),
-            cpu_struct_data.len(),
-            "structural witness size mismatch"
-        );
+                let gpu_structural = gpu_rmms[1].values();
+                let cpu_structural = cpu_rmms[1].values();
+                assert_eq!(
+                    gpu_structural.len(),
+                    cpu_structural.len(),
+                    "structural witness size mismatch"
+                );
+                let structural_mismatches = gpu_structural
+                    .iter()
+                    .zip(cpu_structural)
+                    .filter(|(gpu, cpu)| gpu != cpu)
+                    .count();
 
-        let mut struct_mismatches = 0;
-        for (i, (g, c)) in gpu_struct_data
-            .iter()
-            .zip(cpu_struct_data.iter())
-            .enumerate()
-        {
-            if g != c {
-                if struct_mismatches < 20 {
-                    let row = i / num_structural_witin;
-                    let col = i % num_structural_witin;
-                    eprintln!(
-                        "Structural mismatch row={}, col={}: GPU={:?}, CPU={:?}",
-                        row, col, g, c
-                    );
-                }
-                struct_mismatches += 1;
-            }
-        }
-        eprintln!(
-            "Keccak structural: {} mismatches out of {} cells",
-            struct_mismatches,
-            gpu_struct_data.len()
-        );
-
-        // --- Compare LK multiplicity ---
-        let mut lk_mismatches = 0;
-        for (table_idx, (gpu_map, cpu_map)) in gpu_lk.0.iter().zip(_cpu_lkm.0.iter()).enumerate() {
-            for (&k, &gpu_v) in gpu_map.iter() {
-                let cpu_v = cpu_map.get(&k).copied().unwrap_or(0);
-                if gpu_v != cpu_v {
-                    if lk_mismatches < 30 {
-                        eprintln!(
-                            "LK mismatch table={}, key={:#x}: GPU={}, CPU={}",
-                            table_idx, k, gpu_v, cpu_v,
-                        );
+                let mut lk_mismatches = 0;
+                for (gpu_map, cpu_map) in gpu_lk.0.iter().zip(cpu_lk.0.iter()) {
+                    for (&key, &gpu_value) in gpu_map {
+                        lk_mismatches +=
+                            usize::from(cpu_map.get(&key).copied().unwrap_or(0) != gpu_value);
                     }
-                    lk_mismatches += 1;
-                }
-            }
-            for (&k, &cpu_v) in cpu_map.iter() {
-                if !gpu_map.contains_key(&k) {
-                    if lk_mismatches < 30 {
-                        eprintln!(
-                            "LK mismatch table={}, key={:#x}: GPU=missing, CPU={}",
-                            table_idx, k, cpu_v,
-                        );
+                    for key in cpu_map.keys() {
+                        lk_mismatches += usize::from(!gpu_map.contains_key(key));
                     }
-                    lk_mismatches += 1;
                 }
-            }
-        }
-        eprintln!("Keccak LK: {} mismatches", lk_mismatches);
 
-        assert_eq!(mismatches, 0, "GPU vs CPU witness mismatch");
-        assert_eq!(
-            struct_mismatches, 0,
-            "GPU vs CPU structural witness mismatch"
-        );
-        assert_eq!(lk_mismatches, 0, "GPU vs CPU LK multiplicity mismatch");
+                eprintln!(
+                    "Keccak instances={num_instances}: witness={mismatches}/{} structural={structural_mismatches}/{} lk={lk_mismatches}",
+                    gpu_data.len(),
+                    gpu_structural.len(),
+                );
+                assert_eq!(mismatches, 0, "GPU vs CPU witness mismatch");
+                assert_eq!(
+                    structural_mismatches, 0,
+                    "GPU vs CPU structural witness mismatch"
+                );
+                assert_eq!(lk_mismatches, 0, "GPU vs CPU LK multiplicity mismatch");
+            }
+            release_all_shard_gpu_caches();
+        }
     }
 }

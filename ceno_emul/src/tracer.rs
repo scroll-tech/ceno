@@ -16,8 +16,13 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use strum::EnumCount;
+use strum::{EnumCount, IntoEnumIterator};
 use tiny_keccak::{Hasher, Keccak};
+
+mod gpu_replay_tracer;
+pub use gpu_replay_tracer::{
+    GpuReplayChunk, GpuReplayFallbackRecord, GpuReplayStep, GpuReplayTracer, GpuReplayTracerConfig,
+};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -777,6 +782,14 @@ pub struct ShardPlanBuilder {
     cur_step_count: usize,
     max_step_shard: usize,
     shard_id: usize,
+    replay_range_capacity: usize,
+    replay_range_start: usize,
+    replay_range_len: usize,
+    replay_range_sequence: u32,
+    replay_family_counts: [usize; InsnKind::COUNT],
+    replay_fallback_count: usize,
+    replay_unsupported_count: usize,
+    replay_descriptors: Vec<crate::GpuReplayRangeDescriptor>,
     finalized: bool,
 }
 
@@ -811,8 +824,30 @@ impl ShardPlanBuilder {
             cur_step_count: 0,
             max_step_shard: 0,
             shard_id: 0,
+            replay_range_capacity: 256 * 1024,
+            replay_range_start: 0,
+            replay_range_len: 0,
+            replay_range_sequence: 0,
+            replay_family_counts: [0; InsnKind::COUNT],
+            replay_fallback_count: 0,
+            replay_unsupported_count: 0,
+            replay_descriptors: Vec::new(),
             finalized: false,
         }
+    }
+
+    pub fn set_replay_range_capacity(&mut self, capacity: usize) {
+        assert!(capacity > 0, "GPU replay range capacity must be nonzero");
+        assert_eq!(
+            self.replay_range_len, 0,
+            "GPU replay capacity cannot change after counting starts"
+        );
+        self.replay_range_capacity = capacity;
+    }
+
+    pub fn replay_descriptors(&self) -> &[crate::GpuReplayRangeDescriptor] {
+        assert!(self.finalized, "shard plan not finalized yet");
+        &self.replay_descriptors
     }
 
     pub fn current_shard_start_cycle(&self) -> Cycle {
@@ -842,6 +877,11 @@ impl ShardPlanBuilder {
     pub fn into_cycle_boundaries(self) -> Vec<Cycle> {
         assert!(self.finalized, "shard plan not finalized yet");
         self.shard_cycle_boundaries
+    }
+
+    pub fn into_replay_plan(self) -> (Vec<Cycle>, Vec<crate::GpuReplayRangeDescriptor>) {
+        assert!(self.finalized, "shard plan not finalized yet");
+        (self.shard_cycle_boundaries, self.replay_descriptors)
     }
 
     pub fn observe_step(&mut self, step_cycle: Cycle, step_cells: u64) {
@@ -884,6 +924,7 @@ impl ShardPlanBuilder {
             self.finish_current_shard(step_cycle);
             candidate = self.preview_modeled_chips(&chips);
         }
+        self.record_replay_step(kind);
         for chip in chips {
             self.num_instances[chip] = self.num_instances[chip].saturating_add(1);
         }
@@ -959,9 +1000,12 @@ impl ShardPlanBuilder {
             self.cur_cells > 0 || self.cur_cycle_in_shard > 0,
             "shard split before accumulating any steps"
         );
+        self.flush_replay_range();
         self.record_predicted_shard_cost();
         self.push_boundary(next_shard_cycle);
         self.shard_id += 1;
+        self.replay_range_start = 0;
+        self.replay_range_sequence = 0;
         self.current_shard_start_cycle = next_shard_cycle;
         self.cur_cells = 0;
         self.cur_trace_cells = 0;
@@ -973,6 +1017,142 @@ impl ShardPlanBuilder {
         self.cur_cycle_in_shard = 0;
         self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
         self.cur_step_count = 0;
+    }
+
+    fn record_replay_step(&mut self, kind: InsnKind) {
+        if kind == InsnKind::ECALL {
+            self.replay_fallback_count = self
+                .replay_fallback_count
+                .checked_add(1)
+                .expect("GPU replay fallback count overflow");
+        } else if crate::gpu_typed_kind_spec(kind).is_some() {
+            let count = &mut self.replay_family_counts[kind as usize];
+            *count = count
+                .checked_add(1)
+                .expect("GPU replay family count overflow");
+        } else {
+            self.replay_unsupported_count = self
+                .replay_unsupported_count
+                .checked_add(1)
+                .expect("GPU replay unsupported count overflow");
+        }
+        self.replay_range_len = self
+            .replay_range_len
+            .checked_add(1)
+            .expect("GPU replay range length overflow");
+        if self.replay_range_len == self.replay_range_capacity {
+            self.flush_replay_range();
+        }
+    }
+
+    fn record_admitted_native_block(
+        &mut self,
+        histogram: &[u32; InsnKind::COUNT],
+        ordered_kinds: &[InsnKind],
+    ) {
+        let block_len = histogram
+            .iter()
+            .try_fold(0usize, |sum, &count| sum.checked_add(count as usize))
+            .expect("AOT replay block length overflow");
+        assert_eq!(
+            block_len,
+            ordered_kinds.len(),
+            "AOT replay block histogram length mismatch"
+        );
+        let remaining = self.replay_range_capacity - self.replay_range_len;
+        if block_len > remaining {
+            for &kind in ordered_kinds {
+                self.record_replay_step(kind);
+            }
+            return;
+        }
+        for (index, &count) in histogram.iter().enumerate() {
+            let count = count as usize;
+            let kind = InsnKind::iter()
+                .nth(index)
+                .expect("AOT replay histogram kind index out of bounds");
+            if kind == InsnKind::ECALL {
+                self.replay_fallback_count = self
+                    .replay_fallback_count
+                    .checked_add(count)
+                    .expect("GPU replay fallback count overflow");
+            } else if crate::gpu_typed_kind_spec(kind).is_some() {
+                self.replay_family_counts[index] = self.replay_family_counts[index]
+                    .checked_add(count)
+                    .expect("GPU replay family count overflow");
+            } else {
+                self.replay_unsupported_count = self
+                    .replay_unsupported_count
+                    .checked_add(count)
+                    .expect("GPU replay unsupported count overflow");
+            }
+        }
+        self.replay_range_len = self
+            .replay_range_len
+            .checked_add(block_len)
+            .expect("GPU replay range length overflow");
+        if self.replay_range_len == self.replay_range_capacity {
+            self.flush_replay_range();
+        }
+    }
+
+    fn flush_replay_range(&mut self) {
+        if self.replay_range_len == 0 {
+            return;
+        }
+        let descriptor = crate::GpuReplayRangeDescriptor {
+            shard_id: u32::try_from(self.shard_id).expect("GPU replay shard id exceeds u32"),
+            sequence: self.replay_range_sequence,
+            range_start: u32::try_from(self.replay_range_start)
+                .expect("GPU replay range start exceeds u32"),
+            range_len: u32::try_from(self.replay_range_len)
+                .expect("GPU replay range length exceeds u32"),
+            family_counts: self.replay_family_counts,
+            fallback_count: self.replay_fallback_count,
+            unsupported_count: self.replay_unsupported_count,
+        };
+        assert_eq!(
+            descriptor.checked_total(),
+            Some(self.replay_range_len),
+            "GPU replay descriptor count mismatch"
+        );
+        self.replay_descriptors.push(descriptor);
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        if crate::aot::aot_native_diagnostic_only() && self.replay_descriptors.len() == 1 {
+            let descriptor = &self.replay_descriptors[0];
+            crate::aot::aot_native_diagnostic_boundary(
+                "FIRST_REPLAY_DESCRIPTOR",
+                "FLUSHED",
+                &format!(
+                    "vector_len={},vector_ptr={:p},first_ptr={:p},shard={},sequence={},range_start={},range_len={},checked_total={:?},auipc_index={},auipc_count={},fallback={},unsupported={},family_counts={:?}",
+                    self.replay_descriptors.len(),
+                    self.replay_descriptors.as_ptr(),
+                    descriptor,
+                    descriptor.shard_id,
+                    descriptor.sequence,
+                    descriptor.range_start,
+                    descriptor.range_len,
+                    descriptor.checked_total(),
+                    InsnKind::AUIPC as usize,
+                    descriptor.family_counts[InsnKind::AUIPC as usize],
+                    descriptor.fallback_count,
+                    descriptor.unsupported_count,
+                    descriptor.family_counts,
+                ),
+            );
+        }
+        self.replay_range_start = self
+            .replay_range_start
+            .checked_add(self.replay_range_len)
+            .expect("GPU replay range start overflow");
+        self.replay_range_len = 0;
+        self.replay_range_sequence = self
+            .replay_range_sequence
+            .checked_add(1)
+            .expect("GPU replay range sequence overflow");
+        self.replay_family_counts.fill(0);
+        self.replay_fallback_count = 0;
+        self.replay_unsupported_count = 0;
     }
 
     fn add_ecall_step(&mut self, ecall_code: Word, base_cells: u64) {
@@ -1104,6 +1284,7 @@ impl ShardPlanBuilder {
             !self.finalized,
             "shard plan cannot be finalized multiple times"
         );
+        self.flush_replay_range();
         self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
         self.record_predicted_shard_cost();
         self.cur_step_count = 0;
@@ -1449,6 +1630,29 @@ impl StepRecord {
         self.syscall_index != Self::NO_SYSCALL
     }
 
+    /// Stable association used by compact witness journals.
+    pub fn syscall_index(&self) -> Option<u32> {
+        (self.syscall_index != Self::NO_SYSCALL).then_some(self.syscall_index)
+    }
+
+    pub fn remap_syscall_index(
+        &mut self,
+        global_base: u32,
+        shard_syscall_count: usize,
+    ) -> Result<(), &'static str> {
+        let Some(index) = self.syscall_index() else {
+            return Ok(());
+        };
+        let local = index
+            .checked_sub(global_base)
+            .ok_or("syscall witness index precedes shard store")?;
+        if local as usize >= shard_syscall_count {
+            return Err("syscall witness index exceeds shard store");
+        }
+        self.syscall_index = local;
+        Ok(())
+    }
+
     /// Look up the syscall witness from a separate store.
     /// The store is typically obtained from `FullTracer::syscall_witnesses()`.
     pub fn syscall<'a>(&self, store: &'a [SyscallWitness]) -> Option<&'a SyscallWitness> {
@@ -1502,6 +1706,12 @@ pub struct FullTracer {
     next_access_cursor: usize,
 }
 
+/// Configuration for the compact, chunked witness replay producer.
+///
+/// This tracer is intentionally internal to replay.  It does not replace
+/// [`FullTracer`] as the CPU/debug reference and it does not expose a new
+/// serialized journal format.
+#[derive(Clone, Copy, Debug)]
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) struct FullTracerNativeTraceState {
     pub records: *mut StepRecord,
@@ -1962,6 +2172,11 @@ pub struct PreflightTracer {
     register_reads_tracked: u8,
     planner: Option<ShardPlanBuilder>,
     current_shard_start_cycle: Cycle,
+    replay_shard_previews: Vec<crate::GpuShardPreview>,
+    preview_heap_start: ByteAddr,
+    preview_hint_start: ByteAddr,
+    platform_heap_start: ByteAddr,
+    platform_hint_start: ByteAddr,
     defer_mmio_bounds: bool,
     config: PreflightTracerConfig,
 }
@@ -2034,6 +2249,11 @@ pub(crate) struct PreflightNativeTraceState {
     pub planner_max_cycle_per_shard: Cycle,
     pub planner_num_instances: *mut u64,
     pub planner_num_chips: usize,
+    pub replay_range_len: *mut usize,
+    pub replay_family_counts: *mut usize,
+    pub replay_fallback_count: *mut usize,
+    pub replay_unsupported_count: *mut usize,
+    pub replay_range_capacity: usize,
 }
 
 #[derive(Clone)]
@@ -2042,6 +2262,7 @@ pub struct PreflightTracerConfig {
     max_cell_per_shard: u64,
     max_cycle_per_shard: Cycle,
     step_cell_extractor: Option<Arc<dyn StepCellExtractor>>,
+    replay_range_capacity: usize,
 }
 
 impl fmt::Debug for PreflightTracer {
@@ -2069,6 +2290,7 @@ impl fmt::Debug for PreflightTracerConfig {
             .field("max_cell_per_shard", &self.max_cell_per_shard)
             .field("max_cycle_per_shard", &self.max_cycle_per_shard)
             .field("step_cell_extractor", &self.step_cell_extractor.is_some())
+            .field("replay_range_capacity", &self.replay_range_capacity)
             .finish()
     }
 }
@@ -2084,6 +2306,7 @@ impl PreflightTracerConfig {
             max_cell_per_shard,
             max_cycle_per_shard,
             step_cell_extractor: None,
+            replay_range_capacity: 256 * 1024,
         }
     }
 
@@ -2104,6 +2327,12 @@ impl PreflightTracerConfig {
         self
     }
 
+    pub fn with_replay_range_capacity(mut self, capacity: usize) -> Self {
+        assert!(capacity > 0, "GPU replay range capacity must be nonzero");
+        self.replay_range_capacity = capacity;
+        self
+    }
+
     pub fn step_cell_extractor(&self) -> Option<Arc<dyn StepCellExtractor>> {
         self.step_cell_extractor.clone()
     }
@@ -2116,6 +2345,7 @@ impl Default for PreflightTracerConfig {
             max_cell_per_shard: u64::MAX,
             max_cycle_per_shard: Cycle::MAX,
             step_cell_extractor: None,
+            replay_range_capacity: 256 * 1024,
         }
     }
 }
@@ -2151,6 +2381,12 @@ impl PreflightTracer {
             .step_cell_extractor
             .as_ref()
             .and_then(|extractor| extractor.shard_cost_model());
+        let mut planner = ShardPlanBuilder::new_with_cost_model(
+            max_cell_per_shard,
+            planner_cycle_limit,
+            cost_model,
+        );
+        planner.set_replay_range_capacity(config.replay_range_capacity);
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             pc: Default::default(),
@@ -2164,12 +2400,13 @@ impl PreflightTracer {
             next_access_growth_bytes: 0,
             next_access_growth_time: Duration::ZERO,
             register_reads_tracked: 0,
-            planner: Some(ShardPlanBuilder::new_with_cost_model(
-                max_cell_per_shard,
-                planner_cycle_limit,
-                cost_model,
-            )),
+            planner: Some(planner),
             current_shard_start_cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
+            replay_shard_previews: Vec::new(),
+            preview_heap_start: ByteAddr::from(platform.heap.start),
+            preview_hint_start: ByteAddr::from(platform.hints.start),
+            platform_heap_start: ByteAddr::from(platform.heap.start),
+            platform_hint_start: ByteAddr::from(platform.hints.start),
             defer_mmio_bounds: false,
             config,
         };
@@ -2177,7 +2414,20 @@ impl PreflightTracer {
         tracer
     }
 
-    pub fn into_shard_plan(self) -> (ShardPlanBuilder, NextCycleAccess) {
+    pub fn into_shard_plan(
+        mut self,
+    ) -> (
+        ShardPlanBuilder,
+        NextCycleAccess,
+        Vec<crate::GpuShardPreview>,
+    ) {
+        if self
+            .planner
+            .as_ref()
+            .is_some_and(|planner| self.replay_shard_previews.len() <= planner.shard_id)
+        {
+            self.capture_shard_preview(self.cycle);
+        }
         let Some(mut planner) = self.planner else {
             panic!("shard planner missing")
         };
@@ -2187,7 +2437,32 @@ impl PreflightTracer {
         (
             planner,
             NextAccessTape::from_unsorted(self.next_access_events),
+            self.replay_shard_previews,
         )
+    }
+
+    fn mmio_region_end(&self, start: ByteAddr) -> ByteAddr {
+        self.mmio_min_max_access
+            .as_ref()
+            .and_then(|regions| regions.get(&start.waddr()))
+            .map_or(start, |(_, _, _, max)| max.baddr())
+    }
+
+    fn capture_shard_preview(&mut self, cycle_end: Cycle) {
+        let heap_end = self.mmio_region_end(self.platform_heap_start);
+        let hint_end = self.mmio_region_end(self.platform_hint_start);
+        self.replay_shard_previews.push(crate::GpuShardPreview {
+            shard_id: u32::try_from(self.replay_shard_previews.len())
+                .expect("GPU preview shard id exceeds u32"),
+            cycle_start: self.current_shard_start_cycle,
+            cycle_end,
+            heap_start: self.preview_heap_start.0,
+            heap_end: heap_end.0,
+            hint_start: self.preview_hint_start.0,
+            hint_end: hint_end.0,
+        });
+        self.preview_heap_start = heap_end;
+        self.preview_hint_start = hint_end;
     }
 
     #[cfg_attr(
@@ -2240,6 +2515,11 @@ impl PreflightTracer {
             planner_max_cycle_per_shard: planner.max_cycle_per_shard,
             planner_num_instances: planner.num_instances.as_mut_ptr(),
             planner_num_chips,
+            replay_range_len: &mut planner.replay_range_len,
+            replay_family_counts: planner.replay_family_counts.as_mut_ptr(),
+            replay_fallback_count: &mut planner.replay_fallback_count,
+            replay_unsupported_count: &mut planner.replay_unsupported_count,
+            replay_range_capacity: planner.replay_range_capacity,
         }
     }
 
@@ -2267,25 +2547,32 @@ impl PreflightTracer {
 
     #[inline(always)]
     fn observe_current_step(&mut self, ecall_code: Option<Word>) {
+        let mut split = false;
+        let mut next_start = self.current_shard_start_cycle;
         if let Some(planner) = self.planner.as_mut() {
+            let old_shard = planner.shard_id;
             if planner.cost_model.is_some() {
                 planner.observe_modeled_step(self.cycle, self.last_kind, ecall_code);
-                self.current_shard_start_cycle = planner.current_shard_start_cycle();
-                return;
-            }
-            let step_cells = self
-                .config
-                .step_cell_extractor
-                .as_ref()
-                .map(|extractor| extractor.cells_for_kind(self.last_kind, ecall_code))
-                .unwrap_or(0);
-            if let Some(ecall_code) = ecall_code {
-                planner.observe_ecall_step(self.cycle, ecall_code, step_cells);
             } else {
-                planner.observe_step(self.cycle, step_cells);
+                let step_cells = self
+                    .config
+                    .step_cell_extractor
+                    .as_ref()
+                    .map(|extractor| extractor.cells_for_kind(self.last_kind, ecall_code))
+                    .unwrap_or(0);
+                if let Some(ecall_code) = ecall_code {
+                    planner.observe_ecall_step(self.cycle, ecall_code, step_cells);
+                } else {
+                    planner.observe_step(self.cycle, step_cells);
+                }
             }
-            self.current_shard_start_cycle = planner.current_shard_start_cycle();
+            split = planner.shard_id != old_shard;
+            next_start = planner.current_shard_start_cycle();
         }
+        if split {
+            self.capture_shard_preview(self.cycle);
+        }
+        self.current_shard_start_cycle = next_start;
     }
 
     #[cfg_attr(
@@ -2345,6 +2632,46 @@ impl PreflightTracer {
         }
         for ((_, region), bounds) in regions.iter_mut().zip(bounds) {
             *region = bounds;
+        }
+
+        // Native production preflight captures shard boundaries while MMIO
+        // bound writes are deferred.  Reconstruct each monotonic shard-local
+        // heap/hint maximum from the same authoritative first-touch events
+        // used above, keyed by the cycle at which the address was first used.
+        let heap_region = regions
+            .get(&self.platform_heap_start.waddr())
+            .map(|&(start, end, _, _)| (start, end));
+        let hint_region = regions
+            .get(&self.platform_hint_start.waddr())
+            .map(|&(start, end, _, _)| (start, end));
+        if let (Some((heap_start, heap_limit)), Some((hint_start, hint_limit))) =
+            (heap_region, hint_region)
+        {
+            let region_end_at = |start: WordAddr, limit: WordAddr, cycle_end: Cycle| {
+                self.next_access_events
+                    .iter()
+                    .filter(|event| {
+                        event.source_cycle == 0
+                            && event.target_cycle < cycle_end
+                            && event.address >= start
+                            && event.address < limit
+                    })
+                    .fold(start, |end, event| end.max(event.address + 1usize))
+                    .baddr()
+                    .0
+            };
+            let mut previous_heap_end = heap_start.baddr().0;
+            let mut previous_hint_end = hint_start.baddr().0;
+            for preview in &mut self.replay_shard_previews {
+                preview.heap_start = previous_heap_end;
+                preview.heap_end = region_end_at(heap_start, heap_limit, preview.cycle_end);
+                preview.hint_start = previous_hint_end;
+                preview.hint_end = region_end_at(hint_start, hint_limit, preview.cycle_end);
+                previous_heap_end = preview.heap_end;
+                previous_hint_end = preview.hint_end;
+            }
+            self.preview_heap_start = ByteAddr(previous_heap_end);
+            self.preview_hint_start = ByteAddr(previous_hint_end);
         }
     }
 
@@ -2447,12 +2774,31 @@ impl PreflightTracer {
         not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
         allow(dead_code)
     )]
+    pub(crate) fn record_admitted_native_block(
+        &mut self,
+        histogram: &[u32; InsnKind::COUNT],
+        ordered_kinds: &[InsnKind],
+    ) {
+        self.planner
+            .as_mut()
+            .expect("shard planner missing")
+            .record_admitted_native_block(histogram, ordered_kinds);
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn record_native_shard_split(&mut self) {
+        self.capture_shard_preview(self.cycle);
         let planner = self.planner.as_mut().expect("shard planner missing");
         let next_shard_cycle = self.cycle;
+        planner.flush_replay_range();
         planner.record_predicted_shard_cost();
         planner.push_boundary(next_shard_cycle);
         planner.shard_id += 1;
+        planner.replay_range_start = 0;
+        planner.replay_range_sequence = 0;
         planner.current_shard_start_cycle = next_shard_cycle;
         planner.max_step_shard = planner.max_step_shard.max(planner.cur_step_count);
         planner.cur_cells = 0;
@@ -2471,8 +2817,10 @@ impl PreflightTracer {
             .mmio_min_max_access
             .as_mut()
             .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
-            && addr < *end_addr
         {
+            if addr >= *end_addr {
+                return;
+            }
             // skip if the target address is not within the range tracked by this MMIO region
             // this condition ensures the address is within the MMIO region's end address
             if addr >= *max_addr {
@@ -2612,7 +2960,7 @@ impl Tracer for PreflightTracer {
         for op in effects.iter_mem_ops_mut() {
             self.record_memory_access(op.addr, op.previous_cycle);
         }
-        let _ = effects.finalize(self);
+        effects.finalize(self);
     }
 
     #[inline(always)]
@@ -3085,6 +3433,162 @@ mod tests {
         );
     }
 
+    #[test]
+    fn replay_keeps_exactly_two_warmed_nonaliasing_owners() {
+        fn fingerprint(chunk: &GpuReplayChunk) -> ((usize, usize), (usize, usize), (usize, usize)) {
+            let add = chunk.typed[InsnKind::ADD as usize].as_ref().unwrap();
+            let add_ptr = if add.is_compact() {
+                add.payload_bytes().as_ptr() as usize
+            } else {
+                add.fields()[0].as_ptr() as usize
+            };
+            (
+                (chunk.typed.as_ptr() as usize, chunk.typed.capacity()),
+                (add_ptr, add.capacity()),
+                (chunk.fallback.as_ptr() as usize, chunk.fallback.capacity()),
+            )
+        }
+
+        let mut counts = [0; InsnKind::COUNT];
+        counts[InsnKind::ADD as usize] = 2;
+        let descriptors = Arc::new(vec![
+            crate::GpuReplayRangeDescriptor {
+                shard_id: 0,
+                sequence: 0,
+                range_start: 0,
+                range_len: 3,
+                family_counts: counts,
+                fallback_count: 1,
+                unsupported_count: 0,
+            },
+            crate::GpuReplayRangeDescriptor {
+                shard_id: 0,
+                sequence: 1,
+                range_start: 3,
+                range_len: 3,
+                family_counts: counts,
+                fallback_count: 1,
+                unsupported_count: 0,
+            },
+        ]);
+        let mut tracer = GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig::default());
+        tracer.install_range_descriptors(descriptors);
+
+        let first = fingerprint(&tracer.current);
+        let second = fingerprint(tracer.recyclable.as_ref().unwrap());
+        assert_eq!(
+            (first.0.1, first.1.1, first.2.1),
+            (second.0.1, second.1.1, second.2.1)
+        );
+        assert_ne!(first.0.0, second.0.0);
+        assert_ne!(first.1.0, second.1.0);
+        assert_ne!(first.2.0, second.2.0);
+
+        let first_owner = std::mem::replace(
+            &mut tracer.current,
+            GpuReplayChunk::empty(0, FullTracer::SUBCYCLES_PER_INSN),
+        );
+        let second_owner = tracer.recyclable.take().unwrap();
+        assert!(tracer.current.typed.is_empty());
+        assert!(tracer.recyclable.is_none());
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: first_owner.sequence,
+            typed: first_owner.typed,
+            fallback: first_owner.fallback,
+        });
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: second_owner.sequence,
+            typed: second_owner.typed,
+            fallback: second_owner.fallback,
+        });
+
+        assert_eq!(fingerprint(&tracer.current), first);
+        assert_eq!(fingerprint(tracer.recyclable.as_ref().unwrap()), second);
+    }
+
+    #[test]
+    fn cross_shard_recycle_stays_empty_until_start_shard() {
+        fn fingerprint(chunk: &GpuReplayChunk) -> ((usize, usize), (usize, usize), (usize, usize)) {
+            let add = chunk.typed[InsnKind::ADD as usize].as_ref().unwrap();
+            let add_ptr = if add.is_compact() {
+                add.payload_bytes().as_ptr() as usize
+            } else {
+                add.fields()[0].as_ptr() as usize
+            };
+            (
+                (chunk.typed.as_ptr() as usize, chunk.typed.capacity()),
+                (add_ptr, add.capacity()),
+                (chunk.fallback.as_ptr() as usize, chunk.fallback.capacity()),
+            )
+        }
+
+        let mut counts = [0; InsnKind::COUNT];
+        counts[InsnKind::ADD as usize] = 2;
+        let descriptors = Arc::new(vec![
+            crate::GpuReplayRangeDescriptor {
+                shard_id: 0,
+                sequence: 0,
+                range_start: 0,
+                range_len: 2,
+                family_counts: counts,
+                fallback_count: 0,
+                unsupported_count: 0,
+            },
+            crate::GpuReplayRangeDescriptor {
+                shard_id: 1,
+                sequence: 0,
+                range_start: 17,
+                range_len: 2,
+                family_counts: counts,
+                fallback_count: 0,
+                unsupported_count: 0,
+            },
+        ]);
+        let mut tracer = GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig::default());
+        tracer.install_range_descriptors(descriptors);
+
+        let first_owner = std::mem::replace(
+            &mut tracer.current,
+            GpuReplayChunk::empty(0, FullTracer::SUBCYCLES_PER_INSN),
+        );
+        let second_owner = tracer.recyclable.take().unwrap();
+        let first = fingerprint(&first_owner);
+        let second = fingerprint(&second_owner);
+        tracer.next_range_descriptor = 1;
+
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: first_owner.sequence,
+            typed: first_owner.typed,
+            fallback: first_owner.fallback,
+        });
+        let add = tracer.current.typed[InsnKind::ADD as usize]
+            .as_ref()
+            .unwrap();
+        assert!(tracer.current.is_empty());
+        assert_ne!(
+            add.range_start(),
+            17,
+            "recycle initialized the next shard descriptor before start_shard"
+        );
+
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: second_owner.sequence,
+            typed: second_owner.typed,
+            fallback: second_owner.fallback,
+        });
+        tracer.start_shard();
+
+        assert_eq!(
+            tracer.current.typed[InsnKind::ADD as usize]
+                .as_ref()
+                .unwrap()
+                .range_start(),
+            17
+        );
+        assert_eq!(fingerprint(&tracer.current), first);
+        assert_eq!(fingerprint(tracer.recyclable.as_ref().unwrap()), second);
+    }
+
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     #[test]
     fn deferred_mmio_bounds_rebuild_from_first_access_events() {
@@ -3125,6 +3629,35 @@ mod tests {
             tracer.probe_min_max_address_by_start_addr(hints_start),
             Some((hints_start + 5usize, hints_start + 6usize))
         );
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    #[test]
+    fn deferred_mmio_repair_advances_pending_preview_starts() {
+        let mut tracer = PreflightTracer::new(
+            &CENO_PLATFORM,
+            PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX),
+        );
+        let heap_start = ByteAddr(CENO_PLATFORM.heap.start).waddr();
+        let hint_start = ByteAddr(CENO_PLATFORM.hints.start).waddr();
+
+        tracer.begin_deferred_mmio_bounds();
+        tracer.push_next_access_event(NextAccessEvent::new(0, 8, heap_start + 3usize));
+        tracer.push_next_access_event(NextAccessEvent::new(0, 8, hint_start + 2usize));
+        tracer.capture_shard_preview(12);
+        tracer.current_shard_start_cycle = 12;
+        tracer.push_next_access_event(NextAccessEvent::new(0, 16, heap_start + 9usize));
+        tracer.push_next_access_event(NextAccessEvent::new(0, 16, hint_start + 5usize));
+
+        tracer.finish_deferred_mmio_bounds();
+        tracer.capture_shard_preview(20);
+
+        let first = tracer.replay_shard_previews[0];
+        let second = tracer.replay_shard_previews[1];
+        assert_eq!(second.heap_start, first.heap_end);
+        assert_eq!(second.hint_start, first.hint_end);
+        assert_eq!(second.heap_end, (heap_start + 10usize).baddr().0);
+        assert_eq!(second.hint_end, (hint_start + 6usize).baddr().0);
     }
 
     #[test]
@@ -3169,6 +3702,32 @@ mod tests {
 
         // Sub-type sizes
         assert_eq!(mem::size_of::<Instruction>(), 12, "Instruction size");
+        assert_eq!(
+            mem::offset_of!(Instruction, kind),
+            0,
+            "Instruction.kind offset"
+        );
+        assert_eq!(
+            mem::offset_of!(Instruction, rs1),
+            1,
+            "Instruction.rs1 offset"
+        );
+        assert_eq!(
+            mem::offset_of!(Instruction, rs2),
+            2,
+            "Instruction.rs2 offset"
+        );
+        assert_eq!(mem::offset_of!(Instruction, rd), 3, "Instruction.rd offset");
+        assert_eq!(
+            mem::offset_of!(Instruction, imm),
+            4,
+            "Instruction.imm offset"
+        );
+        assert_eq!(
+            mem::offset_of!(Instruction, raw),
+            8,
+            "Instruction.raw offset"
+        );
         assert_eq!(mem::size_of::<ReadOp>(), 16, "ReadOp size");
         assert_eq!(mem::size_of::<WriteOp>(), 24, "WriteOp size");
         assert_eq!(

@@ -74,6 +74,7 @@ pub fn extract_shard_ram_column_map<E: ExtensionField>(
         x[i] = config.x[i].id as u32;
         y[i] = config.y[i].id as u32;
     }
+    let y6_lo_bytes = std::array::from_fn(|i| config.y6_lo_bytes[i].id as u32);
 
     // Poseidon2 columns: p3_cols are contiguous, followed by post_linear_layer_cols
     let poseidon2_base_col = config.perm_config.p3_cols[0].id as u32;
@@ -112,6 +113,7 @@ pub fn extract_shard_ram_column_map<E: ExtensionField>(
         is_global_write,
         x,
         y,
+        y6_lo_bytes,
         slope: [0; 7],
         poseidon2_base_col,
         num_poseidon2_cols,
@@ -144,6 +146,7 @@ pub fn extract_shard_ram_ec_tree_column_map<E: ExtensionField>(
         is_global_write: 0,
         x,
         y,
+        y6_lo_bytes: [0; 4],
         slope,
         poseidon2_base_col: 0,
         num_poseidon2_cols: 0,
@@ -159,6 +162,36 @@ pub fn extract_shard_ram_ec_tree_column_map<E: ExtensionField>(
 use ceno_gpu::common::witgen::types::GpuShardRamRecord;
 use tracing::info_span;
 
+const LEGACY_SEGMENT_SHIFT: u32 = 62;
+const LEGACY_BUCKET_LIMIT: usize = 1usize << 30;
+const LEGACY_FIRST_CONTINUATION_SEGMENT: u64 = 1;
+const LEGACY_CURRENT_CONTINUATION_SEGMENT: u64 = 2;
+
+fn legacy_btree_ordinal(
+    is_write: bool,
+    bucket: usize,
+    addr: ceno_emul::WordAddr,
+) -> Result<u64, ZKVMError> {
+    if bucket >= LEGACY_BUCKET_LIMIT {
+        return Err(ZKVMError::InvalidWitness(
+            format!("legacy ShardRAM bucket {bucket} exceeds 30 bits").into(),
+        ));
+    }
+    let segment = if is_write { 0 } else { 3u64 };
+    Ok((segment << LEGACY_SEGMENT_SHIFT) | ((bucket as u64) << 32) | u64::from(addr.0))
+}
+
+fn legacy_continuation_ordinal(segment: u64, index: usize) -> Result<u64, ZKVMError> {
+    let index = u64::try_from(index)
+        .map_err(|_| ZKVMError::InvalidWitness("continuation index exceeds u64".into()))?;
+    if index >= (1u64 << LEGACY_SEGMENT_SHIFT) {
+        return Err(ZKVMError::InvalidWitness(
+            "continuation index exceeds ordinal segment".into(),
+        ));
+    }
+    Ok((segment << LEGACY_SEGMENT_SHIFT) | index)
+}
+
 /// Convert a ShardRamRecord to GpuShardRamRecord (metadata only, EC fields zeroed).
 pub(crate) fn shard_ram_record_to_gpu(rec: &crate::tables::ShardRamRecord) -> GpuShardRamRecord {
     GpuShardRamRecord {
@@ -170,6 +203,7 @@ pub(crate) fn shard_ram_record_to_gpu(rec: &crate::tables::ShardRamRecord) -> Gp
         },
         value: rec.value,
         _pad0: 0,
+        ordinal: 0,
         shard: rec.shard,
         local_clk: rec.local_clk,
         global_clk: rec.global_clk,
@@ -180,13 +214,23 @@ pub(crate) fn shard_ram_record_to_gpu(rec: &crate::tables::ShardRamRecord) -> Gp
     }
 }
 
+fn shard_ram_record_to_gpu_with_ordinal(
+    rec: &crate::tables::ShardRamRecord,
+    ordinal: u64,
+) -> GpuShardRamRecord {
+    GpuShardRamRecord {
+        ordinal,
+        ..shard_ram_record_to_gpu(rec)
+    }
+}
+
 /// Batch compute EC points on GPU, results stay on device.
 ///
 /// Used by the full GPU pipeline in `structs.rs` where records feed directly
-/// into `merge_and_partition_records` on device without D2H.
+/// into `merge_and_finalize_records` on device without D2H.
 pub fn gpu_batch_continuation_ec_on_device(
-    write_records: &[(crate::tables::ShardRamRecord, &'static str)],
-    read_records: &[(crate::tables::ShardRamRecord, &'static str)],
+    write_records: &[(crate::tables::ShardRamRecord, &'static str, u64)],
+    read_records: &[(crate::tables::ShardRamRecord, &'static str, u64)],
 ) -> Result<
     (
         ceno_gpu::common::buffer::BufferImpl<'static, u32>,
@@ -213,8 +257,8 @@ pub fn gpu_batch_continuation_ec_on_device(
     }
 
     let mut gpu_records: Vec<GpuShardRamRecord> = Vec::with_capacity(total);
-    for (rec, _name) in write_records.iter().chain(read_records.iter()) {
-        gpu_records.push(shard_ram_record_to_gpu(rec));
+    for (rec, _name, ordinal) in write_records.iter().chain(read_records.iter()) {
+        gpu_records.push(shard_ram_record_to_gpu_with_ordinal(rec, *ordinal));
     }
 
     let (device_buf, _count) = info_span!("gpu_batch_ec_on_device", n = total)
@@ -253,9 +297,7 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
 
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
 
-    if !crate::instructions::gpu::config::is_gpu_witgen_enabled()
-        || crate::instructions::gpu::dispatch::is_force_cpu_path()
-    {
+    if crate::instructions::gpu::dispatch::is_force_cpu_path() {
         return Ok(None);
     }
 
@@ -338,9 +380,7 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
 
     // 5. Structural witness: keep device-resident only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         let struct_data = tracing::info_span!(
             "gpu_shard_ram_structural_transpose_d2h",
             rows = gpu_structural.num_rows,
@@ -388,20 +428,18 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
             InstancePaddingStrategy::Default,
         )
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_device_backing(
+            steps.len(),
             num_structural_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(gpu_structural.device_buffer, DeviceMatrixLayout::ColMajor);
-        rmm
+            gpu_structural.device_buffer,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     // 6. Main witness: keep device-resident only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         tracing::info_span!(
             "gpu_shard_ram_witness_transpose_d2h",
             num_rows_padded,
@@ -445,13 +483,13 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
             ))
         })?
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_device_backing(
+            steps.len(),
             num_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(witness_buf, DeviceMatrixLayout::ColMajor);
-        rmm
+            witness_buf,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     tracing::info!(
@@ -551,9 +589,7 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
 
     // Structural witness: keep device-resident only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         let struct_data = tracing::info_span!(
             "gpu_shard_ram_structural_transpose_d2h_from_device",
             rows = gpu_structural.num_rows,
@@ -601,20 +637,18 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
             InstancePaddingStrategy::Default,
         )
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_device_backing(
+            num_records,
             num_structural_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(gpu_structural.device_buffer, DeviceMatrixLayout::ColMajor);
-        rmm
+            gpu_structural.device_buffer,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     // Witness: keep device-resident only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         tracing::info_span!(
             "gpu_shard_ram_witness_transpose_d2h_from_device",
             num_rows_padded,
@@ -658,13 +692,13 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
             ))
         })?
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_device_backing(
+            num_records,
             num_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(witness_buf, DeviceMatrixLayout::ColMajor);
-        rmm
+            witness_buf,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     tracing::info!(
@@ -788,9 +822,7 @@ pub(crate) fn try_gpu_assign_shard_ram_ec_tree_from_device<E: ExtensionField>(
         },
     )?;
 
-    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         let struct_data = tracing::info_span!(
             "gpu_shard_ram_ec_tree_structural_transpose_d2h_from_device",
             rows = gpu_structural.num_rows,
@@ -837,18 +869,17 @@ pub(crate) fn try_gpu_assign_shard_ram_ec_tree_from_device<E: ExtensionField>(
             InstancePaddingStrategy::Default,
         )
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_rotation_device_backing(
+            num_records,
+            1,
             num_structural_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(gpu_structural.device_buffer, DeviceMatrixLayout::ColMajor);
-        rmm
+            gpu_structural.device_buffer,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
-    {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         tracing::info_span!(
             "gpu_shard_ram_ec_tree_witness_transpose_d2h_from_device",
             num_rows_padded,
@@ -894,13 +925,14 @@ pub(crate) fn try_gpu_assign_shard_ram_ec_tree_from_device<E: ExtensionField>(
             ))
         })?
     } else {
-        let mut rmm = witness::RowMajorMatrix::new(
-            num_rows_padded,
+        witness::RowMajorMatrix::new_by_rotation_device_backing(
+            num_records,
+            1,
             num_witin,
             InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(gpu_witness.device_buffer, DeviceMatrixLayout::ColMajor);
-        rmm
+            gpu_witness.device_buffer,
+            DeviceMatrixLayout::ColMajor,
+        )
     };
 
     Ok(Some([raw_witin, raw_structural_witin]))
@@ -978,6 +1010,56 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
             .map_err(|e| ZKVMError::InvalidWitness(format!("shared_addr_count D2H: {e}").into()))?;
         cv[0] as usize
     };
+    let emission_expected = {
+        let cv: Vec<u32> = shared.emission_expected.to_vec().map_err(|e| {
+            ZKVMError::InvalidWitness(format!("emission expectations D2H: {e}").into())
+        })?;
+        if cv.len() != 3 {
+            return Err(ZKVMError::InvalidWitness(
+                "emission expectation ABI length mismatch".into(),
+            ));
+        }
+        ceno_gpu::common::witgen::types::EmissionExpectations {
+            writes: cv[0],
+            reads: cv[1],
+            addresses: cv[2],
+        }
+    };
+    let expected_ec = emission_expected
+        .writes
+        .checked_add(emission_expected.reads)
+        .ok_or_else(|| ZKVMError::InvalidWitness("expected EC count overflow".into()))?
+        as usize;
+    let ec_capacity = shared.ec_buf.len()
+        / (std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>() / 4);
+    let addr_capacity = shared.addr_buf.len();
+    if ec_count != expected_ec || addr_count > shared.reserved_address_capacity as usize {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "emission mismatch: EC observed={ec_count} expected={expected_ec}; address observed={addr_count} reserved={}",
+                shared.reserved_address_capacity,
+            ).into(),
+        ));
+    }
+    if ec_count > ec_capacity
+        || expected_ec > ec_capacity
+        || addr_count > addr_capacity
+        || shared.reserved_address_capacity as usize > addr_capacity
+    {
+        return Err(ZKVMError::InvalidWitness(
+            "emission count exceeds allocated capacity".into(),
+        ));
+    }
+
+    tracing::info!(
+        ec_observed = ec_count,
+        ec_expected_writes = emission_expected.writes,
+        ec_expected_reads = emission_expected.reads,
+        address_observed = addr_count,
+        address_reserved = shared.reserved_address_capacity,
+        address_capacity = addr_capacity,
+        "GPU emission contract validated"
+    );
 
     tracing::info!(
         "[GPU full pipeline] shared buffers: {} EC records, {} addr_accessed",
@@ -985,20 +1067,36 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         addr_count,
     );
 
-    // 3. GPU sort addr_accessed + dedup, then D2H sorted unique addrs
+    // 3. Build the unique address set on GPU. Preserve the dense input so hash
+    // overflow or probe exhaustion can fall back to the existing exact sort.
     let addr_accessed: Vec<ceno_emul::WordAddr> = if addr_count > 0 {
-        info_span!("gpu_sort_addr").in_scope(|| {
-            let (deduped, unique_count) = hal
+        info_span!("gpu_unique_addr").in_scope(|| {
+            let deduped = match hal
                 .witgen
-                .sort_and_dedup_u32(&mut shared.addr_buf, addr_count, None)
-                .map_err(|e| ZKVMError::InvalidWitness(format!("GPU sort addr: {e}").into()))?;
+                .hash_dedup_u32(&shared.addr_buf, addr_count, None)
+                .map_err(|e| ZKVMError::InvalidWitness(format!("GPU hash addr: {e}").into()))?
+            {
+                Some(addrs) => addrs,
+                None => {
+                    tracing::warn!(
+                        "[GPU full pipeline] address hash table exhausted; falling back to sort"
+                    );
+                    hal.witgen
+                        .sort_and_dedup_u32(&mut shared.addr_buf, addr_count, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(format!("GPU sort addr fallback: {e}").into())
+                        })?
+                        .0
+                }
+            };
+            let unique_count = deduped.len();
             if unique_count == 0 {
                 return Ok::<Vec<ceno_emul::WordAddr>, ZKVMError>(vec![]);
             }
             let addrs: Vec<ceno_emul::WordAddr> =
                 deduped.into_iter().map(ceno_emul::WordAddr).collect();
             tracing::info!(
-                "[GPU full pipeline] sorted {} addrs → {} unique",
+                "[GPU full pipeline] aggregated {} addrs → {} unique",
                 addr_count,
                 unique_count,
             );
@@ -1011,76 +1109,126 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     // 4. CPU collect_records (uses unique addrs)
     let addr_accessed: rustc_hash::FxHashSet<ceno_emul::WordAddr> =
         addr_accessed.into_iter().collect();
-    let (write_record_pairs, read_record_pairs) = info_span!("collect_records").in_scope(|| {
-        let first_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> =
-            if shard_ctx.is_first_shard() {
-                final_mem
-                    .par_iter()
-                    .filter(|(_, range, _)| range.is_none())
-                    .flat_map(|(mem_name, _, final_mem)| {
-                        final_mem.par_iter().filter_map(|mem_record| {
-                            let (waddr, addr) = ZKVMWitnesses::<E>::mem_addresses(mem_record);
-                            make_cross_shard_record(
-                                mem_name,
-                                mem_record,
-                                waddr,
-                                addr,
-                                shard_ctx,
-                                &addr_accessed,
-                            )
+    let (write_record_pairs, read_record_pairs, continuation_segments) =
+        info_span!("collect_records").in_scope(|| {
+            let first_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> =
+                if shard_ctx.is_first_shard() {
+                    final_mem
+                        .par_iter()
+                        .filter(|(_, range, _)| range.is_none())
+                        .flat_map(|(mem_name, _, final_mem)| {
+                            final_mem.par_iter().filter_map(|mem_record| {
+                                let (waddr, addr) = ZKVMWitnesses::<E>::mem_addresses(mem_record);
+                                make_cross_shard_record(
+                                    mem_name,
+                                    mem_record,
+                                    waddr,
+                                    addr,
+                                    shard_ctx,
+                                    &addr_accessed,
+                                )
+                            })
                         })
+                        .collect()
+                } else {
+                    vec![]
+                };
+
+            let current_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> = final_mem
+                .par_iter()
+                .filter(|(_, range, _)| range.is_some())
+                .flat_map(|(mem_name, range, final_mem)| {
+                    let range = range.as_ref().unwrap();
+                    final_mem.par_iter().filter_map(|mem_record| {
+                        let (waddr, addr) = ZKVMWitnesses::<E>::mem_addresses(mem_record);
+                        if !range.contains(&addr) {
+                            return None;
+                        }
+                        make_cross_shard_record(
+                            mem_name,
+                            mem_record,
+                            waddr,
+                            addr,
+                            shard_ctx,
+                            &addr_accessed,
+                        )
                     })
-                    .collect()
-            } else {
-                vec![]
-            };
-
-        let current_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> = final_mem
-            .par_iter()
-            .filter(|(_, range, _)| range.is_some())
-            .flat_map(|(mem_name, range, final_mem)| {
-                let range = range.as_ref().unwrap();
-                final_mem.par_iter().filter_map(|mem_record| {
-                    let (waddr, addr) = ZKVMWitnesses::<E>::mem_addresses(mem_record);
-                    if !range.contains(&addr) {
-                        return None;
-                    }
-                    make_cross_shard_record(
-                        mem_name,
-                        mem_record,
-                        waddr,
-                        addr,
-                        shard_ctx,
-                        &addr_accessed,
-                    )
                 })
-            })
-            .collect();
+                .collect();
 
-        let write_record_pairs: Vec<(ShardRamRecord, &'static str)> = shard_ctx
-            .write_records()
-            .iter()
-            .flat_map(|records| {
-                records.iter().map(|(vma, record)| {
-                    ((vma, record, true).into(), "current_shard_external_write")
+            let mut write_record_pairs: Vec<(ShardRamRecord, &'static str, u64)> = shard_ctx
+                .write_records()
+                .iter()
+                .enumerate()
+                .flat_map(|(bucket, records)| {
+                    records.iter().map(move |(vma, record)| {
+                        Ok((
+                            (vma, record, true).into(),
+                            "current_shard_external_write",
+                            legacy_btree_ordinal(true, bucket, *vma)?,
+                        ))
+                    })
                 })
-            })
-            .chain(first_shard_access_later_recs)
-            .chain(current_shard_access_later_recs)
-            .collect();
+                .collect::<Result<_, ZKVMError>>()?;
+            let segment0 = u32::try_from(write_record_pairs.len())
+                .map_err(|_| ZKVMError::InvalidWitness("segment 0 count exceeds u32".into()))?;
+            let segment1 = u32::try_from(first_shard_access_later_recs.len())
+                .map_err(|_| ZKVMError::InvalidWitness("segment 1 count exceeds u32".into()))?;
+            let segment2 = u32::try_from(current_shard_access_later_recs.len())
+                .map_err(|_| ZKVMError::InvalidWitness("segment 2 count exceeds u32".into()))?;
+            write_record_pairs.extend(
+                first_shard_access_later_recs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (record, name))| {
+                        Ok((
+                            record,
+                            name,
+                            legacy_continuation_ordinal(LEGACY_FIRST_CONTINUATION_SEGMENT, index)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, ZKVMError>>()?,
+            );
+            write_record_pairs.extend(
+                current_shard_access_later_recs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (record, name))| {
+                        Ok((
+                            record,
+                            name,
+                            legacy_continuation_ordinal(
+                                LEGACY_CURRENT_CONTINUATION_SEGMENT,
+                                index,
+                            )?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, ZKVMError>>()?,
+            );
 
-        let read_record_pairs: Vec<(ShardRamRecord, &'static str)> = shard_ctx
-            .read_records()
-            .iter()
-            .flat_map(|records| {
-                records.iter().map(|(vma, record)| {
-                    ((vma, record, false).into(), "current_shard_external_read")
+            let read_record_pairs: Vec<(ShardRamRecord, &'static str, u64)> = shard_ctx
+                .read_records()
+                .iter()
+                .enumerate()
+                .flat_map(|(bucket, records)| {
+                    records.iter().map(move |(vma, record)| {
+                        Ok((
+                            (vma, record, false).into(),
+                            "current_shard_external_read",
+                            legacy_btree_ordinal(false, bucket, *vma)?,
+                        ))
+                    })
                 })
-            })
-            .collect();
+                .collect::<Result<_, ZKVMError>>()?;
+            let segment3 = u32::try_from(read_record_pairs.len())
+                .map_err(|_| ZKVMError::InvalidWitness("segment 3 count exceeds u32".into()))?;
 
-        (write_record_pairs, read_record_pairs)
-    });
+            Ok::<_, ZKVMError>((
+                write_record_pairs,
+                read_record_pairs,
+                [segment0, segment1, segment2, segment3],
+            ))
+        })?;
 
     // 5. GPU batch EC on device for continuation records
     let (cont_ec_buf, cont_n_writes, cont_n_reads) = info_span!("gpu_batch_ec_on_device")
@@ -1095,23 +1243,61 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         cont_n_reads,
         cont_total,
     );
+    let mut expected_segments = continuation_segments;
+    expected_segments[0] = expected_segments[0]
+        .checked_add(emission_expected.writes)
+        .ok_or_else(|| ZKVMError::InvalidWitness("segment 0 expectation overflow".into()))?;
+    expected_segments[3] = expected_segments[3]
+        .checked_add(emission_expected.reads)
+        .ok_or_else(|| ZKVMError::InvalidWitness("segment 3 expectation overflow".into()))?;
+    let continuation_writes = continuation_segments[0]
+        .checked_add(continuation_segments[1])
+        .and_then(|count| count.checked_add(continuation_segments[2]))
+        .ok_or_else(|| ZKVMError::InvalidWitness("continuation write count overflow".into()))?;
+    if cont_n_writes != continuation_writes as usize
+        || cont_n_reads != continuation_segments[3] as usize
+    {
+        return Err(ZKVMError::InvalidWitness(
+            "continuation EC segment count mismatch".into(),
+        ));
+    }
+    let finalization_expectations = ceno_gpu::common::witgen::types::FinalizationExpectations {
+        segment_counts: expected_segments,
+        legacy_bucket_limit: u32::try_from(multilinear_extensions::util::max_usable_threads())
+            .map_err(|_| ZKVMError::InvalidWitness("legacy bucket limit exceeds u32".into()))?,
+    };
 
-    // 6. GPU merge shared_ec + batch_ec, then partition by is_to_write_set
-    let (partitioned_buf, num_writes, total_records) =
-        info_span!("gpu_merge_partition").in_scope(|| {
+    // 6. Exactly one deterministic finalization feeds both consumers.
+    let (partitioned_buf, num_writes, total_records, finalized_segments) =
+        info_span!("gpu_merge_finalize").in_scope(|| {
             hal.witgen
-                .merge_and_partition_records(
+                .merge_and_finalize_records(
                     &shared.ec_buf,
                     ec_count,
                     &cont_ec_buf,
                     cont_total,
+                    &finalization_expectations,
                     None,
                 )
-                .map_err(|e| ZKVMError::InvalidWitness(format!("GPU merge+partition: {e}").into()))
+                .map_err(|e| ZKVMError::InvalidWitness(format!("GPU merge+finalize: {e}").into()))
         })?;
 
     tracing::info!(
-        "[GPU full pipeline] merged+partitioned: {} total ({} writes, {} reads)",
+        finalizer_status = 0,
+        segment0 = finalized_segments[0],
+        segment1 = finalized_segments[1],
+        segment2 = finalized_segments[2],
+        segment3 = finalized_segments[3],
+        expected_total = finalized_segments
+            .iter()
+            .map(|&count| u64::from(count))
+            .sum::<u64>(),
+        observed_total = total_records,
+        "GPU finalizer contract validated"
+    );
+
+    tracing::info!(
+        "[GPU full pipeline] merged+finalized: {} total ({} writes, {} reads)",
         total_records,
         num_writes,
         total_records - num_writes,
@@ -1119,21 +1305,20 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
 
     let record_u32s = std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>() / 4;
     // GpuShardRamRecord (#[repr(C)]) layout — derived from shard_ram_record_to_gpu
-    // above: 4xu32 leader (addr, ram_type, value, _pad0), 3xu64
-    // (shard, local_clk, global_clk), 2xu32 (is_to_write_set, nonce),
-    // [u32; 7] point_x, [u32; 7] point_y. Total = 26 u32s.
-    debug_assert_eq!(record_u32s, 26, "GpuShardRamRecord layout changed");
-    const IS_TO_WRITE_SET_U32_OFFSET: usize = 10;
-    const POINT_Y6_U32_OFFSET: usize = 25;
+    debug_assert_eq!(record_u32s, 28, "GpuShardRamRecord layout changed");
+    const IS_TO_WRITE_SET_U32_OFFSET: usize = 12;
+    const POINT_Y6_U32_OFFSET: usize = 27;
 
     let host_data: Vec<u32> = if total_records == 0 {
         vec![]
     } else {
-        partitioned_buf.to_vec().map_err(|e| {
-            ZKVMError::InvalidWitness(
-                format!("[GPU full pipeline] partitioned_buf D2H: {e}").into(),
-            )
-        })?
+        partitioned_buf
+            .to_vec_n(total_records * record_u32s)
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(
+                    format!("[GPU full pipeline] partitioned_buf D2H: {e}").into(),
+                )
+            })?
     };
     debug_assert_eq!(host_data.len(), total_records * record_u32s);
 
@@ -1228,14 +1413,106 @@ mod tests {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         structs::ProgramParams,
-        tables::{ShardRamCircuit, TableCircuit},
+        tables::{ShardRamCircuit, ShardRamEcTreeCircuit, TableCircuit, y6_lo_value},
     };
     use ff_ext::BabyBearExt4;
+    use p3::{babybear::BabyBear, field::PrimeCharacteristicRing};
 
     type E = BabyBearExt4;
 
     #[test]
-    fn test_extract_shard_ram_column_map() {
+    fn legacy_ordinals_preserve_segment_bucket_and_address_order() {
+        let w0 = legacy_btree_ordinal(true, 0, ceno_emul::WordAddr(9)).unwrap();
+        let w1 = legacy_btree_ordinal(true, 1, ceno_emul::WordAddr(2)).unwrap();
+        let first = legacy_continuation_ordinal(LEGACY_FIRST_CONTINUATION_SEGMENT, 0).unwrap();
+        let current = legacy_continuation_ordinal(LEGACY_CURRENT_CONTINUATION_SEGMENT, 0).unwrap();
+        let r0 = legacy_btree_ordinal(false, 0, ceno_emul::WordAddr(1)).unwrap();
+        let r1 = legacy_btree_ordinal(false, 0, ceno_emul::WordAddr(2)).unwrap();
+
+        assert!(w0 < w1);
+        assert!(w1 < first);
+        assert!(first < current);
+        assert!(current < r0);
+        assert!(r0 < r1);
+        assert_eq!(
+            legacy_continuation_ordinal(LEGACY_FIRST_CONTINUATION_SEGMENT, 1).unwrap(),
+            first + 1
+        );
+    }
+
+    #[test]
+    fn legacy_ordinals_reject_out_of_range_components() {
+        assert!(legacy_btree_ordinal(true, LEGACY_BUCKET_LIMIT, ceno_emul::WordAddr(0)).is_err());
+        if usize::BITS > LEGACY_SEGMENT_SHIFT {
+            assert!(
+                legacy_continuation_ordinal(
+                    LEGACY_CURRENT_CONTINUATION_SEGMENT,
+                    1usize << LEGACY_SEGMENT_SHIFT
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn four_segment_ordinals_and_bounds_are_exact() {
+        let limit = LEGACY_BUCKET_LIMIT;
+        assert!(limit > 0);
+        let segment0 =
+            legacy_btree_ordinal(true, limit - 1, ceno_emul::WordAddr(u32::MAX)).unwrap();
+        let segment1 = legacy_continuation_ordinal(LEGACY_FIRST_CONTINUATION_SEGMENT, 0).unwrap();
+        let segment2 = legacy_continuation_ordinal(LEGACY_CURRENT_CONTINUATION_SEGMENT, 0).unwrap();
+        let segment3 =
+            legacy_btree_ordinal(false, limit - 1, ceno_emul::WordAddr(u32::MAX)).unwrap();
+        assert_eq!(segment0 >> LEGACY_SEGMENT_SHIFT, 0);
+        assert_eq!(segment1 >> LEGACY_SEGMENT_SHIFT, 1);
+        assert_eq!(segment2 >> LEGACY_SEGMENT_SHIFT, 2);
+        assert_eq!(segment3 >> LEGACY_SEGMENT_SHIFT, 3);
+        assert!(segment0 < segment1 && segment1 < segment2 && segment2 < segment3);
+        assert!(legacy_btree_ordinal(true, limit, ceno_emul::WordAddr(0)).is_err());
+        assert!(legacy_btree_ordinal(false, limit, ceno_emul::WordAddr(0)).is_err());
+
+        let expected = ceno_gpu::common::witgen::types::FinalizationExpectations {
+            segment_counts: [2, 3, 5, 7],
+            legacy_bucket_limit: u32::try_from(limit).unwrap(),
+        };
+        assert_eq!(std::mem::size_of_val(&expected), 20);
+        assert_eq!(expected.segment_counts.iter().sum::<u32>(), 17);
+    }
+
+    #[test]
+    fn emission_and_address_capacity_relations_fail_closed_without_repair() {
+        fn validate(
+            observed_ec: u32,
+            expected_writes: u32,
+            expected_reads: u32,
+            ec_capacity: u32,
+            observed_addresses: u32,
+            reserved_addresses: u32,
+            physical_addresses: u32,
+        ) -> bool {
+            let Some(expected_ec) = expected_writes.checked_add(expected_reads) else {
+                return false;
+            };
+            observed_ec == expected_ec
+                && observed_ec <= ec_capacity
+                && expected_ec <= ec_capacity
+                && observed_addresses <= reserved_addresses
+                && reserved_addresses <= physical_addresses
+        }
+
+        assert!(validate(5, 2, 3, 5, 7, 9, 9));
+        assert!(validate(5, 2, 3, 8, 7, 12, 16));
+        assert!(!validate(4, 2, 3, 8, 7, 12, 16));
+        assert!(!validate(6, 2, 3, 8, 7, 12, 16));
+        assert!(!validate(5, 2, 3, 4, 7, 12, 16));
+        assert!(!validate(5, 2, 3, 8, 13, 12, 16));
+        assert!(!validate(5, 2, 3, 8, 7, 17, 16));
+        assert!(!validate(0, u32::MAX, 1, u32::MAX, 0, 0, 0));
+    }
+
+    #[test]
+    fn shard_ram_column_maps_cover_main_and_ec_tree_routes() {
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
         let (config, _gkr_circuit) =
@@ -1245,9 +1522,8 @@ mod tests {
         let col_map = extract_shard_ram_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
 
-        // Basic columns should be in range
-        // (excluding poseidon2 meta entries which are counts, not column IDs)
-        for (i, &col) in flat[..30].iter().enumerate() {
+        // Main-kernel column IDs through y6_lo bytes are concrete and in range.
+        for (i, &col) in flat[..27].iter().enumerate() {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (flat index {}) out of range: {} >= {}",
@@ -1257,18 +1533,44 @@ mod tests {
                 col_map.num_cols
             );
         }
-
-        // Check uniqueness of actual column IDs (first 30 entries)
-        let mut seen = std::collections::HashSet::new();
-        for &col in &flat[..30] {
-            assert!(seen.insert(col), "Duplicate column ID: {}", col);
-        }
+        assert_eq!(col_map.y6_lo_bytes, config.y6_lo_bytes.map(|w| w.id as u32));
+        assert_eq!(&flat[23..27], &col_map.y6_lo_bytes);
+        assert_eq!(col_map.y6_lo_bytes, [367, 368, 369, 370]);
 
         // Verify Poseidon2 column counts are reasonable
         assert_eq!(col_map.num_p3_cols, 299, "Expected 299 p3 cols");
         assert_eq!(
             col_map.num_poseidon2_cols, 344,
             "Expected 344 total Poseidon2 cols"
+        );
+
+        let mut ec_cs = ConstraintSystem::<E>::new(|| "ec tree test");
+        let mut ec_cb = CircuitBuilder::new(&mut ec_cs);
+        let (ec_config, _) = ShardRamEcTreeCircuit::<E>::build_gkr_iop_circuit(
+            &mut ec_cb,
+            &ProgramParams::default(),
+        )
+        .unwrap();
+        let ec_map = extract_shard_ram_ec_tree_column_map(&ec_config, ec_cb.cs.num_witin as usize);
+        assert_eq!(ec_map.y6_lo_bytes, [0; 4]);
+        assert_eq!(&ec_map.to_flat()[23..27], &[0; 4]);
+    }
+
+    #[test]
+    fn shard_ram_y6_lo_formula_and_little_endian_bytes_match_cpu() {
+        const PRIME: u64 = 0x7800_0001;
+        let y6 = 0x1234_567u64;
+        let read = y6_lo_value::<E>(BabyBear::from_u64(y6), false);
+        let write = y6_lo_value::<E>(BabyBear::from_u64(y6), true);
+        assert_eq!(read, y6 - 1);
+        assert_eq!(write, PRIME - 1 - y6);
+        assert_eq!(
+            std::array::from_fn::<_, 4, _>(|i| ((read >> (8 * i)) & 0xff) as u8),
+            (read as u32).to_le_bytes()
+        );
+        assert_eq!(
+            std::array::from_fn::<_, 4, _>(|i| ((write >> (8 * i)) & 0xff) as u8),
+            (write as u32).to_le_bytes()
         );
     }
 }

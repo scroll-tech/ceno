@@ -14,7 +14,7 @@ use itertools::{Itertools, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    slice::ParallelSlice,
+    slice::{ParallelSlice, ParallelSliceMut},
 };
 use sp1_curves::{CurveType, EllipticCurve, params::NumWords, weierstrass::WeierstrassParameters};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
@@ -209,21 +209,47 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                 lk_multiplicity.into_finalize_result(),
             ));
         }
+        #[cfg(feature = "gpu")]
+        let use_gpu_relations = EC::CURVE_TYPE == CurveType::Secp256k1;
+        #[cfg(not(feature = "gpu"))]
+        let use_gpu_relations = false;
         let nthreads = max_usable_threads();
         let num_instance_per_batch = step_indices.len().div_ceil(nthreads).max(1);
+        // GPU relation expansion still needs the canonical instruction columns
+        // during phase 1, but only for valid rows. Avoid allocating a padded host
+        // matrix: the non-arithmetic cells are compacted after assignment and the
+        // arithmetic range plus padding are produced directly on device.
+        let mut gpu_phase1_rows =
+            use_gpu_relations.then(|| vec![E::BaseField::ZERO; step_indices.len() * num_witin]);
+        let mut raw_witin = (!use_gpu_relations).then(|| {
+            RowMajorMatrix::<E::BaseField>::new(
+                step_indices.len(),
+                num_witin,
+                InstancePaddingStrategy::Default,
+            )
+        });
+        let mut raw_structural_witin = if use_gpu_relations {
+            RowMajorMatrix::<E::BaseField>::new(
+                0,
+                num_structural_witin,
+                InstancePaddingStrategy::Default,
+            )
+        } else {
+            RowMajorMatrix::<E::BaseField>::new(
+                step_indices.len(),
+                num_structural_witin,
+                InstancePaddingStrategy::Default,
+            )
+        };
 
-        let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
-            step_indices.len(),
-            num_witin,
-            InstancePaddingStrategy::Default,
-        );
-        let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new(
-            step_indices.len(),
-            num_structural_witin,
-            InstancePaddingStrategy::Default,
-        );
-
-        let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
+        let raw_witin_iter = if let Some(rows) = gpu_phase1_rows.as_mut() {
+            rows.par_chunks_mut(num_instance_per_batch * num_witin)
+        } else {
+            raw_witin
+                .as_mut()
+                .expect("CPU witness matrix")
+                .par_batch_iter_mut(num_instance_per_batch)
+        };
         let shard_ctx_vec = shard_ctx.get_forked();
 
         // 1st pass: assign witness outside of gkr-iop scope
@@ -293,40 +319,137 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             .collect::<Result<(), ZKVMError>>()?;
 
         // second pass
-        let instances: Vec<EllipticCurveDoubleInstance<EC::BaseField>> = step_indices
-            .par_iter()
-            .map(|&idx| {
-                let step = &steps[idx];
-                let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
-                    .syscall(&shard_ctx.syscall_witnesses)
-                    .unwrap()
-                    .mem_ops
-                    .iter()
-                    .map(|op| (op.value.before, op.previous_cycle))
-                    .unzip();
+        let instances: Vec<EllipticCurveDoubleInstance<EC::BaseField>> = tracing::info_span!(
+            "secp256k1_pack_instances",
+            operation = "double",
+            n = step_indices.len()
+        )
+        .in_scope(|| {
+            step_indices
+                .par_iter()
+                .map(|&idx| {
+                    let step = &steps[idx];
+                    let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
+                        .syscall(&shard_ctx.syscall_witnesses)
+                        .unwrap()
+                        .mem_ops
+                        .iter()
+                        .map(|op| (op.value.before, op.previous_cycle))
+                        .unzip();
 
-                let p = GenericArray::try_from(
-                    instance[0..<EC::BaseField as NumWords>::WordsCurvePoint::USIZE].to_vec(),
+                    let p = GenericArray::try_from(
+                        instance[0..<EC::BaseField as NumWords>::WordsCurvePoint::USIZE].to_vec(),
+                    );
+                    p.map(|p| EllipticCurveDoubleInstance::<EC::BaseField> { p })
+                        .map_err(|_| {
+                            ZKVMError::InvalidWitness(
+                                "Failed to parse EllipticCurveDoubleInstance".into(),
+                            )
+                        })
+                })
+                .collect::<Result<_, _>>()
+        })?;
+
+        let affine_results = if EC::CURVE_TYPE == CurveType::Secp256k1 {
+            let span = tracing::info_span!(
+                "secp256k1_affine_batch",
+                operation = "double",
+                n = instances.len()
+            );
+            Some(span.in_scope(|| {
+                WeierstrassDoubleAssignLayout::<E, EC>::compute_compact_secp256k1_affine_results(
+                    &instances,
+                )
+            }))
+        } else {
+            None
+        };
+
+        #[cfg(feature = "gpu")]
+        let used_gpu_relations = if use_gpu_relations {
+            let affine = affine_results.as_deref().ok_or_else(|| {
+                ZKVMError::InvalidWitness(
+                    "direct GPU secp256k1 double requires compact affine results".into(),
+                )
+            })?;
+            let records = tracing::info_span!(
+                "secp256k1_gpu_pack",
+                operation = "double",
+                n = instances.len()
+            )
+            .in_scope(|| {
+                WeierstrassDoubleAssignLayout::<E, EC>::compact_secp256k1_gpu_records(
+                    &instances, affine,
+                )
+            });
+            let [gpu_witin, gpu_structural] = tracing::info_span!(
+                "secp256k1_expand_rows",
+                operation = "double",
+                n = instances.len()
+            )
+            .in_scope(|| {
+                crate::instructions::gpu::chips::secp256k1::assign_relations::<E>(
+                    gpu_phase1_rows.as_deref().expect("GPU phase-1 scratch"),
+                    &records,
+                    true,
+                    step_indices.len(),
+                    num_witin,
+                    num_structural_witin,
+                    config.layout.first_wit_id(),
+                    config.layout.num_arithmetic_wit_cols(),
+                    &mut lk_multiplicity,
+                )
+            })?;
+            raw_witin = Some(gpu_witin);
+            raw_structural_witin = gpu_structural;
+            true
+        } else {
+            false
+        };
+        #[cfg(not(feature = "gpu"))]
+        let used_gpu_relations = false;
+
+        if !used_gpu_relations {
+            if let Some(affine_results) = affine_results.as_deref() {
+                tracing::info_span!(
+                    "secp256k1_expand_rows",
+                    operation = "double",
+                    n = instances.len()
+                )
+                .in_scope(|| {
+                    config.layout.phase1_witness_group_with_affine_results(
+                        WeierstrassDoubleAssignTrace { instances },
+                        affine_results,
+                        [
+                            raw_witin.as_mut().expect("CPU witness matrix"),
+                            &mut raw_structural_witin,
+                        ],
+                        &mut lk_multiplicity,
+                    );
+                });
+            } else {
+                config.layout.phase1_witness_group(
+                    WeierstrassDoubleAssignTrace { instances },
+                    [
+                        raw_witin.as_mut().expect("CPU witness matrix"),
+                        &mut raw_structural_witin,
+                    ],
+                    &mut lk_multiplicity,
                 );
-                p.map(|p| EllipticCurveDoubleInstance::<EC::BaseField> { p })
-                    .map_err(|_| {
-                        ZKVMError::InvalidWitness(
-                            "Failed to parse EllipticCurveDoubleInstance".into(),
-                        )
-                    })
-            })
-            .collect::<Result<_, _>>()?;
-
-        config.layout.phase1_witness_group(
-            WeierstrassDoubleAssignTrace { instances },
-            [&mut raw_witin, &mut raw_structural_witin],
-            &mut lk_multiplicity,
-        );
-
-        raw_witin.padding_by_strategy();
-        raw_structural_witin.padding_by_strategy();
+            }
+        }
+        if !used_gpu_relations {
+            raw_witin
+                .as_mut()
+                .expect("CPU witness matrix")
+                .padding_by_strategy();
+            raw_structural_witin.padding_by_strategy();
+        }
         Ok((
-            [raw_witin, raw_structural_witin],
+            [
+                raw_witin.expect("assigned witness matrix"),
+                raw_structural_witin,
+            ],
             lk_multiplicity.into_finalize_result(),
         ))
     }

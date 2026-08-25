@@ -621,16 +621,14 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         }
 
         #[cfg(feature = "gpu")]
-        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-            if let Some(result) = Self::try_gpu_assign_instances(
-                config,
-                num_witin,
-                num_structural_witin,
-                lk_multiplicity,
-                steps,
-            )? {
-                return Ok(result);
-            }
+        if let Some(result) = Self::try_gpu_assign_instances(
+            config,
+            num_witin,
+            num_structural_witin,
+            lk_multiplicity,
+            steps,
+        )? {
+            return Ok(result);
         }
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
@@ -769,6 +767,14 @@ impl<E: ExtensionField> ShardRamEcTreeCircuit<E> {
             .chain(config.y.iter())
             .map(|witin| instance[witin.id as usize])
             .collect_vec();
+
+        Self::ec_sum_from_xy(&xy)
+    }
+
+    pub(crate) fn ec_sum_from_xy(
+        xy: &[E::BaseField],
+    ) -> SepticPoint<<E as ExtensionField>::BaseField> {
+        assert_eq!(xy.len(), SEPTIC_EXTENSION_DEGREE * 2);
 
         let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
         let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();

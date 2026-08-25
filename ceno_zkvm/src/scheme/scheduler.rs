@@ -23,12 +23,31 @@ use gkr_iop::hal::ProverBackend;
 use mpcs::Point;
 use std::sync::OnceLock;
 #[cfg(feature = "gpu")]
-use std::time::Instant;
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::mpsc::RecvTimeoutError,
+    time::{Duration, Instant},
+};
 use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipSchedulerMode> = OnceLock::new();
 
 #[cfg(feature = "gpu")]
 const DEFAULT_CHIP_PROVING_LANES: usize = 4;
+
+#[cfg(feature = "gpu")]
+fn phase_reservation_release_enabled(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
+#[cfg(feature = "gpu")]
+fn configured_phase_reservation_release() -> bool {
+    phase_reservation_release_enabled(
+        std::env::var("CENO_GPU_PHASE_RESERVATION_RELEASE")
+            .ok()
+            .as_deref(),
+    )
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChipProvingMode {
@@ -159,8 +178,6 @@ pub struct ChipTaskResult<'a, PB: ProverBackend> {
 struct CompletionMessage<'a, PB: ProverBackend> {
     /// The result of the proof
     result: Result<ChipTaskResult<'a, PB>, ZKVMError>,
-    /// Memory that was reserved for this task (to release)
-    memory_reserved: u64,
     /// Task ID for ordering
     task_id: usize,
     /// Circuit name for telemetry
@@ -176,9 +193,149 @@ struct CompletionMessage<'a, PB: ProverBackend> {
 }
 
 #[cfg(feature = "gpu")]
+struct PhaseReleaseMessage {
+    task_id: usize,
+    circuit_name: String,
+    releasable_bytes: u64,
+    lane_id: usize,
+    stream_id: Option<u64>,
+    recorded_at: Instant,
+    event: cudarc::driver::CudaEvent,
+}
+
+#[cfg(feature = "gpu")]
+struct PhaseReleaseContext {
+    sender: mpsc::Sender<PhaseReleaseMessage>,
+    task_id: usize,
+    circuit_name: String,
+    releasable_bytes: u64,
+    lane_id: usize,
+    stream_id: Option<u64>,
+    sent: bool,
+}
+
+#[cfg(feature = "gpu")]
+thread_local! {
+    static PHASE_RELEASE_CONTEXT: RefCell<Option<PhaseReleaseContext>> = const { RefCell::new(None) };
+}
+
+#[cfg(feature = "gpu")]
+struct PhaseReleaseContextGuard;
+
+#[cfg(feature = "gpu")]
+impl Drop for PhaseReleaseContextGuard {
+    fn drop(&mut self) {
+        PHASE_RELEASE_CONTEXT.with(|context| {
+            *context.borrow_mut() = None;
+        });
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn bind_phase_release_context(context: PhaseReleaseContext) -> PhaseReleaseContextGuard {
+    PHASE_RELEASE_CONTEXT.with(|slot| {
+        assert!(slot.borrow().is_none(), "nested GPU phase release context");
+        *slot.borrow_mut() = Some(context);
+    });
+    PhaseReleaseContextGuard
+}
+
+/// Record the tower-deallocation boundary on the current lane stream.
+///
+/// This is a no-op unless the concurrent scheduler installed an opt-in release context.
+#[cfg(feature = "gpu")]
+pub(crate) fn notify_tower_deallocation_enqueued() -> Result<(), String> {
+    PHASE_RELEASE_CONTEXT.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(context) = slot.as_mut() else {
+            return Ok(());
+        };
+        if context.sent || context.releasable_bytes == 0 {
+            return Ok(());
+        }
+        let stream = gkr_iop::gpu::get_thread_stream()
+            .ok_or_else(|| "tower phase release has no bound CUDA stream".to_string())?;
+        let event = stream
+            .record_event(None)
+            .map_err(|err| format!("failed to record tower phase release event: {err}"))?;
+        let message = PhaseReleaseMessage {
+            task_id: context.task_id,
+            circuit_name: context.circuit_name.clone(),
+            releasable_bytes: context.releasable_bytes,
+            lane_id: context.lane_id,
+            stream_id: context.stream_id,
+            recorded_at: Instant::now(),
+            event,
+        };
+        context
+            .sender
+            .send(message)
+            .map_err(|_| "scheduler dropped tower phase release channel".to_string())?;
+        context.sent = true;
+        Ok(())
+    })
+}
+
+#[cfg(feature = "gpu")]
+#[derive(Clone, Copy, Debug)]
+struct TaskReservation {
+    initial_bytes: u64,
+    released_bytes: u64,
+    phase_released: bool,
+    completed: bool,
+    phase_released_at: Option<Instant>,
+}
+
+#[cfg(feature = "gpu")]
+impl TaskReservation {
+    fn new(initial_bytes: u64) -> Self {
+        Self {
+            initial_bytes,
+            released_bytes: 0,
+            phase_released: false,
+            completed: false,
+            phase_released_at: None,
+        }
+    }
+
+    fn release_phase(&mut self, requested_bytes: u64, now: Instant) -> u64 {
+        if self.completed || self.phase_released {
+            return 0;
+        }
+        self.phase_released = true;
+        let released = requested_bytes.min(self.initial_bytes);
+        self.released_bytes = released;
+        self.phase_released_at = Some(now);
+        released
+    }
+
+    fn complete(&mut self) -> (u64, u128) {
+        if self.completed {
+            return (0, 0);
+        }
+        self.completed = true;
+        let remaining = self.initial_bytes.saturating_sub(self.released_bytes);
+        let released_byte_ms = self
+            .phase_released_at
+            .map(|released_at| self.released_bytes as u128 * released_at.elapsed().as_millis())
+            .unwrap_or(0);
+        (remaining, released_byte_ms)
+    }
+
+    fn remaining_bytes(&self) -> u64 {
+        if self.completed {
+            0
+        } else {
+            self.initial_bytes.saturating_sub(self.released_bytes)
+        }
+    }
+}
+
+#[cfg(feature = "gpu")]
 struct ScheduledTask<'a, PB: ProverBackend> {
     task: ChipTask<'a, PB>,
     queued_at: Instant,
+    phase_releasable_memory_bytes: u64,
 }
 
 #[cfg(feature = "gpu")]
@@ -187,6 +344,68 @@ enum SchedulerWaitReason {
     WorkerLimit,
     MemoryLimit,
     CompletionDrain,
+}
+
+#[cfg(feature = "gpu")]
+#[derive(Debug, PartialEq, Eq)]
+enum PhaseEventStatus {
+    Incomplete,
+    Complete,
+    Failed(String),
+}
+
+#[cfg(feature = "gpu")]
+fn cuda_phase_event_status(event: &cudarc::driver::CudaEvent) -> PhaseEventStatus {
+    let status = unsafe { cudarc::driver::sys::cuEventQuery(event.cu_event()) };
+    match status {
+        cudarc::driver::sys::CUresult::CUDA_SUCCESS => PhaseEventStatus::Complete,
+        cudarc::driver::sys::CUresult::CUDA_ERROR_NOT_READY => PhaseEventStatus::Incomplete,
+        status => PhaseEventStatus::Failed(format!("{status:?}")),
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn apply_phase_event_status(
+    reservation: &mut TaskReservation,
+    requested_bytes: u64,
+    status: PhaseEventStatus,
+    now: Instant,
+) -> Result<Option<u64>, String> {
+    match status {
+        PhaseEventStatus::Incomplete => Ok(None),
+        PhaseEventStatus::Complete => Ok(Some(reservation.release_phase(requested_bytes, now))),
+        PhaseEventStatus::Failed(status) => Err(status),
+    }
+}
+
+#[cfg(feature = "gpu")]
+#[derive(Default)]
+struct SchedulerMemoryTelemetry {
+    pool_used_high: u64,
+    framebuffer_used_high: u64,
+    booked_high: u64,
+    underestimation_high: u64,
+    released_byte_ms: u128,
+}
+
+#[cfg(feature = "gpu")]
+impl SchedulerMemoryTelemetry {
+    fn sample(&mut self, mem_pool: &ceno_gpu::common::mem_pool::CudaMemPool) {
+        let pool_used = mem_pool.get_used_size().unwrap_or(0);
+        let booked = mem_pool.get_booked_total();
+        self.pool_used_high = self
+            .pool_used_high
+            .max(mem_pool.get_used_mem_high().unwrap_or(pool_used));
+        self.booked_high = self.booked_high.max(booked);
+        self.underestimation_high = self
+            .underestimation_high
+            .max(pool_used.saturating_sub(booked));
+        if let Ok((free, total)) = ceno_gpu::get_cuda_mem_info() {
+            self.framebuffer_used_high = self
+                .framebuffer_used_high
+                .max((total.saturating_sub(free)) as u64);
+        }
+    }
 }
 
 #[cfg(feature = "gpu")]
@@ -238,13 +457,46 @@ impl ChipScheduler {
                     // Resolve benchmark configuration before touching the CUDA stream pool.
                     let lane_count = configured_chip_proving_lanes();
                     tracing::info!("[scheduler] resolved CENO_CHIP_PROVING_LANES={lane_count}");
-                    return self.execute_concurrently(tasks, transcript, execute_task, lane_count);
+                    return self.execute_concurrently(
+                        tasks,
+                        transcript,
+                        execute_task,
+                        lane_count,
+                        HashMap::new(),
+                    );
                 }
                 ChipSchedulerMode::Sequential => {}
             }
             tracing::info!("[scheduler] using sequential chip proving");
         }
         self.execute_sequentially(tasks, transcript, execute_task)
+    }
+
+    /// Concurrent GPU entry point with scheduler-private phase reservation metadata.
+    #[cfg(feature = "gpu")]
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn execute_with_phase_reservations<'a, PB, T, F>(
+        &self,
+        tasks: Vec<ChipTask<'a, PB>>,
+        transcript: &T,
+        execute_task: F,
+        phase_releasable_by_task: HashMap<usize, u64>,
+    ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
+    where
+        PB: ProverBackend + 'static,
+        PB::E: Send + 'static,
+        T: Transcript<PB::E> + Clone,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<'a, PB>, ZKVMError> + Send + Sync,
+    {
+        let lane_count = configured_chip_proving_lanes();
+        tracing::info!("[scheduler] resolved CENO_CHIP_PROVING_LANES={lane_count}");
+        self.execute_concurrently(
+            tasks,
+            transcript,
+            execute_task,
+            lane_count,
+            phase_releasable_by_task,
+        )
     }
 
     /// Check if concurrent mode is enabled (GPU only).
@@ -325,6 +577,7 @@ impl ChipScheduler {
         transcript: &T,
         execute_task: F,
         lane_count: usize,
+        mut phase_releasable_by_task: HashMap<usize, u64>,
     ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
@@ -338,6 +591,11 @@ impl ChipScheduler {
 
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
         let worker_limit = lane_count;
+        let phase_release_enabled = configured_phase_reservation_release();
+        tracing::info!(
+            "[scheduler] CENO_GPU_PHASE_RESERVATION_RELEASE={}",
+            usize::from(phase_release_enabled)
+        );
 
         // must call `init_booking_baseline` before concurrent execution
         let mem_pool = cuda_hal.inner().mem_pool();
@@ -375,24 +633,50 @@ impl ChipScheduler {
         let (task_tx, task_rx) = mpsc::channel::<ScheduledTask<'a, PB>>();
         let task_rx = Arc::new(Mutex::new(task_rx));
         let (done_tx, done_rx) = mpsc::channel::<CompletionMessage<'a, PB>>();
+        let (phase_tx, phase_rx) = mpsc::channel::<PhaseReleaseMessage>();
 
         // 3. State tracking
         let mut tasks_inflight = 0usize;
         let mut results: Vec<ChipTaskResult<'a, PB>> = Vec::with_capacity(total_tasks);
         let mut samples: Vec<(usize, PB::E)> = Vec::with_capacity(total_tasks);
+        let mut reservations = HashMap::<usize, TaskReservation>::with_capacity(total_tasks);
+        let mut pending_phase_events = Vec::<PhaseReleaseMessage>::new();
+        let mut memory_telemetry = SchedulerMemoryTelemetry::default();
+        memory_telemetry.sample(mem_pool);
 
         // Helper to handle a completion message
         let mut handle_completion = |msg: CompletionMessage<'a, PB>,
                                      mem_pool: &ceno_gpu::common::mem_pool::CudaMemPool,
                                      tasks_inflight: &mut usize,
+                                     reservations: &mut HashMap<usize, TaskReservation>,
+                                     memory_telemetry: &mut SchedulerMemoryTelemetry,
                                      label: &str|
          -> Result<(), ZKVMError> {
-            mem_pool.unbook_capacity(msg.memory_reserved);
-            *tasks_inflight -= 1;
+            let Some(reservation) = reservations.get_mut(&msg.task_id) else {
+                tracing::warn!(
+                    "[scheduler] ignoring completion for unknown task_id={}",
+                    msg.task_id
+                );
+                return Ok(());
+            };
+            if reservation.completed {
+                tracing::warn!(
+                    "[scheduler] ignoring duplicate completion for task_id={}",
+                    msg.task_id
+                );
+                return Ok(());
+            }
+            let initial_reserved = reservation.initial_bytes;
+            let phase_released = reservation.released_bytes;
+            let (remaining_reserved, released_byte_ms) = reservation.complete();
+            mem_pool.unbook_capacity(remaining_reserved);
+            memory_telemetry.released_byte_ms += released_byte_ms;
+            *tasks_inflight = tasks_inflight.saturating_sub(1);
+            memory_telemetry.sample(mem_pool);
             let pool_used = mem_pool.get_used_size().unwrap_or(0);
             let pool_reserved = mem_pool.get_reserved_size().unwrap_or(0);
             tracing::info!(
-                "[scheduler] Task completed{}, task_id={}, circuit={}, lane={}, stream_id={:?}, queue_delay={:.3}ms, host_execution={:.3}ms, event_wait={:.3}ms, completion={:.3}ms, unbooked={:.2}MB, pool_used={:.2}MB, pool_reserved={:.2}MB, pool_booked={:.2}MB, inflight={}",
+                "[scheduler] Task completed{}, task_id={}, circuit={}, lane={}, stream_id={:?}, queue_delay={:.3}ms, host_execution={:.3}ms, event_wait={:.3}ms, completion={:.3}ms, reservation_initial={:.2}MB, reservation_released={:.2}MB, reservation_remaining={:.2}MB, completion_unbooked={:.2}MB, pool_used={:.2}MB, pool_reserved={:.2}MB, pool_booked={:.2}MB, pool_high_water={:.2}MB, framebuffer_high_water={:.2}MB, underestimation_high={:.2}MB, inflight={}",
                 label,
                 msg.task_id,
                 msg.circuit_name,
@@ -402,10 +686,16 @@ impl ChipScheduler {
                 msg.host_execution_ms,
                 msg.event_wait_ms,
                 msg.completion_ms,
-                msg.memory_reserved as f64 / (1024.0 * 1024.0),
+                initial_reserved as f64 / (1024.0 * 1024.0),
+                phase_released as f64 / (1024.0 * 1024.0),
+                remaining_reserved as f64 / (1024.0 * 1024.0),
+                remaining_reserved as f64 / (1024.0 * 1024.0),
                 pool_used as f64 / (1024.0 * 1024.0),
                 pool_reserved as f64 / (1024.0 * 1024.0),
                 mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
+                memory_telemetry.pool_used_high as f64 / (1024.0 * 1024.0),
+                memory_telemetry.framebuffer_used_high as f64 / (1024.0 * 1024.0),
+                memory_telemetry.underestimation_high as f64 / (1024.0 * 1024.0),
                 *tasks_inflight
             );
             crate::scheme::gpu::log_gpu_device_state(&format!(
@@ -474,6 +764,7 @@ impl ChipScheduler {
             for (lane_id, (lane_stream, stream_id)) in lane_streams.drain(..).enumerate() {
                 let rx = Arc::clone(&task_rx);
                 let tx = done_tx.clone();
+                let phase_tx = phase_tx.clone();
                 let execute_fn = &execute_task;
                 let tr = &transcript_ref;
 
@@ -491,17 +782,19 @@ impl ChipScheduler {
                         let task = scheduled.task;
                         let memory = task.estimated_memory_bytes;
                         let booked_memory = task.booked_memory_bytes;
+                        let phase_releasable_memory = scheduled.phase_releasable_memory_bytes;
                         let task_id = task.task_id;
                         let circuit_name = task.circuit_name.clone();
                         tracing::info!(
-                            "[scheduler] worker starting task {} ({}), lane={}, stream_id={:?}, queue_delay={:.3}ms, estimated={:.2}MB, reserved={:.2}MB",
+                            "[scheduler] worker starting task {} ({}), lane={}, stream_id={:?}, queue_delay={:.3}ms, estimated={:.2}MB, reserved={:.2}MB, phase_releasable={:.2}MB",
                             task_id,
                             circuit_name,
                             lane_id,
                             stream_id,
                             queue_delay_ms,
                             memory as f64 / (1024.0 * 1024.0),
-                            booked_memory as f64 / (1024.0 * 1024.0)
+                            booked_memory as f64 / (1024.0 * 1024.0),
+                            phase_releasable_memory as f64 / (1024.0 * 1024.0),
                         );
                         crate::scheme::gpu::log_gpu_device_state(&format!(
                             "task_start:{}:{}",
@@ -524,6 +817,17 @@ impl ChipScheduler {
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 let _lane_binding = lane_stream.as_ref().map(|stream| {
                                     gkr_iop::gpu::bind_thread_stream(stream.stream().clone())
+                                });
+                                let _phase_release_context = phase_release_enabled.then(|| {
+                                    bind_phase_release_context(PhaseReleaseContext {
+                                        sender: phase_tx.clone(),
+                                        task_id,
+                                        circuit_name: circuit_name.clone(),
+                                        releasable_bytes: phase_releasable_memory,
+                                        lane_id,
+                                        stream_id,
+                                        sent: false,
+                                    })
                                 });
                                 // Fork locally: clone parent transcript template.
                                 let mut local_transcript = tr.0.clone();
@@ -585,7 +889,6 @@ impl ChipScheduler {
 
                         let _ = tx.send(CompletionMessage {
                             result,
-                            memory_reserved: booked_memory,
                             task_id,
                             circuit_name,
                             forked_sample,
@@ -600,16 +903,101 @@ impl ChipScheduler {
                 });
             }
             drop(done_tx);
+            drop(phase_tx);
 
             // 5. Scheduling loop (greedy backfilling)
             let mut pending: Vec<ChipTask<'a, PB>> = tasks;
 
             while !pending.is_empty() || tasks_inflight > 0 {
+                while let Ok(message) = phase_rx.try_recv() {
+                    pending_phase_events.push(message);
+                }
+                let mut phase_idx = pending_phase_events.len();
+                while phase_idx > 0 {
+                    phase_idx -= 1;
+                    let status = cuda_phase_event_status(&pending_phase_events[phase_idx].event);
+                    match status {
+                        PhaseEventStatus::Incomplete => {}
+                        PhaseEventStatus::Complete => {
+                            let message = pending_phase_events.swap_remove(phase_idx);
+                            let event_latency_ms =
+                                message.recorded_at.elapsed().as_secs_f64() * 1000.0;
+                            let Some(reservation) = reservations.get_mut(&message.task_id) else {
+                                tracing::warn!(
+                                    "[scheduler] ignoring phase release for unknown task_id={}",
+                                    message.task_id
+                                );
+                                continue;
+                            };
+                            let released = apply_phase_event_status(
+                                reservation,
+                                message.releasable_bytes,
+                                PhaseEventStatus::Complete,
+                                Instant::now(),
+                            )
+                            .expect("completed phase event cannot fail")
+                            .expect("completed phase event must produce a release result");
+                            if released == 0 {
+                                tracing::warn!(
+                                    "[scheduler] ignoring duplicate/late phase release for task_id={}",
+                                    message.task_id
+                                );
+                                continue;
+                            }
+                            let remaining = reservation.remaining_bytes();
+                            mem_pool.unbook_capacity(released);
+                            memory_telemetry.sample(mem_pool);
+                            let _release_range = nvtx::range!(
+                                "ceno.phase.reservation-release circuit={} lane={} stream_id={}",
+                                message.circuit_name,
+                                message.lane_id,
+                                message
+                                    .stream_id
+                                    .map(|id| id.to_string())
+                                    .unwrap_or_else(|| "default".to_string())
+                            );
+                            tracing::info!(
+                                "[scheduler] Tower reservation released, task_id={}, circuit={}, lane={}, stream_id={:?}, phase_event_latency={:.3}ms, reservation_initial={:.2}MB, reservation_released={:.2}MB, reservation_remaining={:.2}MB, pool_booked={:.2}MB, pool_high_water={:.2}MB, framebuffer_high_water={:.2}MB, underestimation_high={:.2}MB",
+                                message.task_id,
+                                message.circuit_name,
+                                message.lane_id,
+                                message.stream_id,
+                                event_latency_ms,
+                                reservation.initial_bytes as f64 / (1024.0 * 1024.0),
+                                released as f64 / (1024.0 * 1024.0),
+                                remaining as f64 / (1024.0 * 1024.0),
+                                mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
+                                memory_telemetry.pool_used_high as f64 / (1024.0 * 1024.0),
+                                memory_telemetry.framebuffer_used_high as f64 / (1024.0 * 1024.0),
+                                memory_telemetry.underestimation_high as f64 / (1024.0 * 1024.0),
+                            );
+                        }
+                        PhaseEventStatus::Failed(status) => {
+                            let message = pending_phase_events.swap_remove(phase_idx);
+                            drop(task_tx);
+                            return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                                format!(
+                                    "CUDA phase event query failed for task {} ({}) on lane {}: {}",
+                                    message.task_id, message.circuit_name, message.lane_id, status
+                                )
+                                .into_boxed_str(),
+                            )));
+                        }
+                    }
+                }
+
                 // First drain any completions already available to free memory immediately.
                 // This non-blocking path keeps utilization high (and covers the initial loop
                 // iteration when nothing is running yet), so we handle completions here.
                 while let Ok(msg) = done_rx.try_recv() {
-                    if let Err(e) = handle_completion(msg, mem_pool, &mut tasks_inflight, "") {
+                    if let Err(e) = handle_completion(
+                        msg,
+                        mem_pool,
+                        &mut tasks_inflight,
+                        &mut reservations,
+                        &mut memory_telemetry,
+                        "",
+                    ) {
                         drop(task_tx);
                         return Err(e);
                     }
@@ -625,6 +1013,9 @@ impl ChipScheduler {
                 {
                     let task = pending.remove(vec_idx);
                     let booked_mem = task.booked_memory_bytes;
+                    let task_id = task.task_id;
+                    let phase_releasable_memory_bytes =
+                        phase_releasable_by_task.remove(&task_id).unwrap_or(0);
                     let pool_used = mem_pool.get_used_size().unwrap_or(0);
                     let pool_reserved = mem_pool.get_reserved_size().unwrap_or(0);
                     tracing::info!(
@@ -642,15 +1033,29 @@ impl ChipScheduler {
                         task.task_id, task.circuit_name
                     ));
                     tasks_inflight += 1;
+                    if reservations
+                        .insert(task_id, TaskReservation::new(booked_mem))
+                        .is_some()
+                    {
+                        mem_pool.unbook_capacity(booked_mem);
+                        tasks_inflight -= 1;
+                        drop(task_tx);
+                        return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                            format!("duplicate scheduler task_id={task_id}").into_boxed_str(),
+                        )));
+                    }
+                    memory_telemetry.sample(mem_pool);
                     if task_tx
                         .send(ScheduledTask {
                             task,
                             queued_at: scheduler_start,
+                            phase_releasable_memory_bytes,
                         })
                         .is_err()
                     {
                         mem_pool.unbook_capacity(booked_mem);
                         tasks_inflight -= 1;
+                        reservations.remove(&task_id);
                         drop(task_tx);
                         return Err(ZKVMError::BackendError(BackendError::CircuitError(
                             "Worker channel closed: all workers have died"
@@ -731,16 +1136,27 @@ impl ChipScheduler {
 
                 // Second call site blocks instead of busy-waiting when the pool is full; this
                 // waits for the next completion to free memory before trying to launch again.
-                match done_rx.recv() {
+                let completion = if phase_release_enabled {
+                    done_rx.recv_timeout(Duration::from_millis(1))
+                } else {
+                    done_rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
+                };
+                match completion {
                     Ok(msg) => {
-                        if let Err(e) =
-                            handle_completion(msg, mem_pool, &mut tasks_inflight, " (blocked)")
-                        {
+                        if let Err(e) = handle_completion(
+                            msg,
+                            mem_pool,
+                            &mut tasks_inflight,
+                            &mut reservations,
+                            &mut memory_telemetry,
+                            " (blocked)",
+                        ) {
                             drop(task_tx);
                             return Err(e);
                         }
                     }
-                    Err(_) => {
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => {
                         if tasks_inflight > 0 {
                             return Err(ZKVMError::BackendError(BackendError::CircuitError(
                                 "Completion channel closed with tasks still in-flight"
@@ -758,6 +1174,14 @@ impl ChipScheduler {
         });
 
         let scope_result = scope_result;
+        tracing::info!(
+            "[scheduler] memory telemetry: pool_high_water={:.2}MB, framebuffer_high_water={:.2}MB, booked_high_water={:.2}MB, underestimation_high={:.2}MB, released_byte_time={:.3}GiB*s",
+            memory_telemetry.pool_used_high as f64 / (1024.0 * 1024.0),
+            memory_telemetry.framebuffer_used_high as f64 / (1024.0 * 1024.0),
+            memory_telemetry.booked_high as f64 / (1024.0 * 1024.0),
+            memory_telemetry.underestimation_high as f64 / (1024.0 * 1024.0),
+            memory_telemetry.released_byte_ms as f64 / (1024.0 * 1024.0 * 1024.0 * 1000.0),
+        );
         mem_pool.reset_booking();
         scope_result?;
 
@@ -824,5 +1248,82 @@ mod tests {
             stream_ids.push(stream_id);
         }
         assert!(validate_unique_stream_id(&stream_ids, 18).is_err());
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn phase_reservation_release_is_opt_in() {
+        assert!(!phase_reservation_release_enabled(None));
+        assert!(!phase_reservation_release_enabled(Some("0")));
+        assert!(!phase_reservation_release_enabled(Some("true")));
+        assert!(phase_reservation_release_enabled(Some("1")));
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn phase_events_release_only_after_completion_and_exactly_once() {
+        let now = Instant::now();
+        let mut reservation = TaskReservation::new(1_000);
+        assert_eq!(
+            apply_phase_event_status(&mut reservation, 600, PhaseEventStatus::Incomplete, now,),
+            Ok(None)
+        );
+        assert_eq!(reservation.remaining_bytes(), 1_000);
+        assert_eq!(
+            apply_phase_event_status(&mut reservation, 600, PhaseEventStatus::Complete, now,),
+            Ok(Some(600))
+        );
+        assert_eq!(reservation.remaining_bytes(), 400);
+        assert_eq!(
+            apply_phase_event_status(&mut reservation, 600, PhaseEventStatus::Complete, now,),
+            Ok(Some(0))
+        );
+        assert_eq!(reservation.complete().0, 400);
+        assert_eq!(reservation.complete().0, 0);
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn completion_before_phase_message_releases_the_whole_reservation() {
+        let mut reservation = TaskReservation::new(1_000);
+        assert_eq!(reservation.complete().0, 1_000);
+        assert_eq!(reservation.release_phase(600, Instant::now()), 0);
+        assert_eq!(reservation.remaining_bytes(), 0);
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn phase_event_errors_do_not_release_capacity() {
+        let mut reservation = TaskReservation::new(1_000);
+        assert_eq!(
+            apply_phase_event_status(
+                &mut reservation,
+                600,
+                PhaseEventStatus::Failed("query failed".to_string()),
+                Instant::now(),
+            ),
+            Err("query failed".to_string())
+        );
+        assert_eq!(reservation.remaining_bytes(), 1_000);
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn success_error_and_panic_completions_release_remaining_capacity() {
+        enum WorkerOutcome {
+            Success,
+            Error,
+            Panic,
+        }
+
+        for _outcome in [
+            WorkerOutcome::Success,
+            WorkerOutcome::Error,
+            WorkerOutcome::Panic,
+        ] {
+            let mut reservation = TaskReservation::new(1_000);
+            assert_eq!(reservation.release_phase(600, Instant::now()), 600);
+            assert_eq!(reservation.complete().0, 400);
+        }
     }
 }

@@ -35,6 +35,78 @@ pub(crate) type WitResult = ceno_gpu::common::witgen::types::GpuWitnessResult<Wi
 pub(crate) type LkResult = ceno_gpu::common::witgen::types::GpuLookupCountersResult<LkBuf>;
 pub(crate) type CompactEcBuf = ceno_gpu::common::witgen::types::CompactEcResult<RamBuf>;
 
+/// Read selected cells from one logical row of a GPU-backed witness matrix.
+///
+/// Normal GPU witgen deliberately keeps a zero-filled host placeholder and the
+/// authoritative witness in column-major device storage.  Callers that need a
+/// handful of post-witgen scalar values must therefore read those cells from
+/// the backing instead of indexing the placeholder.
+pub(crate) fn gpu_col_major_row_cells<E: ExtensionField>(
+    rmm: &RowMajorMatrix<E::BaseField>,
+    row: usize,
+    columns: &[usize],
+) -> Result<Option<Vec<E::BaseField>>, ZKVMError> {
+    type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
+
+    if !rmm.has_device_backing() {
+        return Ok(None);
+    }
+    if rmm.device_backing_layout() != Some(DeviceMatrixLayout::ColMajor) {
+        return Err(ZKVMError::InvalidWitness(
+            "post-witgen scalar extraction requires column-major device backing".into(),
+        ));
+    }
+    if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>() {
+        return Err(ZKVMError::InvalidWitness(
+            "GPU-backed scalar extraction only supports BabyBear".into(),
+        ));
+    }
+
+    let height = rmm.height();
+    let width = rmm.n_col();
+    if row >= height || columns.iter().any(|&column| column >= width) {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "GPU-backed scalar extraction out of bounds: row={row}, height={height}, width={width}, columns={columns:?}"
+            )
+            .into(),
+        ));
+    }
+    let backing = rmm
+        .device_backing_ref::<WitBuf>()
+        .ok_or_else(|| ZKVMError::InvalidWitness("unexpected GPU witness backing type".into()))?;
+    let expected_len = height
+        .checked_mul(width)
+        .ok_or_else(|| ZKVMError::InvalidWitness("GPU witness shape overflow".into()))?;
+    if backing.len() != expected_len {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "GPU witness backing length mismatch: got {}, expected {expected_len}",
+                backing.len()
+            )
+            .into(),
+        ));
+    }
+
+    let values = columns
+        .iter()
+        .map(|&column| backing.get(column * height + row, None))
+        .collect::<Result<Vec<BB>, _>>()
+        .map_err(|err| ZKVMError::InvalidWitness(format!("GPU scalar D2H failed: {err}").into()))?;
+
+    // The TypeId check above establishes that E::BaseField is BabyBear.  Keep
+    // the same narrow conversion convention as the existing full D2H helpers.
+    let values = unsafe {
+        let mut values = std::mem::ManuallyDrop::new(values);
+        Vec::from_raw_parts(
+            values.as_mut_ptr() as *mut E::BaseField,
+            values.len(),
+            values.capacity(),
+        )
+    };
+    Ok(Some(values))
+}
+
 /// CPU-side lightweight scan of GPU-produced RAM record slots.
 ///
 /// Reconstructs BTreeMap read/write records and addr_accessed from the GPU output,
@@ -342,8 +414,57 @@ pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
         compact
     };
 
-    let mut rmm = RowMajorMatrix::<E::BaseField>::new(num_rows, num_cols, padding);
     // Keep the original col-major witness buffer as the source of truth for GPU commit.
-    rmm.set_device_backing(device_buffer, DeviceMatrixLayout::ColMajor);
-    Ok(rmm)
+    // The GPU path must not allocate and zero a duplicate padded host matrix merely to
+    // carry shape metadata for this already device-owned result.
+    Ok(RowMajorMatrix::<E::BaseField>::new_by_device_backing(
+        num_rows,
+        num_cols,
+        padding,
+        device_buffer,
+        DeviceMatrixLayout::ColMajor,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ceno_gpu::{Buffer, CudaHal, common::BufferImpl};
+    use ff_ext::BabyBearExt4;
+    use p3::{babybear::BabyBear, field::PrimeCharacteristicRing};
+
+    #[test]
+    fn device_owned_witness_preserves_compact_shape_layout_and_storage() {
+        let hal = gkr_iop::gpu::get_cuda_hal().unwrap();
+        let values = (1..=6).map(BabyBear::from_u64).collect::<Vec<_>>();
+        let device = hal.alloc_elems_from_host(&values, None).unwrap();
+        let matrix = gpu_witness_to_rmm::<BabyBearExt4>(
+            ceno_gpu::common::witgen::types::GpuWitnessResult {
+                device_buffer: device,
+                num_rows: 3,
+                num_cols: 2,
+                layout: DeviceMatrixLayout::ColMajor,
+            },
+            3,
+            2,
+            InstancePaddingStrategy::Default,
+        )
+        .unwrap();
+
+        assert_eq!(matrix.num_instances(), 3);
+        assert_eq!(matrix.height(), 4);
+        assert_eq!(matrix.width(), 2);
+        assert_eq!(
+            matrix.device_backing_layout(),
+            Some(DeviceMatrixLayout::ColMajor)
+        );
+        assert_eq!(
+            matrix
+                .device_backing_ref::<BufferImpl<'static, BabyBear>>()
+                .unwrap()
+                .to_vec()
+                .unwrap(),
+            values
+        );
+    }
 }

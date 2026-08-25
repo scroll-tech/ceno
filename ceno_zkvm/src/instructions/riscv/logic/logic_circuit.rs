@@ -21,7 +21,7 @@ use crate::{
 use ceno_emul::{InsnKind, StepRecord};
 
 /// This trait defines a logic instruction, connecting an instruction type to a lookup table.
-pub trait LogicOp {
+pub trait LogicOp: 'static {
     const INST_KIND: InsnKind;
     type OpsTable: OpsTable;
 }

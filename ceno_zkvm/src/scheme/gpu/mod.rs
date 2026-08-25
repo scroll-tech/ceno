@@ -177,8 +177,8 @@ mod util;
 pub(crate) use memory::{
     check_gpu_mem_estimation, check_gpu_mem_estimation_with_context,
     check_gpu_tower_prove_mem_estimation_with_context, estimate_chip_proof_memory,
-    estimate_main_witness_bytes, estimate_tower_bytes, estimate_tower_peak_cells_for_rows,
-    init_gpu_mem_tracker,
+    estimate_chip_proof_reservations, estimate_main_witness_bytes, estimate_tower_bytes,
+    estimate_tower_peak_cells_for_rows, init_gpu_mem_tracker,
 };
 use memory::{
     estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
@@ -937,15 +937,57 @@ pub(crate) fn normalize_traces_to_device_col_major<E: ExtensionField>(
 ) {
     let mut already_col_major = 0usize;
     let mut cpu_upload_and_transpose = 0usize;
-    let device_retranspose_todo = 0usize;
+    let mut device_retranspose = 0usize;
+    let mut device_retranspose_bytes = 0usize;
+    let device_retranspose_start = Instant::now();
 
     for (idx, trace) in vec_traces.iter_mut().enumerate() {
         if trace.has_device_backing() {
-            if trace.device_backing_layout() != Some(DeviceMatrixLayout::ColMajor) {
-                panic!("TODO: GPU trace at index {idx} is device-backed but not col-major");
+            match trace.device_backing_layout() {
+                Some(DeviceMatrixLayout::ColMajor) => {
+                    already_col_major += 1;
+                    continue;
+                }
+                Some(DeviceMatrixLayout::RowMajor) => {
+                    let rows = if compact_prefix_rows {
+                        trace.occupied_physical_rows()
+                    } else {
+                        trace.height()
+                    };
+                    let cols = trace.width();
+                    let row_major_buf = trace
+                        .device_backing_ref::<BufferImpl<'static, BB31Base>>()
+                        .unwrap_or_else(|| {
+                            panic!("GPU trace at index {idx} has unexpected row-major backing type")
+                        })
+                        .clone();
+                    assert_eq!(
+                        row_major_buf.len(),
+                        rows * cols,
+                        "GPU trace at index {idx} row-major backing size mismatch"
+                    );
+                    let mut col_major_buf = cuda_hal
+                        .alloc_elems_on_device(rows * cols, false, None)
+                        .unwrap_or_else(|e| {
+                            panic!("failed to allocate col-major buffer for GPU trace {idx}: {e}")
+                        });
+                    matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+                        &cuda_hal.inner,
+                        &mut col_major_buf,
+                        &row_major_buf,
+                        cols,
+                        rows,
+                    )
+                    .unwrap_or_else(|e| {
+                        panic!("failed to transpose row-major GPU trace {idx}: {e}")
+                    });
+                    trace.set_device_backing(col_major_buf, DeviceMatrixLayout::ColMajor);
+                    device_retranspose += 1;
+                    device_retranspose_bytes += rows * cols * std::mem::size_of::<BB31Base>();
+                    continue;
+                }
+                None => unreachable!("device-backed trace must report a layout"),
             }
-            already_col_major += 1;
-            continue;
         }
 
         let rows = if compact_prefix_rows {
@@ -979,13 +1021,58 @@ pub(crate) fn normalize_traces_to_device_col_major<E: ExtensionField>(
         cpu_upload_and_transpose += 1;
     }
 
-    tracing::debug!(
+    tracing::info!(
         total_traces = vec_traces.len(),
         already_col_major,
         cpu_upload_and_transpose,
-        device_retranspose_todo,
+        device_retranspose,
+        device_retranspose_bytes,
+        device_retranspose_ms = device_retranspose_start.elapsed().as_secs_f64() * 1_000.0,
         "normalized gpu trace backing to device col-major"
     );
+}
+
+#[cfg(test)]
+mod device_layout_tests {
+    use super::*;
+    use ceno_gpu::{Buffer, CudaHal};
+    use p3::field::PrimeCharacteristicRing;
+    use witness::{DeviceMatrixLayout, InstancePaddingStrategy};
+
+    #[test]
+    fn row_major_device_trace_normalizes_values_and_layout() {
+        let cuda_hal = get_cuda_hal().unwrap();
+        let values = [1, 2, 3, 4, 5, 6]
+            .into_iter()
+            .map(BB31Base::from_u64)
+            .collect_vec();
+        let device = cuda_hal.alloc_elems_from_host(&values, None).unwrap();
+        let trace = witness::RowMajorMatrix::new_by_device_backing(
+            2,
+            3,
+            InstancePaddingStrategy::Default,
+            device,
+            DeviceMatrixLayout::RowMajor,
+        );
+        let mut traces = vec![trace];
+
+        normalize_traces_to_device_col_major::<BB31Ext>(&cuda_hal, &mut traces, false);
+
+        assert_eq!(
+            traces[0].device_backing_layout(),
+            Some(DeviceMatrixLayout::ColMajor)
+        );
+        let normalized = traces[0]
+            .device_backing_ref::<BufferImpl<'static, BB31Base>>()
+            .unwrap()
+            .to_vec()
+            .unwrap();
+        let expected = [1, 4, 2, 5, 3, 6]
+            .into_iter()
+            .map(BB31Base::from_u64)
+            .collect_vec();
+        assert_eq!(normalized, expected);
+    }
 }
 
 fn jagged_batch_commit_from_host(
@@ -1380,7 +1467,7 @@ where
     }
     crate::instructions::gpu::cache::assert_caches_released_before_prove();
 
-    let ordered_traces = traces.into_values().collect_vec();
+    let mut ordered_traces = traces.into_values().collect_vec();
     let max_poly_size_log2 = ordered_traces
         .iter()
         .map(|rmm| ceil_log2(rmm.height()))
@@ -1401,6 +1488,26 @@ where
     }
 
     let cuda_hal = get_cuda_hal().unwrap();
+    for (trace_idx, trace) in ordered_traces.iter_mut().enumerate() {
+        if trace.width() == 0 {
+            tracing::warn!(
+                "[gpu] replacing zero-width gpu witness trace at index {trace_idx} with a dummy column"
+            );
+            *trace = witness::RowMajorMatrix::<E::BaseField>::new(
+                trace.num_instances(),
+                1,
+                InstancePaddingStrategy::Default,
+            );
+        }
+    }
+    normalize_traces_to_device_col_major::<E>(&cuda_hal, &mut ordered_traces, is_jagged_pcs);
+    for (idx, trace) in ordered_traces.iter().enumerate() {
+        assert_eq!(
+            trace.device_backing_layout(),
+            Some(DeviceMatrixLayout::ColMajor),
+            "GPU cache-none commit requires col-major device-backed witness trace at index {idx}"
+        );
+    }
     cuda_hal
         .inner
         .synchronize()
@@ -1418,31 +1525,8 @@ where
     );
 
     if is_jagged_pcs {
-        let mut vec_traces = ordered_traces
-            .into_iter()
-            .enumerate()
-            .map(|(trace_idx, witness_rmm)| {
-                if witness_rmm.width() == 0 {
-                    tracing::warn!(
-                        "[gpu] replacing zero-width gpu witness trace at index {trace_idx} with a dummy column"
-                    );
-                    witness::RowMajorMatrix::<E::BaseField>::new(
-                        witness_rmm.num_instances(),
-                        1,
-                        InstancePaddingStrategy::Default,
-                    )
-                } else {
-                    witness_rmm
-                }
-            })
-            .collect_vec();
+        let vec_traces = ordered_traces;
         let trace_layouts = jagged_trace_layouts(&vec_traces);
-        let normalize_start = Instant::now();
-        normalize_traces_to_device_col_major::<E>(&cuda_hal, &mut vec_traces, true);
-        tracing::info!(
-            "[gpu-jagged-profile] eager_jagged_normalize_missing_traces elapsed_ms={:.3}",
-            normalize_start.elapsed().as_secs_f64() * 1000.0
-        );
         for (idx, trace) in vec_traces.iter().enumerate() {
             assert!(
                 trace.has_device_backing(),
@@ -1490,18 +1574,6 @@ where
             let witness_rmm = ordered_traces[trace_idx]
                 .take()
                 .expect("gpu commit source reused");
-            let witness_rmm = if witness_rmm.width() == 0 {
-                tracing::warn!(
-                    "[gpu] replacing zero-width gpu witness trace at index {trace_idx} with a dummy column"
-                );
-                witness::RowMajorMatrix::<E::BaseField>::new(
-                    witness_rmm.num_instances(),
-                    1,
-                    InstancePaddingStrategy::Default,
-                )
-            } else {
-                witness_rmm
-            };
             Ok(unsafe { std::mem::transmute(witness_rmm) })
         })
         .unwrap();
@@ -1561,7 +1633,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
                 }
             }
 
-            if crate::instructions::gpu::config::should_materialize_witness_on_gpu() {
+            {
                 let span = entered_span!("[gpu] normalize_trace_backing", profiling_2 = true);
                 let cuda_hal = get_cuda_hal().unwrap();
                 normalize_traces_to_device_col_major::<E>(

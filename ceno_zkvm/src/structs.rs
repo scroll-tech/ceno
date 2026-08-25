@@ -405,6 +405,17 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         &self.lk_mlts
     }
 
+    #[cfg(feature = "gpu")]
+    pub(crate) fn insert_shard_gpu_lk_multiplicity(&mut self, lk_mlt: Multiplicity<u64>) {
+        assert!(self.combined_lk_mlt.is_none());
+        assert!(
+            self.lk_mlts
+                .insert("__gpu_shard_lk".to_string(), lk_mlt)
+                .is_none(),
+            "shard GPU lookup multiplicity inserted twice"
+        );
+    }
+
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
@@ -575,9 +586,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         use tracing::info_span;
 
         // Try the full GPU pipeline: keep data on device, minimal CPU roundtrips.
-        // Only when GPU witgen is enabled (otherwise witgen must not touch GPU).
         #[cfg(feature = "gpu")]
-        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+        {
             let gpu_result = self.try_assign_shared_circuit_gpu(
                 cs,
                 shard_ctx,
