@@ -235,7 +235,7 @@ fn convert_compact_shard_records<E: ff_ext::ExtensionField>(
         let base = i * GPU_SHARD_RAM_RECORD_SIZE;
         let r = &raw[base..base + GPU_SHARD_RAM_RECORD_SIZE];
 
-        // Layout matches GpuShardRamRecord (112 bytes, #[repr(C)]):
+        // Layout matches GpuShardRamRecord (120 bytes, #[repr(C)]):
         //   0: addr(u32), 4: ram_type(u32), 8: value(u32), 12: _pad(u32),
         //   16: ordinal(u64), 24: shard(u64), 32: local_clk(u64),
         //   40: global_clk(u64), 48: is_to_write_set(u32), 52: nonce(u32),
@@ -415,7 +415,7 @@ fn ensure_shard_metadata_cached_inner(
         // Allocate shared EC/addr compact buffers for this shard.
         //
         // EC records: cross-shard only (sparse subset of RAM ops).
-        //   112 bytes each (28 u32s). Cap at 16M entries ≈ 1.8 GB.
+        //   120 bytes each (30 u32s). Cap at 16M entries ≈ 1.9 GB.
         // Addr records: every gpu_send() emits one (dense).
         //   4 bytes each (1 u32). Cap at 256M entries ≈ 1 GB.
         let max_ops_per_step = 52u64; // keccak worst case

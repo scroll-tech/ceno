@@ -1183,6 +1183,50 @@ struct CompactStepReplay {
     aot: Arc<ceno_emul::aot::AotProgram>,
 }
 
+// `GpuReplayTracer` caches raw pointers into allocations it exclusively owns.
+// Moving the complete replay state to one worker thread does not alias those
+// allocations; the state is never accessed again by the spawning thread.
+#[cfg(feature = "gpu")]
+unsafe impl Send for CompactStepReplay {}
+
+#[cfg(feature = "gpu")]
+struct CompactReplayPipeline {
+    ready: std::sync::mpsc::Receiver<CompactReplayShard>,
+    recycle: std::sync::mpsc::SyncSender<Vec<ceno_emul::GpuReplayTypedRange>>,
+}
+
+#[cfg(feature = "gpu")]
+fn spawn_compact_replay_pipeline(mut replay: CompactStepReplay) -> CompactReplayPipeline {
+    // One prepared shard may wait while the current shard is proving. The
+    // producer must recover the previous shard's arenas before replaying the
+    // next one, which bounds retained CPU storage and preserves tracer reuse.
+    let (ready_tx, ready) = std::sync::mpsc::sync_channel(1);
+    let (recycle, recycle_rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("ceno-compact-replay".to_string())
+        .spawn(move || {
+            let shard_count = replay.shard_step_counts.len();
+            for shard_id in 0..shard_count {
+                if shard_id != 0 {
+                    let Ok(ranges) = recycle_rx.recv() else {
+                        return;
+                    };
+                    for range in ranges {
+                        replay.vm.tracer_mut().recycle_range(range);
+                    }
+                }
+                let shard = replay
+                    .next_shard(false, Some)
+                    .expect("compact replay ended before its shard plan");
+                if ready_tx.send(shard).is_err() {
+                    return;
+                }
+            }
+        })
+        .expect("failed to spawn compact replay pipeline");
+    CompactReplayPipeline { ready, recycle }
+}
+
 #[cfg(feature = "gpu")]
 fn compact_replay_selected(debug_compare: bool, disabled_kinds: bool) -> bool {
     !debug_compare && !disabled_kinds
@@ -2114,6 +2158,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
             emul_result.replay_aot_program.clone(),
         )
     });
+    #[cfg(feature = "gpu")]
+    let compact_pipeline = compact_iter.take().map(spawn_compact_replay_pipeline);
     let mut current_compact_shard: Option<CompactReplayShard> = None;
     std::iter::from_fn(move || {
         info_span!(
@@ -2142,9 +2188,12 @@ pub fn generate_witness<'a, E: ExtensionField>(
             } {
             instrunction_dispatch_ctx.begin_shard();
             }
-            let (mut shard_ctx, shard_summary) = if let Some(compact_iter) = compact_iter.as_mut() {
+            let (mut shard_ctx, shard_summary) = if use_compact_replay {
                 instrunction_dispatch_ctx.begin_compact_ingest();
-                let stream_owned_ranges = true;
+                // Replay and typed arena preparation are CPU-only and may run
+                // one shard ahead. All GPU setup and assignment below remain
+                // on this consumer thread, after the previous proof returned.
+                let stream_owned_ranges = false;
                 #[cfg(feature = "gpu")]
                 if stream_owned_ranges
                     && !{
@@ -2256,17 +2305,23 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         .unwrap();
                 }
                 #[allow(unused_mut)]
-                let mut compact_shard = info_span!("position_compact_shard")
-                    .in_scope(|| {
-                        compact_iter.next_shard(stream_owned_ranges, |range| {
-                            #[cfg(feature = "gpu")]
-                            if stream_owned_ranges {
-                                return crate::instructions::gpu::dispatch::submit_provisional_fused_range(range)
-                                    .unwrap();
-                            }
-                            Some(range)
+                let mut compact_shard = info_span!("position_compact_shard").in_scope(|| {
+                    #[cfg(feature = "gpu")]
+                    {
+                        compact_pipeline
+                            .as_ref()
+                            .expect("compact replay pipeline missing")
+                            .ready
+                            .recv()
+                            .ok()
+                    }
+                    #[cfg(not(feature = "gpu"))]
+                    {
+                        compact_iter.as_mut().and_then(|compact_iter| {
+                            compact_iter.next_shard(stream_owned_ranges, Some)
                         })
-                    })?;
+                    }
+                })?;
                 for range in &compact_shard.arenas.ranges {
                     for (kind, arena) in InsnKind::iter().zip(&range.typed) {
                         if let Some(arena) = arena {
@@ -2413,12 +2468,12 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .in_scope(|| {
                         let recycled =
                             crate::instructions::gpu::dispatch::clear_compact_replay_arenas();
-                        let compact_iter = compact_iter
-                            .as_mut()
-                            .expect("compact owner recovery missing source");
-                        for range in recycled.into_iter().flatten() {
-                            compact_iter.vm.tracer_mut().recycle_range(range);
-                        }
+                        compact_pipeline
+                            .as_ref()
+                            .expect("compact replay pipeline missing")
+                            .recycle
+                            .send(recycled.into_iter().flatten().collect())
+                            .expect("compact replay pipeline stopped before owner recycling");
                     });
             }
 
@@ -3717,32 +3772,11 @@ pub fn run_e2e_proof_with_precompiled_aot<
     )
 }
 
-/// defines a lightweight CPU -> GPU pipeline for witness generation and proof creation.
-/// This enables overlapped execution such that while the GPU is proving shard `i`,
-/// the CPU is already generating the witness for shard `i+1`.
-///
-/// With `channel::bounded(0)` the pipeline behaves as a strict rendezvous:
-/// - CPU generates the next witness while GPU is proving the current one.
-/// - Once the CPU finishes generating `wN`, it blocks on `send(wN)`
-///   until the GPU finishes proving `wN–1` and calls `recv()`.
-///
-/// This ensures:
-///   - At most **one** witness on the GPU, and
-///   - At most **one** fully-generated witness waiting in CPU memory,
-///     keeping memory usage strictly bounded (2 witnesses max).
-///
-/// Timeline with bounded(0):
-///
-/// CPU gen(w1)→gen(w2)→wait→gen(w3)→wait, while GPU wait→prove(w1)→prove(w2)→prove(w3)→prove(w4).
-///
-/// CPU never runs ahead more than one witness, but CPU/GPU still overlap fully.
-///
-/// This improves total proving throughput by hiding CPU witness generation latency
-/// behind GPU proof execution.
-///
-/// in pure CPU mode, the pipeline is disabled and the prover falls back to
-/// fully sequential execution. Witness generation and proof creation run
-/// one after another with no overlap.
+/// Consume assigned witnesses and prove them sequentially. In GPU mode,
+/// `generate_witness` internally prepares one CPU replay shard ahead through a
+/// capacity-one channel. Its iterator performs all GPU assignment work before
+/// yielding, so advancing it only after the previous proof returns prevents
+/// assignment/H2D/CUDA work for shard N+1 from overlapping proof N.
 fn create_proofs_streaming<
     E: ExtensionField + LkMultiplicityKey,
     PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
@@ -4339,5 +4373,46 @@ mod tests {
             super::public_io_words_to_digest_words(&[]),
             super::KECCAK_EMPTY_WORDS
         );
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn compact_pipeline_overlaps_cpu_replay_but_gates_next_gpu_phase() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+            mpsc::sync_channel,
+        };
+
+        // This is the production channel topology in
+        // `spawn_compact_replay_pipeline`: one prepared shard and one recycled
+        // arena batch. GPU work remains exclusively on the receiver thread.
+        let (ready_tx, ready_rx) = sync_channel(1);
+        let (recycle_tx, recycle_rx) = sync_channel(1);
+        let replay_one_started = Arc::new(AtomicBool::new(false));
+        let next_gpu_phase_started = AtomicBool::new(false);
+        let replay_one_started_worker = Arc::clone(&replay_one_started);
+        let worker = std::thread::spawn(move || {
+            ready_tx.send(0usize).unwrap();
+            recycle_rx.recv().unwrap();
+            replay_one_started_worker.store(true, Ordering::Release);
+            ready_tx.send(1usize).unwrap();
+        });
+
+        // Receiving shard 0 models assignment 0. Recycling its CPU arenas
+        // enables replay 1 while proof 0 is still active.
+        assert_eq!(ready_rx.recv().unwrap(), 0);
+        recycle_tx.send(()).unwrap();
+        while !replay_one_started.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+
+        // The receiver has not advanced, so no assignment/H2D/kernel for shard
+        // 1 can have occurred even though its CPU replay is underway/ready.
+        assert!(!next_gpu_phase_started.load(Ordering::Relaxed));
+        assert_eq!(ready_rx.recv().unwrap(), 1);
+        next_gpu_phase_started.store(true, Ordering::Relaxed);
+        assert!(next_gpu_phase_started.load(Ordering::Relaxed));
+        worker.join().unwrap();
     }
 }
