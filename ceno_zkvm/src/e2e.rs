@@ -1183,11 +1183,18 @@ struct CompactStepReplay {
     aot: Arc<ceno_emul::aot::AotProgram>,
 }
 
-// `GpuReplayTracer` caches raw pointers into allocations it exclusively owns.
-// Moving the complete replay state to one worker thread does not alias those
-// allocations; the state is never accessed again by the spawning thread.
 #[cfg(feature = "gpu")]
-unsafe impl Send for CompactStepReplay {}
+struct CompactReplayPipelineInput {
+    platform: Platform,
+    program: Arc<Program>,
+    init_mem_state: InitMemState,
+    next_accesses: Arc<NextCycleAccess>,
+    shard_cycle_boundaries: Arc<Vec<Cycle>>,
+    range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
+    chunk_capacity: usize,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    aot: Arc<ceno_emul::aot::AotProgram>,
+}
 
 #[cfg(feature = "gpu")]
 struct CompactReplayPipeline {
@@ -1196,7 +1203,7 @@ struct CompactReplayPipeline {
 }
 
 #[cfg(feature = "gpu")]
-fn spawn_compact_replay_pipeline(mut replay: CompactStepReplay) -> CompactReplayPipeline {
+fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactReplayPipeline {
     // One prepared shard may wait while the current shard is proving. The
     // producer must recover the previous shard's arenas before replaying the
     // next one, which bounds retained CPU storage and preserves tracer reuse.
@@ -1205,6 +1212,20 @@ fn spawn_compact_replay_pipeline(mut replay: CompactStepReplay) -> CompactReplay
     std::thread::Builder::new()
         .name("ceno-compact-replay".to_string())
         .spawn(move || {
+            // Construct the VM and native replay state at their final address
+            // on the producer thread. The AOT replay path contains native
+            // pointers into that state and must not be moved after setup.
+            let mut replay = CompactStepReplay::new(
+                input.platform,
+                input.program,
+                &input.init_mem_state,
+                input.next_accesses,
+                input.shard_cycle_boundaries,
+                input.range_descriptors,
+                input.chunk_capacity,
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                input.aot,
+            );
             let shard_count = replay.shard_step_counts.len();
             for shard_id in 0..shard_count {
                 if shard_id != 0 {
@@ -2157,6 +2178,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             emul_result.replay_aot_program.clone(),
         )
     });
+    #[cfg(not(feature = "gpu"))]
     let mut compact_iter = use_compact_replay.then(|| {
         CompactStepReplay::new(
             platform.clone(),
@@ -2171,7 +2193,19 @@ pub fn generate_witness<'a, E: ExtensionField>(
         )
     });
     #[cfg(feature = "gpu")]
-    let compact_pipeline = compact_iter.take().map(spawn_compact_replay_pipeline);
+    let compact_pipeline = use_compact_replay.then(|| {
+        spawn_compact_replay_pipeline(CompactReplayPipelineInput {
+            platform: platform.clone(),
+            program: program.clone(),
+            init_mem_state: init_mem_state.clone(),
+            next_accesses: shard_ctx_builder.next_accesses(),
+            shard_cycle_boundaries: emul_result.shard_cycle_boundaries.clone(),
+            range_descriptors: emul_result.replay_range_descriptors.clone(),
+            chunk_capacity: emul_result.replay_range_capacity,
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            aot: emul_result.replay_aot_program.clone(),
+        })
+    });
     let mut current_compact_shard: Option<CompactReplayShard> = None;
     std::iter::from_fn(move || {
         info_span!(
