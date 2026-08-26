@@ -1226,6 +1226,7 @@ fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactRe
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
                 input.aot,
             );
+            replay.vm.tracer_mut().enable_retained_shard_mode();
             let shard_count = replay.shard_step_counts.len();
             for shard_id in 0..shard_count {
                 if shard_id != 0 {

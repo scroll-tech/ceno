@@ -134,6 +134,7 @@ pub struct GpuReplayTracer {
     pub(super) current: GpuReplayChunk,
     sealed: Vec<GpuReplayChunk>,
     pub(super) recyclable: Option<GpuReplayChunk>,
+    retain_complete_shard: bool,
     range_descriptors: Arc<Vec<crate::GpuReplayRangeDescriptor>>,
     pub(super) next_range_descriptor: usize,
     ordinal: usize,
@@ -168,6 +169,7 @@ impl GpuReplayTracer {
             current: GpuReplayChunk::empty(0, shard_start_cycle),
             sealed: Vec::new(),
             recyclable: None,
+            retain_complete_shard: false,
             range_descriptors: Arc::new(Vec::new()),
             next_range_descriptor: 0,
             ordinal: 0,
@@ -284,7 +286,22 @@ impl GpuReplayTracer {
         self.next_range_descriptor += 1;
         let next_descriptor = self.range_descriptors.get(self.next_range_descriptor);
         let next = self.recyclable.take().map_or_else(
-            || GpuReplayChunk::empty(sequence + 1, self.shard_start_cycle),
+            || {
+                next_descriptor
+                    .filter(|next| self.retain_complete_shard && next.shard_id == shard_id)
+                    .map_or_else(
+                        || GpuReplayChunk::empty(sequence + 1, self.shard_start_cycle),
+                        |descriptor| {
+                            let mut next = GpuReplayChunk::warmed(
+                                descriptor.family_counts,
+                                descriptor.fallback_count,
+                                self.shard_start_cycle,
+                            );
+                            next.reset_from_descriptor(descriptor, self.shard_start_cycle);
+                            next
+                        },
+                    )
+            },
             |mut next| {
                 if let Some(descriptor) = next_descriptor.filter(|next| next.shard_id == shard_id) {
                     next.reset_from_descriptor(descriptor, self.shard_start_cycle);
@@ -356,6 +373,16 @@ impl GpuReplayTracer {
         }
     }
 
+    /// Permit CPU replay to retain every range in one prepared shard while GPU
+    /// assignment of that shard remains gated by the preceding proof.
+    pub fn enable_retained_shard_mode(&mut self) {
+        assert_eq!(
+            self.ordinal, 0,
+            "retained shard mode enabled after replay started"
+        );
+        self.retain_complete_shard = true;
+    }
+
     pub fn finish_chunks(&mut self) {
         self.seal_current();
     }
@@ -408,9 +435,16 @@ impl GpuReplayTracer {
                 recycled.reset_empty(self.shard_start_cycle);
             }
             self.current = recycled;
-        } else {
-            assert!(self.recyclable.is_none(), "GPU replay range recycled twice");
+        } else if self.recyclable.is_none() {
             self.recyclable = Some(recycled);
+        } else {
+            assert!(
+                self.retain_complete_shard,
+                "GPU replay range recycled twice"
+            );
+            // Retained mode may allocate one owner per range while a full
+            // CPU-prepared shard waits for GPU assignment. Keep the two
+            // globally warmed owners and release the extras after use.
         }
     }
 
