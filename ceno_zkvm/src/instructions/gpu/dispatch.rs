@@ -49,7 +49,7 @@ fn producer_count(rows: usize) -> u32 {
     u32::try_from(rows).expect("producer count exceeds u32")
 }
 
-fn producer_base(base: usize) -> u32 {
+fn encoded_producer_base(base: usize) -> u32 {
     let base = u32::try_from(base).expect("producer base exceeds u32");
     assert!(base < (1 << 25), "producer base exceeds device priority range");
     base
@@ -757,7 +757,7 @@ pub(crate) fn submit_provisional_fused_range(
                 tag: registration.tag,
                 layout: arena.layout() as u32,
                 row_count: u32::try_from(arena.len()).unwrap(),
-                producer_base: producer_base(producer_base),
+                producer_base: encoded_producer_base(producer_base),
                 producer_count: producer_count(registration.rows),
                 producer_order: producer_order(arena.kind()),
                 num_cols: u32::try_from(registration.num_cols).unwrap(),
@@ -1427,7 +1427,7 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                     tag: registration.tag,
                     layout: arena.layout() as u32,
                     row_count: u32::try_from(arena.len()).expect("typed row count exceeds u32"),
-                    producer_base: producer_base(producer_base),
+                    producer_base: encoded_producer_base(producer_base),
                     producer_count: producer_count(registration.rows),
                     producer_order: producer_order(arena.kind()),
                     num_cols: u32::try_from(registration.num_cols)
