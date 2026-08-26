@@ -4114,9 +4114,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 
 #[cfg(test)]
 mod tests {
-    use crate::e2e::{
-        MultiProver, ShardContextBuilder, recv_compact_replay_shard, recycle_compact_replay_owners,
-    };
+    use crate::e2e::{MultiProver, ShardContextBuilder};
     use ceno_emul::{
         CENO_PLATFORM, Cycle, FullTracer, GpuReplayRangeDescriptor, InsnKind, NextCycleAccess,
         StepIndex, StepRecord, SyscallWitness,
@@ -4478,62 +4476,17 @@ mod tests {
 
     #[cfg(feature = "gpu")]
     #[test]
-    fn compact_pipeline_overlaps_cpu_replay_but_gates_next_gpu_phase() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-            mpsc::sync_channel,
-        };
+    fn compact_pipeline_channel_contracts() {
+        use crate::e2e::{recv_compact_replay_shard, recycle_compact_replay_owners};
 
-        // This is the production channel topology in
-        // `spawn_compact_replay_pipeline`: one prepared shard and one recycled
-        // arena batch. GPU work remains exclusively on the receiver thread.
-        let (ready_tx, ready_rx) = sync_channel(1);
-        let (recycle_tx, recycle_rx) = sync_channel(1);
-        let replay_one_started = Arc::new(AtomicBool::new(false));
-        let next_gpu_phase_started = AtomicBool::new(false);
-        let replay_one_started_worker = Arc::clone(&replay_one_started);
-        let worker = std::thread::spawn(move || {
-            ready_tx.send(0usize).unwrap();
-            recycle_rx.recv().unwrap();
-            replay_one_started_worker.store(true, Ordering::Release);
-            ready_tx.send(1usize).unwrap();
-        });
-
-        // Receiving shard 0 models assignment 0. Recycling its CPU arenas
-        // enables replay 1 while proof 0 is still active.
-        assert_eq!(ready_rx.recv().unwrap(), 0);
-        recycle_tx.send(()).unwrap();
-        while !replay_one_started.load(Ordering::Acquire) {
-            std::thread::yield_now();
-        }
-
-        // The receiver has not advanced, so no assignment/H2D/kernel for shard
-        // 1 can have occurred even though its CPU replay is underway/ready.
-        assert!(!next_gpu_phase_started.load(Ordering::Relaxed));
-        assert_eq!(ready_rx.recv().unwrap(), 1);
-        next_gpu_phase_started.store(true, Ordering::Relaxed);
-        assert!(next_gpu_phase_started.load(Ordering::Relaxed));
-        worker.join().unwrap();
-    }
-
-    #[cfg(feature = "gpu")]
-    #[test]
-    fn compact_pipeline_disconnect_is_fatal() {
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         drop(ready_tx);
         let result = std::panic::catch_unwind(|| recv_compact_replay_shard(&ready_rx));
         assert!(result.is_err());
-    }
 
-    #[cfg(feature = "gpu")]
-    #[test]
-    fn compact_pipeline_terminal_shard_does_not_require_recycling() {
         let (recycle_tx, recycle_rx) = std::sync::mpsc::sync_channel(1);
         drop(recycle_rx);
-
         recycle_compact_replay_owners(&recycle_tx, Vec::new(), true);
-
         let result = std::panic::catch_unwind(|| {
             recycle_compact_replay_owners(&recycle_tx, Vec::new(), false)
         });
