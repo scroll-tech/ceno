@@ -517,6 +517,14 @@ fn ensure_shard_metadata_cached_inner(
             addr_capacity as u32,
             super::config::is_debug_compare_enabled(),
         );
+        // Every buffer above is initialized on the default stream, while fused
+        // replay and some auxiliary chips launch on independent streams. Do
+        // not publish their pointers until zero-initialization and scalar H2D
+        // are visible to those consumers.
+        hal.inner.default_stream().synchronize().map_err(|e| {
+            ZKVMError::InvalidWitness(format!("shard metadata initialization sync: {e}").into())
+        })?;
+
         *cache = Some(ShardMetadataCache {
             shard_id,
             device_bufs: ShardDeviceBuffers {

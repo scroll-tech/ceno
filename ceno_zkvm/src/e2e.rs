@@ -1214,6 +1214,19 @@ fn recv_compact_replay_shard(
 }
 
 #[cfg(feature = "gpu")]
+fn recycle_compact_replay_owners(
+    recycle: &std::sync::mpsc::SyncSender<Vec<ceno_emul::GpuReplayTypedRange>>,
+    ranges: Vec<ceno_emul::GpuReplayTypedRange>,
+    is_last_shard: bool,
+) {
+    if !is_last_shard {
+        recycle
+            .send(ranges)
+            .expect("compact replay pipeline stopped before owner recycling");
+    }
+}
+
+#[cfg(feature = "gpu")]
 fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactReplayPipeline {
     // One prepared shard may wait while the current shard is proving. The
     // producer must recover the previous shard's arenas before replaying the
@@ -2539,12 +2552,14 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .in_scope(|| {
                         let recycled =
                             crate::instructions::gpu::dispatch::clear_compact_replay_arenas();
-                        compact_pipeline
-                            .as_ref()
-                            .expect("compact replay pipeline missing")
-                            .recycle
-                            .send(recycled.into_iter().flatten().collect())
-                            .expect("compact replay pipeline stopped before owner recycling");
+                        recycle_compact_replay_owners(
+                            &compact_pipeline
+                                .as_ref()
+                                .expect("compact replay pipeline missing")
+                                .recycle,
+                            recycled.into_iter().flatten().collect(),
+                            shard_ctx.is_last_shard(),
+                        );
                     });
             }
 
@@ -4099,7 +4114,9 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 
 #[cfg(test)]
 mod tests {
-    use crate::e2e::{MultiProver, ShardContextBuilder, recv_compact_replay_shard};
+    use crate::e2e::{
+        MultiProver, ShardContextBuilder, recv_compact_replay_shard, recycle_compact_replay_owners,
+    };
     use ceno_emul::{
         CENO_PLATFORM, Cycle, FullTracer, GpuReplayRangeDescriptor, InsnKind, NextCycleAccess,
         StepIndex, StepRecord, SyscallWitness,
@@ -4506,6 +4523,20 @@ mod tests {
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         drop(ready_tx);
         let result = std::panic::catch_unwind(|| recv_compact_replay_shard(&ready_rx));
+        assert!(result.is_err());
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn compact_pipeline_terminal_shard_does_not_require_recycling() {
+        let (recycle_tx, recycle_rx) = std::sync::mpsc::sync_channel(1);
+        drop(recycle_rx);
+
+        recycle_compact_replay_owners(&recycle_tx, Vec::new(), true);
+
+        let result = std::panic::catch_unwind(|| {
+            recycle_compact_replay_owners(&recycle_tx, Vec::new(), false)
+        });
         assert!(result.is_err());
     }
 }
