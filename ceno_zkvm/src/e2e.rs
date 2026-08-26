@@ -1203,6 +1203,17 @@ struct CompactReplayPipeline {
 }
 
 #[cfg(feature = "gpu")]
+fn recv_compact_replay_shard(
+    ready: &std::sync::mpsc::Receiver<CompactReplayShard>,
+) -> Option<CompactReplayShard> {
+    Some(
+        ready
+            .recv()
+            .expect("compact replay pipeline stopped before producing every planned shard"),
+    )
+}
+
+#[cfg(feature = "gpu")]
 fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactReplayPipeline {
     // One prepared shard may wait while the current shard is proving. The
     // producer must recover the previous shard's arenas before replaying the
@@ -2361,12 +2372,12 @@ pub fn generate_witness<'a, E: ExtensionField>(
                             phase = "gpu_assignment_wait",
                             "compact replay pipeline event"
                         );
-                        compact_pipeline
-                            .as_ref()
-                            .expect("compact replay pipeline missing")
-                            .ready
-                            .recv()
-                            .ok()
+                        recv_compact_replay_shard(
+                            &compact_pipeline
+                                .as_ref()
+                                .expect("compact replay pipeline missing")
+                                .ready,
+                        )
                     }
                     #[cfg(not(feature = "gpu"))]
                     {
@@ -4088,7 +4099,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 
 #[cfg(test)]
 mod tests {
-    use crate::e2e::{MultiProver, ShardContextBuilder};
+    use crate::e2e::{MultiProver, ShardContextBuilder, recv_compact_replay_shard};
     use ceno_emul::{
         CENO_PLATFORM, Cycle, FullTracer, GpuReplayRangeDescriptor, InsnKind, NextCycleAccess,
         StepIndex, StepRecord, SyscallWitness,
@@ -4487,5 +4498,14 @@ mod tests {
         next_gpu_phase_started.store(true, Ordering::Relaxed);
         assert!(next_gpu_phase_started.load(Ordering::Relaxed));
         worker.join().unwrap();
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn compact_pipeline_disconnect_is_fatal() {
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+        drop(ready_tx);
+        let result = std::panic::catch_unwind(|| recv_compact_replay_shard(&ready_rx));
+        assert!(result.is_err());
     }
 }

@@ -421,15 +421,14 @@ impl GpuReplayTracer {
             fallback: range.fallback,
         };
         if self.current.typed.is_empty() {
+            let next_descriptor = self.range_descriptors.get(self.next_range_descriptor);
             let current_shard_id = self
                 .next_range_descriptor
                 .checked_sub(1)
                 .map(|index| self.range_descriptors[index].shard_id);
-            if let Some(descriptor) = self
-                .range_descriptors
-                .get(self.next_range_descriptor)
-                .filter(|descriptor| Some(descriptor.shard_id) == current_shard_id)
-            {
+            if let Some(descriptor) = next_descriptor.filter(|descriptor| {
+                self.retain_complete_shard || Some(descriptor.shard_id) == current_shard_id
+            }) {
                 recycled.reset_from_descriptor(descriptor, self.shard_start_cycle);
             } else {
                 recycled.reset_empty(self.shard_start_cycle);
@@ -557,6 +556,62 @@ impl GpuReplayTracer {
         } else if start_addr.baddr().0 == self.platform.hints.start {
             self.max_hint_addr_access = self.max_hint_addr_access.max(access_end);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retained_recycling_warms_first_owner_across_shards() {
+        let mut counts = [0; InsnKind::COUNT];
+        counts[InsnKind::ADDI as usize] = 1;
+        let descriptors = Arc::new(vec![
+            crate::GpuReplayRangeDescriptor {
+                shard_id: 0,
+                sequence: 0,
+                range_start: 0,
+                range_len: 1,
+                family_counts: counts,
+                fallback_count: 0,
+                unsupported_count: 0,
+            },
+            crate::GpuReplayRangeDescriptor {
+                shard_id: 1,
+                sequence: 0,
+                range_start: 1,
+                range_len: 1,
+                family_counts: counts,
+                fallback_count: 0,
+                unsupported_count: 0,
+            },
+        ]);
+        let mut tracer = GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig::default());
+        tracer.install_range_descriptors(descriptors);
+        tracer.enable_retained_shard_mode();
+
+        let first = std::mem::replace(
+            &mut tracer.current,
+            GpuReplayChunk::empty(1, tracer.shard_start_cycle),
+        );
+        let second = tracer.recyclable.take().unwrap();
+        tracer.next_range_descriptor = 1;
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: first.sequence,
+            typed: first.typed,
+            fallback: first.fallback,
+        });
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: second.sequence,
+            typed: second.typed,
+            fallback: second.fallback,
+        });
+
+        tracer.start_shard();
+        assert_eq!(tracer.current.sequence, 0);
+        assert_eq!(tracer.current.typed.len(), InsnKind::COUNT);
+        assert!(tracer.recyclable.is_some());
     }
 }
 
