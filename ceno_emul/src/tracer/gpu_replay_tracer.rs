@@ -70,6 +70,11 @@ impl GpuReplayChunk {
         descriptor: &crate::GpuReplayRangeDescriptor,
         shard_start_cycle: Cycle,
     ) {
+        assert_eq!(
+            self.typed.len(),
+            InsnKind::COUNT,
+            "warmed range has an invalid family vector"
+        );
         self.sequence = descriptor.sequence;
         self.shard_start_cycle = shard_start_cycle;
         for ((kind, arena), required) in InsnKind::iter()
@@ -396,15 +401,23 @@ impl GpuReplayTracer {
         self.syscall_witnesses.clear();
         let descriptor = &self.range_descriptors[self.next_range_descriptor];
         assert_eq!(descriptor.sequence, 0);
-        assert_eq!(
-            self.current.typed.len(),
-            InsnKind::COUNT,
-            "GPU replay shard transition lost a warmed CPU owner"
-        );
-        assert!(
-            self.recyclable.is_some(),
-            "GPU replay shard transition did not recover both warmed CPU owners"
-        );
+        if self.current.typed.len() != InsnKind::COUNT {
+            assert!(
+                self.retain_complete_shard,
+                "GPU replay shard transition lost a warmed CPU owner"
+            );
+            self.current = GpuReplayChunk::warmed(
+                descriptor.family_counts,
+                descriptor.fallback_count,
+                self.shard_start_cycle,
+            );
+        }
+        if !self.retain_complete_shard {
+            assert!(
+                self.recyclable.is_some(),
+                "GPU replay shard transition did not recover both warmed CPU owners"
+            );
+        }
         self.current
             .reset_from_descriptor(descriptor, self.shard_start_cycle);
     }
@@ -429,7 +442,14 @@ impl GpuReplayTracer {
             if let Some(descriptor) = next_descriptor.filter(|descriptor| {
                 self.retain_complete_shard || Some(descriptor.shard_id) == current_shard_id
             }) {
-                recycled.reset_from_descriptor(descriptor, self.shard_start_cycle);
+                if recycled.typed.len() == InsnKind::COUNT {
+                    recycled.reset_from_descriptor(descriptor, self.shard_start_cycle);
+                } else {
+                    assert!(
+                        self.retain_complete_shard,
+                        "recycled GPU replay owner has an invalid family vector"
+                    );
+                }
             } else {
                 recycled.reset_empty(self.shard_start_cycle);
             }
@@ -563,8 +583,7 @@ impl GpuReplayTracer {
 mod tests {
     use super::*;
 
-    #[test]
-    fn retained_recycling_warms_first_owner_across_shards() {
+    fn retained_cross_shard_tracer() -> GpuReplayTracer {
         let mut counts = [0; InsnKind::COUNT];
         counts[InsnKind::ADDI as usize] = 1;
         let descriptors = Arc::new(vec![
@@ -590,28 +609,60 @@ mod tests {
         let mut tracer = GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig::default());
         tracer.install_range_descriptors(descriptors);
         tracer.enable_retained_shard_mode();
-
-        let first = std::mem::replace(
-            &mut tracer.current,
-            GpuReplayChunk::empty(1, tracer.shard_start_cycle),
-        );
-        let second = tracer.recyclable.take().unwrap();
         tracer.next_range_descriptor = 1;
+        tracer
+    }
+
+    #[test]
+    fn retained_start_shard_recovers_without_terminal_owner() {
+        let mut tracer = retained_cross_shard_tracer();
+        tracer.current = GpuReplayChunk::empty(1, tracer.shard_start_cycle);
+        tracer.recyclable = None;
+
+        tracer.start_shard();
+        assert_eq!(tracer.current.sequence, 0);
+        assert_eq!(tracer.current.typed.len(), InsnKind::COUNT);
+        assert!(tracer.recyclable.is_none());
+    }
+
+    #[test]
+    fn retained_start_shard_recovers_from_empty_terminal_owner() {
+        let mut tracer = retained_cross_shard_tracer();
+        tracer.current = GpuReplayChunk::empty(1, tracer.shard_start_cycle);
+        tracer.recyclable = None;
         tracer.recycle_range(crate::GpuReplayTypedRange {
-            sequence: first.sequence,
-            typed: first.typed,
-            fallback: first.fallback,
-        });
-        tracer.recycle_range(crate::GpuReplayTypedRange {
-            sequence: second.sequence,
-            typed: second.typed,
-            fallback: second.fallback,
+            sequence: 0,
+            typed: Vec::new(),
+            fallback: Vec::new(),
         });
 
         tracer.start_shard();
         assert_eq!(tracer.current.sequence, 0);
         assert_eq!(tracer.current.typed.len(), InsnKind::COUNT);
-        assert!(tracer.recyclable.is_some());
+        assert!(tracer.recyclable.is_none());
+    }
+
+    #[test]
+    fn retained_start_shard_reuses_one_valid_terminal_owner() {
+        let mut tracer = retained_cross_shard_tracer();
+        let first = std::mem::replace(
+            &mut tracer.current,
+            GpuReplayChunk::empty(1, tracer.shard_start_cycle),
+        );
+        tracer.recyclable = None;
+        let typed_ptr = first.typed.as_ptr();
+
+        tracer.recycle_range(crate::GpuReplayTypedRange {
+            sequence: first.sequence,
+            typed: first.typed,
+            fallback: first.fallback,
+        });
+
+        tracer.start_shard();
+        assert_eq!(tracer.current.sequence, 0);
+        assert_eq!(tracer.current.typed.len(), InsnKind::COUNT);
+        assert_eq!(tracer.current.typed.as_ptr(), typed_ptr);
+        assert!(tracer.recyclable.is_none());
     }
 }
 
