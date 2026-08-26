@@ -1215,9 +1215,21 @@ fn spawn_compact_replay_pipeline(mut replay: CompactStepReplay) -> CompactReplay
                         replay.vm.tracer_mut().recycle_range(range);
                     }
                 }
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id,
+                    phase = "cpu_replay_start",
+                    "compact replay pipeline event"
+                );
                 let shard = replay
                     .next_shard(false, Some)
                     .expect("compact replay ended before its shard plan");
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id,
+                    phase = "cpu_replay_ready",
+                    "compact replay pipeline event"
+                );
                 if ready_tx.send(shard).is_err() {
                     return;
                 }
@@ -2308,6 +2320,12 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 let mut compact_shard = info_span!("position_compact_shard").in_scope(|| {
                     #[cfg(feature = "gpu")]
                     {
+                        tracing::info!(
+                            target: "ceno_pipeline",
+                            shard_id = shard_ctx_builder.cur_shard_id,
+                            phase = "gpu_assignment_wait",
+                            "compact replay pipeline event"
+                        );
                         compact_pipeline
                             .as_ref()
                             .expect("compact replay pipeline missing")
@@ -2322,6 +2340,13 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         })
                     }
                 })?;
+                #[cfg(feature = "gpu")]
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = shard_ctx_builder.cur_shard_id,
+                    phase = "gpu_assignment_start",
+                    "compact replay pipeline event"
+                );
                 for range in &compact_shard.arenas.ranges {
                     for (kind, arena) in InsnKind::iter().zip(&range.typed) {
                         if let Some(arena) = arena {
@@ -3833,6 +3858,12 @@ fn create_proofs_streaming<
 
                     let transcript = Transcript::new(b"riscv");
                     let start = std::time::Instant::now();
+                    tracing::info!(
+                        target: "ceno_pipeline",
+                        shard_id = shard_ctx.shard_id,
+                        phase = "proof_start",
+                        "compact replay pipeline event"
+                    );
                     let zkvm_proof =
                         match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
                             Ok(proof) => proof,
@@ -3845,6 +3876,13 @@ fn create_proofs_streaming<
                                 std::process::exit(1);
                             }
                         };
+                    tracing::info!(
+                        target: "ceno_pipeline",
+                        shard_id = shard_ctx.shard_id,
+                        phase = "proof_end",
+                        elapsed_ms = start.elapsed().as_millis(),
+                        "compact replay pipeline event"
+                    );
                     tracing::debug!(
                         "{}th shard proof created in {:?}",
                         shard_ctx.shard_id,
