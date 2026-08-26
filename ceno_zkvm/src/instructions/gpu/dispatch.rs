@@ -45,18 +45,36 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-const PACKED_PRODUCER_COUNT_BITS: u32 = 24;
-const PRODUCER_PRIORITY_ROW_BITS: u32 = 23;
+const MAX_PRODUCER_ROWS: usize = 1 << 28;
 
-fn packed_producer_total(kind: InsnKind, rows: usize) -> u32 {
-    let rows = u32::try_from(rows).expect("producer total exceeds u32");
+fn producer_count(rows: usize) -> u32 {
     assert!(
-        rows < (1 << PRODUCER_PRIORITY_ROW_BITS),
-        "producer total exceeds packed priority row range"
+        rows <= MAX_PRODUCER_ROWS,
+        "producer count exceeds 2^28 rows"
     );
+    u32::try_from(rows).expect("producer count exceeds u32")
+}
+
+fn checked_producer_base(base: usize, range_rows: usize, count: usize) -> u32 {
+    producer_count(count);
+    let end = base
+        .checked_add(range_rows)
+        .expect("producer range end overflow");
+    assert!(base <= count, "producer base exceeds producer count");
+    assert!(end <= count, "producer range exceeds producer count");
+    u32::try_from(base).expect("producer base exceeds u32")
+}
+
+fn producer_order(kind: InsnKind) -> u32 {
     let order = kind as u32;
-    assert!(order < (1 << (31 - 25)));
-    (order << PACKED_PRODUCER_COUNT_BITS) | rows
+    let max_priority =
+        (u64::from(order) << 30) | (u64::try_from(MAX_PRODUCER_ROWS - 1).unwrap() << 2) | 3;
+    assert_eq!(
+        max_priority >> 63,
+        0,
+        "producer order overlaps continuation class"
+    );
+    order
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -755,8 +773,9 @@ pub(crate) fn submit_provisional_fused_range(
                 tag: registration.tag,
                 layout: arena.layout() as u32,
                 row_count: u32::try_from(arena.len()).unwrap(),
-                producer_base: u32::try_from(producer_base).unwrap(),
-                producer_total: packed_producer_total(arena.kind(), registration.rows),
+                producer_base: checked_producer_base(producer_base, arena.len(), registration.rows),
+                producer_count: producer_count(registration.rows),
+                producer_order: producer_order(arena.kind()),
                 num_cols: u32::try_from(registration.num_cols).unwrap(),
                 arg0: registration.arg0,
                 arg1: registration.arg1,
@@ -1424,8 +1443,13 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                     tag: registration.tag,
                     layout: arena.layout() as u32,
                     row_count: u32::try_from(arena.len()).expect("typed row count exceeds u32"),
-                    producer_base: u32::try_from(producer_base).expect("producer base exceeds u32"),
-                    producer_total: packed_producer_total(arena.kind(), registration.rows),
+                    producer_base: checked_producer_base(
+                        producer_base,
+                        arena.len(),
+                        registration.rows,
+                    ),
+                    producer_count: producer_count(registration.rows),
+                    producer_order: producer_order(arena.kind()),
                     num_cols: u32::try_from(registration.num_cols)
                         .expect("column count exceeds u32"),
                     arg0: registration.arg0,
@@ -2846,14 +2870,33 @@ mod tests {
     }
 
     #[test]
-    fn packed_producer_total_preserves_count_and_kind_priority() {
-        let add = packed_producer_total(InsnKind::ADD, 123);
-        let sub = packed_producer_total(InsnKind::SUB, 123);
-        assert_eq!(add & 0x00ff_ffff, 123);
-        assert_eq!(sub & 0x00ff_ffff, 123);
-        assert_eq!(add >> PACKED_PRODUCER_COUNT_BITS, InsnKind::ADD as u32);
-        assert_eq!(sub >> PACKED_PRODUCER_COUNT_BITS, InsnKind::SUB as u32);
-        assert_ne!(add, sub);
+    fn producer_metadata_preserves_count_and_kind_priority() {
+        assert_eq!(producer_count(123), 123);
+        assert_eq!(producer_order(InsnKind::ADD), InsnKind::ADD as u32);
+        assert_eq!(producer_order(InsnKind::SUB), InsnKind::SUB as u32);
+        assert_ne!(producer_order(InsnKind::ADD), producer_order(InsnKind::SUB));
+    }
+
+    #[test]
+    fn producer_domain_bounds_are_exact() {
+        assert_eq!(producer_count(1 << 28), 1 << 28);
+        assert_eq!(
+            checked_producer_base((1 << 28) - 1, 1, 1 << 28),
+            (1 << 28) - 1
+        );
+        assert_eq!(checked_producer_base(1 << 28, 0, 1 << 28), 1 << 28);
+    }
+
+    #[test]
+    #[should_panic(expected = "producer count exceeds 2^28 rows")]
+    fn producer_count_rejects_above_limit() {
+        producer_count((1 << 28) + 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "producer range exceeds producer count")]
+    fn producer_range_rejects_end_above_count() {
+        checked_producer_base((1 << 28) - 1, 2, 1 << 28);
     }
 
     #[test]

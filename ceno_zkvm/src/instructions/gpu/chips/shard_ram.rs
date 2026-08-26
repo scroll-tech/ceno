@@ -203,6 +203,7 @@ pub(crate) fn shard_ram_record_to_gpu(rec: &crate::tables::ShardRamRecord) -> Gp
         },
         value: rec.value,
         _pad0: 0,
+        priority: 0,
         ordinal: 0,
         shard: rec.shard,
         local_clk: rec.local_clk,
@@ -1305,9 +1306,9 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
 
     let record_u32s = std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>() / 4;
     // GpuShardRamRecord (#[repr(C)]) layout — derived from shard_ram_record_to_gpu
-    debug_assert_eq!(record_u32s, 28, "GpuShardRamRecord layout changed");
-    const IS_TO_WRITE_SET_U32_OFFSET: usize = 12;
-    const POINT_Y6_U32_OFFSET: usize = 27;
+    debug_assert_eq!(record_u32s, 30, "GpuShardRamRecord layout changed");
+    const IS_TO_WRITE_SET_U32_OFFSET: usize = 14;
+    const POINT_Y6_U32_OFFSET: usize = 29;
 
     let host_data: Vec<u32> = if total_records == 0 {
         vec![]

@@ -3589,6 +3589,76 @@ mod tests {
         assert_eq!(fingerprint(tracer.recyclable.as_ref().unwrap()), second);
     }
 
+    #[test]
+    fn retained_shard_mode_supports_more_than_two_owned_ranges() {
+        let descriptors = Arc::new(
+            (0..3)
+                .map(|sequence| crate::GpuReplayRangeDescriptor {
+                    shard_id: 0,
+                    sequence,
+                    range_start: sequence,
+                    range_len: 1,
+                    family_counts: [0; InsnKind::COUNT],
+                    fallback_count: 1,
+                    unsupported_count: 0,
+                })
+                .collect(),
+        );
+        let mut tracer = GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig::default());
+        tracer.install_range_descriptors(descriptors);
+        tracer.enable_retained_shard_mode();
+
+        let mut retained = Vec::new();
+        for sequence in 0..3 {
+            tracer.current.fallback.push(GpuReplayFallbackRecord {
+                ordinal: sequence,
+                record: StepRecord::default(),
+            });
+            tracer.finish_chunks();
+            retained.extend(tracer.take_sealed_chunks());
+        }
+        assert_eq!(retained.len(), 3);
+        assert!(tracer.current.typed.is_empty());
+
+        for chunk in retained {
+            tracer.recycle_range(crate::GpuReplayTypedRange {
+                sequence: chunk.sequence,
+                typed: chunk.typed,
+                fallback: chunk.fallback,
+            });
+        }
+        assert_eq!(tracer.current.typed.len(), InsnKind::COUNT);
+        assert!(tracer.recyclable.is_some());
+    }
+
+    #[test]
+    fn default_replay_mode_keeps_two_owner_limit() {
+        let descriptors = Arc::new(
+            (0..3)
+                .map(|sequence| crate::GpuReplayRangeDescriptor {
+                    shard_id: 0,
+                    sequence,
+                    range_start: sequence,
+                    range_len: 1,
+                    family_counts: [0; InsnKind::COUNT],
+                    fallback_count: 1,
+                    unsupported_count: 0,
+                })
+                .collect(),
+        );
+        let mut tracer = GpuReplayTracer::new(&CENO_PLATFORM, GpuReplayTracerConfig::default());
+        tracer.install_range_descriptors(descriptors);
+        for sequence in 0..2 {
+            tracer.current.fallback.push(GpuReplayFallbackRecord {
+                ordinal: sequence,
+                record: StepRecord::default(),
+            });
+            tracer.finish_chunks();
+            tracer.take_sealed_chunks();
+        }
+        assert!(tracer.current.typed.is_empty());
+    }
+
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     #[test]
     fn deferred_mmio_bounds_rebuild_from_first_access_events() {
