@@ -6,6 +6,7 @@ use crate::{
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
+    tensor::TensorWitnessProvider,
     tracer::{Change, FullTracer, NativeTraceStep, PreflightTracer, Tracer},
 };
 use anyhow::{Result, anyhow};
@@ -29,6 +30,7 @@ pub struct VMState<T: Tracer = FullTracer> {
     // Termination.
     halt_state: Option<HaltState>,
     committed_public_io: Option<[Word; 8]>,
+    tensor_witness_provider: Option<Arc<dyn TensorWitnessProvider>>,
     tracer: T,
 }
 
@@ -138,6 +140,7 @@ impl<T: Tracer> VMState<T> {
                 .waddr(),
             ),
             registers: [0; VM_REG_COUNT],
+            tensor_witness_provider: None,
             halt_state: None,
             committed_public_io: None,
             tracer: T::with_next_accesses(&platform, config, next_accesses),
@@ -173,6 +176,15 @@ impl<T: Tracer> VMState<T> {
     /// The last digest passed to the guest public-I/O commit syscall.
     pub fn committed_public_io(&self) -> Option<[Word; 8]> {
         self.committed_public_io
+    }
+
+    /// Install the deterministic, read-only source used by tensor ecalls.
+    pub fn set_tensor_witness_provider(&mut self, provider: Arc<dyn TensorWitnessProvider>) {
+        self.tensor_witness_provider = Some(provider);
+    }
+
+    pub(crate) fn tensor_witness_provider(&self) -> Option<&dyn TensorWitnessProvider> {
+        self.tensor_witness_provider.as_deref()
     }
 
     pub fn tracer(&self) -> &T {

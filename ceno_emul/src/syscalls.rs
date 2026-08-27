@@ -11,6 +11,7 @@ pub(crate) mod pure;
 pub mod secp256k1;
 pub(crate) mod secp256r1;
 pub mod sha256;
+pub mod tensor;
 pub mod uint256;
 // Using the same function codes as sp1:
 // https://github.com/succinctlabs/sp1/blob/013c24ea2fa15a0e7ed94f7d11a7ada4baa39ab9/crates/core/executor/src/syscalls/code.rs
@@ -57,6 +58,15 @@ pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<
         BN254_FP2_MUL => Ok(bn254::bn254_fp2_mul(vm)),
         UINT256_MUL => Ok(uint256::uint256_mul(vm)),
         PUB_IO_COMMIT => Ok(pubio_commit::pubio_commit(vm)),
+        crate::tensor::TENSOR_MATMUL_V1 => tensor::tensor_matmul_v1(vm),
+        crate::tensor::TENSOR_MATMUL_HIDDEN_V1 => tensor::tensor_matmul_hidden_v1(vm),
+        crate::tensor::TENSOR_MATMUL_INTERMEDIATE_V1 => tensor::tensor_matmul_intermediate_v1(vm),
+        crate::tensor::TENSOR_RMS_LOOKUP_V1 => tensor::tensor_rms_lookup_v1(vm),
+        crate::tensor::TENSOR_ATTENTION_REDUCED_V1 => tensor::tensor_attention_reduced_v1(vm),
+        crate::tensor::TENSOR_ATTENTION_BLOCK_REDUCED_V1 => {
+            tensor::tensor_attention_block_reduced_v1(vm)
+        }
+        crate::tensor::TENSOR_FFN_BLOCK_REDUCED_V1 => tensor::tensor_ffn_block_reduced_v1(vm),
 
         // phantom syscall
         PHANTOM_LOG_PC_CYCLE => Ok(phantom::log_pc_cycle(vm)),

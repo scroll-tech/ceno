@@ -167,6 +167,7 @@ pub struct ShardCostModel {
     main_cost_table: Vec<u64>,
     tower_cost_table: Vec<u64>,
     extension_field_degree: u64,
+    atomic_ecalls: BTreeMap<Word, ()>,
     fingerprint: [u8; 32],
 }
 
@@ -246,8 +247,28 @@ impl ShardCostModel {
             main_cost_table,
             tower_cost_table,
             extension_field_degree,
+            atomic_ecalls: BTreeMap::new(),
             fingerprint,
         }
+    }
+
+    /// Marks ecalls whose complete modeled chip set must fit in one shard.
+    /// Other instructions retain the historical behavior which permits an
+    /// oversized first step in an otherwise empty shard.
+    pub fn with_atomic_ecalls(mut self, codes: impl IntoIterator<Item = Word>) -> Self {
+        self.atomic_ecalls = codes.into_iter().map(|code| (code, ())).collect();
+        let mut hasher = Keccak::v256();
+        hasher.update(b"ceno-shard-cost-model-atomic-v1");
+        hasher.update(&self.fingerprint);
+        for code in self.atomic_ecalls.keys() {
+            hasher.update(&code.to_le_bytes());
+        }
+        hasher.finalize(&mut self.fingerprint);
+        self
+    }
+
+    pub fn is_atomic_ecall(&self, code: Word) -> bool {
+        self.atomic_ecalls.contains_key(&code)
     }
 
     pub fn chip_count(&self) -> usize {
@@ -920,6 +941,26 @@ impl ShardPlanBuilder {
             "shard plan cannot be extended after finalization"
         );
         let mut candidate = self.preview_modeled_chips(&chips);
+        if self.cur_step_count == 0
+            && kind == InsnKind::ECALL
+            && ecall_code.is_some_and(|code| {
+                self.cost_model
+                    .as_ref()
+                    .is_some_and(|model| model.is_atomic_ecall(code))
+            })
+            && self.candidate_would_exceed_shard(candidate.3)
+        {
+            panic!(
+                "atomic ecall {:#x} modeled cost {} exceeds max_cell_per_shard {}",
+                ecall_code.unwrap(),
+                candidate.3,
+                if self.shard_id == 0 {
+                    self.target_cell_first_shard
+                } else {
+                    self.max_cell_per_shard
+                }
+            );
+        }
         if self.cur_step_count > 0 && self.candidate_would_exceed_shard(candidate.3) {
             self.finish_current_shard(step_cycle);
             candidate = self.preview_modeled_chips(&chips);
@@ -946,9 +987,13 @@ impl ShardPlanBuilder {
         let mut trace = self.cur_trace_cells;
         let mut main = self.cur_main_peak;
         let mut tower = self.cur_tower_peak;
+        let mut increments = BTreeMap::<usize, u64>::new();
         for &chip in chips {
+            *increments.entry(chip).or_default() += 1;
+        }
+        for (chip, increment) in increments {
             let old = model.chip_cost(chip, self.num_instances[chip]);
-            let new = model.chip_cost(chip, self.num_instances[chip].saturating_add(1));
+            let new = model.chip_cost(chip, self.num_instances[chip].saturating_add(increment));
             trace = trace.saturating_add(new.trace_cells.saturating_sub(old.trace_cells));
             main = main.saturating_add(new.main_peak.saturating_sub(old.main_peak));
             tower = tower.max(new.tower_peak);
@@ -3226,6 +3271,32 @@ mod tests {
     }
 
     #[test]
+    fn shard_planner_accounts_repeated_chip_rows_in_one_ecall() {
+        let specs = vec![ChipCostSpec {
+            rotation: 0,
+            trace_cells_per_row: 9,
+            tower_peak_cells_per_row: 0,
+            tower_peak_cells_by_bucket: None,
+        }];
+        let mut ecalls = BTreeMap::new();
+        ecalls.insert(7, vec![0, 0, 0, 0]);
+        let model = Arc::new(ShardCostModel::new(
+            vec![Vec::new(); InsnKind::COUNT],
+            ecalls,
+            specs,
+            4,
+        ));
+        let mut planner =
+            ShardPlanBuilder::new_with_cost_model(u64::MAX, Cycle::MAX, Some(model.clone()));
+
+        planner.observe_modeled_step(4, InsnKind::ECALL, Some(7));
+
+        assert_eq!(planner.num_instances[0], 4);
+        assert_eq!(planner.cur_cells(), model.shard_cost(&[4]));
+        planner.debug_assert_cost_invariant();
+    }
+
+    #[test]
     fn shard_cost_model_selects_tower_or_main_peak() {
         let model = cost_model(vec![
             ChipCostSpec {
@@ -3295,6 +3366,70 @@ mod tests {
         planner.observe_modeled_step(8, InsnKind::ECALL, Some(7));
         assert_eq!(planner.num_instances, vec![2]);
         assert_eq!(planner.cur_cells(), 6);
+    }
+
+    #[test]
+    fn atomic_ecall_batches_splits_and_rejects_too_small_budget() {
+        let atomic_codes = [
+            crate::tensor::TENSOR_ATTENTION_REDUCED_V1,
+            crate::tensor::TENSOR_ATTENTION_BLOCK_REDUCED_V1,
+            crate::tensor::TENSOR_FFN_BLOCK_REDUCED_V1,
+            crate::tensor::TENSOR_MATMUL_HIDDEN_V1,
+            crate::tensor::TENSOR_MATMUL_INTERMEDIATE_V1,
+        ];
+        let spec = ChipCostSpec {
+            rotation: 0,
+            trace_cells_per_row: 1,
+            tower_peak_cells_per_row: 1,
+            tower_peak_cells_by_bucket: None,
+        };
+        let atomic = Arc::new({
+            let opcodes = vec![Vec::new(); InsnKind::COUNT];
+            let mut ecalls = BTreeMap::new();
+            for code in atomic_codes {
+                ecalls.insert(code, vec![0]);
+            }
+            ShardCostModel::new(opcodes, ecalls, vec![spec.clone()], 4)
+                .with_atomic_ecalls(atomic_codes)
+        });
+        for code in atomic_codes {
+            let mut batched =
+                ShardPlanBuilder::new_with_cost_model(6, Cycle::MAX, Some(atomic.clone()));
+            batched.observe_modeled_step(4, InsnKind::ECALL, Some(code));
+            batched.observe_modeled_step(8, InsnKind::ECALL, Some(code));
+            assert_eq!(batched.current_shard_id(), 0);
+            assert_eq!(batched.num_instances, vec![2]);
+
+            let mut split =
+                ShardPlanBuilder::new_with_cost_model(2, Cycle::MAX, Some(atomic.clone()));
+            split.observe_modeled_step(4, InsnKind::ECALL, Some(code));
+            split.observe_modeled_step(8, InsnKind::ECALL, Some(code));
+            assert_eq!(split.current_shard_id(), 1);
+            assert_eq!(split.num_instances, vec![1]);
+
+            let rejected = std::panic::catch_unwind({
+                let atomic = atomic.clone();
+                move || {
+                    let mut planner =
+                        ShardPlanBuilder::new_with_cost_model(1, Cycle::MAX, Some(atomic));
+                    planner.observe_modeled_step(4, InsnKind::ECALL, Some(code));
+                }
+            });
+            let message = rejected
+                .expect_err("an atomic ecall larger than the shard budget must fail")
+                .downcast::<String>()
+                .map(|message| *message)
+                .unwrap_or_default();
+            assert!(message.contains(&format!("atomic ecall {code:#x} modeled cost 2")));
+        }
+
+        // Generic ecalls preserve the historical oversized-first-step behavior.
+        let generic = cost_model(vec![spec]);
+        let mut generic_planner =
+            ShardPlanBuilder::new_with_cost_model(1, Cycle::MAX, Some(generic));
+        generic_planner.observe_modeled_step(4, InsnKind::ECALL, Some(7));
+        assert_eq!(generic_planner.current_shard_id(), 0);
+        assert_eq!(generic_planner.cur_cells(), 2);
     }
 
     #[derive(Debug)]

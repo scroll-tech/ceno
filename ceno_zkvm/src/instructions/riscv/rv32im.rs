@@ -23,7 +23,15 @@ use crate::{
                 Fp2AddInstruction, Fp2MulInstruction, FpAddInstruction, FpMulInstruction,
                 KeccakCoreInstruction, KeccakEcallInstruction, KeccakXorinInstruction,
                 PubIoCommitInstruction, Secp256k1InvInstruction, Secp256r1InvInstruction,
-                ShaExtendInstruction, Uint256MulInstruction, WeierstrassAddAssignInstruction,
+                ShaExtendInstruction, TensorAttentionBlockReducedCoreInstruction,
+                TensorAttentionBlockReducedEcallInstruction, TensorAttentionReducedCoreInstruction,
+                TensorAttentionReducedEcallInstruction, TensorFfnBlockReducedCoreInstruction,
+                TensorFfnBlockReducedEcallInstruction, TensorMatMulCoreInstruction,
+                TensorMatMulEcallInstruction, TensorMatMulHiddenEcallInstruction,
+                TensorMatMulHiddenFinalizeInstruction, TensorMatMulIntermediateEcallInstruction,
+                TensorMatMulIntermediateFinalizeInstruction, TensorProductionTileInstruction,
+                TensorRmsLookupCoreInstruction, TensorRmsLookupEcallInstruction,
+                Uint256MulInstruction, WeierstrassAddAssignInstruction,
                 WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
@@ -52,7 +60,9 @@ use ceno_emul::{
     KeccakSpec, KeccakXorinSpec, LogPcCycleSpec, Platform, PubIoCommitSpec, STATE_CONTINUATION,
     Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec,
     Secp256r1AddSpec, Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec, Sha256ExtendSpec,
-    ShardCostModel, StepCellExtractor, StepIndex, StepRecord, SyscallSpec, Uint256MulSpec, Word,
+    ShardCostModel, StepCellExtractor, StepIndex, StepRecord, SyscallSpec,
+    TensorAttentionBlockReducedV1Spec, TensorAttentionReducedV1Spec, TensorFfnBlockReducedV1Spec,
+    TensorMatMulV1Spec, TensorRmsLookupV1Spec, Uint256MulSpec, Word,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;
@@ -268,6 +278,34 @@ pub struct Rv32imConfig<E: ExtensionField> {
         <KeccakEcallInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_core_config:
         <KeccakCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_matmul_ecall_config:
+        <TensorMatMulEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_matmul_core_config:
+        <TensorMatMulCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_hidden_ecall_config:
+        <TensorMatMulHiddenEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_production_tile_config:
+        <TensorProductionTileInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_hidden_finalize_config:
+        <TensorMatMulHiddenFinalizeInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_intermediate_ecall_config: <TensorMatMulIntermediateEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_intermediate_finalize_config: <TensorMatMulIntermediateFinalizeInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_rms_ecall_config:
+        <TensorRmsLookupEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_rms_core_config:
+        <TensorRmsLookupCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_attention_ecall_config:
+        <TensorAttentionReducedEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_attention_core_config:
+        <TensorAttentionReducedCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_attention_block_ecall_config:
+        <TensorAttentionBlockReducedEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_attention_block_core_config:
+        <TensorAttentionBlockReducedCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_ffn_block_ecall_config:
+        <TensorFfnBlockReducedEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_ffn_block_core_config:
+        <TensorFfnBlockReducedCoreInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_xorin_config:
         <KeccakXorinInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sha_extend_config: <ShaExtendInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -559,6 +597,236 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             chip_specs.push(chip_cost_spec(circuit_cs));
         }
         ecall_name_to_chips.insert(<KeccakCoreInstruction<E>>::name(), keccak_chips);
+        let tensor_matmul_ecall_config =
+            cs.register_opcode_circuit::<TensorMatMulEcallInstruction<E>>();
+        let tensor_matmul_core_config =
+            cs.register_opcode_circuit::<TensorMatMulCoreInstruction<E>>();
+        assert!(
+            ecall_cells_map
+                .insert(
+                    <TensorMatMulCoreInstruction<E>>::name(),
+                    [
+                        <TensorMatMulEcallInstruction<E>>::name(),
+                        <TensorMatMulCoreInstruction<E>>::name()
+                    ]
+                    .into_iter()
+                    .map(|name| cs
+                        .get_cs(&name)
+                        .as_ref()
+                        .map(|cs| {
+                            (cs.zkvm_v1_css.num_witin as u64
+                                + cs.zkvm_v1_css.num_structural_witin as u64
+                                + cs.zkvm_v1_css.num_fixed as u64)
+                                * (1 << cs.rotation_vars().unwrap_or(0))
+                        })
+                        .unwrap_or_default())
+                    .sum(),
+                )
+                .is_none()
+        );
+        let mut tensor_chips = Vec::new();
+        for name in [
+            <TensorMatMulEcallInstruction<E>>::name(),
+            <TensorMatMulCoreInstruction<E>>::name(),
+        ] {
+            let circuit_cs = cs.get_cs(&name).expect("tensor circuit missing");
+            tensor_chips.push(chip_specs.len());
+            chip_specs.push(chip_cost_spec(circuit_cs));
+        }
+        ecall_name_to_chips.insert(<TensorMatMulCoreInstruction<E>>::name(), tensor_chips);
+        let tensor_hidden_ecall_config =
+            cs.register_opcode_circuit::<TensorMatMulHiddenEcallInstruction<E>>();
+        let tensor_production_tile_config =
+            cs.register_opcode_circuit::<TensorProductionTileInstruction<E>>();
+        let tensor_hidden_finalize_config =
+            cs.register_opcode_circuit::<TensorMatMulHiddenFinalizeInstruction<E>>();
+        let tensor_intermediate_ecall_config =
+            cs.register_opcode_circuit::<TensorMatMulIntermediateEcallInstruction<E>>();
+        let tensor_intermediate_finalize_config =
+            cs.register_opcode_circuit::<TensorMatMulIntermediateFinalizeInstruction<E>>();
+        let circuit_cells = |name: &String| {
+            let c = cs.get_cs(name).expect("production tensor circuit missing");
+            (c.zkvm_v1_css.num_witin as u64
+                + c.zkvm_v1_css.num_structural_witin as u64
+                + c.zkvm_v1_css.num_fixed as u64)
+                * (1 << c.rotation_vars().unwrap_or(0))
+        };
+        let hidden_ecall_name = <TensorMatMulHiddenEcallInstruction<E>>::name();
+        let production_tile_name = <TensorProductionTileInstruction<E>>::name();
+        let hidden_finalize_name = <TensorMatMulHiddenFinalizeInstruction<E>>::name();
+        let tensor_hidden_cells = circuit_cells(&hidden_ecall_name)
+            + 4 * circuit_cells(&production_tile_name)
+            + circuit_cells(&hidden_finalize_name);
+        assert!(
+            ecall_cells_map
+                .insert(
+                    <TensorMatMulHiddenFinalizeInstruction<E>>::name(),
+                    tensor_hidden_cells
+                )
+                .is_none()
+        );
+        let hidden_ecall_chip = chip_specs.len();
+        chip_specs.push(chip_cost_spec(cs.get_cs(&hidden_ecall_name).unwrap()));
+        let production_tile_chip = chip_specs.len();
+        chip_specs.push(chip_cost_spec(cs.get_cs(&production_tile_name).unwrap()));
+        let hidden_finalize_chip = chip_specs.len();
+        chip_specs.push(chip_cost_spec(cs.get_cs(&hidden_finalize_name).unwrap()));
+        let mut tensor_hidden_chips = vec![hidden_ecall_chip];
+        tensor_hidden_chips.extend(std::iter::repeat_n(production_tile_chip, 4));
+        tensor_hidden_chips.push(hidden_finalize_chip);
+        ecall_name_to_chips.insert(
+            <TensorMatMulHiddenFinalizeInstruction<E>>::name(),
+            tensor_hidden_chips,
+        );
+        let intermediate_ecall_name = <TensorMatMulIntermediateEcallInstruction<E>>::name();
+        let intermediate_finalize_name = <TensorMatMulIntermediateFinalizeInstruction<E>>::name();
+        let tensor_intermediate_cells = circuit_cells(&intermediate_ecall_name)
+            + 11 * circuit_cells(&production_tile_name)
+            + circuit_cells(&intermediate_finalize_name);
+        assert!(
+            ecall_cells_map
+                .insert(
+                    <TensorMatMulIntermediateFinalizeInstruction<E>>::name(),
+                    tensor_intermediate_cells
+                )
+                .is_none()
+        );
+        let intermediate_ecall_chip = chip_specs.len();
+        chip_specs.push(chip_cost_spec(cs.get_cs(&intermediate_ecall_name).unwrap()));
+        let intermediate_finalize_chip = chip_specs.len();
+        chip_specs.push(chip_cost_spec(
+            cs.get_cs(&intermediate_finalize_name).unwrap(),
+        ));
+        let mut tensor_intermediate_chips = vec![intermediate_ecall_chip];
+        tensor_intermediate_chips.extend(std::iter::repeat_n(production_tile_chip, 11));
+        tensor_intermediate_chips.push(intermediate_finalize_chip);
+        ecall_name_to_chips.insert(
+            <TensorMatMulIntermediateFinalizeInstruction<E>>::name(),
+            tensor_intermediate_chips,
+        );
+        let tensor_rms_ecall_config =
+            cs.register_opcode_circuit::<TensorRmsLookupEcallInstruction<E>>();
+        let tensor_rms_core_config =
+            cs.register_opcode_circuit::<TensorRmsLookupCoreInstruction<E>>();
+        assert!(
+            ecall_cells_map
+                .insert(
+                    <TensorRmsLookupCoreInstruction<E>>::name(),
+                    [
+                        <TensorRmsLookupEcallInstruction<E>>::name(),
+                        <TensorRmsLookupCoreInstruction<E>>::name(),
+                    ]
+                    .into_iter()
+                    .map(|name| cs
+                        .get_cs(&name)
+                        .as_ref()
+                        .map(|cs| {
+                            (cs.zkvm_v1_css.num_witin as u64
+                                + cs.zkvm_v1_css.num_structural_witin as u64
+                                + cs.zkvm_v1_css.num_fixed as u64)
+                                * (1 << cs.rotation_vars().unwrap_or(0))
+                        })
+                        .unwrap_or_default())
+                    .sum(),
+                )
+                .is_none()
+        );
+        let mut tensor_rms_chips = Vec::new();
+        for name in [
+            <TensorRmsLookupEcallInstruction<E>>::name(),
+            <TensorRmsLookupCoreInstruction<E>>::name(),
+        ] {
+            let circuit_cs = cs.get_cs(&name).expect("RMS tensor circuit missing");
+            tensor_rms_chips.push(chip_specs.len());
+            chip_specs.push(chip_cost_spec(circuit_cs));
+        }
+        ecall_name_to_chips.insert(
+            <TensorRmsLookupCoreInstruction<E>>::name(),
+            tensor_rms_chips,
+        );
+        let tensor_attention_ecall_config =
+            cs.register_opcode_circuit::<TensorAttentionReducedEcallInstruction<E>>();
+        let tensor_attention_core_config =
+            cs.register_opcode_circuit::<TensorAttentionReducedCoreInstruction<E>>();
+        assert!(
+            ecall_cells_map
+                .insert(
+                    <TensorAttentionReducedCoreInstruction<E>>::name(),
+                    [
+                        <TensorAttentionReducedEcallInstruction<E>>::name(),
+                        <TensorAttentionReducedCoreInstruction<E>>::name(),
+                    ]
+                    .into_iter()
+                    .map(|name| cs
+                        .get_cs(&name)
+                        .as_ref()
+                        .map(|cs| {
+                            (cs.zkvm_v1_css.num_witin as u64
+                                + cs.zkvm_v1_css.num_structural_witin as u64
+                                + cs.zkvm_v1_css.num_fixed as u64)
+                                * (1 << cs.rotation_vars().unwrap_or(0))
+                        })
+                        .unwrap_or_default())
+                    .sum(),
+                )
+                .is_none()
+        );
+        let mut tensor_attention_chips = Vec::new();
+        for name in [
+            <TensorAttentionReducedEcallInstruction<E>>::name(),
+            <TensorAttentionReducedCoreInstruction<E>>::name(),
+        ] {
+            let circuit_cs = cs.get_cs(&name).expect("attention tensor circuit missing");
+            tensor_attention_chips.push(chip_specs.len());
+            chip_specs.push(chip_cost_spec(circuit_cs));
+        }
+        ecall_name_to_chips.insert(
+            <TensorAttentionReducedCoreInstruction<E>>::name(),
+            tensor_attention_chips,
+        );
+        let tensor_attention_block_ecall_config =
+            cs.register_opcode_circuit::<TensorAttentionBlockReducedEcallInstruction<E>>();
+        let tensor_attention_block_core_config =
+            cs.register_opcode_circuit::<TensorAttentionBlockReducedCoreInstruction<E>>();
+        let tensor_ffn_block_ecall_config =
+            cs.register_opcode_circuit::<TensorFfnBlockReducedEcallInstruction<E>>();
+        let tensor_ffn_block_core_config =
+            cs.register_opcode_circuit::<TensorFfnBlockReducedCoreInstruction<E>>();
+        for (core, pair) in [
+            (
+                <TensorAttentionBlockReducedCoreInstruction<E>>::name(),
+                [
+                    <TensorAttentionBlockReducedEcallInstruction<E>>::name(),
+                    <TensorAttentionBlockReducedCoreInstruction<E>>::name(),
+                ],
+            ),
+            (
+                <TensorFfnBlockReducedCoreInstruction<E>>::name(),
+                [
+                    <TensorFfnBlockReducedEcallInstruction<E>>::name(),
+                    <TensorFfnBlockReducedCoreInstruction<E>>::name(),
+                ],
+            ),
+        ] {
+            let cells = pair
+                .iter()
+                .map(|name| {
+                    let circuit = cs.get_cs(name).expect("fused tensor circuit missing");
+                    (circuit.zkvm_v1_css.num_witin as u64
+                        + circuit.zkvm_v1_css.num_structural_witin as u64
+                        + circuit.zkvm_v1_css.num_fixed as u64)
+                        * (1 << circuit.rotation_vars().unwrap_or(0))
+                })
+                .sum();
+            assert!(ecall_cells_map.insert(core.clone(), cells).is_none());
+            let mut chips = Vec::new();
+            for name in pair {
+                let circuit = cs.get_cs(&name).expect("fused tensor circuit missing");
+                chips.push(chip_specs.len());
+                chip_specs.push(chip_cost_spec(circuit));
+            }
+            ecall_name_to_chips.insert(core, chips);
+        }
         let keccak_xorin_config =
             register_ecall_circuit!(KeccakXorinInstruction<E>, ecall_cells_map);
         let bn254_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
@@ -594,6 +862,34 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         map_ecall(ECALL_PUB_IO_COMMIT, PubIoCommitInstruction::<E>::name());
         map_ecall(STATE_CONTINUATION, GlobalState::<E>::name());
         map_ecall(KeccakSpec::CODE, KeccakCoreInstruction::<E>::name());
+        map_ecall(
+            TensorMatMulV1Spec::CODE,
+            TensorMatMulCoreInstruction::<E>::name(),
+        );
+        map_ecall(
+            ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1,
+            TensorMatMulHiddenFinalizeInstruction::<E>::name(),
+        );
+        map_ecall(
+            ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1,
+            TensorMatMulIntermediateFinalizeInstruction::<E>::name(),
+        );
+        map_ecall(
+            TensorRmsLookupV1Spec::CODE,
+            TensorRmsLookupCoreInstruction::<E>::name(),
+        );
+        map_ecall(
+            TensorAttentionReducedV1Spec::CODE,
+            TensorAttentionReducedCoreInstruction::<E>::name(),
+        );
+        map_ecall(
+            TensorAttentionBlockReducedV1Spec::CODE,
+            TensorAttentionBlockReducedCoreInstruction::<E>::name(),
+        );
+        map_ecall(
+            TensorFfnBlockReducedV1Spec::CODE,
+            TensorFfnBlockReducedCoreInstruction::<E>::name(),
+        );
         map_ecall(KeccakXorinSpec::CODE, KeccakXorinInstruction::<E>::name());
         map_ecall(
             Bn254AddSpec::CODE,
@@ -649,12 +945,18 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         );
         map_ecall(Uint256MulSpec::CODE, Uint256MulInstruction::<E>::name());
         map_ecall(Sha256ExtendSpec::CODE, ShaExtendInstruction::<E>::name());
-        let shard_cost_model = Arc::new(ShardCostModel::new(
-            opcode_chips,
-            ecall_chips,
-            chip_specs,
-            E::DEGREE,
-        ));
+        let shard_cost_model = Arc::new(
+            ShardCostModel::new(opcode_chips, ecall_chips, chip_specs, E::DEGREE)
+                .with_atomic_ecalls([
+                    TensorMatMulV1Spec::CODE,
+                    ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1,
+                    ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1,
+                    TensorRmsLookupV1Spec::CODE,
+                    TensorAttentionReducedV1Spec::CODE,
+                    TensorAttentionBlockReducedV1Spec::CODE,
+                    TensorFfnBlockReducedV1Spec::CODE,
+                ]),
+        );
 
         // tables
         let dynamic_range_config =
@@ -726,6 +1028,21 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             state_continuation_config,
             keccak_ecall_config,
             keccak_core_config,
+            tensor_matmul_ecall_config,
+            tensor_matmul_core_config,
+            tensor_hidden_ecall_config,
+            tensor_production_tile_config,
+            tensor_hidden_finalize_config,
+            tensor_intermediate_ecall_config,
+            tensor_intermediate_finalize_config,
+            tensor_rms_ecall_config,
+            tensor_rms_core_config,
+            tensor_attention_ecall_config,
+            tensor_attention_core_config,
+            tensor_attention_block_ecall_config,
+            tensor_attention_block_core_config,
+            tensor_ffn_block_ecall_config,
+            tensor_ffn_block_core_config,
             keccak_xorin_config,
             sha_extend_config,
             bn254_add_config,
@@ -825,6 +1142,66 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<GlobalState<E>>(cs, &self.state_continuation_config);
         fixed.register_opcode_circuit::<KeccakEcallInstruction<E>>(cs, &self.keccak_ecall_config);
         fixed.register_opcode_circuit::<KeccakCoreInstruction<E>>(cs, &self.keccak_core_config);
+        fixed.register_opcode_circuit::<TensorMatMulEcallInstruction<E>>(
+            cs,
+            &self.tensor_matmul_ecall_config,
+        );
+        fixed.register_opcode_circuit::<TensorMatMulCoreInstruction<E>>(
+            cs,
+            &self.tensor_matmul_core_config,
+        );
+        fixed.register_opcode_circuit::<TensorMatMulHiddenEcallInstruction<E>>(
+            cs,
+            &self.tensor_hidden_ecall_config,
+        );
+        fixed.register_opcode_circuit::<TensorProductionTileInstruction<E>>(
+            cs,
+            &self.tensor_production_tile_config,
+        );
+        fixed.register_opcode_circuit::<TensorMatMulHiddenFinalizeInstruction<E>>(
+            cs,
+            &self.tensor_hidden_finalize_config,
+        );
+        fixed.register_opcode_circuit::<TensorMatMulIntermediateEcallInstruction<E>>(
+            cs,
+            &self.tensor_intermediate_ecall_config,
+        );
+        fixed.register_opcode_circuit::<TensorMatMulIntermediateFinalizeInstruction<E>>(
+            cs,
+            &self.tensor_intermediate_finalize_config,
+        );
+        fixed.register_opcode_circuit::<TensorRmsLookupEcallInstruction<E>>(
+            cs,
+            &self.tensor_rms_ecall_config,
+        );
+        fixed.register_opcode_circuit::<TensorRmsLookupCoreInstruction<E>>(
+            cs,
+            &self.tensor_rms_core_config,
+        );
+        fixed.register_opcode_circuit::<TensorAttentionReducedEcallInstruction<E>>(
+            cs,
+            &self.tensor_attention_ecall_config,
+        );
+        fixed.register_opcode_circuit::<TensorAttentionReducedCoreInstruction<E>>(
+            cs,
+            &self.tensor_attention_core_config,
+        );
+        fixed.register_opcode_circuit::<TensorAttentionBlockReducedEcallInstruction<E>>(
+            cs,
+            &self.tensor_attention_block_ecall_config,
+        );
+        fixed.register_opcode_circuit::<TensorAttentionBlockReducedCoreInstruction<E>>(
+            cs,
+            &self.tensor_attention_block_core_config,
+        );
+        fixed.register_opcode_circuit::<TensorFfnBlockReducedEcallInstruction<E>>(
+            cs,
+            &self.tensor_ffn_block_ecall_config,
+        );
+        fixed.register_opcode_circuit::<TensorFfnBlockReducedCoreInstruction<E>>(
+            cs,
+            &self.tensor_ffn_block_core_config,
+        );
         fixed.register_opcode_circuit::<KeccakXorinInstruction<E>>(cs, &self.keccak_xorin_config);
         fixed.register_opcode_circuit::<ShaExtendInstruction<E>>(cs, &self.sha_extend_config);
         fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
@@ -940,6 +1317,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         log_ecall!("PUB_IO_COMMIT", ECALL_PUB_IO_COMMIT);
         log_ecall!("STATE_CONTINUATION", STATE_CONTINUATION);
         log_ecall!("KECCAK", KeccakSpec::CODE);
+        log_ecall!("TENSOR_MATMUL_V1", TensorMatMulV1Spec::CODE);
+        log_ecall!("TENSOR_RMS_LOOKUP_V1", TensorRmsLookupV1Spec::CODE);
+        log_ecall!(
+            "TENSOR_ATTENTION_REDUCED_V1",
+            TensorAttentionReducedV1Spec::CODE
+        );
         log_ecall!("KECCAK_XORIN", KeccakXorinSpec::CODE);
         log_ecall!("bn254_add_records", Bn254AddSpec::CODE);
         log_ecall!("bn254_double_records", Bn254DoubleSpec::CODE);
@@ -1113,6 +1496,101 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             KeccakCoreInstruction<E>,
             keccak_core_config,
             KeccakSpec::CODE
+        );
+        assign_ecall!(
+            TensorMatMulEcallInstruction<E>,
+            tensor_matmul_ecall_config,
+            TensorMatMulV1Spec::CODE
+        );
+        assign_ecall!(
+            TensorMatMulCoreInstruction<E>,
+            tensor_matmul_core_config,
+            TensorMatMulV1Spec::CODE
+        );
+        assign_ecall!(
+            TensorMatMulHiddenEcallInstruction<E>,
+            tensor_hidden_ecall_config,
+            ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1
+        );
+        assign_ecall!(
+            TensorMatMulHiddenFinalizeInstruction<E>,
+            tensor_hidden_finalize_config,
+            ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1
+        );
+        assign_ecall!(
+            TensorMatMulIntermediateEcallInstruction<E>,
+            tensor_intermediate_ecall_config,
+            ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1
+        );
+        let mut tensor_production_records = instrunction_dispatch_ctx
+            .records_for_ecall_code(ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1)
+            .unwrap_or(&[])
+            .to_vec();
+        tensor_production_records.extend_from_slice(
+            instrunction_dispatch_ctx
+                .records_for_ecall_code(ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1)
+                .unwrap_or(&[]),
+        );
+        tensor_production_records.sort_unstable();
+        let n = tensor_production_records.len();
+        info_span!(
+            "assign_chip",
+            chip = %<TensorProductionTileInstruction<E>>::name(),
+            n
+        )
+        .in_scope(|| {
+            witness.assign_opcode_circuit::<TensorProductionTileInstruction<E>>(
+                cs,
+                shard_ctx,
+                &self.tensor_production_tile_config,
+                shard_steps,
+                &tensor_production_records,
+            )
+        })?;
+        assign_ecall!(
+            TensorMatMulIntermediateFinalizeInstruction<E>,
+            tensor_intermediate_finalize_config,
+            ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1
+        );
+        assign_ecall!(
+            TensorRmsLookupEcallInstruction<E>,
+            tensor_rms_ecall_config,
+            TensorRmsLookupV1Spec::CODE
+        );
+        assign_ecall!(
+            TensorRmsLookupCoreInstruction<E>,
+            tensor_rms_core_config,
+            TensorRmsLookupV1Spec::CODE
+        );
+        assign_ecall!(
+            TensorAttentionReducedEcallInstruction<E>,
+            tensor_attention_ecall_config,
+            TensorAttentionReducedV1Spec::CODE
+        );
+        assign_ecall!(
+            TensorAttentionReducedCoreInstruction<E>,
+            tensor_attention_core_config,
+            TensorAttentionReducedV1Spec::CODE
+        );
+        assign_ecall!(
+            TensorAttentionBlockReducedEcallInstruction<E>,
+            tensor_attention_block_ecall_config,
+            TensorAttentionBlockReducedV1Spec::CODE
+        );
+        assign_ecall!(
+            TensorAttentionBlockReducedCoreInstruction<E>,
+            tensor_attention_block_core_config,
+            TensorAttentionBlockReducedV1Spec::CODE
+        );
+        assign_ecall!(
+            TensorFfnBlockReducedEcallInstruction<E>,
+            tensor_ffn_block_ecall_config,
+            TensorFfnBlockReducedV1Spec::CODE
+        );
+        assign_ecall!(
+            TensorFfnBlockReducedCoreInstruction<E>,
+            tensor_ffn_block_core_config,
+            TensorFfnBlockReducedV1Spec::CODE
         );
         assign_ecall!(
             KeccakXorinInstruction<E>,
@@ -1317,6 +1795,42 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     STATE_CONTINUATION => collect_ecall!(GlobalState<E>, state_continuation_config),
                     KeccakSpec::CODE => {
                         collect_ecall!(KeccakEcallInstruction<E>, keccak_ecall_config);
+                    }
+                    TensorMatMulV1Spec::CODE => {
+                        collect_ecall!(TensorMatMulEcallInstruction<E>, tensor_matmul_ecall_config);
+                    }
+                    ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1 => {
+                        collect_ecall!(
+                            TensorMatMulHiddenEcallInstruction<E>,
+                            tensor_hidden_ecall_config
+                        );
+                    }
+                    ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1 => {
+                        collect_ecall!(
+                            TensorMatMulIntermediateEcallInstruction<E>,
+                            tensor_intermediate_ecall_config
+                        );
+                    }
+                    TensorRmsLookupV1Spec::CODE => {
+                        collect_ecall!(TensorRmsLookupEcallInstruction<E>, tensor_rms_ecall_config);
+                    }
+                    TensorAttentionReducedV1Spec::CODE => {
+                        collect_ecall!(
+                            TensorAttentionReducedEcallInstruction<E>,
+                            tensor_attention_ecall_config
+                        );
+                    }
+                    TensorAttentionBlockReducedV1Spec::CODE => {
+                        collect_ecall!(
+                            TensorAttentionBlockReducedEcallInstruction<E>,
+                            tensor_attention_block_ecall_config
+                        );
+                    }
+                    TensorFfnBlockReducedV1Spec::CODE => {
+                        collect_ecall!(
+                            TensorFfnBlockReducedEcallInstruction<E>,
+                            tensor_ffn_block_ecall_config
+                        );
                     }
                     KeccakXorinSpec::CODE => {
                         collect_ecall!(KeccakXorinInstruction<E>, keccak_xorin_config)
@@ -1674,6 +2188,34 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .ecall_cells_map
                 .get(&KeccakCoreInstruction::<E>::name())
                 .expect("unable to find name"),
+            TensorMatMulV1Spec::CODE => *self
+                .ecall_cells_map
+                .get(&TensorMatMulCoreInstruction::<E>::name())
+                .expect("unable to find name"),
+            ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1 => *self
+                .ecall_cells_map
+                .get(&TensorMatMulHiddenFinalizeInstruction::<E>::name())
+                .expect("unable to find production hidden name"),
+            ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1 => *self
+                .ecall_cells_map
+                .get(&TensorMatMulIntermediateFinalizeInstruction::<E>::name())
+                .expect("unable to find production intermediate name"),
+            TensorRmsLookupV1Spec::CODE => *self
+                .ecall_cells_map
+                .get(&TensorRmsLookupCoreInstruction::<E>::name())
+                .expect("unable to find name"),
+            TensorAttentionReducedV1Spec::CODE => *self
+                .ecall_cells_map
+                .get(&TensorAttentionReducedCoreInstruction::<E>::name())
+                .expect("unable to find name"),
+            TensorAttentionBlockReducedV1Spec::CODE => *self
+                .ecall_cells_map
+                .get(&TensorAttentionBlockReducedCoreInstruction::<E>::name())
+                .expect("unable to find fused attention name"),
+            TensorFfnBlockReducedV1Spec::CODE => *self
+                .ecall_cells_map
+                .get(&TensorFfnBlockReducedCoreInstruction::<E>::name())
+                .expect("unable to find fused FFN name"),
             KeccakXorinSpec::CODE => *self
                 .ecall_cells_map
                 .get(&KeccakXorinInstruction::<E>::name())

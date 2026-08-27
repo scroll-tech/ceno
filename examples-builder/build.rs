@@ -43,10 +43,32 @@ fn build_elfs() {
         panic!("cargo build of examples failed.");
     }
 
+    let mut ceno_args = vec!["ceno", "build", "--example", "tensor_matmul_hidden_v1"];
+    if is_release {
+        ceno_args.push("--release");
+    }
+    let output = Command::new("cargo")
+        .args(ceno_args)
+        .current_dir("../examples")
+        .env_clear()
+        .envs(std::env::vars().filter(|x| !x.0.starts_with("CARGO_")))
+        .env(
+            "CARGO_TARGET_DIR",
+            Path::new(CARGO_MANIFEST_DIR).join("../examples/target"),
+        )
+        .output()
+        .expect("cargo ceno build failed to run");
+    if !output.status.success() {
+        io::stdout().write_all(&output.stdout).unwrap();
+        io::stderr().write_all(&output.stderr).unwrap();
+        panic!("cargo ceno build of tensor_matmul_hidden_v1 failed.");
+    }
+
     for example in glob("../examples/examples/*.rs")
         .unwrap()
         .map(Result::unwrap)
     {
+        println!("cargo:rerun-if-changed={}", example.display());
         let example = example.file_stem().unwrap().to_str().unwrap();
         writeln!(
             dest,

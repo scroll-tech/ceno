@@ -498,3 +498,71 @@ fn test_tower_proof_various_prod_size() {
         _test_tower_proof_prod_size_2(1 << leaf_layer_size);
     }
 }
+
+#[test]
+fn test_tower_proof_mixed_product_heights() {
+    type E = GoldilocksExt2;
+
+    let mut rng = thread_rng();
+    let make_layers = |size: usize, rng: &mut _| {
+        let leaf: MultilinearExtension<E> = (0..size)
+            .map(|_| E::random(&mut *rng))
+            .collect_vec()
+            .into_mle();
+        let (first, second) = leaf
+            .get_ext_field_vec()
+            .split_at(leaf.evaluations().len() / 2);
+        let layers = infer_tower_product_witness(
+            ceil_log2(size),
+            vec![first.to_vec().into_mle(), second.to_vec().into_mle()],
+            2,
+        );
+        (leaf, layers)
+    };
+    let (short_leaf, short_layers) = make_layers(2, &mut rng);
+    let (tall_leaf, tall_layers) = make_layers(64, &mut rng);
+
+    let mut prover_transcript = BasicTranscript::new(b"test_tower_mixed_heights");
+    let (rt_tower_p, tower_proof) = CpuTowerProver::create_proof::<E, WhirDefault<E>>(
+        vec![
+            TowerProverSpec {
+                witness: short_layers.clone(),
+            },
+            TowerProverSpec {
+                witness: tall_layers.clone(),
+            },
+        ],
+        vec![],
+        2,
+        &mut prover_transcript,
+    );
+
+    let root_evals = [&short_layers, &tall_layers]
+        .map(|layers| {
+            layers[0]
+                .iter()
+                .map(|mle| mle.get_ext_field_vec()[0])
+                .collect_vec()
+        })
+        .to_vec();
+    let mut verifier_transcript = BasicTranscript::new(b"test_tower_mixed_heights");
+    let (rt_tower_v, product_evals, _, _) = TowerVerify::verify(
+        root_evals,
+        vec![],
+        &tower_proof,
+        vec![1, 6],
+        2,
+        &mut verifier_transcript,
+    )
+    .unwrap();
+
+    assert_eq!(rt_tower_p, rt_tower_v);
+    assert_eq!(
+        short_leaf.evaluate(&product_evals[0].point),
+        product_evals[0].eval
+    );
+    assert_eq!(
+        tall_leaf.evaluate(&product_evals[1].point),
+        product_evals[1].eval
+    );
+}

@@ -8,6 +8,8 @@ mod dense_addr_space;
 mod platform;
 pub use platform::{CENO_PLATFORM, Platform};
 
+pub mod tensor;
+
 mod tracer;
 pub use tracer::{
     Change, ChipCostSpec, FullTracer, FullTracerConfig, GpuReplayChunk, GpuReplayFallbackRecord,
@@ -73,6 +75,14 @@ pub use syscalls::{
         Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec,
     },
     sha256::{SHA_EXTEND_WORDS, Sha256ExtendSpec},
+    tensor::{
+        ATTENTION_REDUCED_PROFILE_V1, ATTENTION_RESCALE_SHIFT_Q20_V1,
+        ATTENTION_SOFTMAX_TABLE_COMMITMENT_V1, ATTENTION_SOFTMAX_TABLE_REDUCED_V1,
+        BLOCK_REDUCED_PROFILE_V1, FFN_TABLE_COMMITMENT_V1, FFN_TABLE_REDUCED_V1,
+        TENSOR_SIGNATURE_2X3X2, TensorAttentionBlockReducedV1Spec, TensorAttentionReducedV1Spec,
+        TensorFfnBlockReducedV1Spec, TensorMatMulHiddenV1Spec, TensorMatMulIntermediateV1Spec,
+        TensorMatMulV1Spec, TensorRmsLookupV1Spec,
+    },
     uint256::{UINT256_WORDS_FIELD_ELEMENT, Uint256MulSpec},
 };
 

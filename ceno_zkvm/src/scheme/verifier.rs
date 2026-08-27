@@ -983,7 +983,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             tower_num_variables,
             num_product_fanin,
             transcript,
-        )?;
+        )
+        .map_err(|error| match error {
+            ZKVMError::VerifyError(message) => {
+                ZKVMError::VerifyError(format!("{_name}: {message}").into())
+            }
+            other => other,
+        })?;
 
         if cs.lk_table_expressions.is_empty() {
             // verify LogUp witness nominator p(x) ?= constant vector 1
@@ -1463,14 +1469,28 @@ impl TowerVerify {
             .unzip::<_, _, Vec<_>, Vec<_>>();
 
         // initial claim = \sum_j alpha^j * out_j[rt]
-        let initial_claim = izip!(&prod_spec_point_n_eval, &alpha_pows)
-            .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
-            .sum::<E>()
+        // A one-variable tower is already at its root and does not
+        // participate in the first (or any later) reduction sumcheck. Keep
+        // its point/evaluation for the caller, but do not fold it into the
+        // claim proved by taller towers. This matters when a chip mixes a
+        // short read/write product with a taller lookup tower.
+        let initial_claim = izip!(
+            &prod_spec_point_n_eval,
+            &alpha_pows,
+            &num_variables[..num_prod_spec]
+        )
+        .filter(|(_, _, num_vars)| **num_vars > 1)
+        .map(|(point_n_eval, alpha, _)| point_n_eval.eval * *alpha)
+        .sum::<E>()
             + izip!(
                 interleave(&logup_spec_p_point_n_eval, &logup_spec_q_point_n_eval),
-                &alpha_pows[num_prod_spec..]
+                &alpha_pows[num_prod_spec..],
+                num_variables[num_prod_spec..]
+                    .iter()
+                    .flat_map(|num_vars| [num_vars, num_vars])
             )
-            .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
+            .filter(|(_, _, num_vars)| **num_vars > 1)
+            .map(|(point_n_eval, alpha, _)| point_n_eval.eval * *alpha)
             .sum::<E>();
 
         let max_num_variables = num_variables
@@ -1612,7 +1632,13 @@ impl TowerVerify {
                 let expected_evaluation = eq * weighted_prime_fold;
 
                 if expected_evaluation != sumcheck_claim.expected_evaluation {
-                    return Err(ZKVMError::VerifyError("mismatch tower evaluation".into()));
+                    return Err(ZKVMError::VerifyError(
+                        format!(
+                            "mismatch tower evaluation at round {round}: expected {expected_evaluation:?}, got {:?}",
+                            sumcheck_claim.expected_evaluation
+                        )
+                        .into(),
+                    ));
                 }
 
                 // derive single eval

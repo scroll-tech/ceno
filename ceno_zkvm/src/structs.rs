@@ -112,6 +112,8 @@ pub type RAMType = gkr_iop::RAMType;
 pub enum CustomRWTag {
     KeccakState = 0,
     ShardRamEcPoint = 1,
+    /// Boundary state shared by the syscall-facing and arithmetic tensor chips.
+    TensorState = 2,
 }
 
 impl CustomRWTag {

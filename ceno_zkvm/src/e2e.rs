@@ -27,7 +27,7 @@ use ceno_emul::{
     NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, RegIdx,
     ReplayChunk, ReplayEngine, ReplayStopReason, StepCellExtractor, StepIndex, StepRecord,
     SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
-    host_utils::read_all_messages,
+    host_utils::read_all_messages, tensor::TensorWitnessProvider,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -256,6 +256,22 @@ pub struct ShardContext<'a> {
     /// Syscall witnesses for StepRecord::syscall() lookups.
     /// Borrowed from the tracer — no per-shard Vec clone.
     pub syscall_witnesses: Arc<Vec<SyscallWitness>>,
+    /// Runtime-only private tensor source; intentionally not journaled.
+    pub tensor_proof_context: Option<Arc<TensorProofContext>>,
+}
+
+pub struct TensorProofContext {
+    provider: Arc<dyn TensorWitnessProvider>,
+}
+
+impl TensorProofContext {
+    pub fn new(provider: Arc<dyn TensorWitnessProvider>) -> Self {
+        Self { provider }
+    }
+
+    pub fn provider(&self) -> &dyn TensorWitnessProvider {
+        self.provider.as_ref()
+    }
 }
 
 impl<'a> Default for ShardContext<'a> {
@@ -286,6 +302,7 @@ impl<'a> Default for ShardContext<'a> {
             shard_heap_addr_range: CENO_PLATFORM.heap.clone(),
             shard_hint_addr_range: CENO_PLATFORM.hints.clone(),
             syscall_witnesses: Arc::new(Vec::new()),
+            tensor_proof_context: None,
         }
     }
 }
@@ -329,6 +346,7 @@ impl<'a> ShardContext<'a> {
             shard_heap_addr_range: self.shard_heap_addr_range.clone(),
             shard_hint_addr_range: self.shard_hint_addr_range.clone(),
             syscall_witnesses: self.syscall_witnesses.clone(),
+            tensor_proof_context: self.tensor_proof_context.clone(),
         }
     }
 
@@ -362,6 +380,7 @@ impl<'a> ShardContext<'a> {
                     shard_heap_addr_range: self.shard_heap_addr_range.clone(),
                     shard_hint_addr_range: self.shard_hint_addr_range.clone(),
                     syscall_witnesses: self.syscall_witnesses.clone(),
+                    tensor_proof_context: self.tensor_proof_context.clone(),
                 })
                 .collect_vec(),
             _ => panic!("invalid type"),
@@ -724,6 +743,7 @@ pub struct ShardContextBuilder {
     #[allow(dead_code)]
     replay_shard_previews: Arc<Vec<ceno_emul::GpuShardPreview>>,
     max_cycle: Cycle,
+    tensor_proof_context: Option<Arc<TensorProofContext>>,
 }
 
 impl Default for ShardContextBuilder {
@@ -738,6 +758,7 @@ impl Default for ShardContextBuilder {
             shard_cycle_boundaries: Arc::new(vec![FullTracer::SUBCYCLES_PER_INSN]),
             replay_shard_previews: Arc::new(Vec::new()),
             max_cycle: 0,
+            tensor_proof_context: None,
         }
     }
 }
@@ -764,7 +785,12 @@ impl ShardContextBuilder {
             shard_cycle_boundaries,
             replay_shard_previews,
             max_cycle,
+            tensor_proof_context: None,
         }
+    }
+
+    pub fn set_tensor_proof_context(&mut self, context: Arc<TensorProofContext>) {
+        self.tensor_proof_context = Some(context);
     }
 
     pub fn shard_cycle_boundaries(&self) -> Arc<Vec<Cycle>> {
@@ -773,6 +799,10 @@ impl ShardContextBuilder {
 
     pub fn next_accesses(&self) -> Arc<NextCycleAccess> {
         self.next_accesses.clone()
+    }
+
+    fn tensor_proof_context(&self) -> Option<Arc<TensorProofContext>> {
+        self.tensor_proof_context.clone()
     }
 
     pub fn total_shards(&self) -> usize {
@@ -797,6 +827,7 @@ impl ShardContextBuilder {
             platform: self.platform.clone(),
             shard_heap_addr_range: preview.heap_start..preview.heap_end,
             shard_hint_addr_range: preview.hint_start..preview.hint_end,
+            tensor_proof_context: self.tensor_proof_context.clone(),
             ..Default::default()
         }
     }
@@ -881,6 +912,7 @@ impl ShardContextBuilder {
             platform: self.platform.clone(),
             shard_heap_addr_range: summary.first_heap_before..summary.last_heap_after,
             shard_hint_addr_range: summary.first_hint_before..summary.last_hint_after,
+            tensor_proof_context: self.tensor_proof_context.clone(),
             ..Default::default()
         };
         self.prev_shard_cycle_range
@@ -944,6 +976,7 @@ impl StepReplay {
         full_tracer_config: FullTracerConfig,
         next_accesses: Arc<NextCycleAccess>,
         shard_cycle_boundaries: Arc<Vec<Cycle>>,
+        tensor_proof_context: Option<Arc<TensorProofContext>>,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))] aot: Arc<
             ceno_emul::aot::AotProgram,
         >,
@@ -984,6 +1017,9 @@ impl StepReplay {
             full_tracer_config,
             Some(next_accesses),
         );
+        if let Some(context) = tensor_proof_context {
+            vm.set_tensor_witness_provider(context.provider.clone());
+        }
         for record in init_mem_state.hints.iter() {
             vm.init_memory(record.addr.into(), record.value);
         }
@@ -1192,6 +1228,7 @@ struct CompactReplayPipelineInput {
     shard_cycle_boundaries: Arc<Vec<Cycle>>,
     range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
     chunk_capacity: usize,
+    tensor_proof_context: Option<Arc<TensorProofContext>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     aot: Arc<ceno_emul::aot::AotProgram>,
 }
@@ -1247,6 +1284,7 @@ fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactRe
                 input.shard_cycle_boundaries,
                 input.range_descriptors,
                 input.chunk_capacity,
+                input.tensor_proof_context,
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
                 input.aot,
             );
@@ -1340,6 +1378,7 @@ impl CompactStepReplay {
         shard_cycle_boundaries: Arc<Vec<Cycle>>,
         range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
         chunk_capacity: usize,
+        tensor_proof_context: Option<Arc<TensorProofContext>>,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))] aot: Arc<
             ceno_emul::aot::AotProgram,
         >,
@@ -1358,6 +1397,9 @@ impl CompactStepReplay {
             GpuReplayTracerConfig { chunk_capacity },
             Some(next_accesses),
         );
+        if let Some(context) = tensor_proof_context {
+            vm.set_tensor_witness_provider(context.provider.clone());
+        }
         vm.tracer_mut()
             .install_range_descriptors(range_descriptors.clone());
         for record in &init_mem_state.hints {
@@ -1625,6 +1667,7 @@ pub fn replay_full_trace(
         emul_result.full_tracer_config,
         shard_ctx_builder.next_accesses(),
         emul_result.shard_cycle_boundaries,
+        shard_ctx_builder.tensor_proof_context(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         emul_result.replay_aot_program,
     );
@@ -1673,6 +1716,7 @@ pub fn emulate_program<'a>(
     platform: &Platform,
     multi_prover: &MultiProver,
     step_cell_extractor: Arc<dyn StepCellExtractor>,
+    tensor_proof_context: Option<Arc<TensorProofContext>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     precompiled_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -1713,6 +1757,9 @@ pub fn emulate_program<'a>(
         .in_scope(move || {
             VMState::new_with_tracer_config(platform.clone(), preflight_program, tracer_config)
         });
+    if let Some(context) = &tensor_proof_context {
+        vm.set_tensor_witness_provider(context.provider.clone());
+    }
 
     info_span!("[ceno] emulator.init_mem").in_scope(|| {
         for record in hints_init {
@@ -1964,7 +2011,7 @@ pub fn emulate_program<'a>(
     let shard_cycle_boundaries = Arc::new(shard_cycle_boundaries);
     let replay_range_descriptors = Arc::new(replay_range_descriptors);
     let replay_shard_previews = Arc::new(replay_shard_previews);
-    let shard_ctx_builder = ShardContextBuilder::from_plan(
+    let mut shard_ctx_builder = ShardContextBuilder::from_plan(
         multi_prover,
         platform.clone(),
         shard_cycle_boundaries.clone(),
@@ -1972,6 +2019,9 @@ pub fn emulate_program<'a>(
         max_cycle,
         next_accesses,
     );
+    if let Some(context) = tensor_proof_context {
+        shard_ctx_builder.set_tensor_proof_context(context);
+    }
     tracing::info!(
         "num_shards: {}, max_cycle {}, shard_cycle_boundaries {:?}",
         shard_ctx_builder.total_shards(),
@@ -2199,6 +2249,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             emul_result.full_tracer_config,
             shard_ctx_builder.next_accesses(),
             emul_result.shard_cycle_boundaries.clone(),
+            shard_ctx_builder.tensor_proof_context(),
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             emul_result.replay_aot_program.clone(),
         )
@@ -2213,6 +2264,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             emul_result.shard_cycle_boundaries.clone(),
             emul_result.replay_range_descriptors.clone(),
             emul_result.replay_range_capacity,
+            shard_ctx_builder.tensor_proof_context(),
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             emul_result.replay_aot_program.clone(),
         )
@@ -2227,6 +2279,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             shard_cycle_boundaries: emul_result.shard_cycle_boundaries.clone(),
             range_descriptors: emul_result.replay_range_descriptors.clone(),
             chunk_capacity: emul_result.replay_range_capacity,
+            tensor_proof_context: shard_ctx_builder.tensor_proof_context(),
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             aot: emul_result.replay_aot_program.clone(),
         })
@@ -3031,6 +3084,7 @@ pub fn analyze_shard_ram_light<E: ExtensionField>(
         &program_ctx.platform,
         &program_ctx.multi_prover,
         step_cell_extractor,
+        program_ctx.tensor_proof_context.clone(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         precompiled_aot,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -3052,6 +3106,7 @@ pub fn analyze_shard_ram_light<E: ExtensionField>(
         emul_result.full_tracer_config,
         shard_ctx_builder.next_accesses(),
         emul_result.shard_cycle_boundaries.clone(),
+        shard_ctx_builder.tensor_proof_context(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         emul_result.replay_aot_program.clone(),
     );
@@ -3462,6 +3517,7 @@ pub struct E2EProgramCtx<E: ExtensionField> {
     pub system_config: ConstraintSystemConfig<E>,
     pub reg_init: Vec<MemInitRecord>,
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
+    pub tensor_proof_context: Option<Arc<TensorProofContext>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub preflight_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -3520,6 +3576,7 @@ pub fn setup_program<E: ExtensionField>(
         system_config,
         reg_init,
         zkvm_fixed_traces,
+        tensor_proof_context: None,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         preflight_aot_program,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -3528,6 +3585,9 @@ pub fn setup_program<E: ExtensionField>(
 }
 
 impl<E: ExtensionField> E2EProgramCtx<E> {
+    pub fn set_tensor_proof_context(&mut self, context: Arc<TensorProofContext>) {
+        self.tensor_proof_context = Some(context);
+    }
     pub fn keygen<PCS: PolynomialCommitmentScheme<E> + 'static>(
         self,
         max_num_variables: usize,
@@ -3672,6 +3732,13 @@ pub fn run_e2e_with_checkpoint<
         &prover.pk.program_ctx.as_ref().unwrap().platform,
         &prover.pk.program_ctx.as_ref().unwrap().multi_prover,
         step_cell_extractor,
+        prover
+            .pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .tensor_proof_context
+            .clone(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         prover
             .pk
@@ -3844,6 +3911,7 @@ pub fn run_e2e_proof_with_precompiled_aot<
         &ctx.platform,
         &ctx.multi_prover,
         step_cell_extractor,
+        ctx.tensor_proof_context.clone(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         precompiled_aot,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -4123,6 +4191,227 @@ mod tests {
     use std::sync::Arc;
     use strum::EnumCount;
     use tiny_keccak::{Hasher, Keccak};
+
+    #[test]
+    #[ignore = "single Gate-2 application proof E2E; run explicitly"]
+    fn tensor_matmul_v1_application_proves_and_verifies() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver,
+                run_e2e_full_trace_verify, run_e2e_proof, setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ceno_emul::tensor::{DeterministicTileProvider, TensorWitnessProvider, encode_i32_le};
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+
+        let program = ceno_emul::Program::load_elf(ceno_examples::tensor_matmul_v1, u32::MAX)
+            .expect("load tensor MatMul guest");
+        let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        let provider = Arc::new(
+            DeterministicTileProvider::new(
+                41,
+                vec![encode_i32_le(&[65_536, 0, 0, 65_536, 65_536, 65_536])],
+            )
+            .unwrap(),
+        );
+        ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
+
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+
+        let metrics = provider.metrics();
+        assert!(
+            metrics.read_calls >= 3,
+            "preflight, replay and proof assignment read the tile"
+        );
+        assert_eq!(
+            metrics.h2d_bytes, 0,
+            "Gate-2 tensor assignment is CPU fallback"
+        );
+        assert_eq!(
+            metrics.d2h_bytes, 0,
+            "Gate-2 tensor assignment is CPU fallback"
+        );
+    }
+
+    #[test]
+    #[ignore = "Gate-3 reduced static Llama layer proof E2E; run explicitly"]
+    fn llama_layer_reduced_v1_application_proves_and_verifies() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver,
+                run_e2e_full_trace_verify, run_e2e_proof, setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ceno_emul::tensor::{DeterministicTileProvider, TensorWitnessProvider, encode_i32_le};
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+
+        let program = ceno_emul::Program::load_elf(ceno_examples::llama_layer_reduced_v1, u32::MAX)
+            .expect("load reduced static Llama layer guest");
+        let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        let tile = encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]);
+        let provider = Arc::new(
+            DeterministicTileProvider::new(73, (0..7).map(|_| tile.clone()).collect()).unwrap(),
+        );
+        ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
+
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+
+        let metrics = provider.metrics();
+        assert!(
+            metrics.read_calls >= 21,
+            "all seven committed tiles replay across proving phases"
+        );
+        assert_eq!((metrics.h2d_bytes, metrics.d2h_bytes), (0, 0));
+    }
+
+    #[test]
+    #[ignore = "Gate-4 fused reduced Llama layer proof E2E; run explicitly"]
+    fn llama_layer_fused_reduced_v1_application_proves_and_verifies() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver,
+                run_e2e_full_trace_verify, run_e2e_proof, setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ceno_emul::tensor::{DeterministicTileProvider, TensorWitnessProvider, encode_i32_le};
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+        let program =
+            ceno_emul::Program::load_elf(ceno_examples::llama_layer_fused_reduced_v1, u32::MAX)
+                .expect("load fused reduced static Llama layer guest");
+        let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        let tile = encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]);
+        let provider = Arc::new(
+            DeterministicTileProvider::new(73, (0..7).map(|_| tile.clone()).collect()).unwrap(),
+        );
+        ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+        assert!(provider.metrics().read_calls >= 21);
+    }
+
+    #[test]
+    #[ignore = "Gate-5 K4096 tile/finalize application proof E2E; run explicitly"]
+    fn tensor_matmul_hidden_v1_application_proves_and_verifies() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver,
+                prepare_fulltracer_aot_program, prepare_preflight_aot_program,
+                run_e2e_full_trace_verify, run_e2e_proof, setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ceno_emul::tensor::{
+            TensorWitnessProvider,
+            production::{ProductionMatMulSignature, sparse_production_dot_fixture},
+        };
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+
+        let program =
+            ceno_emul::Program::load_elf(ceno_examples::tensor_matmul_hidden_v1, u32::MAX)
+                .expect("load K4096 guest");
+        let platform = setup_platform(Preset::Ceno, &program, 64 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        assert_eq!(
+            ctx.system_config
+                .zkvm_cs
+                .get_css()
+                .keys()
+                .filter(|name| name.as_str() == "TensorProductionTileK1024")
+                .count(),
+            1,
+            "production K tiles must share one dynamic circuit schema"
+        );
+        let (_, _, provider) =
+            sparse_production_dot_fixture(ProductionMatMulSignature::HiddenK4096, 81, 23).unwrap();
+        let provider = Arc::new(provider);
+        ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        {
+            let init_mem = ctx.setup_init_mem(&[]);
+            let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+            let step_cell_extractor: Arc<dyn ceno_emul::StepCellExtractor> =
+                raw_step_cell_extractor;
+            let preflight_aot = prepare_preflight_aot_program(
+                Arc::clone(&ctx.program),
+                &ctx.platform,
+                &ctx.multi_prover,
+                step_cell_extractor,
+                &init_mem,
+            );
+            ctx.fulltracer_aot_program =
+                Some(prepare_fulltracer_aot_program(preflight_aot.as_ref()));
+            ctx.preflight_aot_program = Some(preflight_aot);
+        }
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 24, false, None);
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 24);
+        assert!(provider.metrics().read_calls >= 8);
+    }
+
+    #[cfg(feature = "aot-x86_64")]
+    #[test]
+    fn tensor_matmul_hidden_v1_embeds_static_aot_roots() {
+        let program =
+            ceno_emul::Program::load_elf(ceno_examples::tensor_matmul_hidden_v1, u32::MAX)
+                .expect("load embedded K4096 guest");
+        assert!(
+            program
+                .static_aot_roots
+                .as_ref()
+                .is_some_and(|roots| !roots.is_empty()),
+            "cargo-ceno guest embedded by ceno-examples must contain static AOT roots"
+        );
+    }
 
     #[cfg(feature = "gpu")]
     #[test]
