@@ -1,5 +1,3 @@
-#[cfg(feature = "llama-tiny")]
-use crate::tables::TensorBusCircuit;
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
@@ -9,7 +7,7 @@ use crate::{
         DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, HintsTable,
         LocalFinalCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, RegTable,
         RegTableInitCircuit, ShardRamCircuit, ShardRamEcTreeCircuit, StackInitCircuit, StackTable,
-        StaticMemInitCircuit, StaticMemTable, TableCircuit,
+        StaticMemInitCircuit, StaticMemTable, TableCircuit, TensorBusCircuit,
     },
 };
 use ceno_emul::{Addr, IterAddresses, WORD_SIZE, Word};
@@ -34,7 +32,6 @@ pub struct MmuConfig<E: ExtensionField> {
     pub ram_bus_circuit: <ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     /// EC accumulation tree for cross-shard read/write points.
     pub ram_bus_ec_tree_circuit: <ShardRamEcTreeCircuit<E> as TableCircuit<E>>::TableConfig,
-    #[cfg(feature = "llama-tiny")]
     pub tensor_bus_circuit: <TensorBusCircuit<E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
@@ -51,7 +48,6 @@ impl<E: ExtensionField> MmuConfig<E> {
         let local_final_circuit = cs.register_table_circuit::<LocalFinalCircuit<E>>();
         let ram_bus_circuit = cs.register_table_circuit::<ShardRamCircuit<E>>();
         let ram_bus_ec_tree_circuit = cs.register_table_circuit::<ShardRamEcTreeCircuit<E>>();
-        #[cfg(feature = "llama-tiny")]
         let tensor_bus_circuit = cs.register_table_circuit::<TensorBusCircuit<E>>();
 
         Self {
@@ -63,7 +59,6 @@ impl<E: ExtensionField> MmuConfig<E> {
             local_final_circuit,
             ram_bus_circuit,
             ram_bus_ec_tree_circuit,
-            #[cfg(feature = "llama-tiny")]
             tensor_bus_circuit,
             params: cs.params.clone(),
         }
@@ -220,7 +215,6 @@ impl<E: ExtensionField> MmuConfig<E> {
                 &self.ram_bus_ec_tree_circuit,
             )
         })?;
-        #[cfg(feature = "llama-tiny")]
         {
             let events = crate::tables::events_from_syscalls(
                 shard_ctx.syscall_witnesses.as_ref(),

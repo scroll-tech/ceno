@@ -35,7 +35,11 @@ const META_LEN: usize = 5;
 const OUTPUT_LEN: usize = 4;
 const RESERVED: usize = 7;
 const META_START: usize = 8;
-const HANDLE_START_IMPORT: usize = 16;
+// Import writes descriptor (8 words), metadata (4 words), the fixed payload,
+// then the output handle.  The tiny profile happened to put this at 16; the
+// default 7B-shaped profile must skip its complete 4096-word payload.
+const HANDLE_START_IMPORT: usize =
+    META_START + 4 + ceno_emul::TENSOR_BUS_FIXED_TRANSFER_WORDS as usize;
 const HANDLE_START_EXPORT: usize = 8;
 const META_START_EXPORT: usize = 12;
 const HANDLE_START_OP_INPUT: usize = 8;

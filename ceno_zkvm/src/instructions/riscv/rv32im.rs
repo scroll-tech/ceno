@@ -4,11 +4,6 @@ use super::{
 };
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::auipc::AuipcInstruction;
-#[cfg(feature = "llama-tiny")]
-use crate::instructions::riscv::ecall::{
-    TensorBusExportEndEcallInstruction, TensorBusHandleAttentionEcallInstruction,
-    TensorBusHandleFfnEcallInstruction, TensorBusImportBeginEcallInstruction,
-};
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::lui::LuiInstruction;
 #[cfg(not(feature = "u16limb_circuit"))]
@@ -30,7 +25,9 @@ use crate::{
                 PubIoCommitInstruction, Secp256k1InvInstruction, Secp256r1InvInstruction,
                 ShaExtendInstruction, TensorAttentionBlockReducedCoreInstruction,
                 TensorAttentionBlockReducedEcallInstruction, TensorAttentionReducedCoreInstruction,
-                TensorAttentionReducedEcallInstruction, TensorFfnBlockReducedCoreInstruction,
+                TensorAttentionReducedEcallInstruction, TensorBusExportEndEcallInstruction,
+                TensorBusHandleAttentionEcallInstruction, TensorBusHandleFfnEcallInstruction,
+                TensorBusImportBeginEcallInstruction, TensorFfnBlockReducedCoreInstruction,
                 TensorFfnBlockReducedEcallInstruction, TensorMatMulCoreInstruction,
                 TensorMatMulEcallInstruction, TensorMatMulGate5SmallHiddenEcallInstruction,
                 TensorMatMulGate5SmallHiddenFinalizeInstruction,
@@ -69,13 +66,9 @@ use ceno_emul::{
     Secp256k1AddSpec, Secp256k1DecompressSpec, Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec,
     Secp256r1AddSpec, Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec, Sha256ExtendSpec,
     ShardCostModel, StepCellExtractor, StepIndex, StepRecord, SyscallSpec,
-    TensorAttentionBlockReducedV1Spec, TensorAttentionReducedV1Spec, TensorFfnBlockReducedV1Spec,
-    TensorMatMulV1Spec, TensorRmsLookupV1Spec, Uint256MulSpec, Word,
-};
-#[cfg(feature = "llama-tiny")]
-use ceno_emul::{
-    TensorExportEndV1Spec, TensorHandleAttentionV1Spec, TensorHandleFfnV1Spec,
-    TensorImportBeginV1Spec,
+    TensorAttentionBlockReducedV1Spec, TensorAttentionReducedV1Spec, TensorExportEndV1Spec,
+    TensorFfnBlockReducedV1Spec, TensorHandleAttentionV1Spec, TensorHandleFfnV1Spec,
+    TensorImportBeginV1Spec, TensorMatMulV1Spec, TensorRmsLookupV1Spec, Uint256MulSpec, Word,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;
@@ -291,19 +284,13 @@ pub struct Rv32imConfig<E: ExtensionField> {
         <KeccakEcallInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_core_config:
         <KeccakCoreInstruction<E> as Instruction<E>>::InstructionConfig,
-    /// TensorBus ABI circuits are intentionally only in the compile-time tiny
-    /// registry. The default profile has a fixed 4096-word ABI but does not
-    /// alter the production circuit registry before the large-setup gate.
-    #[cfg(feature = "llama-tiny")]
+    /// TensorBus ABI circuits use the feature-selected fixed transfer width.
     pub tensor_bus_import_config:
         <TensorBusImportBeginEcallInstruction<E> as Instruction<E>>::InstructionConfig,
-    #[cfg(feature = "llama-tiny")]
     pub tensor_bus_export_config:
         <TensorBusExportEndEcallInstruction<E> as Instruction<E>>::InstructionConfig,
-    #[cfg(feature = "llama-tiny")]
     pub tensor_bus_handle_attention_config:
         <TensorBusHandleAttentionEcallInstruction<E> as Instruction<E>>::InstructionConfig,
-    #[cfg(feature = "llama-tiny")]
     pub tensor_bus_handle_ffn_config:
         <TensorBusHandleFfnEcallInstruction<E> as Instruction<E>>::InstructionConfig,
     // These are optional only in the compile-time Llama-tiny Tensor profile.
@@ -480,7 +467,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // independent Tensor artifacts concurrently, but insert them below in
         // the unchanged source order so circuit IDs and fixed-trace ordering
         // remain deterministic.
-        #[cfg(all(feature = "parallel", feature = "llama-tiny"))]
+        #[cfg(feature = "parallel")]
         let (
             (tensor_bus_import_artifact, tensor_bus_export_artifact),
             (tensor_bus_handle_attention_artifact, tensor_bus_handle_ffn_artifact),
@@ -661,7 +648,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let pubio_commit_config =
             register_ecall_circuit!(PubIoCommitInstruction<E>, ecall_cells_map);
         let state_continuation_config = register_ecall_circuit!(GlobalState<E>, ecall_cells_map);
-        #[cfg(feature = "llama-tiny")]
         let tensor_bus_import_config = {
             #[cfg(feature = "parallel")]
             let config = cs
@@ -700,7 +686,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             );
             config
         };
-        #[cfg(feature = "llama-tiny")]
         let tensor_bus_export_config = {
             #[cfg(feature = "parallel")]
             let config = cs
@@ -736,7 +721,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             ecall_name_to_chips.insert(TensorBusExportEndEcallInstruction::<E>::name(), vec![chip]);
             config
         };
-        #[cfg(feature = "llama-tiny")]
         let tensor_bus_handle_attention_config = {
             #[cfg(feature = "parallel")]
             let config = cs
@@ -776,7 +760,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             );
             config
         };
-        #[cfg(feature = "llama-tiny")]
         let tensor_bus_handle_ffn_config = {
             #[cfg(feature = "parallel")]
             let config = cs
@@ -1409,13 +1392,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             state_continuation_config,
             keccak_ecall_config,
             keccak_core_config,
-            #[cfg(feature = "llama-tiny")]
             tensor_bus_import_config,
-            #[cfg(feature = "llama-tiny")]
             tensor_bus_export_config,
-            #[cfg(feature = "llama-tiny")]
             tensor_bus_handle_attention_config,
-            #[cfg(feature = "llama-tiny")]
             tensor_bus_handle_ffn_config,
             tensor_matmul_ecall_config,
             tensor_matmul_core_config,
@@ -1534,22 +1513,18 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<GlobalState<E>>(cs, &self.state_continuation_config);
         fixed.register_opcode_circuit::<KeccakEcallInstruction<E>>(cs, &self.keccak_ecall_config);
         fixed.register_opcode_circuit::<KeccakCoreInstruction<E>>(cs, &self.keccak_core_config);
-        #[cfg(feature = "llama-tiny")]
         fixed.register_opcode_circuit::<TensorBusImportBeginEcallInstruction<E>>(
             cs,
             &self.tensor_bus_import_config,
         );
-        #[cfg(feature = "llama-tiny")]
         fixed.register_opcode_circuit::<TensorBusExportEndEcallInstruction<E>>(
             cs,
             &self.tensor_bus_export_config,
         );
-        #[cfg(feature = "llama-tiny")]
         fixed.register_opcode_circuit::<TensorBusHandleAttentionEcallInstruction<E>>(
             cs,
             &self.tensor_bus_handle_attention_config,
         );
-        #[cfg(feature = "llama-tiny")]
         fixed.register_opcode_circuit::<TensorBusHandleFfnEcallInstruction<E>>(
             cs,
             &self.tensor_bus_handle_ffn_config,
@@ -1930,25 +1905,21 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             keccak_core_config,
             KeccakSpec::CODE
         );
-        #[cfg(feature = "llama-tiny")]
         assign_ecall!(
             TensorBusImportBeginEcallInstruction<E>,
             tensor_bus_import_config,
             TensorImportBeginV1Spec::CODE
         );
-        #[cfg(feature = "llama-tiny")]
         assign_ecall!(
             TensorBusExportEndEcallInstruction<E>,
             tensor_bus_export_config,
             TensorExportEndV1Spec::CODE
         );
-        #[cfg(feature = "llama-tiny")]
         assign_ecall!(
             TensorBusHandleAttentionEcallInstruction<E>,
             tensor_bus_handle_attention_config,
             TensorHandleAttentionV1Spec::CODE
         );
-        #[cfg(feature = "llama-tiny")]
         assign_ecall!(
             TensorBusHandleFfnEcallInstruction<E>,
             tensor_bus_handle_ffn_config,
@@ -2365,28 +2336,24 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     KeccakSpec::CODE => {
                         collect_ecall!(KeccakEcallInstruction<E>, keccak_ecall_config);
                     }
-                    #[cfg(feature = "llama-tiny")]
                     TensorImportBeginV1Spec::CODE => {
                         collect_ecall!(
                             TensorBusImportBeginEcallInstruction<E>,
                             tensor_bus_import_config
                         );
                     }
-                    #[cfg(feature = "llama-tiny")]
                     TensorExportEndV1Spec::CODE => {
                         collect_ecall!(
                             TensorBusExportEndEcallInstruction<E>,
                             tensor_bus_export_config
                         );
                     }
-                    #[cfg(feature = "llama-tiny")]
                     TensorHandleAttentionV1Spec::CODE => {
                         collect_ecall!(
                             TensorBusHandleAttentionEcallInstruction<E>,
                             tensor_bus_handle_attention_config
                         );
                     }
-                    #[cfg(feature = "llama-tiny")]
                     TensorHandleFfnV1Spec::CODE => {
                         collect_ecall!(
                             TensorBusHandleFfnEcallInstruction<E>,
@@ -2797,22 +2764,18 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .ecall_cells_map
                 .get(&KeccakCoreInstruction::<E>::name())
                 .expect("unable to find name"),
-            #[cfg(feature = "llama-tiny")]
             TensorImportBeginV1Spec::CODE => *self
                 .ecall_cells_map
                 .get(&TensorBusImportBeginEcallInstruction::<E>::name())
                 .expect("unable to find TensorBus import"),
-            #[cfg(feature = "llama-tiny")]
             TensorExportEndV1Spec::CODE => *self
                 .ecall_cells_map
                 .get(&TensorBusExportEndEcallInstruction::<E>::name())
                 .expect("unable to find TensorBus export"),
-            #[cfg(feature = "llama-tiny")]
             TensorHandleAttentionV1Spec::CODE => *self
                 .ecall_cells_map
                 .get(&TensorBusHandleAttentionEcallInstruction::<E>::name())
                 .expect("unable to find TensorBus attention"),
-            #[cfg(feature = "llama-tiny")]
             TensorHandleFfnV1Spec::CODE => *self
                 .ecall_cells_map
                 .get(&TensorBusHandleFfnEcallInstruction::<E>::name())

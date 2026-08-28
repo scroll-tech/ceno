@@ -580,7 +580,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         // check num proofs
         let num_proofs = vm_proof.chip_proofs.len();
-        #[cfg(feature = "llama-tiny")]
         {
             let circuit_index = |name: &str| {
                 self.vk

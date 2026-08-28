@@ -244,17 +244,18 @@ impl<T: Tracer> VMState<T> {
         handle: TensorHandle,
         words: &[i32],
     ) -> Result<()> {
-        use crate::tensor::resident::{TINY_RESIDENT_WORDS, TinyResidentCudaProvider};
+        use crate::tensor::resident::{RESIDENT_WORDS, TinyResidentCudaProvider};
 
         ensure!(
             self.tensor_bus_resident.is_none(),
             "TensorBus CUDA segment is already active"
         );
-        let input: [i32; TINY_RESIDENT_WORDS] = words
-            .try_into()
-            .map_err(|_| anyhow!("TensorBus CUDA input length mismatch"))?;
+        ensure!(
+            words.len() == RESIDENT_WORDS,
+            "TensorBus CUDA input length mismatch"
+        );
         let provider = TinyResidentCudaProvider::new(0)?;
-        let witness = provider.import(input)?;
+        let witness = provider.import(words)?;
         self.tensor_bus_resident = Some(TensorBusResidentSession {
             provider,
             witness,
@@ -308,7 +309,19 @@ impl<T: Tracer> VMState<T> {
             session.phase == TensorBusResidentPhase::Ffn,
             "TensorBus CUDA export before FFN"
         );
-        Ok(session.provider.export(&mut session.witness)?.to_vec())
+        let output = session.provider.export(&mut session.witness)?;
+        let metrics = session.witness.metrics();
+        tracing::info!(
+            h2d_bytes = metrics.h2d_bytes,
+            d2h_bytes = metrics.d2h_bytes,
+            intermediate_h2d_bytes = metrics.intermediate_h2d_bytes,
+            intermediate_d2h_bytes = metrics.intermediate_d2h_bytes,
+            peak_device_bytes = metrics.peak_device_bytes,
+            attention_launches = metrics.attention_launches,
+            ffn_launches = metrics.ffn_launches,
+            "TensorBus resident CUDA segment exported"
+        );
+        Ok(output)
     }
 
     pub(crate) fn tensor_bus_import(

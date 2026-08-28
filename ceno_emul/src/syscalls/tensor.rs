@@ -196,10 +196,18 @@ pub fn tensor_export_end_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEff
     let (output, records) = {
         let (output, records) = vm.tensor_bus_export(handle)?;
         let resident_output = vm.tensor_bus_resident_export(handle)?;
-        ensure!(
-            resident_output == output,
-            "TensorBus CUDA output disagrees with CPU relation"
-        );
+        if resident_output != output {
+            let index = resident_output
+                .iter()
+                .zip(&output)
+                .position(|(device, host)| device != host)
+                .expect("unequal vectors must have a differing word");
+            anyhow::bail!(
+                "TensorBus CUDA output disagrees with CPU relation at word {index}: device={} cpu={}",
+                resident_output[index],
+                output[index]
+            );
+        }
         vm.tensor_bus_end()?;
         (output, records)
     };
@@ -274,12 +282,20 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
             "TensorBus operator input length mismatch"
         );
         Ok(match code {
-            crate::tensor::TENSOR_HANDLE_ATTENTION_V1 => vec![
-                input[0],
-                input[1],
-                input[2].wrapping_add(input[0]),
-                input[3].wrapping_add(input[1]),
-            ],
+            crate::tensor::TENSOR_HANDLE_ATTENTION_V1 => {
+                let hidden = input.len() / 2;
+                input
+                    .iter()
+                    .enumerate()
+                    .map(|(index, word)| {
+                        if index < hidden {
+                            *word
+                        } else {
+                            word.wrapping_add(input[index - hidden])
+                        }
+                    })
+                    .collect()
+            }
             crate::tensor::TENSOR_HANDLE_FFN_V1 => input
                 .iter()
                 .map(|word| word.wrapping_mul(2).wrapping_add(1))

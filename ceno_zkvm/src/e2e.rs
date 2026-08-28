@@ -2610,7 +2610,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
             pi.hint_shard_len = (shard_ctx.shard_hint_addr_range.end
                 - shard_ctx.shard_hint_addr_range.start)
                 / (WORD_SIZE as u32);
-            #[cfg(feature = "llama-tiny")]
             {
                 let events = crate::tables::events_from_syscalls(
                     shard_ctx.syscall_witnesses.as_ref(),
@@ -4534,7 +4533,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "llama-tiny")]
     #[ignore = "TensorBus handle ABI proof E2E; run explicitly"]
     fn tensor_bus_handle_v1_proves_and_verifies() {
         use crate::{
