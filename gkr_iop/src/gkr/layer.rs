@@ -187,7 +187,11 @@ impl<E: ExtensionField> Layer<E> {
                     rotation_sumcheck_expression_monomial_terms: None,
                     rotation_sumcheck_expression: None,
                 };
+                let static_build_start = std::time::Instant::now();
                 <Self as ZerocheckLayer<E>>::build_static_expression(&mut layer);
+                crate::setup_profile::record_static_layer_build_ns(
+                    static_build_start.elapsed().as_nanos() as u64,
+                );
                 layer
             }
             LayerType::Linear => unimplemented!(""),

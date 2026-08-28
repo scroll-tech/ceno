@@ -23,6 +23,7 @@ pub mod gkr;
 pub mod gpu;
 pub mod hal;
 pub mod selector;
+pub mod setup_profile;
 pub mod tables;
 pub mod utils;
 
