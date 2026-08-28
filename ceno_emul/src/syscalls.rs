@@ -61,6 +61,9 @@ pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<
         crate::tensor::TENSOR_MATMUL_V1 => tensor::tensor_matmul_v1(vm),
         crate::tensor::TENSOR_MATMUL_HIDDEN_V1 => tensor::tensor_matmul_hidden_v1(vm),
         crate::tensor::TENSOR_MATMUL_INTERMEDIATE_V1 => tensor::tensor_matmul_intermediate_v1(vm),
+        crate::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1 => {
+            tensor::tensor_matmul_gate5_small_hidden_v1(vm)
+        }
         crate::tensor::TENSOR_RMS_LOOKUP_V1 => tensor::tensor_rms_lookup_v1(vm),
         crate::tensor::TENSOR_ATTENTION_REDUCED_V1 => tensor::tensor_attention_reduced_v1(vm),
         crate::tensor::TENSOR_ATTENTION_BLOCK_REDUCED_V1 => {

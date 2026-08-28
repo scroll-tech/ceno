@@ -40,6 +40,7 @@ use itertools::Itertools;
 use itertools::{MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
+use p3::matrix::Matrix;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 #[cfg(debug_assertions)]
@@ -1368,6 +1369,44 @@ fn checked_compact_covered_steps(ordinary_rows: u64, fallback_rows: usize) -> us
         .expect("covered step count overflow")
 }
 
+/// Validates the compact-only syscall journal at its ownership boundaries.
+///
+/// Ordinary instructions are represented by typed arenas, while ecalls stay in
+/// `fallback_steps`; consequently their `StepRecord::syscall_index` values must
+/// address exactly the Vec moved out of `GpuReplayTracer`.  Keep this check
+/// beside the transfer rather than in a Tensor chip: it applies to every
+/// compact replay ecall and makes a lost/remapped journal fail before circuit
+/// assignment or PCS setup.
+fn compact_syscall_journal_codes(
+    fallback_steps: &[StepRecord],
+    syscall_witnesses: &[SyscallWitness],
+) -> Vec<(u32, u32)> {
+    let mut entries = fallback_steps
+        .iter()
+        .filter_map(|step| {
+            let syscall_index = step.syscall_index()?;
+            let code = step
+                .rs1()
+                .expect("syscall witness must belong to an ecall with rs1")
+                .value;
+            Some((syscall_index, code))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_unstable_by_key(|(index, _)| *index);
+    assert_eq!(
+        entries.len(),
+        syscall_witnesses.len(),
+        "compact replay syscall journal count differs from fallback steps"
+    );
+    for (expected, (actual, _)) in entries.iter().enumerate() {
+        assert_eq!(
+            *actual, expected as u32,
+            "compact replay syscall indices must be dense and ordered"
+        );
+    }
+    entries
+}
+
 impl CompactStepReplay {
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -1600,7 +1639,8 @@ impl CompactStepReplay {
                 )
             })
             .collect::<Vec<_>>();
-        let fallback_steps = fallback.into_iter().map(|record| record.record).collect();
+        let fallback_steps: Vec<StepRecord> =
+            fallback.into_iter().map(|record| record.record).collect();
 
         let covered_steps = checked_compact_covered_steps(ordinary_rows, fallback_meta.len());
         assert_eq!(covered_steps, expected_steps);
@@ -1618,6 +1658,13 @@ impl CompactStepReplay {
             last_hint_after: self.vm.tracer().max_hint_addr_access().0,
         };
         let syscall_witnesses = self.vm.tracer_mut().take_syscall_witnesses();
+        let syscall_codes = compact_syscall_journal_codes(&fallback_steps, &syscall_witnesses);
+        tracing::info!(
+            shard_id = self.shard_id,
+            syscall_witnesses = syscall_witnesses.len(),
+            ?syscall_codes,
+            "compact replay syscall journal retained"
+        );
         self.shard_id += 1;
         Some(CompactReplayShard {
             arenas,
@@ -2498,7 +2545,18 @@ pub fn generate_witness<'a, E: ExtensionField>(
             };
 
             shard_ctx.syscall_witnesses = if let Some(compact_shard) = current_compact_shard.as_mut() {
-                Arc::new(std::mem::take(&mut compact_shard.syscall_witnesses))
+                let syscall_witnesses = std::mem::take(&mut compact_shard.syscall_witnesses);
+                let syscall_codes = compact_syscall_journal_codes(
+                    &compact_shard.fallback_steps,
+                    &syscall_witnesses,
+                );
+                tracing::info!(
+                    shard_id = shard_ctx.shard_id,
+                    syscall_witnesses = syscall_witnesses.len(),
+                    ?syscall_codes,
+                    "compact replay syscall journal transferred to shard context"
+                );
+                Arc::new(syscall_witnesses)
             } else {
                 Arc::new(
                     step_iter
@@ -3524,6 +3582,143 @@ pub struct E2EProgramCtx<E: ExtensionField> {
     pub fulltracer_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
 }
 
+/// Stable identity for an in-process proving setup.  A reusable runner must
+/// compare this identity before accepting another witness/provider attempt;
+/// a serialized VK alone is insufficient to reconstruct the proving key,
+/// program context, fixed commitment witnesses, or device-owned state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReusableSetupIdentity {
+    pub digest: [u8; 32],
+    pub max_num_variables: usize,
+    pub security_level: String,
+    pub field_type: &'static str,
+    pub pcs_type: &'static str,
+    pub profile: String,
+    pub circuit_count: usize,
+}
+
+impl<E: ExtensionField> E2EProgramCtx<E> {
+    pub fn reusable_setup_identity<PCS: PolynomialCommitmentScheme<E>>(
+        &self,
+        max_num_variables: usize,
+        security_level: SecurityLevel,
+        profile: impl Into<String>,
+    ) -> ReusableSetupIdentity {
+        let profile = profile.into();
+        let mut hash = Keccak::v256();
+        let mut put = |bytes: &[u8]| hash.update(bytes);
+        put(b"ceno.reusable-setup.v1");
+        put(std::any::type_name::<E>().as_bytes());
+        put(std::any::type_name::<PCS>().as_bytes());
+        put(&max_num_variables.to_le_bytes());
+        let security_level = format!("{security_level:?}");
+        put(security_level.as_bytes());
+        put(profile.as_bytes());
+        put(&bincode::serialize(&self.platform).expect("platform serialization"));
+        put(&self.program.entry.to_le_bytes());
+        put(&self.program.base_address.to_le_bytes());
+        put(&self.program.sheap.to_le_bytes());
+        for instruction in &self.program.instructions {
+            put(&[
+                instruction.kind as u8,
+                instruction.rs1,
+                instruction.rs2,
+                instruction.rd,
+            ]);
+            put(&instruction.imm.to_le_bytes());
+            put(&instruction.raw.to_le_bytes());
+        }
+        for (&address, &value) in &self.program.image {
+            put(&address.to_le_bytes());
+            put(&value.to_le_bytes());
+        }
+        for root in self.program.static_aot_roots.as_deref().unwrap_or_default() {
+            put(&root.to_le_bytes());
+        }
+        for name in self.system_config.zkvm_cs.get_css().keys() {
+            put(&(name.len() as u64).to_le_bytes());
+            put(name.as_bytes());
+        }
+        for (name, trace) in &self.zkvm_fixed_traces.circuit_fixed_traces {
+            put(&(name.len() as u64).to_le_bytes());
+            put(name.as_bytes());
+            match trace {
+                None => put(&[0]),
+                Some(trace) => {
+                    put(&[1]);
+                    put(&trace.height().to_le_bytes());
+                    put(&trace.width().to_le_bytes());
+                    for row in trace.rows() {
+                        for value in row {
+                            put(&value.to_canonical_u64().to_le_bytes());
+                        }
+                    }
+                }
+            }
+        }
+        let mut digest = [0u8; 32];
+        hash.finalize(&mut digest);
+        ReusableSetupIdentity {
+            digest,
+            max_num_variables,
+            security_level,
+            field_type: std::any::type_name::<E>(),
+            pcs_type: std::any::type_name::<PCS>(),
+            profile,
+            circuit_count: self.system_config.zkvm_cs.get_css().len(),
+        }
+    }
+}
+
+/// Owns one constructed/key-generated prover for multiple in-process attempts.
+/// It intentionally has no serde implementation: the proving key embeds the
+/// program context, fixed commitment witnesses, and potentially GPU handles.
+pub struct ReusableE2ERunner<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    PB: ProverBackend<E = E, Pcs = PCS>,
+    PD: ProverDevice<PB>,
+> {
+    pub identity: ReusableSetupIdentity,
+    pub prover: ZKVMProver<E, PCS, PB, PD>,
+    pub vk: ZKVMVerifyingKey<E, PCS>,
+}
+
+impl<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB> + 'static,
+> ReusableE2ERunner<E, PCS, PB, PD>
+{
+    pub fn new(
+        ctx: E2EProgramCtx<E>,
+        device: PD,
+        max_num_variables: usize,
+        security_level: SecurityLevel,
+        profile: impl Into<String>,
+    ) -> Self {
+        let identity =
+            ctx.reusable_setup_identity::<PCS>(max_num_variables, security_level, profile);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        Self {
+            identity,
+            prover,
+            vk,
+        }
+    }
+
+    pub fn assert_identity(&self, expected: &ReusableSetupIdentity) -> Result<(), ZKVMError> {
+        if &self.identity != expected {
+            return Err(ZKVMError::InvalidWitness(
+                "reusable proving setup identity mismatch".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// end-to-end pipeline result, stopping at a certain checkpoint
 pub struct E2ECheckpointResult<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     /// The proof generated by the pipeline, if any
@@ -4222,7 +4417,6 @@ mod tests {
             .unwrap(),
         );
         ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
-
         let (max_num_variables, security_level) = default_backend_config();
         let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
         let device = create_prover(backend);
@@ -4328,6 +4522,270 @@ mod tests {
         let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
         run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
         assert!(provider.metrics().read_calls >= 21);
+    }
+
+    #[test]
+    #[ignore = "Legacy Gate-5 whole-registry trim harness; do not use for PCS diagnosis"]
+    fn gate5_tensor_guest_trim_ladder() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver, emulate_program,
+                generate_witness, prepare_fulltracer_aot_program, prepare_preflight_aot_program,
+                run_e2e_full_trace_verify, run_e2e_proof, setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ceno_emul::tensor::{DeterministicTileProvider, TensorWitnessProvider, encode_i32_le};
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+
+        // The normal CLI owns tracing initialization. This direct test harness
+        // needs a subscriber so the external mock monitor can observe the
+        // existing `Mock proving passed` marker before it stops real PCS work.
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_test_writer()
+            .try_init();
+
+        let selector =
+            std::env::var("CENO_TENSOR_TRIM_GUEST").unwrap_or_else(|_| "zero".to_owned());
+        let (guest, expected_ecalls, provider): (&[u8], usize, Arc<dyn TensorWitnessProvider>) =
+            match selector.as_str() {
+                "zero" => (
+                    ceno_examples::ceno_rt_mini,
+                    0usize,
+                    // The non-tensor control never reads this provider, but
+                    // `DeterministicTileProvider` intentionally rejects an
+                    // empty committed tile set. Keep one inert tile so the
+                    // same full GPU E2E harness can exercise no-tensor PCS.
+                    Arc::new(
+                        DeterministicTileProvider::new(73, vec![encode_i32_le(&[0])]).unwrap(),
+                    ),
+                ),
+                "matmul" => (
+                    ceno_examples::tensor_matmul_v1,
+                    1,
+                    Arc::new(
+                        DeterministicTileProvider::new(
+                            41,
+                            vec![encode_i32_le(&[65_536, 0, 0, 65_536, 65_536, 65_536])],
+                        )
+                        .unwrap(),
+                    ),
+                ),
+                "rms" => (
+                    ceno_examples::tensor_rms_lookup_v1,
+                    1,
+                    Arc::new(
+                        DeterministicTileProvider::new(73, vec![encode_i32_le(&[0])]).unwrap(),
+                    ),
+                ),
+                "attention_reduced" => (
+                    ceno_examples::tensor_attention_reduced_v1,
+                    1,
+                    Arc::new(
+                        DeterministicTileProvider::new(73, vec![encode_i32_le(&[0])]).unwrap(),
+                    ),
+                ),
+                "hidden" => {
+                    let (_, _, provider) =
+                        ceno_emul::tensor::production::sparse_production_dot_fixture(
+                            ceno_emul::tensor::production::ProductionMatMulSignature::HiddenK4096,
+                            81,
+                            23,
+                        )
+                        .expect("build K4096 hidden fixture");
+                    (
+                        ceno_examples::tensor_matmul_hidden_v1,
+                        1,
+                        Arc::new(provider),
+                    )
+                }
+                "small_hidden" => {
+                    let (_, _, provider) =
+                        ceno_emul::tensor::production::sparse_production_dot_fixture(
+                            ceno_emul::tensor::production::ProductionMatMulSignature::Gate5SmallHiddenK64,
+                            81,
+                            23,
+                        )
+                        .expect("build K64 small hidden fixture");
+                    (
+                        ceno_examples::tensor_matmul_gate5_small_hidden_v1,
+                        1,
+                        Arc::new(provider),
+                    )
+                }
+                "attention" => (
+                    ceno_examples::llama_attention_fused_reduced_v1,
+                    1,
+                    Arc::new(
+                        DeterministicTileProvider::new(
+                            73,
+                            (0..7)
+                                .map(|_| encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]))
+                                .collect(),
+                        )
+                        .unwrap(),
+                    ),
+                ),
+                "pair" => (
+                    ceno_examples::llama_layer_fused_reduced_v1,
+                    2,
+                    Arc::new(
+                        DeterministicTileProvider::new(
+                            73,
+                            (0..7)
+                                .map(|_| encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]))
+                                .collect(),
+                        )
+                        .unwrap(),
+                    ),
+                ),
+                "topology32" => (
+                    ceno_examples::llama_10m_topology_v1,
+                    64,
+                    Arc::new(
+                        DeterministicTileProvider::new(
+                            73,
+                            (0..7)
+                                .map(|_| encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]))
+                                .collect(),
+                        )
+                        .unwrap(),
+                    ),
+                ),
+                other => panic!(
+                    "unknown CENO_TENSOR_TRIM_GUEST={other:?}; expected zero, matmul, rms, attention_reduced, small_hidden, hidden, attention, pair, or topology32"
+                ),
+            };
+        tracing::info!(
+            guest = %selector,
+            expected_ecalls,
+            "Gate-5 tensor guest trim candidate"
+        );
+
+        let program =
+            ceno_emul::Program::load_elf(guest, u32::MAX).expect("load cargo-ceno trim guest");
+        let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
+        // `run_e2e_proof` replays the finalized preflight plan with FullTracer.
+        // Prepare both artifacts in the trim harness, as in the K4096 E2E.
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        {
+            let init_mem = ctx.setup_init_mem(&[]);
+            let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+            let step_cell_extractor: Arc<dyn ceno_emul::StepCellExtractor> =
+                raw_step_cell_extractor;
+            let preflight_aot = prepare_preflight_aot_program(
+                Arc::clone(&ctx.program),
+                &ctx.platform,
+                &ctx.multi_prover,
+                step_cell_extractor,
+                &init_mem,
+            );
+            ctx.fulltracer_aot_program =
+                Some(prepare_fulltracer_aot_program(preflight_aot.as_ref()));
+            ctx.preflight_aot_program = Some(preflight_aot);
+        }
+
+        // Replay/assignment isolation deliberately bypasses key generation and
+        // PCS. It is the first Gate-5 rung: it preserves the production
+        // provider, preflight plan, compact GPU replay, and dispatcher, while
+        // making an ownership or empty-trace failure observable in seconds
+        // after the already-required circuit construction.
+        if std::env::var_os("CENO_GATE5_REPLAY_AUDIT_ONLY").is_some() {
+            let init_mem = ctx.setup_init_mem(&[]);
+            let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+            let step_cell_extractor: Arc<dyn ceno_emul::StepCellExtractor> =
+                raw_step_cell_extractor;
+            let emul_result = emulate_program(
+                ctx.program.clone(),
+                1 << 20,
+                &init_mem,
+                KECCAK_EMPTY_WORDS,
+                &ctx.platform,
+                &ctx.multi_prover,
+                step_cell_extractor,
+                ctx.tensor_proof_context.clone(),
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                ctx.preflight_aot_program.clone(),
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                ctx.fulltracer_aot_program.clone(),
+            );
+            let mut witnesses = generate_witness(
+                &ctx.system_config,
+                emul_result,
+                ctx.program.clone(),
+                &ctx.platform,
+                &init_mem,
+                None,
+            );
+            let (_, shard_ctx, _, _) = witnesses
+                .next()
+                .expect("attention trim guest must yield one assigned shard");
+            assert!(
+                witnesses.next().is_none(),
+                "trim guest unexpectedly has more shards"
+            );
+            tracing::info!(
+                shard_id = shard_ctx.shard_id,
+                syscall_witnesses = shard_ctx.syscall_witnesses.len(),
+                "Gate-5 replay-only assignment audit completed"
+            );
+            return;
+        }
+
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let start = std::time::Instant::now();
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+        let provider_metrics = provider.metrics();
+        tracing::info!(
+            guest = %selector,
+            elapsed_ms = start.elapsed().as_millis(),
+            provider_reads = provider_metrics.read_calls,
+            provider_h2d_bytes = provider_metrics.h2d_bytes,
+            provider_d2h_bytes = provider_metrics.d2h_bytes,
+            "Gate-5 tensor guest trim completed"
+        );
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+    }
+
+    #[test]
+    fn llama_10m_topology_guest_emits_all_ordered_fused_calls() {
+        use ceno_emul::{
+            FullTracer, VMState,
+            tensor::{DeterministicTileProvider, TensorWitnessProvider, encode_i32_le},
+        };
+
+        let mut vm = VMState::<FullTracer>::new_from_elf_with_tracer(
+            CENO_PLATFORM.clone(),
+            ceno_examples::llama_10m_topology_v1,
+        )
+        .expect("load cargo-ceno miniature topology guest");
+        let tile = encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]);
+        let provider = Arc::new(
+            DeterministicTileProvider::new(73, (0..7).map(|_| tile.clone()).collect()).unwrap(),
+        );
+        vm.set_tensor_witness_provider(provider.clone());
+        vm.iter_until_halt()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("execute all 32 fused layer pairs");
+        assert_eq!(
+            vm.tracer().syscall_witnesses().len(),
+            64,
+            "32 attention and 32 FFN calls must retain ordered witnesses"
+        );
+        assert_eq!(provider.metrics().read_calls, 32 * 7);
     }
 
     #[test]

@@ -32,9 +32,10 @@ pub use tensor_block::{
     TensorFfnBlockReducedCoreInstruction, TensorFfnBlockReducedEcallInstruction,
 };
 pub use tensor_production::{
+    TensorMatMulGate5SmallHiddenEcallInstruction, TensorMatMulGate5SmallHiddenFinalizeInstruction,
     TensorMatMulHiddenEcallInstruction, TensorMatMulHiddenFinalizeInstruction,
     TensorMatMulIntermediateEcallInstruction, TensorMatMulIntermediateFinalizeInstruction,
-    TensorProductionTileInstruction,
+    TensorProductionTileInstruction, TensorProductionTileK64Instruction,
 };
 pub use tensor_rms::{TensorRmsLookupCoreInstruction, TensorRmsLookupEcallInstruction};
 pub use uint256::{Secp256k1InvInstruction, Secp256r1InvInstruction, Uint256MulInstruction};

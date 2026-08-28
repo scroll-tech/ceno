@@ -50,10 +50,18 @@ const TENSOR_ID: usize = 6;
 const FIRST_TILE: usize = 7;
 const ROOT_PTR: usize = 10;
 
+fn gate5_record_trace_enabled() -> bool {
+    std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some()
+}
+
 fn production_tile_bounds<const K: usize>(
     position: usize,
 ) -> Result<(usize, usize, usize), ZKVMError> {
-    let tile = ceno_emul::tensor::production::PRODUCTION_K_TILE;
+    // The production instructions use 1024-wide physical rows.  The compact
+    // Gate-5 K64 diagnostic is intentionally the sole narrower variant: it
+    // keeps the raw/tile record ABI but avoids constructing a 1024-column
+    // circuit merely to prove one 64-value row.
+    let tile = K.min(ceno_emul::tensor::production::PRODUCTION_K_TILE);
     let start = position
         .checked_mul(tile)
         .ok_or_else(|| ZKVMError::InvalidWitness("production tile offset overflow".into()))?;
@@ -83,7 +91,10 @@ pub struct TensorProductionEcallConfig<E: ExtensionField, const K: usize> {
 }
 
 pub struct TensorProductionEcallInstruction<E, const K: usize, const CODE: u32>(PhantomData<E>);
-pub struct TensorProductionTileInstruction<E>(PhantomData<E>);
+pub struct TensorProductionTileInstruction<
+    E,
+    const K: usize = { ceno_emul::tensor::production::PRODUCTION_K_TILE },
+>(PhantomData<E>);
 pub struct TensorProductionFinalizeInstruction<
     E,
     const K: usize,
@@ -106,6 +117,19 @@ pub type TensorMatMulIntermediateFinalizeInstruction<E> = TensorProductionFinali
     { ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1 },
     11,
 >;
+pub type TensorMatMulGate5SmallHiddenEcallInstruction<E> = TensorProductionEcallInstruction<
+    E,
+    { ceno_emul::tensor::production::GATE5_SMALL_HIDDEN_K },
+    { ceno_emul::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1 },
+>;
+pub type TensorMatMulGate5SmallHiddenFinalizeInstruction<E> = TensorProductionFinalizeInstruction<
+    E,
+    { ceno_emul::tensor::production::GATE5_SMALL_HIDDEN_K },
+    { ceno_emul::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1 },
+    1,
+>;
+pub type TensorProductionTileK64Instruction<E> =
+    TensorProductionTileInstruction<E, { ceno_emul::tensor::production::GATE5_SMALL_HIDDEN_K }>;
 
 fn memory_expr<E: ExtensionField>(cb: &mut CircuitBuilder<E>, name: &str) -> MemoryExpr<E> {
     array::from_fn(|i| cb.create_witin(|| format!("{name}_{i}")).expr())
@@ -167,6 +191,8 @@ impl<E: ExtensionField, const K: usize, const CODE: u32> Instruction<E>
             ceno_emul::tensor::production::PRODUCTION_MATMUL_HIDDEN_SIGNATURE_V1
         } else if K == 11008 {
             ceno_emul::tensor::production::PRODUCTION_MATMUL_INTERMEDIATE_SIGNATURE_V1
+        } else if K == ceno_emul::tensor::production::GATE5_SMALL_HIDDEN_K {
+            ceno_emul::tensor::production::GATE5_SMALL_HIDDEN_SIGNATURE_V1
         } else {
             return Err(ZKVMError::InvalidWitness("unsupported production K".into()));
         };
@@ -385,6 +411,26 @@ impl<E: ExtensionField, const K: usize, const CODE: u32> Instruction<E>
                 )?;
             }
             let output = ops.mem_ops[DESC + K + ROOT].value.after as i32;
+            if gate5_record_trace_enabled() {
+                let tiles = K.div_ceil(ceno_emul::tensor::production::PRODUCTION_K_TILE);
+                tracing::info!(
+                    target: "ceno_gpu::tensor_record_path",
+                    role = "raw_ecall",
+                    k = K,
+                    step_index = *index,
+                    cycle = step.cycle() - shard_ctx.current_shard_offset_cycle(),
+                    call_id = ops.reg_ops[0].value.after,
+                    profile = ops.mem_ops[PROFILE].value.before,
+                    signature = ops.mem_ops[SIGNATURE].value.before,
+                    tensor_id = ops.mem_ops[TENSOR_ID].value.before,
+                    first_tile = ops.mem_ops[FIRST_TILE].value.before,
+                    tile_count = ops.mem_ops[8].value.before,
+                    input_words = K,
+                    record_writes = tiles,
+                    record_reads = 1usize,
+                    "Gate-5 raw ecall custom-record path"
+                );
+            }
             config.signed_output.assign(instance, &mut lkm, output);
             set_val!(
                 instance,
@@ -443,20 +489,20 @@ impl<E: ExtensionField, const K: usize, const CODE: u32> Instruction<E>
     }
 }
 
-impl<E: ExtensionField> Instruction<E> for TensorProductionTileInstruction<E> {
-    type InstructionConfig = TensorProductionTileCoreConfig<E>;
+impl<E: ExtensionField, const K: usize> Instruction<E> for TensorProductionTileInstruction<E, K> {
+    type InstructionConfig = TensorProductionTileCoreConfig<E, K>;
     type InsnType = InsnKind;
     fn inst_kinds() -> &'static [InsnKind] {
         &[InsnKind::ECALL]
     }
     fn name() -> String {
-        "TensorProductionTileK1024".into()
+        format!("TensorProductionTileK{K}")
     }
     fn construct_circuit(
         cb: &mut CircuitBuilder<E>,
         _: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        TensorProductionTileCoreConfig::construct(cb)
+        TensorProductionTileCoreConfig::<E, K>::construct(cb)
     }
     fn assign_instance(
         _: &Self::InstructionConfig,
@@ -491,6 +537,11 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionTileInstruction<E> {
                     .before,
             )
             .ok_or_else(|| ZKVMError::InvalidWitness("production signature invalid".into()))?;
+            if signature.proof_tile_k() != K {
+                return Err(ZKVMError::InvalidWitness(
+                    "production tile physical width does not match signature".into(),
+                ));
+            }
             for position in production_tile_positions(signature) {
                 work.push((index, position));
             }
@@ -540,10 +591,29 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionTileInstruction<E> {
                 .iter()
                 .map(|op| op.value.before as i32)
                 .collect_vec();
-            let start = position * ceno_emul::tensor::production::PRODUCTION_K_TILE;
-            let end = (start + ceno_emul::tensor::production::PRODUCTION_K_TILE).min(k);
+            let start = position * K;
+            let end = (start + K).min(k);
             let mut tile_input = input[start..end].to_vec();
-            tile_input.resize(ceno_emul::tensor::production::PRODUCTION_K_TILE, 0);
+            tile_input.resize(K, 0);
+            if gate5_record_trace_enabled() {
+                tracing::info!(
+                    target: "ceno_gpu::tensor_record_path",
+                    role = "tile",
+                    step_index = index,
+                    cycle = step.cycle() - shard_ctx.current_shard_offset_cycle(),
+                    call_id = ops.reg_ops[0].value.after,
+                    signature = desc.signature.id(),
+                    tensor_id = desc.weight_tensor_id,
+                    first_tile = desc.first_tile_id,
+                    tile_id = desc.first_tile_id + position as u32,
+                    position,
+                    logical_input_words = end - start,
+                    physical_input_words = K,
+                    record_reads = 1usize,
+                    record_writes = 1usize,
+                    "Gate-5 tile custom-record path"
+                );
+            }
             config
                 .assign(
                     instance,
@@ -569,7 +639,7 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionTileInstruction<E> {
 impl<E: ExtensionField, const K: usize, const CODE: u32, const TILES: usize> Instruction<E>
     for TensorProductionFinalizeInstruction<E, K, CODE, TILES>
 {
-    type InstructionConfig = TensorProductionFinalizeCoreConfig<E, TILES>;
+    type InstructionConfig = TensorProductionFinalizeCoreConfig<E, K, TILES>;
     type InsnType = InsnKind;
     fn inst_kinds() -> &'static [InsnKind] {
         &[InsnKind::ECALL]
@@ -639,6 +709,23 @@ impl<E: ExtensionField, const K: usize, const CODE: u32, const TILES: usize> Ins
                 &input,
             )
             .map_err(|e| ZKVMError::InvalidWitness(e.into_boxed_str()))?;
+        if gate5_record_trace_enabled() {
+            tracing::info!(
+                target: "ceno_gpu::tensor_record_path",
+                role = "finalize",
+                k = K,
+                cycle = step.cycle() - shard_ctx.current_shard_offset_cycle(),
+                call_id = ops.reg_ops[0].value.after,
+                signature = desc.signature.id(),
+                tensor_id = desc.weight_tensor_id,
+                first_tile = desc.first_tile_id,
+                tile_count = desc.tile_count,
+                bucket_reads = TILES,
+                state_writes = 1usize,
+                output,
+                "Gate-5 finalize custom-record path"
+            );
+        }
         if ops.mem_ops[DESC + K + ROOT].value.after as i32 != output {
             return Err(ZKVMError::InvalidWitness(
                 "production journal output mismatch".into(),

@@ -46,6 +46,30 @@ const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 10 * 1024 * 1024; // reserved head
 const SHARD_RAM_TOWER_PROVE_TOLERANCE_BYTES: usize = 16 * 1024 * 1024;
 const HEAVY_TOWER_SPLIT_THRESHOLD_BYTES: usize = 4 * 1024 * 1024 * 1024;
 
+/// Memory estimates are scheduler reservations, not arithmetic witness values.
+/// If their exact sum exceeds `usize`, retain the conservative meaning of the
+/// estimate instead of panicking in debug builds or wrapping in release builds.
+/// `usize::MAX` makes the request unschedulable on the current host/device,
+/// which is the only safe interpretation of an unrepresentable byte count.
+fn saturating_memory_estimate_sum(context: &'static str, terms: &[usize]) -> usize {
+    let mut total = 0usize;
+    for &term in terms {
+        match total.checked_add(term) {
+            Some(next) => total = next,
+            None => {
+                tracing::warn!(
+                    context,
+                    partial_bytes = total,
+                    next_term_bytes = term,
+                    "GPU memory estimate overflow; saturating reservation"
+                );
+                return usize::MAX;
+            }
+        }
+    }
+    total
+}
+
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
 /// - Over-estimate (estimated > actual): diff must be <= `ESTIMATION_SAFETY_MARGIN_BYTES`
@@ -232,12 +256,21 @@ pub(crate) fn estimate_chip_proof_reservations<
     // Runtime keeps the main witness resident during tower proving. Borrowed
     // tower inputs are compact views into that witness, not another allocation.
     let tower_input_backing_bytes = main_witness_bytes;
-    let tower_prove_stage_bytes =
-        tower_input_backing_bytes + tower_input_non_borrowed_bytes + tower_prove_local_bytes;
+    let tower_prove_stage_bytes = saturating_memory_estimate_sum(
+        "chip_proof.tower_prove_stage",
+        &[
+            tower_input_backing_bytes,
+            tower_input_non_borrowed_bytes,
+            tower_prove_local_bytes,
+        ],
+    );
 
     // Main constraints are proved in the shard-level batched stage, not in the
     // chip-local scheduler reservation.
-    let tower_build_stage_bytes = main_witness_bytes + tower_build_bytes;
+    let tower_build_stage_bytes = saturating_memory_estimate_sum(
+        "chip_proof.tower_build_stage",
+        &[main_witness_bytes, tower_build_bytes],
+    );
     let stage_peak_usage_bytes = trace_est
         .trace_temporary_bytes
         .max(tower_build_stage_bytes)
@@ -245,11 +278,22 @@ pub(crate) fn estimate_chip_proof_reservations<
         .max(ecc_quark_temporary_bytes)
         .max(rotation_temporary_bytes);
     let resident_bytes = trace_est.trace_resident_bytes;
-    let total_usage_bytes =
-        resident_bytes + stage_peak_usage_bytes + ESTIMATION_SAFETY_MARGIN_BYTES;
-    let post_tower_bytes = resident_bytes
-        + ecc_quark_temporary_bytes.max(rotation_temporary_bytes)
-        + ESTIMATION_SAFETY_MARGIN_BYTES;
+    let total_usage_bytes = saturating_memory_estimate_sum(
+        "chip_proof.total",
+        &[
+            resident_bytes,
+            stage_peak_usage_bytes,
+            ESTIMATION_SAFETY_MARGIN_BYTES,
+        ],
+    );
+    let post_tower_bytes = saturating_memory_estimate_sum(
+        "chip_proof.post_tower",
+        &[
+            resident_bytes,
+            ecc_quark_temporary_bytes.max(rotation_temporary_bytes),
+            ESTIMATION_SAFETY_MARGIN_BYTES,
+        ],
+    );
     let reservations = split_chip_reservation(total_usage_bytes, post_tower_bytes);
 
     let to_mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
@@ -753,7 +797,14 @@ fn estimate_precise_build_tower_memory(
         0
     };
     let aux_buffer_bytes = prod_aux_buffer_bytes.max(logup_aux_buffer_bytes);
-    let total_bytes = prod_tower_buffer_bytes + logup_tower_buffer_bytes + aux_buffer_bytes;
+    let total_bytes = saturating_memory_estimate_sum(
+        "tower_build.total",
+        &[
+            prod_tower_buffer_bytes,
+            logup_tower_buffer_bytes,
+            aux_buffer_bytes,
+        ],
+    );
 
     PreciseBuildTowerEstimate {
         prod_tower_buffer_bytes,
@@ -899,8 +950,15 @@ fn estimate_precise_prove_tower_memory(
             + round_eq_mle_buffer_bytes
             + round_points_buffer
             + round_sumcheck_estimate.total_bytes;
-        round_peak = round_peak
-            .max(local_round_bytes + prod_borrowed_live_bytes + logup_borrowed_live_bytes);
+        let round_peak_bytes = saturating_memory_estimate_sum(
+            "tower_prove.round_peak",
+            &[
+                local_round_bytes,
+                prod_borrowed_live_bytes,
+                logup_borrowed_live_bytes,
+            ],
+        );
+        round_peak = round_peak.max(round_peak_bytes);
         local_round_peak = local_round_peak.max(local_round_bytes);
     }
 
@@ -1015,8 +1073,14 @@ fn estimate_tower_stage_components_for_rows<E: ExtensionField>(
         .and_then(|circuit| circuit.layers.first())
         .is_some_and(|layer| layer.name == "ShardRamCircuit_main");
     let shard_ram_tower_batch_overhead = is_shard_ram.then_some(10 * 1024 * 1024).unwrap_or(0);
-    let build_bytes =
-        build_est.total_bytes + interleaved_input_bytes + shard_ram_tower_batch_overhead;
+    let build_bytes = saturating_memory_estimate_sum(
+        "tower_components.build",
+        &[
+            build_est.total_bytes,
+            interleaved_input_bytes,
+            shard_ram_tower_batch_overhead,
+        ],
+    );
     let prove_est = estimate_precise_prove_tower_memory(
         &prod_groups,
         logup_group,
@@ -1042,16 +1106,35 @@ fn estimate_tower_stage_components_for_rows<E: ExtensionField>(
             to_mb(prove_est.local_total_bytes),
             to_mb(prove_est.prod_tower_buffer_bytes),
             to_mb(prove_est.logup_tower_buffer_bytes),
-            to_mb(prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes),
+            to_mb(saturating_memory_estimate_sum(
+                "tower_components.debug_borrowed",
+                &[
+                    prove_est.prod_borrowed_input_bytes,
+                    prove_est.logup_borrowed_input_bytes,
+                ],
+            )),
             to_mb(prove_est.eq_mle_buffer_bytes),
             to_mb(prove_est.sumcheck_total_bytes),
         );
     }
-    let base_tower_input_live_bytes =
-        prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
-    let tower_input_live_bytes = base_tower_input_live_bytes + interleaved_input_bytes;
-    let borrowed_input_bytes =
-        prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes;
+    let base_tower_input_live_bytes = saturating_memory_estimate_sum(
+        "tower_components.input_live",
+        &[
+            prove_est.prod_tower_buffer_bytes,
+            prove_est.logup_tower_buffer_bytes,
+        ],
+    );
+    let tower_input_live_bytes = saturating_memory_estimate_sum(
+        "tower_components.input_live_with_metadata",
+        &[base_tower_input_live_bytes, interleaved_input_bytes],
+    );
+    let borrowed_input_bytes = saturating_memory_estimate_sum(
+        "tower_components.borrowed_input",
+        &[
+            prove_est.prod_borrowed_input_bytes,
+            prove_est.logup_borrowed_input_bytes,
+        ],
+    );
     let prove_local_bytes = prove_est
         .local_total_bytes
         .saturating_sub(base_tower_input_live_bytes.saturating_sub(borrowed_input_bytes));
@@ -1209,6 +1292,20 @@ mod reservation_tests {
     fn equal_phase_and_whole_reservations_release_nothing() {
         let reservation = split_chip_reservation(4_000, 4_000);
         assert_eq!(reservation.releasable_bytes, 0);
+    }
+
+    #[test]
+    fn overflowed_memory_estimate_saturates_to_unschedulable_capacity() {
+        assert_eq!(
+            saturating_memory_estimate_sum("test", &[usize::MAX - 7, 8]),
+            usize::MAX,
+            "an unrepresentable scheduler reservation must never wrap"
+        );
+        assert_eq!(
+            saturating_memory_estimate_sum("test", &[11, 13, 17]),
+            41,
+            "ordinary estimates retain their exact byte total"
+        );
     }
 
     #[test]

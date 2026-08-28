@@ -214,6 +214,16 @@ pub fn tensor_matmul_intermediate_v1<T: Tracer>(vm: &VMState<T>) -> Result<Sysca
     )
 }
 
+/// Gate-5-only compact production-topology syscall.  It deliberately shares
+/// the ordinary descriptor/input/root/output memory witness layout with the
+/// 7B hidden projection and expands to one physical K1024 tile plus finalize.
+pub fn tensor_matmul_gate5_small_hidden_v1<T: Tracer>(vm: &VMState<T>) -> Result<SyscallEffects> {
+    tensor_production_matmul_v1::<T, { crate::tensor::production::GATE5_SMALL_HIDDEN_K }>(
+        vm,
+        crate::tensor::production::ProductionMatMulSignature::Gate5SmallHiddenK64,
+    )
+}
+
 fn descriptor(words: [u32; TENSOR_DESC_WORDS]) -> TensorMatMulDescV1 {
     TensorMatMulDescV1 {
         abi_version: words[0],

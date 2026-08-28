@@ -150,6 +150,51 @@ where
             crate::scheme::utils::WitnessBuildStage::Tower,
         )
     });
+    // Gate-5's frozen hidden-K4096 E2E has one physical row per syscall
+    // circuit.  Copy just its already-materialized tower-facing record MLEs
+    // under an opt-in flag so a raw custom-record producer can be compared to
+    // its tile/finalize consumer before the grouped GPU product tower hides
+    // the individual record identities.  This is diagnostic-only D2H; it is
+    // never used by proof construction.
+    if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some()
+        && task.circuit_name.starts_with("TensorProduction")
+    {
+        let cs = &cs.zkvm_v1_css;
+        let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+        let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+        for (record_idx, record) in records.iter().take(num_reads + num_writes).enumerate() {
+            let (direction, namespace) = if record_idx < num_reads {
+                (
+                    "read",
+                    cs.r_expressions_namespace_map.get(record_idx).or_else(|| {
+                        cs.r_table_expressions_namespace_map
+                            .get(record_idx - cs.r_expressions.len())
+                    }),
+                )
+            } else {
+                let write_idx = record_idx - num_reads;
+                (
+                    "write",
+                    cs.w_expressions_namespace_map.get(write_idx).or_else(|| {
+                        cs.w_table_expressions_namespace_map
+                            .get(write_idx - cs.w_expressions.len())
+                    }),
+                )
+            };
+            let values = record.inner_to_mle().get_ext_field_vec().to_vec();
+            tracing::info!(
+                target: "ceno_gpu::tensor_record_path",
+                circuit = %task.circuit_name,
+                circuit_idx = task.circuit_idx,
+                logical_instances = ?input_num_instances,
+                record_idx,
+                direction,
+                namespace = ?namespace,
+                values = ?values,
+                "Gate-5 individual tower record MLE"
+            );
+        }
+    }
     drop(_main_witness_range);
 
     let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
@@ -590,8 +635,7 @@ impl<
                         &mut transcript,
                     )
                 })?;
-            let (points, evaluations) =
-                Self::collect_main_constraint_results(main_constraint_results);
+            let (points, evaluations) = collect_main_constraint_openings(main_constraint_results);
             exit_span!(main_constraints_span);
 
             // batch opening pcs
@@ -1076,25 +1120,41 @@ impl<
 
         (chip_proofs, main_constraint_jobs)
     }
+}
 
-    fn collect_main_constraint_results(
-        results: Vec<MainConstraintResult<E>>,
-    ) -> (Vec<Point<E>>, Vec<Vec<Vec<E>>>) {
-        let mut points = Vec::new();
-        let mut evaluations = Vec::new();
-        for result in results {
-            if !result.opening_evals.wits_in_evals.is_empty()
-                || !result.opening_evals.fixed_in_evals.is_empty()
-            {
-                points.push(result.input_opening_point);
-                evaluations.push(vec![
-                    result.opening_evals.wits_in_evals,
-                    result.opening_evals.fixed_in_evals,
-                ]);
+/// Preserve the main-sumcheck producer order while converting its output into
+/// the paired point/evaluation input consumed by PCS opening.  This seam is
+/// deliberately standalone so small PCS tests can exercise the same routing
+/// without constructing the full RV registry.
+pub(crate) fn collect_main_constraint_openings<E: ExtensionField>(
+    results: Vec<MainConstraintResult<E>>,
+) -> (Vec<Point<E>>, Vec<Vec<Vec<E>>>) {
+    let trace_ownership_debug = std::env::var_os("CENO_GPU_TRACE_OWNERSHIP").is_some();
+    let mut points = Vec::new();
+    let mut evaluations = Vec::new();
+    for result in results {
+        if !result.opening_evals.wits_in_evals.is_empty()
+            || !result.opening_evals.fixed_in_evals.is_empty()
+        {
+            if trace_ownership_debug {
+                tracing::info!(
+                    target: "ceno_gpu::basefold_ownership",
+                    opening_idx = points.len(),
+                    circuit_idx = result.circuit_idx,
+                    query_dim = result.input_opening_point.len(),
+                    witness_mles = result.opening_evals.wits_in_evals.len(),
+                    fixed_mles = result.opening_evals.fixed_in_evals.len(),
+                    "[basefold ownership] main/tower result source"
+                );
             }
+            points.push(result.input_opening_point);
+            evaluations.push(vec![
+                result.opening_evals.wits_in_evals,
+                result.opening_evals.fixed_in_evals,
+            ]);
         }
-        (points, evaluations)
     }
+    (points, evaluations)
 }
 
 /// TowerProofs

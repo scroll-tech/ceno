@@ -43,6 +43,13 @@ const NODE_DOMAIN: u32 = 0x4e4f_4445; // "NODE"
 const PAD_SPONGE_DOMAIN: u32 = 0x5041_4421; // "PAD!"
 pub const PRODUCTION_MATMUL_HIDDEN_SIGNATURE_V1: u32 = 0x4d48_1000;
 pub const PRODUCTION_MATMUL_INTERMEDIATE_SIGNATURE_V1: u32 = 0x4d49_2b00;
+pub const MINI_MATMUL_HIDDEN_SIGNATURE_V1: u32 = 0x4d4d_00a0;
+pub const MINI_MATMUL_INTERMEDIATE_SIGNATURE_V1: u32 = 0x4d4d_01b0;
+/// Gate-5 compact, one-tile production signature.  It is intentionally
+/// separate from the 10M model profile: it exists solely to retain the exact
+/// production record topology while shrinking direct GPU E2E iterations.
+pub const GATE5_SMALL_HIDDEN_SIGNATURE_V1: u32 = 0x4d47_0040;
+pub const GATE5_SMALL_HIDDEN_K: usize = 64;
 
 pub const LLAMA2_7B_LAYERS: usize = 32;
 pub const LLAMA2_7B_VOCAB: usize = 32_000;
@@ -55,6 +62,46 @@ pub const PRODUCTION_K_TILE: usize = 1024;
 pub const PRODUCTION_TILE_BYTES: u32 = (PRODUCTION_K_TILE * 4) as u32;
 const MODEL_DOMAIN: &[u8] = b"ceno.tensor.model-manifest.v1";
 const PROMPT_DOMAIN: &[u8] = b"ceno.tensor.prompt-token-ids.v1";
+
+/// Compile-time Gate-5 diagnosis profile.  This keeps the Llama layer graph
+/// and head geometry while making every arithmetic domain small enough for
+/// assignment/PCS differential tests to run before the production-width E2E.
+/// It is deliberately a separate profile: none of these constants may be
+/// accepted by the Llama-2-7B production descriptors.
+pub mod mini_llama_10m {
+    use super::StaticPhysicalCall;
+
+    pub const LAYERS: usize = 32;
+    pub const HIDDEN: usize = 160;
+    pub const HEADS: usize = 5;
+    pub const HEAD_DIM: usize = 32;
+    pub const INTERMEDIATE: usize = 432;
+    pub const VOCAB: usize = 4096;
+    pub const INITIAL_SEQUENCE: usize = 2;
+    pub const EXTENDED_SEQUENCE: usize = 8;
+    pub const PROOF_TILE_K: usize = 32;
+
+    // Embedding + 32 transformer layers + final RMS/head. Biases are omitted,
+    // matching Llama. Norm vectors are included.
+    pub const PARAMETER_COUNT: usize = VOCAB * HIDDEN
+        + LAYERS * (4 * HIDDEN * HIDDEN + 3 * HIDDEN * INTERMEDIATE + 2 * HIDDEN)
+        + HIDDEN;
+
+    const _: () = assert!(HIDDEN == HEADS * HEAD_DIM);
+    const _: () = assert!(HIDDEN.is_multiple_of(PROOF_TILE_K));
+    pub const INTERMEDIATE_TILE_COUNT: usize = INTERMEDIATE.div_ceil(PROOF_TILE_K);
+
+    pub fn static_calls() -> Vec<StaticPhysicalCall> {
+        let mut calls = Vec::with_capacity(2 * LAYERS + 2);
+        calls.push(StaticPhysicalCall::Embedding);
+        for layer in 0..LAYERS as u32 {
+            calls.push(StaticPhysicalCall::AttentionBlock { layer });
+            calls.push(StaticPhysicalCall::FfnBlock { layer });
+        }
+        calls.push(StaticPhysicalCall::FinalHead);
+        calls
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TensorRole {
@@ -542,6 +589,9 @@ pub struct AtomicCallCost {
 pub enum ProductionMatMulSignature {
     HiddenK4096,
     IntermediateK11008,
+    MiniHiddenK160,
+    MiniIntermediateK432,
+    Gate5SmallHiddenK64,
 }
 
 impl ProductionMatMulSignature {
@@ -549,6 +599,9 @@ impl ProductionMatMulSignature {
         match self {
             Self::HiddenK4096 => PRODUCTION_MATMUL_HIDDEN_SIGNATURE_V1,
             Self::IntermediateK11008 => PRODUCTION_MATMUL_INTERMEDIATE_SIGNATURE_V1,
+            Self::MiniHiddenK160 => MINI_MATMUL_HIDDEN_SIGNATURE_V1,
+            Self::MiniIntermediateK432 => MINI_MATMUL_INTERMEDIATE_SIGNATURE_V1,
+            Self::Gate5SmallHiddenK64 => GATE5_SMALL_HIDDEN_SIGNATURE_V1,
         }
     }
 
@@ -556,6 +609,9 @@ impl ProductionMatMulSignature {
         match id {
             PRODUCTION_MATMUL_HIDDEN_SIGNATURE_V1 => Some(Self::HiddenK4096),
             PRODUCTION_MATMUL_INTERMEDIATE_SIGNATURE_V1 => Some(Self::IntermediateK11008),
+            MINI_MATMUL_HIDDEN_SIGNATURE_V1 => Some(Self::MiniHiddenK160),
+            MINI_MATMUL_INTERMEDIATE_SIGNATURE_V1 => Some(Self::MiniIntermediateK432),
+            GATE5_SMALL_HIDDEN_SIGNATURE_V1 => Some(Self::Gate5SmallHiddenK64),
             _ => None,
         }
     }
@@ -563,11 +619,25 @@ impl ProductionMatMulSignature {
         match self {
             Self::HiddenK4096 => LLAMA2_7B_HIDDEN,
             Self::IntermediateK11008 => LLAMA2_7B_INTERMEDIATE,
+            Self::MiniHiddenK160 => mini_llama_10m::HIDDEN,
+            Self::MiniIntermediateK432 => mini_llama_10m::INTERMEDIATE,
+            Self::Gate5SmallHiddenK64 => GATE5_SMALL_HIDDEN_K,
+        }
+    }
+
+    pub const fn proof_tile_k(self) -> usize {
+        match self {
+            Self::HiddenK4096 | Self::IntermediateK11008 => PRODUCTION_K_TILE,
+            Self::MiniHiddenK160 | Self::MiniIntermediateK432 => mini_llama_10m::PROOF_TILE_K,
+            // Gate-5 is an opt-in compact reproducer.  Its one physical row
+            // intentionally matches the 64-word raw/tile record width so the
+            // guest-first E2E does not pay the production K1024 setup cost.
+            Self::Gate5SmallHiddenK64 => GATE5_SMALL_HIDDEN_K,
         }
     }
 
     pub const fn atomic_tiles(self) -> u64 {
-        self.k().div_ceil(PRODUCTION_K_TILE) as u64
+        self.k().div_ceil(self.proof_tile_k()) as u64
     }
 }
 
@@ -1439,6 +1509,33 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(plan_atomic_shards(&costs, 16).unwrap().len(), 17);
         assert!(plan_atomic_shards(&costs, 3).is_err());
+    }
+
+    #[test]
+    fn mini_llama_profile_preserves_topology_and_k32_padding() {
+        use super::mini_llama_10m as mini;
+
+        assert_eq!(mini::HIDDEN, mini::HEADS * mini::HEAD_DIM);
+        assert_eq!(mini::HIDDEN / mini::PROOF_TILE_K, 5);
+        assert_eq!(mini::INTERMEDIATE_TILE_COUNT, 14);
+        assert_eq!(mini::PARAMETER_COUNT, 10_578_080);
+        let calls = mini::static_calls();
+        assert_eq!(calls.len(), 66);
+        assert_eq!(calls.first(), Some(&StaticPhysicalCall::Embedding));
+        assert_eq!(calls.last(), Some(&StaticPhysicalCall::FinalHead));
+        for (layer, pair) in calls[1..65].chunks_exact(2).enumerate() {
+            assert_eq!(
+                pair,
+                [
+                    StaticPhysicalCall::AttentionBlock {
+                        layer: layer as u32,
+                    },
+                    StaticPhysicalCall::FfnBlock {
+                        layer: layer as u32,
+                    },
+                ]
+            );
+        }
     }
 
     #[test]

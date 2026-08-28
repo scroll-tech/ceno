@@ -495,6 +495,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         );
 
         // main invariant between opcode circuits and table circuits
+        //
+        // Gate-5's minimal hidden-K4096 guest E2E is intentionally the only
+        // caller that enables this trace.  Keep the diagnostics at the proof
+        // boundary: they describe precisely the values which the verifier
+        // multiplies, without changing witness construction or tower routing.
+        let rw_product_trace = std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some();
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
@@ -742,6 +748,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     num_lks * (num_padded_instance + num_instance_non_selected);
             }
 
+            if std::env::var_os("CENO_TENSOR_E2E_LOGUP_TRACE").is_some() {
+                tracing::info!(
+                    shard_id,
+                    circuit_name,
+                    circuit_index,
+                    num_instance,
+                    num_lks,
+                    grouped_tower_shape,
+                    chip_logup_sum = ?chip_logup_sum,
+                    dummy_table_item_multiplicity,
+                    "Gate-5 per-chip logup contribution"
+                );
+            }
+
             // accumulate logup_sum
             logup_sum += chip_logup_sum;
 
@@ -760,6 +780,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             let chip_prod_r = proof.r_out_evals.iter().flatten().copied().product::<E>();
             prod_w *= chip_prod_w;
             prod_r *= chip_prod_r;
+            if rw_product_trace {
+                tracing::info!(
+                    target: "ceno_gpu::tensor_rw_product",
+                    shard_id,
+                    chip_ordinal = index,
+                    circuit_index,
+                    circuit_name,
+                    logical_instances = ?proof.num_instances,
+                    read_specs = proof.r_out_evals.len(),
+                    write_specs = proof.w_out_evals.len(),
+                    read_evals = ?proof.r_out_evals,
+                    write_evals = ?proof.w_out_evals,
+                    chip_prod_r = ?chip_prod_r,
+                    chip_prod_w = ?chip_prod_w,
+                    cumulative_prod_r = ?prod_r,
+                    cumulative_prod_w = ?prod_w,
+                    "Gate-5 read/write product contribution"
+                );
+            }
             tracing::debug!(
                 "{shard_id}th shard verified proof for circuit {}",
                 circuit_name

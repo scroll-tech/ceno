@@ -1600,6 +1600,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
             panic!("GPU backend only supports BabyBear base field");
         }
 
+        let trace_ownership_debug = std::env::var_os("CENO_GPU_TRACE_OWNERSHIP").is_some();
+        if trace_ownership_debug {
+            for (physical_trace_idx, (circuit_idx, trace)) in traces.iter().enumerate() {
+                tracing::info!(
+                    target: "ceno_gpu::basefold_ownership",
+                    physical_trace_idx,
+                    circuit_idx,
+                    logical_rows = trace.num_instances(),
+                    physical_rows = trace.height(),
+                    width = trace.width(),
+                    query_dim = trace.num_vars(),
+                    "[basefold ownership] commit trace range/view"
+                );
+            }
+        }
+
         let span = entered_span!("[gpu] init pp", profiling_2 = true);
         let max_poly_size_log2 = traces
             .values()
@@ -3405,6 +3421,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
             panic!("GPU backend only supports BabyBear base field");
         }
 
+        // This log deliberately stays at the Ceno-to-PCS boundary.  It
+        // records the main/tower-produced input before rounds are consumed.
+        let trace_ownership_debug = std::env::var_os("CENO_GPU_TRACE_OWNERSHIP").is_some();
+        if trace_ownership_debug {
+            for (opening_idx, (point, groups)) in points.iter().zip(&evals).enumerate() {
+                tracing::info!(
+                    target: "ceno_gpu::basefold_ownership",
+                    opening_idx,
+                    query_dim = point.len(),
+                    witness_mles = groups.first().map_or(0, Vec::len),
+                    fixed_mles = groups.get(1).map_or(0, Vec::len),
+                    group_count = groups.len(),
+                    "[basefold ownership] main/tower opening input"
+                );
+            }
+        }
+
         let mut rounds = vec![];
         rounds.push((&witness_data, {
             evals
@@ -3448,8 +3481,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
         > = unsafe { std::mem::transmute(prover_param) };
         let rounds_gl64: Vec<_> = rounds
             .iter()
-            .map(|(commitment, point_eval_pairs)| {
+            .enumerate()
+            .map(|(round_idx, (commitment, point_eval_pairs))| {
                 let commitment_gl64 = expect_basefold_pcs_data(commitment);
+                if trace_ownership_debug {
+                    let (leaves, trace, rmms) = commitment_gl64.data_source();
+                    tracing::info!(
+                        target: "ceno_gpu::basefold_ownership",
+                        round_idx,
+                        commitment_origin = if round_idx == 0 { "witness" } else { "fixed" },
+                        trace_count = commitment_gl64.num_traces(),
+                        opening_count = point_eval_pairs.len(),
+                        cache_level = ?get_gpu_cache_level(),
+                        has_leaves = leaves,
+                        has_trace = trace,
+                        has_rmms = rmms,
+                        log2_max_codeword_size = commitment_gl64.log2_max_codeword_size,
+                        "[basefold ownership] Ceno opening round boundary"
+                    );
+                }
                 let point_eval_pairs_gl64: Vec<_> = point_eval_pairs
                     .iter()
                     .map(|(point, evals)| {

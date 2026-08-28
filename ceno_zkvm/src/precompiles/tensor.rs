@@ -832,6 +832,11 @@ impl<E: ExtensionField> TensorI32ByteLimbProduct<E> {
             set_val!(instance, *limb, v);
             lkm.assert_const_range(v, 8);
         }
+        // These two checks intentionally mirror the separate top-byte range
+        // constraints in `construct`.  They are redundant algebraically, but
+        // remain distinct dynamic lookup relations in the AIR.
+        lkm.assert_const_range((left_mag >> 24) & 255, 8);
+        lkm.assert_const_range((right_mag >> 24) & 255, 8);
         let product = u128::from(left.unsigned_abs()) * u128::from(right.unsigned_abs());
         for (i, limb) in self.product.iter().enumerate() {
             let v = ((product >> (8 * i)) & 255) as u64;
@@ -1359,18 +1364,10 @@ impl<E: ExtensionField> TensorSignedLimbRescaleConfig<E> {
             set_val!(instance, self.result[i], digit);
             lkm.assert_const_range(digit, 4);
         }
-        for (value, carries) in [(lhs, &self.left_carries), (rhs, &self.right_carries)] {
-            let mut carry = 0u128;
-            for i in 0..16 {
-                let raw_digit = ((value >> (4 * i)) & 15) + carry;
-                carry = raw_digit >> 4;
-                // `value` is already normalized, so this is zero. Keeping the
-                // explicit columns makes assignment match multi-term AIR rows.
-                set_val!(instance, carries[i], carry as u64);
-                lkm.assert_const_range(carry as u64, 2);
-            }
-        }
-        // Recompute carries from the actual three signed-side terms.
+        // Compute carries from the actual three signed-side terms.  Do not
+        // first account for a normalized approximation: both passes target
+        // the same witness columns, while the AIR has exactly one lookup per
+        // carry column.
         for (left_side, carries) in [(true, &self.left_carries), (false, &self.right_carries)] {
             let mut carry = 0u64;
             for digit in 0..16 {
@@ -2013,7 +2010,10 @@ pub struct TensorProductionRawCoreConfig<E: ExtensionField, const K: usize> {
 /// buckets to the finalize chip.  `weight_checksum` is a circuit-native
 /// integrity check for accidental/tampered row data; it is deliberately not a
 /// model commitment (CommittedHints remains a future gate).
-pub struct TensorProductionTileCoreConfig<E: ExtensionField> {
+pub struct TensorProductionTileCoreConfig<
+    E: ExtensionField,
+    const K: usize = { ceno_emul::tensor::production::PRODUCTION_K_TILE },
+> {
     pub cycle: WitIn,
     pub call_id: WitIn,
     pub profile: WitIn,
@@ -2022,18 +2022,20 @@ pub struct TensorProductionTileCoreConfig<E: ExtensionField> {
     pub first_tile_id: WitIn,
     pub global_tile_id: WitIn,
     pub tile_position: WitIn,
-    pub input_raw: [[WitIn; 2]; ceno_emul::tensor::production::PRODUCTION_K_TILE],
-    pub input_neg_carry: [WitIn; ceno_emul::tensor::production::PRODUCTION_K_TILE],
-    pub input: [TensorSignedWord<E>; ceno_emul::tensor::production::PRODUCTION_K_TILE],
+    pub input_raw: [[WitIn; 2]; K],
+    pub input_neg_carry: [WitIn; K],
+    pub input: [TensorSignedWord<E>; K],
     pub bucket: TensorSignedDotBucketConfig<E>,
     pub weight_checksum: WitIn,
 }
 
 /// Small ordered fold/finalize row.  `TILES` is 4 for hidden projections and
-/// 11 for intermediate projections.  It checks all physical rows belong to
+/// 11 for intermediate projections; Gate-5's diagnostic signature uses one
+/// tile to preserve this relation with a compact E2E.  It checks all physical rows belong to
 /// the same logical call, folds their bounded buckets without overflow, and
 /// performs the one canonical signed rescale used by the guest-visible output.
-pub struct TensorProductionFinalizeCoreConfig<E: ExtensionField, const TILES: usize> {
+pub struct TensorProductionFinalizeCoreConfig<E: ExtensionField, const K: usize, const TILES: usize>
+{
     pub cycle: WitIn,
     pub call_id: WitIn,
     pub profile: WitIn,
@@ -2122,9 +2124,13 @@ fn production_checksum_values(values: &[i32]) -> u64 {
         })
 }
 
-impl<E: ExtensionField> TensorProductionTileCoreConfig<E> {
+impl<E: ExtensionField, const K: usize> TensorProductionTileCoreConfig<E, K> {
     pub fn construct(cb: &mut CircuitBuilder<E>) -> Result<Self, ZKVMError> {
-        const K: usize = ceno_emul::tensor::production::PRODUCTION_K_TILE;
+        if K == 0 || K > ceno_emul::tensor::production::PRODUCTION_K_TILE {
+            return Err(ZKVMError::InvalidWitness(
+                "production tile K outside supported physical domain".into(),
+            ));
+        }
         let cycle = cb.create_witin(|| "production_tile_cycle");
         let call_id = cb.create_witin(|| "production_tile_call_id");
         let profile = cb.create_witin(|| "production_tile_profile");
@@ -2280,7 +2286,6 @@ impl<E: ExtensionField> TensorProductionTileCoreConfig<E> {
         call_id: u32,
         input: &[i32],
     ) -> Result<(), String> {
-        const K: usize = ceno_emul::tensor::production::PRODUCTION_K_TILE;
         if input.len() != K || position >= desc.tile_count as usize {
             return Err("production tile shape/position mismatch".into());
         }
@@ -2340,20 +2345,35 @@ impl<E: ExtensionField> TensorProductionTileCoreConfig<E> {
             );
         }
         self.bucket.assign(instance, lkm, input, &weights)?;
-        set_val!(
-            instance,
-            self.weight_checksum,
-            production_checksum_values(&weights)
-        );
+        let weight_checksum = production_checksum_values(&weights);
+        set_val!(instance, self.weight_checksum, weight_checksum);
+        if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some() {
+            tracing::info!(
+                target: "ceno_gpu::tensor_record_path",
+                role = "tile_witness",
+                record_time = cycle,
+                record_slot = position,
+                call_id,
+                signature = desc.signature.id(),
+                tensor_id = desc.weight_tensor_id,
+                first_tile = desc.first_tile_id,
+                tile_id,
+                input_checksum = production_checksum_values(input),
+                weight_checksum,
+                "Gate-5 tile record witness identity/value"
+            );
+        }
         Ok(())
     }
 }
 
-impl<E: ExtensionField, const TILES: usize> TensorProductionFinalizeCoreConfig<E, TILES> {
+impl<E: ExtensionField, const K: usize, const TILES: usize>
+    TensorProductionFinalizeCoreConfig<E, K, TILES>
+{
     pub fn construct(cb: &mut CircuitBuilder<E>, shift: u32) -> Result<Self, ZKVMError> {
-        if !matches!(TILES, 4 | 11) {
+        if !matches!(TILES, 1 | 4 | 11) {
             return Err(ZKVMError::InvalidWitness(
-                "production finalize tile count must be 4 or 11".into(),
+                "production finalize tile count must be 1, 4, or 11".into(),
             ));
         }
         let cycle = cb.create_witin(|| "production_finalize_cycle");
@@ -2562,17 +2582,20 @@ impl<E: ExtensionField, const TILES: usize> TensorProductionFinalizeCoreConfig<E
                 return Err("production finalize checksum mismatch".into());
             }
             let mut weights = decode_i32_le(&opening.bytes).map_err(|e| e.to_string())?;
-            if weights.len() > ceno_emul::tensor::production::PRODUCTION_K_TILE
-                || (tile + 1 < TILES
-                    && weights.len() != ceno_emul::tensor::production::PRODUCTION_K_TILE)
-            {
+            // The compact K64 diagnostic is a real physical K64 tile, while
+            // production signatures retain the normal 1024-wide tile.  The
+            // finalize witness must use exactly the same physical tile domain
+            // as the tile-record producer; widening K64 here changed the
+            // bucket record and broke the custom-RAM product check.
+            let tile_width = K.min(ceno_emul::tensor::production::PRODUCTION_K_TILE);
+            if weights.len() > tile_width || (tile + 1 < TILES && weights.len() != tile_width) {
                 return Err("production finalize tile length mismatch".into());
             }
-            weights.resize(ceno_emul::tensor::production::PRODUCTION_K_TILE, 0);
-            let start = tile * ceno_emul::tensor::production::PRODUCTION_K_TILE;
-            let end = (start + ceno_emul::tensor::production::PRODUCTION_K_TILE).min(input.len());
+            weights.resize(tile_width, 0);
+            let start = tile * tile_width;
+            let end = (start + tile_width).min(input.len());
             let mut tile_input = input[start..end].to_vec();
-            tile_input.resize(ceno_emul::tensor::production::PRODUCTION_K_TILE, 0);
+            tile_input.resize(tile_width, 0);
             let trace =
                 ceno_emul::tensor::production::signed_dot_byte_limb_tile(&tile_input, &weights)
                     .map_err(|e| e.to_string())?;
@@ -2613,6 +2636,24 @@ impl<E: ExtensionField, const TILES: usize> TensorProductionFinalizeCoreConfig<E
             negative_u128 = negative_u128
                 .checked_add(trace.negative)
                 .ok_or("production negative overflow")?;
+            if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some() {
+                tracing::info!(
+                    target: "ceno_gpu::tensor_record_path",
+                    role = "finalize_bucket_witness",
+                    record_time = cycle,
+                    record_slot = tile,
+                    call_id,
+                    signature = desc.signature.id(),
+                    tensor_id = desc.weight_tensor_id,
+                    first_tile = desc.first_tile_id,
+                    tile_id,
+                    input_checksum = production_checksum_values(&tile_input),
+                    weight_checksum = production_checksum_values(&weights),
+                    positive = ?trace.positive_base256,
+                    negative = ?trace.negative_base256,
+                    "Gate-5 finalize bucket record identity/value"
+                );
+            }
         }
         let signed = i64::try_from(
             i128::try_from(positive_u128).map_err(|_| "production positive i128")?
@@ -2624,6 +2665,23 @@ impl<E: ExtensionField, const TILES: usize> TensorProductionFinalizeCoreConfig<E
         let (q, r) = self.rescale.assign(instance, lkm, signed)?;
         let output = i32::try_from(q).map_err(|_| "production output outside i32")?;
         self.output.assign(instance, lkm, output);
+        if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some() {
+            tracing::info!(
+                target: "ceno_gpu::tensor_record_path",
+                role = "finalize_output_witness",
+                record_time = cycle,
+                record_slot = desc.first_tile_id,
+                call_id,
+                signature = desc.signature.id(),
+                tensor_id = desc.weight_tensor_id,
+                first_tile = desc.first_tile_id,
+                positive_total = ?positive_total,
+                negative_total = ?negative_total,
+                output,
+                remainder = r,
+                "Gate-5 finalize output record identity/value"
+            );
+        }
         Ok((output, r))
     }
 }
@@ -2836,6 +2894,23 @@ impl<E: ExtensionField, const K: usize> TensorProductionRawCoreConfig<E, K> {
         let output_i32 = i32::try_from(output).map_err(|_| "production output outside i32")?;
         self.output.assign(instance, lkm, output_i32);
         self.remainder.assign::<E>(instance, lkm, remainder);
+        if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some() {
+            tracing::info!(
+                target: "ceno_gpu::tensor_record_path",
+                role = "raw_witness",
+                record_time = cycle,
+                record_slot = desc.first_tile_id,
+                call_id,
+                signature = desc.signature.id(),
+                tensor_id = desc.weight_tensor_id,
+                first_tile = desc.first_tile_id,
+                tile_count = desc.tile_count,
+                input_checksum = production_checksum_values(input),
+                output = output_i32,
+                remainder,
+                "Gate-5 raw state record identity/value"
+            );
+        }
         Ok((output_i32, remainder))
     }
 }
@@ -3508,7 +3583,7 @@ mod tests {
                 let mut final_cs = ConstraintSystem::<E>::new(|| "production_k4096_finalize");
                 let mut final_cb = CircuitBuilder::new(&mut final_cs);
                 let finalize =
-                    TensorProductionFinalizeCoreConfig::<E, 4>::construct(&mut final_cb, 16)
+                    TensorProductionFinalizeCoreConfig::<E, 4096, 4>::construct(&mut final_cb, 16)
                         .unwrap();
                 assert!(usize::from(final_cs.num_witin) < usize::from(u16::MAX));
                 let mut final_instance =
@@ -3547,6 +3622,130 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn production_k32_mini_tile_matches_reference_and_rejects_tamper() {
+        const K: usize = ceno_emul::tensor::production::mini_llama_10m::PROOF_TILE_K;
+        let tensor_id = 10_055;
+        let input = (0..K)
+            .map(|i| match i % 6 {
+                0 => i as i32 - 19,
+                1 => -(i as i32) - 3,
+                _ => 0,
+            })
+            .collect_vec();
+        let weights = (0..K)
+            .map(|i| match i % 5 {
+                0 => -65_536,
+                1 => 65_536,
+                2 => -257,
+                _ => 0,
+            })
+            .collect_vec();
+        let provider = DeterministicTileProvider::new(
+            tensor_id,
+            (0..5).map(|_| encode_i32_le(&weights)).collect(),
+        )
+        .unwrap();
+        let desc = ceno_emul::tensor::production::ProductionMatMulCellDesc::new(
+            ceno_emul::tensor::production::ProductionMatMulSignature::MiniHiddenK160,
+            tensor_id,
+            0,
+            16,
+        )
+        .unwrap();
+
+        let mut cs = ConstraintSystem::<E>::new(|| "production_k32_mini_tile");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let tile = TensorProductionTileCoreConfig::<E, K>::construct(&mut cb).unwrap();
+        let mut instance = vec![<E as ExtensionField>::BaseField::ZERO; usize::from(cs.num_witin)];
+        let mut lkm = LkMultiplicity::default();
+        tile.assign(
+            &mut instance,
+            &mut lkm,
+            Some(&provider),
+            desc,
+            0,
+            17,
+            0x5050,
+            &input,
+        )
+        .unwrap();
+        let reference =
+            ceno_emul::tensor::production::signed_dot_byte_limb_tile(&input, &weights).unwrap();
+        for (column, &expected) in tile.bucket.positive.iter().zip(&reference.positive_base256) {
+            assert_eq!(
+                instance[usize::from(column.id)],
+                <E as ExtensionField>::BaseField::from_u64(u64::from(expected))
+            );
+        }
+        for (column, &expected) in tile.bucket.negative.iter().zip(&reference.negative_base256) {
+            assert_eq!(
+                instance[usize::from(column.id)],
+                <E as ExtensionField>::BaseField::from_u64(u64::from(expected))
+            );
+        }
+        assert_mock_satisfied(&mut cs, &instance);
+
+        let mut bad = instance;
+        let old = reference.positive_base256[0];
+        set_val!(bad, tile.bucket.positive[0], u64::from(old.wrapping_add(1)));
+        assert_mock_rejects(&mut cs, &bad);
+
+        // FFN K=432 has thirteen complete K32 rows and one 16-value compact
+        // provider tile. Assignment must zero-pad the logical physical row;
+        // non-zero padding would change the bucket witness and fail AIR.
+        let compact = weights[..16].to_vec();
+        let ffn_provider = DeterministicTileProvider::new(
+            tensor_id + 1,
+            (0..13)
+                .map(|_| encode_i32_le(&weights))
+                .chain(std::iter::once(encode_i32_le(&compact)))
+                .collect(),
+        )
+        .unwrap();
+        let ffn_desc = ceno_emul::tensor::production::ProductionMatMulCellDesc::new(
+            ceno_emul::tensor::production::ProductionMatMulSignature::MiniIntermediateK432,
+            tensor_id + 1,
+            0,
+            16,
+        )
+        .unwrap();
+        let padded_input = input.clone();
+        let mut padded_instance =
+            vec![<E as ExtensionField>::BaseField::ZERO; usize::from(cs.num_witin)];
+        let mut padded_lkm = LkMultiplicity::default();
+        tile.assign(
+            &mut padded_instance,
+            &mut padded_lkm,
+            Some(&ffn_provider),
+            ffn_desc,
+            13,
+            18,
+            0x6060,
+            &padded_input,
+        )
+        .unwrap();
+        let mut padded_weights = compact;
+        padded_weights.resize(K, 0);
+        let padded_reference = ceno_emul::tensor::production::signed_dot_byte_limb_tile(
+            &padded_input,
+            &padded_weights,
+        )
+        .unwrap();
+        for (column, &expected) in tile
+            .bucket
+            .positive
+            .iter()
+            .zip(&padded_reference.positive_base256)
+        {
+            assert_eq!(
+                padded_instance[usize::from(column.id)],
+                <E as ExtensionField>::BaseField::from_u64(u64::from(expected))
+            );
+        }
+        assert_mock_satisfied(&mut cs, &padded_instance);
     }
 
     #[test]

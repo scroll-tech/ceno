@@ -11,6 +11,10 @@ pub const TENSOR_ATTENTION_BLOCK_REDUCED_V1: u32 = 0x00ff_0004;
 pub const TENSOR_FFN_BLOCK_REDUCED_V1: u32 = 0x00ff_0005;
 pub const TENSOR_MATMUL_HIDDEN_V1: u32 = 0x00ff_0006;
 pub const TENSOR_MATMUL_INTERMEDIATE_V1: u32 = 0x00ff_0007;
+/// Gate-5-only compact production topology reproducer.  This has the same
+/// raw-ecall -> ordered tile -> finalize shape as hidden MatMul, but a small
+/// K so GPU PCS iterations stay interactive.  It is not a stable ABI.
+pub const TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1: u32 = 0x00ff_0008;
 pub const TENSOR_ABI_V1: u32 = 1;
 
 /// Statically-shaped matrix multiplication descriptor.
@@ -97,6 +101,13 @@ pub unsafe fn tensor_matmul_hidden_v1(desc: &TensorProductionMatMulDescV1) {
 #[inline(always)]
 pub unsafe fn tensor_matmul_intermediate_v1(desc: &TensorProductionMatMulDescV1) {
     unsafe { tensor_production_matmul_v1(desc, TENSOR_MATMUL_INTERMEDIATE_V1) }
+}
+
+/// # Safety
+/// Descriptor pointers must address the statically required guest regions.
+#[inline(always)]
+pub unsafe fn tensor_matmul_gate5_small_hidden_v1(desc: &TensorProductionMatMulDescV1) {
+    unsafe { tensor_production_matmul_v1(desc, TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1) }
 }
 
 /// Invoke the experimental tensor MatMul ecall.

@@ -474,6 +474,24 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         for name in keys {
             let lk_mlt = self.lk_mlts.get(&name).unwrap();
 
+            if std::env::var_os("CENO_TENSOR_E2E_LOGUP_TRACE").is_some()
+                && matches!(
+                    name.as_str(),
+                    "TensorAttentionBlockReducedCore" | "TensorAttentionBlockReducedEcall"
+                )
+            {
+                let buckets = lk_mlt
+                    .iter()
+                    .enumerate()
+                    .map(|(table, entries)| (table, entries.len(), entries.values().sum::<usize>()))
+                    .collect_vec();
+                tracing::info!(
+                    circuit = %name,
+                    ?buckets,
+                    "Gate-5 attention lookup multiplicity before table assignment"
+                );
+            }
+
             if combined_lk_mlt.is_empty() {
                 combined_lk_mlt = lk_mlt.to_vec();
             } else {
@@ -486,6 +504,18 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                         }
                     });
             }
+        }
+
+        if std::env::var_os("CENO_TENSOR_E2E_LOGUP_TRACE").is_some() {
+            let buckets = combined_lk_mlt
+                .iter()
+                .enumerate()
+                .map(|(table, entries)| (table, entries.len(), entries.values().sum::<usize>()))
+                .collect_vec();
+            tracing::info!(
+                ?buckets,
+                "Gate-5 combined lookup multiplicity for table assignment"
+            );
         }
 
         self.combined_lk_mlt = Some(combined_lk_mlt);

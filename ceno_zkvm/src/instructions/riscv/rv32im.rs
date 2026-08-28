@@ -27,12 +27,15 @@ use crate::{
                 TensorAttentionBlockReducedEcallInstruction, TensorAttentionReducedCoreInstruction,
                 TensorAttentionReducedEcallInstruction, TensorFfnBlockReducedCoreInstruction,
                 TensorFfnBlockReducedEcallInstruction, TensorMatMulCoreInstruction,
-                TensorMatMulEcallInstruction, TensorMatMulHiddenEcallInstruction,
-                TensorMatMulHiddenFinalizeInstruction, TensorMatMulIntermediateEcallInstruction,
+                TensorMatMulEcallInstruction, TensorMatMulGate5SmallHiddenEcallInstruction,
+                TensorMatMulGate5SmallHiddenFinalizeInstruction,
+                TensorMatMulHiddenEcallInstruction, TensorMatMulHiddenFinalizeInstruction,
+                TensorMatMulIntermediateEcallInstruction,
                 TensorMatMulIntermediateFinalizeInstruction, TensorProductionTileInstruction,
-                TensorRmsLookupCoreInstruction, TensorRmsLookupEcallInstruction,
-                Uint256MulInstruction, WeierstrassAddAssignInstruction,
-                WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
+                TensorProductionTileK64Instruction, TensorRmsLookupCoreInstruction,
+                TensorRmsLookupEcallInstruction, Uint256MulInstruction,
+                WeierstrassAddAssignInstruction, WeierstrassDecompressInstruction,
+                WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
@@ -278,34 +281,49 @@ pub struct Rv32imConfig<E: ExtensionField> {
         <KeccakEcallInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_core_config:
         <KeccakCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    // These are optional only in the opt-in, guest-first Tensor E2E profile.
+    // Keeping the inactive pairs out of construction matters: their fixed
+    // domains dominate setup even though the selected guest cannot call them.
     pub tensor_matmul_ecall_config:
-        <TensorMatMulEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorMatMulEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
     pub tensor_matmul_core_config:
-        <TensorMatMulCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorMatMulCoreInstruction<E> as Instruction<E>>::InstructionConfig>,
     pub tensor_hidden_ecall_config:
-        <TensorMatMulHiddenEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorMatMulHiddenEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
+    /// The production K1024 tile circuit is deliberately absent from the
+    /// opt-in one-attention E2E diagnostic profile.  That guest cannot issue
+    /// either production matmul ecall, so registering its 35k-column domain
+    /// would only obscure the first guest proof result with setup work.
     pub tensor_production_tile_config:
-        <TensorProductionTileInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorProductionTileInstruction<E> as Instruction<E>>::InstructionConfig>,
+    /// Compact K64 physical tile, only registered for the Gate-5 small-hidden
+    /// guest-first reproducer.  The production K1024 tile remains the default.
+    pub tensor_gate5_small_hidden_tile_config:
+        Option<<TensorProductionTileK64Instruction<E> as Instruction<E>>::InstructionConfig>,
     pub tensor_hidden_finalize_config:
-        <TensorMatMulHiddenFinalizeInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub tensor_intermediate_ecall_config: <TensorMatMulIntermediateEcallInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub tensor_intermediate_finalize_config: <TensorMatMulIntermediateFinalizeInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorMatMulHiddenFinalizeInstruction<E> as Instruction<E>>::InstructionConfig>,
+    /// Gate-5 compact K64 production topology, registered only by the opt-in
+    /// guest ladder.
+    pub tensor_gate5_small_hidden_ecall_config: Option<<TensorMatMulGate5SmallHiddenEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
+    pub tensor_gate5_small_hidden_finalize_config: Option<<TensorMatMulGate5SmallHiddenFinalizeInstruction<E> as Instruction<E>>::InstructionConfig>,
+    pub tensor_intermediate_ecall_config: Option<<TensorMatMulIntermediateEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
+    pub tensor_intermediate_finalize_config: Option<<TensorMatMulIntermediateFinalizeInstruction<E> as Instruction<E>>::InstructionConfig>,
     pub tensor_rms_ecall_config:
-        <TensorRmsLookupEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorRmsLookupEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
     pub tensor_rms_core_config:
-        <TensorRmsLookupCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorRmsLookupCoreInstruction<E> as Instruction<E>>::InstructionConfig>,
     pub tensor_attention_ecall_config:
-        <TensorAttentionReducedEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorAttentionReducedEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
     pub tensor_attention_core_config:
-        <TensorAttentionReducedCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorAttentionReducedCoreInstruction<E> as Instruction<E>>::InstructionConfig>,
     pub tensor_attention_block_ecall_config:
         <TensorAttentionBlockReducedEcallInstruction<E> as Instruction<E>>::InstructionConfig,
     pub tensor_attention_block_core_config:
         <TensorAttentionBlockReducedCoreInstruction<E> as Instruction<E>>::InstructionConfig,
     pub tensor_ffn_block_ecall_config:
-        <TensorFfnBlockReducedEcallInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorFfnBlockReducedEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
     pub tensor_ffn_block_core_config:
-        <TensorFfnBlockReducedCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+        Option<<TensorFfnBlockReducedCoreInstruction<E> as Instruction<E>>::InstructionConfig>,
     pub keccak_xorin_config:
         <KeccakXorinInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sha_extend_config: <ShaExtendInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -415,6 +433,67 @@ impl<E: ExtensionField> Rv32imConfig<E> {
     pub fn construct_circuits(
         cs: &mut ZKVMConstraintSystem<E>,
     ) -> (Self, InstructionDispatchBuilder) {
+        // This is a diagnostic-only registry trim, not a production proving
+        // mode.  The provider-aware Gate-5 one-attention guest is the sole
+        // caller, and it has no raw hidden/intermediate matmul ecalls.  Keep
+        // the switch explicit so normal Ceno construction is unchanged.
+        let minimal_tensor_e2e_registry =
+            std::env::var_os("CENO_TENSOR_E2E_MINIMAL_REGISTRY").is_some();
+        // The direct guest-first ladder grows one fused pair at a time.  The
+        // normal registry is unchanged; the diagnostic registry starts with
+        // attention and admits FFN only for the pair/topology steps.
+        let minimal_tensor_e2e_needs_ffn = minimal_tensor_e2e_registry
+            && matches!(
+                std::env::var("CENO_TENSOR_TRIM_GUEST").as_deref(),
+                Ok("pair") | Ok("topology32")
+            );
+        let minimal_tensor_e2e_needs_matmul = minimal_tensor_e2e_registry
+            && matches!(
+                std::env::var("CENO_TENSOR_TRIM_GUEST").as_deref(),
+                Ok("matmul")
+            );
+        let minimal_tensor_e2e_needs_rms = minimal_tensor_e2e_registry
+            && matches!(
+                std::env::var("CENO_TENSOR_TRIM_GUEST").as_deref(),
+                Ok("rms")
+            );
+        let minimal_tensor_e2e_needs_attention_reduced = minimal_tensor_e2e_registry
+            && matches!(
+                std::env::var("CENO_TENSOR_TRIM_GUEST").as_deref(),
+                Ok("attention_reduced")
+            );
+        let minimal_tensor_e2e_needs_hidden = minimal_tensor_e2e_registry
+            && matches!(
+                std::env::var("CENO_TENSOR_TRIM_GUEST").as_deref(),
+                Ok("hidden")
+            );
+        let minimal_tensor_e2e_needs_small_hidden = minimal_tensor_e2e_registry
+            && matches!(
+                std::env::var("CENO_TENSOR_TRIM_GUEST").as_deref(),
+                Ok("small_hidden")
+            );
+        if minimal_tensor_e2e_registry {
+            tracing::info!(
+                profile = "gate5-guest-ladder",
+                retained = if minimal_tensor_e2e_needs_matmul {
+                    "TensorMatMulEcall,TensorMatMulCore"
+                } else if minimal_tensor_e2e_needs_rms {
+                    "TensorRmsLookupEcall,TensorRmsLookupCore"
+                } else if minimal_tensor_e2e_needs_attention_reduced {
+                    "TensorAttentionReducedEcall,TensorAttentionReducedCore"
+                } else if minimal_tensor_e2e_needs_small_hidden {
+                    "TensorMatMulGate5SmallHiddenEcall,TensorProductionTileK64,TensorMatMulGate5SmallHiddenFinalize"
+                } else if minimal_tensor_e2e_needs_hidden {
+                    "TensorMatMulHiddenEcall,TensorProductionTileK1024,TensorMatMulHiddenFinalize"
+                } else if minimal_tensor_e2e_needs_ffn {
+                    "TensorAttentionBlockReducedEcall,TensorAttentionBlockReducedCore,TensorFfnBlockReducedEcall,TensorFfnBlockReducedCore"
+                } else {
+                    "TensorAttentionBlockReducedEcall,TensorAttentionBlockReducedCore"
+                },
+                omitted = "TensorMatMul*,TensorRmsLookup*,TensorAttentionReduced*,TensorProductionTileK1024",
+                "minimal tensor E2E registry enabled"
+            );
+        }
         let mut inst_cells_map = vec![0; InsnKind::COUNT];
         let mut ecall_cells_map = HashMap::new();
         let mut opcode_chips = vec![Vec::new(); InsnKind::COUNT];
@@ -597,53 +676,73 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             chip_specs.push(chip_cost_spec(circuit_cs));
         }
         ecall_name_to_chips.insert(<KeccakCoreInstruction<E>>::name(), keccak_chips);
-        let tensor_matmul_ecall_config =
-            cs.register_opcode_circuit::<TensorMatMulEcallInstruction<E>>();
-        let tensor_matmul_core_config =
-            cs.register_opcode_circuit::<TensorMatMulCoreInstruction<E>>();
-        assert!(
-            ecall_cells_map
-                .insert(
-                    <TensorMatMulCoreInstruction<E>>::name(),
-                    [
-                        <TensorMatMulEcallInstruction<E>>::name(),
-                        <TensorMatMulCoreInstruction<E>>::name()
-                    ]
-                    .into_iter()
-                    .map(|name| cs
-                        .get_cs(&name)
-                        .as_ref()
-                        .map(|cs| {
-                            (cs.zkvm_v1_css.num_witin as u64
-                                + cs.zkvm_v1_css.num_structural_witin as u64
-                                + cs.zkvm_v1_css.num_fixed as u64)
-                                * (1 << cs.rotation_vars().unwrap_or(0))
-                        })
-                        .unwrap_or_default())
-                    .sum(),
-                )
-                .is_none()
-        );
-        let mut tensor_chips = Vec::new();
-        for name in [
-            <TensorMatMulEcallInstruction<E>>::name(),
-            <TensorMatMulCoreInstruction<E>>::name(),
-        ] {
-            let circuit_cs = cs.get_cs(&name).expect("tensor circuit missing");
-            tensor_chips.push(chip_specs.len());
-            chip_specs.push(chip_cost_spec(circuit_cs));
+        let tensor_matmul_ecall_config = (!minimal_tensor_e2e_registry
+            || minimal_tensor_e2e_needs_matmul)
+            .then(|| cs.register_opcode_circuit::<TensorMatMulEcallInstruction<E>>());
+        let tensor_matmul_core_config = (!minimal_tensor_e2e_registry
+            || minimal_tensor_e2e_needs_matmul)
+            .then(|| cs.register_opcode_circuit::<TensorMatMulCoreInstruction<E>>());
+        if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_matmul {
+            assert!(
+                ecall_cells_map
+                    .insert(
+                        <TensorMatMulCoreInstruction<E>>::name(),
+                        [
+                            <TensorMatMulEcallInstruction<E>>::name(),
+                            <TensorMatMulCoreInstruction<E>>::name()
+                        ]
+                        .into_iter()
+                        .map(|name| cs
+                            .get_cs(&name)
+                            .as_ref()
+                            .map(|cs| {
+                                (cs.zkvm_v1_css.num_witin as u64
+                                    + cs.zkvm_v1_css.num_structural_witin as u64
+                                    + cs.zkvm_v1_css.num_fixed as u64)
+                                    * (1 << cs.rotation_vars().unwrap_or(0))
+                            })
+                            .unwrap_or_default())
+                        .sum(),
+                    )
+                    .is_none()
+            );
         }
-        ecall_name_to_chips.insert(<TensorMatMulCoreInstruction<E>>::name(), tensor_chips);
-        let tensor_hidden_ecall_config =
-            cs.register_opcode_circuit::<TensorMatMulHiddenEcallInstruction<E>>();
-        let tensor_production_tile_config =
-            cs.register_opcode_circuit::<TensorProductionTileInstruction<E>>();
-        let tensor_hidden_finalize_config =
-            cs.register_opcode_circuit::<TensorMatMulHiddenFinalizeInstruction<E>>();
-        let tensor_intermediate_ecall_config =
-            cs.register_opcode_circuit::<TensorMatMulIntermediateEcallInstruction<E>>();
-        let tensor_intermediate_finalize_config =
-            cs.register_opcode_circuit::<TensorMatMulIntermediateFinalizeInstruction<E>>();
+        let mut tensor_chips = Vec::new();
+        if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_matmul {
+            for name in [
+                <TensorMatMulEcallInstruction<E>>::name(),
+                <TensorMatMulCoreInstruction<E>>::name(),
+            ] {
+                let circuit_cs = cs.get_cs(&name).expect("tensor circuit missing");
+                tensor_chips.push(chip_specs.len());
+                chip_specs.push(chip_cost_spec(circuit_cs));
+            }
+            ecall_name_to_chips.insert(<TensorMatMulCoreInstruction<E>>::name(), tensor_chips);
+        }
+        let tensor_hidden_ecall_config = (!minimal_tensor_e2e_registry
+            || minimal_tensor_e2e_needs_hidden)
+            .then(|| cs.register_opcode_circuit::<TensorMatMulHiddenEcallInstruction<E>>());
+        let tensor_production_tile_config = (!minimal_tensor_e2e_registry
+            || minimal_tensor_e2e_needs_hidden)
+            .then(|| cs.register_opcode_circuit::<TensorProductionTileInstruction<E>>());
+        let tensor_gate5_small_hidden_tile_config = minimal_tensor_e2e_needs_small_hidden
+            .then(|| cs.register_opcode_circuit::<TensorProductionTileK64Instruction<E>>());
+        let tensor_hidden_finalize_config = (!minimal_tensor_e2e_registry
+            || minimal_tensor_e2e_needs_hidden)
+            .then(|| cs.register_opcode_circuit::<TensorMatMulHiddenFinalizeInstruction<E>>());
+        let tensor_gate5_small_hidden_ecall_config =
+            minimal_tensor_e2e_needs_small_hidden.then(|| {
+                cs.register_opcode_circuit::<TensorMatMulGate5SmallHiddenEcallInstruction<E>>()
+            });
+        let tensor_gate5_small_hidden_finalize_config =
+            minimal_tensor_e2e_needs_small_hidden.then(|| {
+                cs.register_opcode_circuit::<TensorMatMulGate5SmallHiddenFinalizeInstruction<E>>()
+            });
+        let tensor_intermediate_ecall_config = (!minimal_tensor_e2e_registry)
+            .then(|| cs.register_opcode_circuit::<TensorMatMulIntermediateEcallInstruction<E>>());
+        let tensor_intermediate_finalize_config = (!minimal_tensor_e2e_registry).then(|| {
+            cs.register_opcode_circuit::<TensorMatMulIntermediateFinalizeInstruction<E>>()
+        });
         let circuit_cells = |name: &String| {
             let c = cs.get_cs(name).expect("production tensor circuit missing");
             (c.zkvm_v1_css.num_witin as u64
@@ -651,163 +750,190 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 + c.zkvm_v1_css.num_fixed as u64)
                 * (1 << c.rotation_vars().unwrap_or(0))
         };
-        let hidden_ecall_name = <TensorMatMulHiddenEcallInstruction<E>>::name();
-        let production_tile_name = <TensorProductionTileInstruction<E>>::name();
-        let hidden_finalize_name = <TensorMatMulHiddenFinalizeInstruction<E>>::name();
-        let tensor_hidden_cells = circuit_cells(&hidden_ecall_name)
-            + 4 * circuit_cells(&production_tile_name)
-            + circuit_cells(&hidden_finalize_name);
-        assert!(
-            ecall_cells_map
-                .insert(
-                    <TensorMatMulHiddenFinalizeInstruction<E>>::name(),
-                    tensor_hidden_cells
-                )
-                .is_none()
-        );
-        let hidden_ecall_chip = chip_specs.len();
-        chip_specs.push(chip_cost_spec(cs.get_cs(&hidden_ecall_name).unwrap()));
-        let production_tile_chip = chip_specs.len();
-        chip_specs.push(chip_cost_spec(cs.get_cs(&production_tile_name).unwrap()));
-        let hidden_finalize_chip = chip_specs.len();
-        chip_specs.push(chip_cost_spec(cs.get_cs(&hidden_finalize_name).unwrap()));
-        let mut tensor_hidden_chips = vec![hidden_ecall_chip];
-        tensor_hidden_chips.extend(std::iter::repeat_n(production_tile_chip, 4));
-        tensor_hidden_chips.push(hidden_finalize_chip);
-        ecall_name_to_chips.insert(
-            <TensorMatMulHiddenFinalizeInstruction<E>>::name(),
-            tensor_hidden_chips,
-        );
-        let intermediate_ecall_name = <TensorMatMulIntermediateEcallInstruction<E>>::name();
-        let intermediate_finalize_name = <TensorMatMulIntermediateFinalizeInstruction<E>>::name();
-        let tensor_intermediate_cells = circuit_cells(&intermediate_ecall_name)
-            + 11 * circuit_cells(&production_tile_name)
-            + circuit_cells(&intermediate_finalize_name);
-        assert!(
-            ecall_cells_map
-                .insert(
+        if tensor_production_tile_config.is_some() {
+            let hidden_ecall_name = <TensorMatMulHiddenEcallInstruction<E>>::name();
+            let production_tile_name = <TensorProductionTileInstruction<E>>::name();
+            let hidden_finalize_name = <TensorMatMulHiddenFinalizeInstruction<E>>::name();
+            let tensor_hidden_cells = circuit_cells(&hidden_ecall_name)
+                + 4 * circuit_cells(&production_tile_name)
+                + circuit_cells(&hidden_finalize_name);
+            assert!(
+                ecall_cells_map
+                    .insert(
+                        <TensorMatMulHiddenFinalizeInstruction<E>>::name(),
+                        tensor_hidden_cells
+                    )
+                    .is_none()
+            );
+            let hidden_ecall_chip = chip_specs.len();
+            chip_specs.push(chip_cost_spec(cs.get_cs(&hidden_ecall_name).unwrap()));
+            let production_tile_chip = chip_specs.len();
+            chip_specs.push(chip_cost_spec(cs.get_cs(&production_tile_name).unwrap()));
+            let hidden_finalize_chip = chip_specs.len();
+            chip_specs.push(chip_cost_spec(cs.get_cs(&hidden_finalize_name).unwrap()));
+            let mut tensor_hidden_chips = vec![hidden_ecall_chip];
+            tensor_hidden_chips.extend(std::iter::repeat_n(production_tile_chip, 4));
+            tensor_hidden_chips.push(hidden_finalize_chip);
+            ecall_name_to_chips.insert(
+                <TensorMatMulHiddenFinalizeInstruction<E>>::name(),
+                tensor_hidden_chips,
+            );
+            if tensor_intermediate_ecall_config.is_some() {
+                let intermediate_ecall_name = <TensorMatMulIntermediateEcallInstruction<E>>::name();
+                let intermediate_finalize_name =
+                    <TensorMatMulIntermediateFinalizeInstruction<E>>::name();
+                let tensor_intermediate_cells = circuit_cells(&intermediate_ecall_name)
+                    + 11 * circuit_cells(&production_tile_name)
+                    + circuit_cells(&intermediate_finalize_name);
+                assert!(
+                    ecall_cells_map
+                        .insert(
+                            <TensorMatMulIntermediateFinalizeInstruction<E>>::name(),
+                            tensor_intermediate_cells
+                        )
+                        .is_none()
+                );
+                let intermediate_ecall_chip = chip_specs.len();
+                chip_specs.push(chip_cost_spec(cs.get_cs(&intermediate_ecall_name).unwrap()));
+                let intermediate_finalize_chip = chip_specs.len();
+                chip_specs.push(chip_cost_spec(
+                    cs.get_cs(&intermediate_finalize_name).unwrap(),
+                ));
+                let mut tensor_intermediate_chips = vec![intermediate_ecall_chip];
+                tensor_intermediate_chips.extend(std::iter::repeat_n(production_tile_chip, 11));
+                tensor_intermediate_chips.push(intermediate_finalize_chip);
+                ecall_name_to_chips.insert(
                     <TensorMatMulIntermediateFinalizeInstruction<E>>::name(),
-                    tensor_intermediate_cells
-                )
-                .is_none()
-        );
-        let intermediate_ecall_chip = chip_specs.len();
-        chip_specs.push(chip_cost_spec(cs.get_cs(&intermediate_ecall_name).unwrap()));
-        let intermediate_finalize_chip = chip_specs.len();
-        chip_specs.push(chip_cost_spec(
-            cs.get_cs(&intermediate_finalize_name).unwrap(),
-        ));
-        let mut tensor_intermediate_chips = vec![intermediate_ecall_chip];
-        tensor_intermediate_chips.extend(std::iter::repeat_n(production_tile_chip, 11));
-        tensor_intermediate_chips.push(intermediate_finalize_chip);
-        ecall_name_to_chips.insert(
-            <TensorMatMulIntermediateFinalizeInstruction<E>>::name(),
-            tensor_intermediate_chips,
-        );
-        let tensor_rms_ecall_config =
-            cs.register_opcode_circuit::<TensorRmsLookupEcallInstruction<E>>();
-        let tensor_rms_core_config =
-            cs.register_opcode_circuit::<TensorRmsLookupCoreInstruction<E>>();
-        assert!(
-            ecall_cells_map
-                .insert(
-                    <TensorRmsLookupCoreInstruction<E>>::name(),
-                    [
-                        <TensorRmsLookupEcallInstruction<E>>::name(),
+                    tensor_intermediate_chips,
+                );
+            }
+        }
+        if tensor_gate5_small_hidden_ecall_config.is_some() {
+            let raw_name = <TensorMatMulGate5SmallHiddenEcallInstruction<E>>::name();
+            let tile_name = <TensorProductionTileK64Instruction<E>>::name();
+            let finalize_name = <TensorMatMulGate5SmallHiddenFinalizeInstruction<E>>::name();
+            let cells = circuit_cells(&raw_name)
+                + circuit_cells(&tile_name)
+                + circuit_cells(&finalize_name);
+            assert!(
+                ecall_cells_map
+                    .insert(finalize_name.clone(), cells)
+                    .is_none()
+            );
+            let raw_chip = chip_specs.len();
+            chip_specs.push(chip_cost_spec(cs.get_cs(&raw_name).unwrap()));
+            let tile_chip = chip_specs.len();
+            chip_specs.push(chip_cost_spec(cs.get_cs(&tile_name).unwrap()));
+            let finalize_chip = chip_specs.len();
+            chip_specs.push(chip_cost_spec(cs.get_cs(&finalize_name).unwrap()));
+            ecall_name_to_chips.insert(finalize_name, vec![raw_chip, tile_chip, finalize_chip]);
+        }
+        let tensor_rms_ecall_config = (!minimal_tensor_e2e_registry
+            || minimal_tensor_e2e_needs_rms)
+            .then(|| cs.register_opcode_circuit::<TensorRmsLookupEcallInstruction<E>>());
+        let tensor_rms_core_config = (!minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_rms)
+            .then(|| cs.register_opcode_circuit::<TensorRmsLookupCoreInstruction<E>>());
+        if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_rms {
+            assert!(
+                ecall_cells_map
+                    .insert(
                         <TensorRmsLookupCoreInstruction<E>>::name(),
-                    ]
-                    .into_iter()
-                    .map(|name| cs
-                        .get_cs(&name)
-                        .as_ref()
-                        .map(|cs| {
-                            (cs.zkvm_v1_css.num_witin as u64
-                                + cs.zkvm_v1_css.num_structural_witin as u64
-                                + cs.zkvm_v1_css.num_fixed as u64)
-                                * (1 << cs.rotation_vars().unwrap_or(0))
-                        })
-                        .unwrap_or_default())
-                    .sum(),
-                )
-                .is_none()
-        );
+                        [
+                            <TensorRmsLookupEcallInstruction<E>>::name(),
+                            <TensorRmsLookupCoreInstruction<E>>::name(),
+                        ]
+                        .into_iter()
+                        .map(|name| cs
+                            .get_cs(&name)
+                            .as_ref()
+                            .map(|cs| {
+                                (cs.zkvm_v1_css.num_witin as u64
+                                    + cs.zkvm_v1_css.num_structural_witin as u64
+                                    + cs.zkvm_v1_css.num_fixed as u64)
+                                    * (1 << cs.rotation_vars().unwrap_or(0))
+                            })
+                            .unwrap_or_default())
+                        .sum(),
+                    )
+                    .is_none()
+            );
+        }
         let mut tensor_rms_chips = Vec::new();
-        for name in [
-            <TensorRmsLookupEcallInstruction<E>>::name(),
-            <TensorRmsLookupCoreInstruction<E>>::name(),
-        ] {
-            let circuit_cs = cs.get_cs(&name).expect("RMS tensor circuit missing");
-            tensor_rms_chips.push(chip_specs.len());
-            chip_specs.push(chip_cost_spec(circuit_cs));
+        if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_rms {
+            for name in [
+                <TensorRmsLookupEcallInstruction<E>>::name(),
+                <TensorRmsLookupCoreInstruction<E>>::name(),
+            ] {
+                let circuit_cs = cs.get_cs(&name).expect("RMS tensor circuit missing");
+                tensor_rms_chips.push(chip_specs.len());
+                chip_specs.push(chip_cost_spec(circuit_cs));
+            }
+            ecall_name_to_chips.insert(
+                <TensorRmsLookupCoreInstruction<E>>::name(),
+                tensor_rms_chips,
+            );
         }
-        ecall_name_to_chips.insert(
-            <TensorRmsLookupCoreInstruction<E>>::name(),
-            tensor_rms_chips,
-        );
-        let tensor_attention_ecall_config =
-            cs.register_opcode_circuit::<TensorAttentionReducedEcallInstruction<E>>();
-        let tensor_attention_core_config =
-            cs.register_opcode_circuit::<TensorAttentionReducedCoreInstruction<E>>();
-        assert!(
-            ecall_cells_map
-                .insert(
-                    <TensorAttentionReducedCoreInstruction<E>>::name(),
-                    [
-                        <TensorAttentionReducedEcallInstruction<E>>::name(),
+        let tensor_attention_ecall_config = (!minimal_tensor_e2e_registry
+            || minimal_tensor_e2e_needs_attention_reduced)
+            .then(|| cs.register_opcode_circuit::<TensorAttentionReducedEcallInstruction<E>>());
+        let tensor_attention_core_config = (!minimal_tensor_e2e_registry
+            || minimal_tensor_e2e_needs_attention_reduced)
+            .then(|| cs.register_opcode_circuit::<TensorAttentionReducedCoreInstruction<E>>());
+        if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_attention_reduced {
+            assert!(
+                ecall_cells_map
+                    .insert(
                         <TensorAttentionReducedCoreInstruction<E>>::name(),
-                    ]
-                    .into_iter()
-                    .map(|name| cs
-                        .get_cs(&name)
-                        .as_ref()
-                        .map(|cs| {
-                            (cs.zkvm_v1_css.num_witin as u64
-                                + cs.zkvm_v1_css.num_structural_witin as u64
-                                + cs.zkvm_v1_css.num_fixed as u64)
-                                * (1 << cs.rotation_vars().unwrap_or(0))
-                        })
-                        .unwrap_or_default())
-                    .sum(),
-                )
-                .is_none()
-        );
-        let mut tensor_attention_chips = Vec::new();
-        for name in [
-            <TensorAttentionReducedEcallInstruction<E>>::name(),
-            <TensorAttentionReducedCoreInstruction<E>>::name(),
-        ] {
-            let circuit_cs = cs.get_cs(&name).expect("attention tensor circuit missing");
-            tensor_attention_chips.push(chip_specs.len());
-            chip_specs.push(chip_cost_spec(circuit_cs));
+                        [
+                            <TensorAttentionReducedEcallInstruction<E>>::name(),
+                            <TensorAttentionReducedCoreInstruction<E>>::name(),
+                        ]
+                        .into_iter()
+                        .map(|name| cs
+                            .get_cs(&name)
+                            .as_ref()
+                            .map(|cs| {
+                                (cs.zkvm_v1_css.num_witin as u64
+                                    + cs.zkvm_v1_css.num_structural_witin as u64
+                                    + cs.zkvm_v1_css.num_fixed as u64)
+                                    * (1 << cs.rotation_vars().unwrap_or(0))
+                            })
+                            .unwrap_or_default())
+                        .sum(),
+                    )
+                    .is_none()
+            );
         }
-        ecall_name_to_chips.insert(
-            <TensorAttentionReducedCoreInstruction<E>>::name(),
-            tensor_attention_chips,
-        );
+        let mut tensor_attention_chips = Vec::new();
+        if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_attention_reduced {
+            for name in [
+                <TensorAttentionReducedEcallInstruction<E>>::name(),
+                <TensorAttentionReducedCoreInstruction<E>>::name(),
+            ] {
+                let circuit_cs = cs.get_cs(&name).expect("attention tensor circuit missing");
+                tensor_attention_chips.push(chip_specs.len());
+                chip_specs.push(chip_cost_spec(circuit_cs));
+            }
+            ecall_name_to_chips.insert(
+                <TensorAttentionReducedCoreInstruction<E>>::name(),
+                tensor_attention_chips,
+            );
+        }
+        // These two configs are stored non-optionally in `Rv32imConfig`.
+        // Keeping them registered in every diagnostic profile avoids changing
+        // normal configuration ownership; the MatMul profile still omits every
+        // large production/hidden/RMS circuit and executes only MatMul.
         let tensor_attention_block_ecall_config =
             cs.register_opcode_circuit::<TensorAttentionBlockReducedEcallInstruction<E>>();
         let tensor_attention_block_core_config =
             cs.register_opcode_circuit::<TensorAttentionBlockReducedCoreInstruction<E>>();
-        let tensor_ffn_block_ecall_config =
-            cs.register_opcode_circuit::<TensorFfnBlockReducedEcallInstruction<E>>();
-        let tensor_ffn_block_core_config =
-            cs.register_opcode_circuit::<TensorFfnBlockReducedCoreInstruction<E>>();
-        for (core, pair) in [
-            (
-                <TensorAttentionBlockReducedCoreInstruction<E>>::name(),
-                [
-                    <TensorAttentionBlockReducedEcallInstruction<E>>::name(),
-                    <TensorAttentionBlockReducedCoreInstruction<E>>::name(),
-                ],
-            ),
-            (
-                <TensorFfnBlockReducedCoreInstruction<E>>::name(),
-                [
-                    <TensorFfnBlockReducedEcallInstruction<E>>::name(),
-                    <TensorFfnBlockReducedCoreInstruction<E>>::name(),
-                ],
-            ),
-        ] {
+        let tensor_ffn_block_ecall_config = (!minimal_tensor_e2e_registry
+            || minimal_tensor_e2e_needs_ffn)
+            .then(|| cs.register_opcode_circuit::<TensorFfnBlockReducedEcallInstruction<E>>());
+        let tensor_ffn_block_core_config = (!minimal_tensor_e2e_registry
+            || minimal_tensor_e2e_needs_ffn)
+            .then(|| cs.register_opcode_circuit::<TensorFfnBlockReducedCoreInstruction<E>>());
+        let mut register_fused_pair = |core: String, pair: [String; 2]| {
             let cells = pair
                 .iter()
                 .map(|name| {
@@ -826,6 +952,22 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 chip_specs.push(chip_cost_spec(circuit));
             }
             ecall_name_to_chips.insert(core, chips);
+        };
+        register_fused_pair(
+            <TensorAttentionBlockReducedCoreInstruction<E>>::name(),
+            [
+                <TensorAttentionBlockReducedEcallInstruction<E>>::name(),
+                <TensorAttentionBlockReducedCoreInstruction<E>>::name(),
+            ],
+        );
+        if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_ffn {
+            register_fused_pair(
+                <TensorFfnBlockReducedCoreInstruction<E>>::name(),
+                [
+                    <TensorFfnBlockReducedEcallInstruction<E>>::name(),
+                    <TensorFfnBlockReducedCoreInstruction<E>>::name(),
+                ],
+            );
         }
         let keccak_xorin_config =
             register_ecall_circuit!(KeccakXorinInstruction<E>, ecall_cells_map);
@@ -862,34 +1004,60 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         map_ecall(ECALL_PUB_IO_COMMIT, PubIoCommitInstruction::<E>::name());
         map_ecall(STATE_CONTINUATION, GlobalState::<E>::name());
         map_ecall(KeccakSpec::CODE, KeccakCoreInstruction::<E>::name());
-        map_ecall(
-            TensorMatMulV1Spec::CODE,
-            TensorMatMulCoreInstruction::<E>::name(),
-        );
-        map_ecall(
-            ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1,
-            TensorMatMulHiddenFinalizeInstruction::<E>::name(),
-        );
-        map_ecall(
-            ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1,
-            TensorMatMulIntermediateFinalizeInstruction::<E>::name(),
-        );
-        map_ecall(
-            TensorRmsLookupV1Spec::CODE,
-            TensorRmsLookupCoreInstruction::<E>::name(),
-        );
-        map_ecall(
-            TensorAttentionReducedV1Spec::CODE,
-            TensorAttentionReducedCoreInstruction::<E>::name(),
-        );
+        if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_matmul {
+            map_ecall(
+                TensorMatMulV1Spec::CODE,
+                TensorMatMulCoreInstruction::<E>::name(),
+            );
+        }
+        if !minimal_tensor_e2e_registry {
+            map_ecall(
+                ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1,
+                TensorMatMulHiddenFinalizeInstruction::<E>::name(),
+            );
+            map_ecall(
+                ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1,
+                TensorMatMulIntermediateFinalizeInstruction::<E>::name(),
+            );
+            map_ecall(
+                TensorAttentionReducedV1Spec::CODE,
+                TensorAttentionReducedCoreInstruction::<E>::name(),
+            );
+        }
+        if minimal_tensor_e2e_needs_hidden {
+            map_ecall(
+                ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1,
+                TensorMatMulHiddenFinalizeInstruction::<E>::name(),
+            );
+        }
+        if minimal_tensor_e2e_needs_small_hidden {
+            map_ecall(
+                ceno_emul::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1,
+                TensorMatMulGate5SmallHiddenFinalizeInstruction::<E>::name(),
+            );
+        }
+        if minimal_tensor_e2e_needs_attention_reduced {
+            map_ecall(
+                TensorAttentionReducedV1Spec::CODE,
+                TensorAttentionReducedCoreInstruction::<E>::name(),
+            );
+        }
+        if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_rms {
+            map_ecall(
+                TensorRmsLookupV1Spec::CODE,
+                TensorRmsLookupCoreInstruction::<E>::name(),
+            );
+        }
         map_ecall(
             TensorAttentionBlockReducedV1Spec::CODE,
             TensorAttentionBlockReducedCoreInstruction::<E>::name(),
         );
-        map_ecall(
-            TensorFfnBlockReducedV1Spec::CODE,
-            TensorFfnBlockReducedCoreInstruction::<E>::name(),
-        );
+        if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_ffn {
+            map_ecall(
+                TensorFfnBlockReducedV1Spec::CODE,
+                TensorFfnBlockReducedCoreInstruction::<E>::name(),
+            );
+        }
         map_ecall(KeccakXorinSpec::CODE, KeccakXorinInstruction::<E>::name());
         map_ecall(
             Bn254AddSpec::CODE,
@@ -1032,7 +1200,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             tensor_matmul_core_config,
             tensor_hidden_ecall_config,
             tensor_production_tile_config,
+            tensor_gate5_small_hidden_tile_config,
             tensor_hidden_finalize_config,
+            tensor_gate5_small_hidden_ecall_config,
+            tensor_gate5_small_hidden_finalize_config,
             tensor_intermediate_ecall_config,
             tensor_intermediate_finalize_config,
             tensor_rms_ecall_config,
@@ -1142,50 +1313,55 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<GlobalState<E>>(cs, &self.state_continuation_config);
         fixed.register_opcode_circuit::<KeccakEcallInstruction<E>>(cs, &self.keccak_ecall_config);
         fixed.register_opcode_circuit::<KeccakCoreInstruction<E>>(cs, &self.keccak_core_config);
-        fixed.register_opcode_circuit::<TensorMatMulEcallInstruction<E>>(
-            cs,
-            &self.tensor_matmul_ecall_config,
-        );
-        fixed.register_opcode_circuit::<TensorMatMulCoreInstruction<E>>(
-            cs,
-            &self.tensor_matmul_core_config,
-        );
-        fixed.register_opcode_circuit::<TensorMatMulHiddenEcallInstruction<E>>(
-            cs,
-            &self.tensor_hidden_ecall_config,
-        );
-        fixed.register_opcode_circuit::<TensorProductionTileInstruction<E>>(
-            cs,
-            &self.tensor_production_tile_config,
-        );
-        fixed.register_opcode_circuit::<TensorMatMulHiddenFinalizeInstruction<E>>(
-            cs,
-            &self.tensor_hidden_finalize_config,
-        );
-        fixed.register_opcode_circuit::<TensorMatMulIntermediateEcallInstruction<E>>(
-            cs,
-            &self.tensor_intermediate_ecall_config,
-        );
-        fixed.register_opcode_circuit::<TensorMatMulIntermediateFinalizeInstruction<E>>(
-            cs,
-            &self.tensor_intermediate_finalize_config,
-        );
-        fixed.register_opcode_circuit::<TensorRmsLookupEcallInstruction<E>>(
-            cs,
-            &self.tensor_rms_ecall_config,
-        );
-        fixed.register_opcode_circuit::<TensorRmsLookupCoreInstruction<E>>(
-            cs,
-            &self.tensor_rms_core_config,
-        );
-        fixed.register_opcode_circuit::<TensorAttentionReducedEcallInstruction<E>>(
-            cs,
-            &self.tensor_attention_ecall_config,
-        );
-        fixed.register_opcode_circuit::<TensorAttentionReducedCoreInstruction<E>>(
-            cs,
-            &self.tensor_attention_core_config,
-        );
+        if let Some(config) = &self.tensor_matmul_ecall_config {
+            fixed.register_opcode_circuit::<TensorMatMulEcallInstruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_matmul_core_config {
+            fixed.register_opcode_circuit::<TensorMatMulCoreInstruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_hidden_ecall_config {
+            fixed.register_opcode_circuit::<TensorMatMulHiddenEcallInstruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_production_tile_config {
+            fixed.register_opcode_circuit::<TensorProductionTileInstruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_gate5_small_hidden_tile_config {
+            fixed.register_opcode_circuit::<TensorProductionTileK64Instruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_hidden_finalize_config {
+            fixed.register_opcode_circuit::<TensorMatMulHiddenFinalizeInstruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_gate5_small_hidden_ecall_config {
+            fixed.register_opcode_circuit::<TensorMatMulGate5SmallHiddenEcallInstruction<E>>(
+                cs, config,
+            );
+        }
+        if let Some(config) = &self.tensor_gate5_small_hidden_finalize_config {
+            fixed.register_opcode_circuit::<TensorMatMulGate5SmallHiddenFinalizeInstruction<E>>(
+                cs, config,
+            );
+        }
+        if let Some(config) = &self.tensor_intermediate_ecall_config {
+            fixed
+                .register_opcode_circuit::<TensorMatMulIntermediateEcallInstruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_intermediate_finalize_config {
+            fixed.register_opcode_circuit::<TensorMatMulIntermediateFinalizeInstruction<E>>(
+                cs, config,
+            );
+        }
+        if let Some(config) = &self.tensor_rms_ecall_config {
+            fixed.register_opcode_circuit::<TensorRmsLookupEcallInstruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_rms_core_config {
+            fixed.register_opcode_circuit::<TensorRmsLookupCoreInstruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_attention_ecall_config {
+            fixed.register_opcode_circuit::<TensorAttentionReducedEcallInstruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_attention_core_config {
+            fixed.register_opcode_circuit::<TensorAttentionReducedCoreInstruction<E>>(cs, config);
+        }
         fixed.register_opcode_circuit::<TensorAttentionBlockReducedEcallInstruction<E>>(
             cs,
             &self.tensor_attention_block_ecall_config,
@@ -1194,14 +1370,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             cs,
             &self.tensor_attention_block_core_config,
         );
-        fixed.register_opcode_circuit::<TensorFfnBlockReducedEcallInstruction<E>>(
-            cs,
-            &self.tensor_ffn_block_ecall_config,
-        );
-        fixed.register_opcode_circuit::<TensorFfnBlockReducedCoreInstruction<E>>(
-            cs,
-            &self.tensor_ffn_block_core_config,
-        );
+        if let Some(config) = &self.tensor_ffn_block_ecall_config {
+            fixed.register_opcode_circuit::<TensorFfnBlockReducedEcallInstruction<E>>(cs, config);
+        }
+        if let Some(config) = &self.tensor_ffn_block_core_config {
+            fixed.register_opcode_circuit::<TensorFfnBlockReducedCoreInstruction<E>>(cs, config);
+        }
         fixed.register_opcode_circuit::<KeccakXorinInstruction<E>>(cs, &self.keccak_xorin_config);
         fixed.register_opcode_circuit::<ShaExtendInstruction<E>>(cs, &self.sha_extend_config);
         fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
@@ -1400,6 +1574,24 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     })?;
             }};
         }
+        macro_rules! assign_ecall_with_config {
+            ($instruction:ty, $config:expr, $code:expr) => {{
+                let records = instrunction_dispatch_ctx
+                    .records_for_ecall_code($code)
+                    .unwrap_or(&[]);
+                let n = records.len();
+                info_span!("assign_chip", chip = %<$instruction>::name(), n)
+                    .in_scope(|| {
+                        witness.assign_opcode_circuit::<$instruction>(
+                            cs,
+                            shard_ctx,
+                            $config,
+                            shard_steps,
+                            records,
+                        )
+                    })?;
+            }};
+        }
 
         #[cfg(feature = "gpu")]
         {
@@ -1497,31 +1689,59 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             keccak_core_config,
             KeccakSpec::CODE
         );
-        assign_ecall!(
-            TensorMatMulEcallInstruction<E>,
-            tensor_matmul_ecall_config,
-            TensorMatMulV1Spec::CODE
-        );
-        assign_ecall!(
-            TensorMatMulCoreInstruction<E>,
-            tensor_matmul_core_config,
-            TensorMatMulV1Spec::CODE
-        );
-        assign_ecall!(
-            TensorMatMulHiddenEcallInstruction<E>,
-            tensor_hidden_ecall_config,
-            ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1
-        );
-        assign_ecall!(
-            TensorMatMulHiddenFinalizeInstruction<E>,
-            tensor_hidden_finalize_config,
-            ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1
-        );
-        assign_ecall!(
-            TensorMatMulIntermediateEcallInstruction<E>,
-            tensor_intermediate_ecall_config,
-            ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1
-        );
+        if let Some(tensor_matmul_ecall_config) = &self.tensor_matmul_ecall_config {
+            assign_ecall_with_config!(
+                TensorMatMulEcallInstruction<E>,
+                tensor_matmul_ecall_config,
+                TensorMatMulV1Spec::CODE
+            );
+        }
+        if let Some(tensor_matmul_core_config) = &self.tensor_matmul_core_config {
+            assign_ecall_with_config!(
+                TensorMatMulCoreInstruction<E>,
+                tensor_matmul_core_config,
+                TensorMatMulV1Spec::CODE
+            );
+        }
+        if let Some(tensor_hidden_ecall_config) = &self.tensor_hidden_ecall_config {
+            assign_ecall_with_config!(
+                TensorMatMulHiddenEcallInstruction<E>,
+                tensor_hidden_ecall_config,
+                ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1
+            );
+        }
+        if let Some(tensor_hidden_finalize_config) = &self.tensor_hidden_finalize_config {
+            assign_ecall_with_config!(
+                TensorMatMulHiddenFinalizeInstruction<E>,
+                tensor_hidden_finalize_config,
+                ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1
+            );
+        }
+        if let Some(tensor_gate5_small_hidden_ecall_config) =
+            &self.tensor_gate5_small_hidden_ecall_config
+        {
+            assign_ecall_with_config!(
+                TensorMatMulGate5SmallHiddenEcallInstruction<E>,
+                tensor_gate5_small_hidden_ecall_config,
+                ceno_emul::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1
+            );
+        }
+        if let Some(tensor_gate5_small_hidden_finalize_config) =
+            &self.tensor_gate5_small_hidden_finalize_config
+        {
+            assign_ecall_with_config!(
+                TensorMatMulGate5SmallHiddenFinalizeInstruction<E>,
+                tensor_gate5_small_hidden_finalize_config,
+                ceno_emul::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1
+            );
+        }
+        if let Some(tensor_intermediate_ecall_config) = &self.tensor_intermediate_ecall_config {
+            assign_ecall_with_config!(
+                TensorMatMulIntermediateEcallInstruction<E>,
+                tensor_intermediate_ecall_config,
+                ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1
+            );
+        }
         let mut tensor_production_records = instrunction_dispatch_ctx
             .records_for_ecall_code(ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1)
             .unwrap_or(&[])
@@ -1531,47 +1751,102 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .records_for_ecall_code(ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1)
                 .unwrap_or(&[]),
         );
+        tensor_production_records.extend_from_slice(
+            instrunction_dispatch_ctx
+                .records_for_ecall_code(ceno_emul::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1)
+                .unwrap_or(&[]),
+        );
         tensor_production_records.sort_unstable();
         let n = tensor_production_records.len();
-        info_span!(
-            "assign_chip",
-            chip = %<TensorProductionTileInstruction<E>>::name(),
-            n
-        )
-        .in_scope(|| {
-            witness.assign_opcode_circuit::<TensorProductionTileInstruction<E>>(
-                cs,
-                shard_ctx,
-                &self.tensor_production_tile_config,
-                shard_steps,
-                &tensor_production_records,
+        if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some()
+            && !tensor_production_records.is_empty()
+        {
+            tracing::info!(
+                target: "ceno_gpu::tensor_record_path",
+                records = ?tensor_production_records,
+                hidden_records = instrunction_dispatch_ctx
+                    .records_for_ecall_code(ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1)
+                    .map_or(0, |records| records.len()),
+                    intermediate_records = instrunction_dispatch_ctx
+                    .records_for_ecall_code(ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1)
+                        .map_or(0, |records| records.len()),
+                    small_hidden_records = instrunction_dispatch_ctx
+                        .records_for_ecall_code(ceno_emul::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1)
+                        .map_or(0, |records| records.len()),
+                "Gate-5 production tile dispatch grouping"
+            );
+        }
+        if let Some(config) = &self.tensor_production_tile_config {
+            info_span!(
+                "assign_chip",
+                chip = %<TensorProductionTileInstruction<E>>::name(),
+                n
             )
-        })?;
-        assign_ecall!(
-            TensorMatMulIntermediateFinalizeInstruction<E>,
-            tensor_intermediate_finalize_config,
-            ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1
-        );
-        assign_ecall!(
-            TensorRmsLookupEcallInstruction<E>,
-            tensor_rms_ecall_config,
-            TensorRmsLookupV1Spec::CODE
-        );
-        assign_ecall!(
-            TensorRmsLookupCoreInstruction<E>,
-            tensor_rms_core_config,
-            TensorRmsLookupV1Spec::CODE
-        );
-        assign_ecall!(
-            TensorAttentionReducedEcallInstruction<E>,
-            tensor_attention_ecall_config,
-            TensorAttentionReducedV1Spec::CODE
-        );
-        assign_ecall!(
-            TensorAttentionReducedCoreInstruction<E>,
-            tensor_attention_core_config,
-            TensorAttentionReducedV1Spec::CODE
-        );
+            .in_scope(|| {
+                witness.assign_opcode_circuit::<TensorProductionTileInstruction<E>>(
+                    cs,
+                    shard_ctx,
+                    config,
+                    shard_steps,
+                    &tensor_production_records,
+                )
+            })?;
+        } else if let Some(config) = &self.tensor_gate5_small_hidden_tile_config {
+            info_span!(
+                "assign_chip",
+                chip = %<TensorProductionTileK64Instruction<E>>::name(),
+                n
+            )
+            .in_scope(|| {
+                witness.assign_opcode_circuit::<TensorProductionTileK64Instruction<E>>(
+                    cs,
+                    shard_ctx,
+                    config,
+                    shard_steps,
+                    &tensor_production_records,
+                )
+            })?;
+        } else if !tensor_production_records.is_empty() {
+            return Err(ZKVMError::InvalidWitness(
+                "production tensor ecall is unavailable in the minimal E2E registry".into(),
+            ));
+        }
+        if let Some(tensor_intermediate_finalize_config) = &self.tensor_intermediate_finalize_config
+        {
+            assign_ecall_with_config!(
+                TensorMatMulIntermediateFinalizeInstruction<E>,
+                tensor_intermediate_finalize_config,
+                ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1
+            );
+        }
+        if let Some(tensor_rms_ecall_config) = &self.tensor_rms_ecall_config {
+            assign_ecall_with_config!(
+                TensorRmsLookupEcallInstruction<E>,
+                tensor_rms_ecall_config,
+                TensorRmsLookupV1Spec::CODE
+            );
+        }
+        if let Some(tensor_rms_core_config) = &self.tensor_rms_core_config {
+            assign_ecall_with_config!(
+                TensorRmsLookupCoreInstruction<E>,
+                tensor_rms_core_config,
+                TensorRmsLookupV1Spec::CODE
+            );
+        }
+        if let Some(tensor_attention_ecall_config) = &self.tensor_attention_ecall_config {
+            assign_ecall_with_config!(
+                TensorAttentionReducedEcallInstruction<E>,
+                tensor_attention_ecall_config,
+                TensorAttentionReducedV1Spec::CODE
+            );
+        }
+        if let Some(tensor_attention_core_config) = &self.tensor_attention_core_config {
+            assign_ecall_with_config!(
+                TensorAttentionReducedCoreInstruction<E>,
+                tensor_attention_core_config,
+                TensorAttentionReducedV1Spec::CODE
+            );
+        }
         assign_ecall!(
             TensorAttentionBlockReducedEcallInstruction<E>,
             tensor_attention_block_ecall_config,
@@ -1582,16 +1857,20 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             tensor_attention_block_core_config,
             TensorAttentionBlockReducedV1Spec::CODE
         );
-        assign_ecall!(
-            TensorFfnBlockReducedEcallInstruction<E>,
-            tensor_ffn_block_ecall_config,
-            TensorFfnBlockReducedV1Spec::CODE
-        );
-        assign_ecall!(
-            TensorFfnBlockReducedCoreInstruction<E>,
-            tensor_ffn_block_core_config,
-            TensorFfnBlockReducedV1Spec::CODE
-        );
+        if let Some(tensor_ffn_block_ecall_config) = &self.tensor_ffn_block_ecall_config {
+            assign_ecall_with_config!(
+                TensorFfnBlockReducedEcallInstruction<E>,
+                tensor_ffn_block_ecall_config,
+                TensorFfnBlockReducedV1Spec::CODE
+            );
+        }
+        if let Some(tensor_ffn_block_core_config) = &self.tensor_ffn_block_core_config {
+            assign_ecall_with_config!(
+                TensorFfnBlockReducedCoreInstruction<E>,
+                tensor_ffn_block_core_config,
+                TensorFfnBlockReducedV1Spec::CODE
+            );
+        }
         assign_ecall!(
             KeccakXorinInstruction<E>,
             keccak_xorin_config,
@@ -1733,6 +2012,31 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 }
             }};
         }
+        macro_rules! collect_optional_ecall {
+            ($instruction:ty, $config:ident) => {{
+                let config = self.$config.as_ref().ok_or_else(|| {
+                    ZKVMError::InvalidWitness(
+                        format!(
+                            "{} is unavailable in the minimal Tensor E2E registry",
+                            <$instruction>::name()
+                        )
+                        .into(),
+                    )
+                })?;
+                if let Err(err) = <$instruction>::collect_lk_and_shardram(
+                    config,
+                    shard_ctx,
+                    &mut lk_multiplicity,
+                    step,
+                ) {
+                    if is_missing_lightweight_collector(&err) {
+                        collect_generic_ecall_shardram(shard_ctx, step);
+                    } else {
+                        return Err(err);
+                    }
+                }
+            }};
+        }
 
         match step.insn.kind {
             ADD => collect!(AddInstruction<E>, add_config),
@@ -1797,25 +2101,37 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                         collect_ecall!(KeccakEcallInstruction<E>, keccak_ecall_config);
                     }
                     TensorMatMulV1Spec::CODE => {
-                        collect_ecall!(TensorMatMulEcallInstruction<E>, tensor_matmul_ecall_config);
+                        collect_optional_ecall!(
+                            TensorMatMulEcallInstruction<E>,
+                            tensor_matmul_ecall_config
+                        );
                     }
                     ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1 => {
-                        collect_ecall!(
+                        collect_optional_ecall!(
                             TensorMatMulHiddenEcallInstruction<E>,
                             tensor_hidden_ecall_config
                         );
                     }
                     ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1 => {
-                        collect_ecall!(
+                        collect_optional_ecall!(
                             TensorMatMulIntermediateEcallInstruction<E>,
                             tensor_intermediate_ecall_config
                         );
                     }
+                    ceno_emul::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1 => {
+                        collect_optional_ecall!(
+                            TensorMatMulGate5SmallHiddenEcallInstruction<E>,
+                            tensor_gate5_small_hidden_ecall_config
+                        );
+                    }
                     TensorRmsLookupV1Spec::CODE => {
-                        collect_ecall!(TensorRmsLookupEcallInstruction<E>, tensor_rms_ecall_config);
+                        collect_optional_ecall!(
+                            TensorRmsLookupEcallInstruction<E>,
+                            tensor_rms_ecall_config
+                        );
                     }
                     TensorAttentionReducedV1Spec::CODE => {
-                        collect_ecall!(
+                        collect_optional_ecall!(
                             TensorAttentionReducedEcallInstruction<E>,
                             tensor_attention_ecall_config
                         );
@@ -1827,7 +2143,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                         );
                     }
                     TensorFfnBlockReducedV1Spec::CODE => {
-                        collect_ecall!(
+                        collect_optional_ecall!(
                             TensorFfnBlockReducedEcallInstruction<E>,
                             tensor_ffn_block_ecall_config
                         );
@@ -2200,6 +2516,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .ecall_cells_map
                 .get(&TensorMatMulIntermediateFinalizeInstruction::<E>::name())
                 .expect("unable to find production intermediate name"),
+            ceno_emul::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1 => *self
+                .ecall_cells_map
+                .get(&TensorMatMulGate5SmallHiddenFinalizeInstruction::<E>::name())
+                .expect("unable to find Gate-5 small production hidden name"),
             TensorRmsLookupV1Spec::CODE => *self
                 .ecall_cells_map
                 .get(&TensorRmsLookupCoreInstruction::<E>::name())
