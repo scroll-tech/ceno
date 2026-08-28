@@ -805,7 +805,7 @@ where
 
                         push_instance::<E, _>(
                             wits,
-                            input8_witin[0].id.into(),
+                            input8_witin[0].id as usize,
                             state8.into_iter().flatten().flatten(),
                         );
 
@@ -969,54 +969,58 @@ where
                         // set witness
                         push_instance::<E, _>(
                             wits,
-                            c_aux_witin[0].id.into(),
+                            c_aux_witin[0].id as usize,
                             c_aux8.into_iter().flatten().flatten(),
                         );
                         push_instance::<E, _>(
                             wits,
-                            c_temp_witin[0].id.into(),
+                            c_temp_witin[0].id as usize,
                             c_temp.into_iter().flatten(),
                         );
                         push_instance::<E, _>(
                             wits,
-                            c_rot_witin[0].id.into(),
+                            c_rot_witin[0].id as usize,
                             crot8.into_iter().flatten(),
                         );
-                        push_instance::<E, _>(wits, d_witin[0].id.into(), d8.into_iter().flatten());
                         push_instance::<E, _>(
                             wits,
-                            theta_output_witin[0].id.into(),
+                            d_witin[0].id as usize,
+                            d8.into_iter().flatten(),
+                        );
+                        push_instance::<E, _>(
+                            wits,
+                            theta_output_witin[0].id as usize,
                             theta_state8.into_iter().flatten().flatten(),
                         );
                         push_instance::<E, _>(
                             wits,
-                            rotation_witness_witin[0].id.into(),
+                            rotation_witness_witin[0].id as usize,
                             rotation_witness.into_iter(),
                         );
                         push_instance::<E, _>(
                             wits,
-                            rhopi_output_witin[0].id.into(),
+                            rhopi_output_witin[0].id as usize,
                             rhopi_output8.into_iter().flatten().flatten(),
                         );
                         push_instance::<E, _>(
                             wits,
-                            nonlinear_witin[0].id.into(),
+                            nonlinear_witin[0].id as usize,
                             nonlinear8.into_iter().flatten().flatten(),
                         );
                         push_instance::<E, _>(
                             wits,
-                            chi_output_witin[0].id.into(),
+                            chi_output_witin[0].id as usize,
                             chi_output8[0][0].iter().copied(),
                         );
                         push_instance::<E, _>(
                             wits,
-                            iota_output_witin[0].id.into(),
+                            iota_output_witin[0].id as usize,
                             iota_output8.into_iter().flatten().flatten(),
                         );
                         // TODO temporarily move RC to witness
                         push_instance::<E, _>(
                             wits,
-                            rc_witin[0].id.into(),
+                            rc_witin[0].id as usize,
                             (0..8).map(|i| (RC[round] >> (i << 3)) & 0xFF),
                         );
 
@@ -1043,8 +1047,12 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     Ok((
         TestKeccakLayout { layout },
         chip.gkr_circuit(),
-        cs.num_witin,
-        cs.num_structural_witin,
+        cs.num_witin
+            .try_into()
+            .expect("Keccak witness count fits u16"),
+        cs.num_structural_witin
+            .try_into()
+            .expect("Keccak structural witness count fits u16"),
     ))
 }
 

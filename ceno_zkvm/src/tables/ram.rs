@@ -15,7 +15,6 @@ use crate::{
     chip_handler::general::PublicValuesQuery,
     circuit_builder::CircuitBuilder,
     scheme::PublicValues,
-    structs::WitnessId,
     tables::ram::{
         ram_circuit::LocalFinalRamCircuit,
         ram_impl::{DynVolatileRamTableInitConfig, NonVolatileInitTableConfig},
@@ -38,7 +37,11 @@ impl DynVolatileRamTable for HeapTable {
         params: &ProgramParams,
     ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
         let max_len = Self::max_len(params);
-        let offset_instance_id = cb.query_heap_start_addr()?.0 as WitnessId;
+        let offset_instance_id = cb
+            .query_heap_start_addr()?
+            .0
+            .try_into()
+            .expect("heap offset instance ID fits WitnessId");
         let addr = cb.create_structural_witin(
             || "addr",
             StructuralWitInType::EqualDistanceDynamicSequence {
@@ -148,7 +151,11 @@ impl DynVolatileRamTable for HintsTable {
         params: &ProgramParams,
     ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
         let max_len = Self::max_len(params);
-        let offset_instance_id = cb.query_hint_start_addr()?.0 as WitnessId;
+        let offset_instance_id = cb
+            .query_hint_start_addr()?
+            .0
+            .try_into()
+            .expect("hint offset instance ID fits WitnessId");
         let addr = cb.create_structural_witin(
             || "addr",
             StructuralWitInType::EqualDistanceDynamicSequence {

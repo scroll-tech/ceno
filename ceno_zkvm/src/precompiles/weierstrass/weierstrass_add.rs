@@ -925,8 +925,12 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve>()
             mem_rw,
         },
         chip.gkr_circuit(),
-        cs.num_witin,
-        cs.num_structural_witin,
+        cs.num_witin
+            .try_into()
+            .expect("Weierstrass-add witness count fits u16"),
+        cs.num_structural_witin
+            .try_into()
+            .expect("Weierstrass-add structural witness count fits u16"),
     ))
 }
 

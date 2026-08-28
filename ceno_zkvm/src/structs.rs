@@ -185,11 +185,11 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         }
     }
     pub fn num_witin(&self) -> usize {
-        self.zkvm_v1_css.num_witin.into()
+        self.zkvm_v1_css.num_witin as usize
     }
 
     pub fn num_structural_witin(&self) -> usize {
-        self.zkvm_v1_css.num_structural_witin.into()
+        self.zkvm_v1_css.num_structural_witin as usize
     }
 
     pub fn num_fixed(&self) -> usize {
