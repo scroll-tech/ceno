@@ -13,6 +13,8 @@ pub mod llama;
 pub mod planner;
 pub mod production;
 #[cfg(feature = "tensor-cuda")]
+pub mod production_cuda;
+#[cfg(feature = "tensor-cuda")]
 pub mod resident;
 
 pub use ceno_rt::tensor::{

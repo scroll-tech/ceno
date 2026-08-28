@@ -717,6 +717,23 @@ pub fn execute_sparse_production_cell(
     }
     ensure!(weights.len() == input.len(), "opened production K mismatch");
     let trace = signed_dot_byte_limb_rescaled(input, &weights, desc.rescale_shift)?;
+    #[cfg(feature = "tensor-cuda")]
+    if desc.signature == ProductionMatMulSignature::IntermediateK11008 {
+        // CUDA is an execution provider only: the CPU trace below is the
+        // proof-authoritative relation.  Export deliberately borrows the
+        // witness, so its device buffers remain reusable after output check.
+        let provider = crate::tensor::production_cuda::K11008CudaProvider::new(0)?;
+        let mut witness = provider.execute(input, &weights)?;
+        let gpu_sum = provider.export(&mut witness)?;
+        ensure!(
+            gpu_sum == trace.signed_sum,
+            "K11008 CUDA result disagrees with proof relation"
+        );
+        ensure!(
+            witness.device_words() == 2 * crate::tensor::production_cuda::K11008 + 1,
+            "K11008 CUDA witness was not retained"
+        );
+    }
     Ok((
         i32::try_from(trace.quotient).map_err(|_| anyhow!("production output outside i32"))?,
         trace.remainder,
