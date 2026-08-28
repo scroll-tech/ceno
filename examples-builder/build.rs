@@ -86,6 +86,9 @@ fn build_elfs() {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    // The TensorBus guest ABI lives below `ceno_rt/src`; the shallow directory
+    // scan above does not notice this file on every Cargo implementation.
+    println!("cargo:rerun-if-changed=../ceno_rt/src/tensor.rs");
     println!("cargo:rerun-if-env-changed=PROFILE");
     build_elfs();
 }

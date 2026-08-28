@@ -1,4 +1,4 @@
-use crate::{RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
+use crate::{Cycle, RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
 use anyhow::Result;
 
 pub mod bn254;
@@ -38,7 +38,10 @@ pub trait SyscallSpec {
 }
 
 /// Trace the inputs and effects of a syscall.
-pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<SyscallEffects> {
+pub fn handle_syscall<T: Tracer>(
+    vm: &mut VMState<T>,
+    function_code: u32,
+) -> Result<SyscallEffects> {
     match function_code {
         KECCAK_PERMUTE => Ok(keccak_permute::keccak_permute(vm)),
         KECCAK_XORIN => Ok(keccak_xorin::keccak_xorin(vm)),
@@ -70,6 +73,10 @@ pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<
             tensor::tensor_attention_block_reduced_v1(vm)
         }
         crate::tensor::TENSOR_FFN_BLOCK_REDUCED_V1 => tensor::tensor_ffn_block_reduced_v1(vm),
+        crate::tensor::TENSOR_IMPORT_BEGIN_V1 => tensor::tensor_import_begin_v1(vm),
+        crate::tensor::TENSOR_EXPORT_END_V1 => tensor::tensor_export_end_v1(vm),
+        crate::tensor::TENSOR_HANDLE_ATTENTION_V1 => tensor::tensor_handle_attention_v1(vm),
+        crate::tensor::TENSOR_HANDLE_FFN_V1 => tensor::tensor_handle_ffn_v1(vm),
 
         // phantom syscall
         PHANTOM_LOG_PC_CYCLE => Ok(phantom::log_pc_cycle(vm)),
@@ -87,6 +94,16 @@ pub struct SyscallWitness {
     pub reg_ops: Vec<WriteOp>,
     pub mem_future_access: Vec<u8>,
     pub reg_future_access: Vec<u8>,
+    /// TensorBus is an independent offline relation; these compact records are
+    /// deliberately not RAM accesses.
+    pub tensor_bus_records: Vec<crate::tensor::bus::TensorBusRecord>,
+    /// Canonical fixed-width ABI tuple for the proof-side TensorBus consumer.
+    /// It deliberately mirrors the custom record emitted by the constrained
+    /// ECALL chip: tag, syscall code, then twenty ABI fields.
+    pub tensor_bus_event: Option<[u32; 25]>,
+    /// Global cycle of `tensor_bus_event`.  Proof assignment normalizes this
+    /// into the owning shard's local cycle before consuming the event.
+    pub tensor_bus_event_cycle: Option<Cycle>,
 }
 
 impl SyscallWitness {
@@ -96,6 +113,9 @@ impl SyscallWitness {
             reg_future_access: vec![0; reg_ops.len()],
             mem_ops,
             reg_ops,
+            tensor_bus_records: Vec::new(),
+            tensor_bus_event: None,
+            tensor_bus_event_cycle: None,
         }
     }
 }

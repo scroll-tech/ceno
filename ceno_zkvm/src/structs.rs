@@ -114,6 +114,9 @@ pub enum CustomRWTag {
     ShardRamEcPoint = 1,
     /// Boundary state shared by the syscall-facing and arithmetic tensor chips.
     TensorState = 2,
+    /// Fixed-width TensorBus ABI event, consumed by the TensorBus offline
+    /// relation. This is deliberately distinct from arithmetic tensor state.
+    TensorBusEvent = 3,
 }
 
 impl CustomRWTag {
@@ -249,6 +252,13 @@ pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub params: ProgramParams,
 }
 
+/// A circuit built without mutating the registry.  Setup can construct these
+/// independently, then insert them in the existing deterministic order.
+pub struct OpcodeCircuitArtifact<E: ExtensionField, Config> {
+    config: Config,
+    cs: ComposedConstrainSystem<E>,
+}
+
 impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
     fn default() -> Self {
         ZKVMConstraintSystem {
@@ -267,7 +277,9 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         }
     }
 
-    pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
+    pub fn build_opcode_circuit<OC: Instruction<E>>(
+        &self,
+    ) -> OpcodeCircuitArtifact<E, OC::InstructionConfig> {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let (config, gkr_iop_circuit) =
@@ -276,6 +288,16 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             zkvm_v1_css: cs,
             gkr_circuit: Some(gkr_iop_circuit),
         };
+        OpcodeCircuitArtifact { config, cs }
+    }
+
+    /// Keep registration serial even when artifacts were constructed in
+    /// parallel: consumers derive circuit layout and IDs from this order.
+    pub fn register_opcode_circuit_artifact<OC: Instruction<E>>(
+        &mut self,
+        artifact: OpcodeCircuitArtifact<E, OC::InstructionConfig>,
+    ) -> OC::InstructionConfig {
+        let OpcodeCircuitArtifact { config, cs } = artifact;
         tracing::trace!(
             "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
             OC::name(),
@@ -290,6 +312,11 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             OC::name()
         );
         config
+    }
+
+    pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
+        let artifact = self.build_opcode_circuit::<OC>();
+        self.register_opcode_circuit_artifact::<OC>(artifact)
     }
 
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {

@@ -234,7 +234,11 @@ impl<E: ExtensionField> DummyConfig<E> {
         Ok(())
     }
 
-    pub(super) fn ts(&self) -> WitIn {
+    pub(crate) fn ts(&self) -> WitIn {
         self.vm_state.ts
+    }
+
+    pub(crate) fn rs1_value(&self) -> Option<UInt<E>> {
+        self.rs1.as_ref().map(|(_, value)| value.clone())
     }
 }

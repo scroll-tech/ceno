@@ -6,14 +6,33 @@ use crate::{
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
-    tensor::TensorWitnessProvider,
+    tensor::{
+        TensorWitnessProvider,
+        bus::{TensorBusMeta, TensorBusRecord, TensorBusSegment, TensorHandle},
+    },
     tracer::{Change, FullTracer, NativeTraceStep, PreflightTracer, Tracer},
 };
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, ensure};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
 
 pub struct HaltState {
     pub exit_code: u32,
+}
+
+#[cfg(feature = "tensor-cuda")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TensorBusResidentPhase {
+    Imported,
+    Attention,
+    Ffn,
+}
+
+#[cfg(feature = "tensor-cuda")]
+struct TensorBusResidentSession {
+    provider: crate::tensor::resident::TinyResidentCudaProvider,
+    witness: crate::tensor::resident::TinyResidentDeviceWitness,
+    handle: TensorHandle,
+    phase: TensorBusResidentPhase,
 }
 
 /// An implementation of the machine state and of the side-effects of operations.
@@ -31,6 +50,11 @@ pub struct VMState<T: Tracer = FullTracer> {
     halt_state: Option<HaltState>,
     committed_public_io: Option<[Word; 8]>,
     tensor_witness_provider: Option<Arc<dyn TensorWitnessProvider>>,
+    tensor_bus_segment: Option<TensorBusSegment>,
+    #[cfg(feature = "tensor-cuda")]
+    tensor_bus_resident: Option<TensorBusResidentSession>,
+    next_tensor_bus_segment_id: u64,
+    completed_tensor_bus_records: Vec<TensorBusRecord>,
     tracer: T,
 }
 
@@ -141,6 +165,11 @@ impl<T: Tracer> VMState<T> {
             ),
             registers: [0; VM_REG_COUNT],
             tensor_witness_provider: None,
+            tensor_bus_segment: None,
+            #[cfg(feature = "tensor-cuda")]
+            tensor_bus_resident: None,
+            next_tensor_bus_segment_id: 1,
+            completed_tensor_bus_records: Vec::new(),
             halt_state: None,
             committed_public_io: None,
             tracer: T::with_next_accesses(&platform, config, next_accesses),
@@ -185,6 +214,172 @@ impl<T: Tracer> VMState<T> {
 
     pub(crate) fn tensor_witness_provider(&self) -> Option<&dyn TensorWitnessProvider> {
         self.tensor_witness_provider.as_deref()
+    }
+
+    fn tensor_bus_begin(&mut self, segment_id: u64) -> Result<()> {
+        if self.tensor_bus_segment.is_some() {
+            return Err(anyhow!("TensorBus segment is already active"));
+        }
+        self.tensor_bus_segment = Some(TensorBusSegment::begin(segment_id)?);
+        Ok(())
+    }
+
+    pub(crate) fn tensor_bus_import_begin(
+        &mut self,
+        meta: TensorBusMeta,
+        words: Vec<i32>,
+    ) -> Result<(TensorHandle, Vec<TensorBusRecord>)> {
+        let segment_id = self.next_tensor_bus_segment_id;
+        self.next_tensor_bus_segment_id = self
+            .next_tensor_bus_segment_id
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("TensorBus segment id overflow"))?;
+        self.tensor_bus_begin(segment_id)?;
+        self.tensor_bus_import(meta, words)
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_bus_resident_import(
+        &mut self,
+        handle: TensorHandle,
+        words: &[i32],
+    ) -> Result<()> {
+        use crate::tensor::resident::{TINY_RESIDENT_WORDS, TinyResidentCudaProvider};
+
+        ensure!(
+            self.tensor_bus_resident.is_none(),
+            "TensorBus CUDA segment is already active"
+        );
+        let input: [i32; TINY_RESIDENT_WORDS] = words
+            .try_into()
+            .map_err(|_| anyhow!("TensorBus CUDA input length mismatch"))?;
+        let provider = TinyResidentCudaProvider::new(0)?;
+        let witness = provider.import(input)?;
+        self.tensor_bus_resident = Some(TensorBusResidentSession {
+            provider,
+            witness,
+            handle,
+            phase: TensorBusResidentPhase::Imported,
+        });
+        Ok(())
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_bus_resident_apply(
+        &mut self,
+        input: TensorHandle,
+        output: TensorHandle,
+        operator: u32,
+    ) -> Result<()> {
+        let session = self
+            .tensor_bus_resident
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus CUDA operator is outside a segment"))?;
+        ensure!(
+            session.handle == input,
+            "TensorBus CUDA handle continuity mismatch"
+        );
+        match (session.phase, operator) {
+            (TensorBusResidentPhase::Imported, crate::tensor::TENSOR_HANDLE_ATTENTION_V1) => {
+                session.provider.attention(&mut session.witness)?;
+                session.phase = TensorBusResidentPhase::Attention;
+            }
+            (TensorBusResidentPhase::Attention, crate::tensor::TENSOR_HANDLE_FFN_V1) => {
+                session.provider.ffn(&mut session.witness)?;
+                session.phase = TensorBusResidentPhase::Ffn;
+            }
+            _ => anyhow::bail!("TensorBus CUDA operator order mismatch"),
+        }
+        session.handle = output;
+        Ok(())
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_bus_resident_export(&mut self, handle: TensorHandle) -> Result<Vec<i32>> {
+        let mut session = self
+            .tensor_bus_resident
+            .take()
+            .ok_or_else(|| anyhow!("TensorBus CUDA export is outside a segment"))?;
+        ensure!(
+            session.handle == handle,
+            "TensorBus CUDA export handle mismatch"
+        );
+        ensure!(
+            session.phase == TensorBusResidentPhase::Ffn,
+            "TensorBus CUDA export before FFN"
+        );
+        Ok(session.provider.export(&mut session.witness)?.to_vec())
+    }
+
+    pub(crate) fn tensor_bus_import(
+        &mut self,
+        meta: TensorBusMeta,
+        words: Vec<i32>,
+    ) -> Result<(TensorHandle, Vec<TensorBusRecord>)> {
+        let segment = self
+            .tensor_bus_segment
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus import is outside a segment"))?;
+        let start = segment.records().len();
+        let handle = segment.import(meta, words)?;
+        Ok((handle, segment.records()[start..].to_vec()))
+    }
+
+    #[cfg(not(feature = "tensor-cuda"))]
+    pub(crate) fn tensor_bus_export_end(
+        &mut self,
+        handle: TensorHandle,
+    ) -> Result<(Vec<i32>, Vec<TensorBusRecord>)> {
+        let (words, records) = self.tensor_bus_export(handle)?;
+        self.tensor_bus_end()?;
+        Ok((words, records))
+    }
+
+    pub(crate) fn tensor_bus_export(
+        &mut self,
+        handle: TensorHandle,
+    ) -> Result<(Vec<i32>, Vec<TensorBusRecord>)> {
+        let segment = self
+            .tensor_bus_segment
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus export is outside a segment"))?;
+        let start = segment.records().len();
+        let words = segment.export(handle)?;
+        let records = segment.records()[start..].to_vec();
+        Ok((words, records))
+    }
+
+    pub(crate) fn tensor_bus_apply<F>(
+        &mut self,
+        input: TensorHandle,
+        meta: TensorBusMeta,
+        operator: u32,
+        transform: F,
+    ) -> Result<(TensorHandle, Vec<TensorBusRecord>)>
+    where
+        F: FnOnce(&[i32]) -> Result<Vec<i32>>,
+    {
+        let segment = self
+            .tensor_bus_segment
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus operator is outside a segment"))?;
+        let start = segment.records().len();
+        let handle = segment.apply(input, meta, operator, transform)?;
+        Ok((handle, segment.records()[start..].to_vec()))
+    }
+
+    pub(crate) fn tensor_bus_end(&mut self) -> Result<()> {
+        let segment = self
+            .tensor_bus_segment
+            .take()
+            .ok_or_else(|| anyhow!("TensorBus segment is not active"))?;
+        self.completed_tensor_bus_records.extend(segment.end()?);
+        #[cfg(feature = "tensor-cuda")]
+        ensure!(
+            self.tensor_bus_resident.is_none(),
+            "TensorBus CUDA segment was not exported"
+        );
+        Ok(())
     }
 
     pub fn tracer(&self) -> &T {

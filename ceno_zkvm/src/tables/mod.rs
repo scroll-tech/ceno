@@ -14,6 +14,11 @@ use witness::RowMajorMatrix;
 mod shard_ram;
 pub use shard_ram::*;
 
+#[cfg(feature = "llama-tiny")]
+mod tensor_bus;
+#[cfg(feature = "llama-tiny")]
+pub use tensor_bus::*;
+
 mod range;
 pub use range::*;
 

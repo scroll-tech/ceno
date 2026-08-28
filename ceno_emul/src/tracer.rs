@@ -811,7 +811,25 @@ pub struct ShardPlanBuilder {
     replay_fallback_count: usize,
     replay_unsupported_count: usize,
     replay_descriptors: Vec<crate::GpuReplayRangeDescriptor>,
+    /// Resident TensorBus work is admitted only after its closing boundary is
+    /// observed. This lets IMPORT_BEGIN reserve the complete fixed segment and
+    /// prevents a shard cut between its device-resident operations.
+    pending_tensor_segment: Option<PendingTensorSegment>,
     finalized: bool,
+}
+
+#[derive(Clone, Debug)]
+struct PendingTensorSegment {
+    start_cycle: Cycle,
+    steps: Vec<PendingTensorStep>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PendingTensorStep {
+    cycle: Cycle,
+    kind: InsnKind,
+    ecall_code: Option<Word>,
+    generic_cells: u64,
 }
 
 impl ShardPlanBuilder {
@@ -853,6 +871,7 @@ impl ShardPlanBuilder {
             replay_fallback_count: 0,
             replay_unsupported_count: 0,
             replay_descriptors: Vec::new(),
+            pending_tensor_segment: None,
             finalized: false,
         }
     }
@@ -975,6 +994,165 @@ impl ShardPlanBuilder {
             self.cur_tower_peak,
             self.cur_cells,
         ) = candidate;
+        self.cur_cycle_in_shard = self
+            .cur_cycle_in_shard
+            .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
+        self.cur_step_count = self.cur_step_count.saturating_add(1);
+        self.debug_assert_cost_invariant();
+    }
+
+    fn observe_tensor_segment_step(
+        &mut self,
+        step_cycle: Cycle,
+        kind: InsnKind,
+        ecall_code: Option<Word>,
+        generic_cells: u64,
+    ) {
+        let step = PendingTensorStep {
+            cycle: step_cycle,
+            kind,
+            ecall_code,
+            generic_cells,
+        };
+        let import_begin = ecall_code == Some(crate::tensor::TENSOR_IMPORT_BEGIN_V1);
+        let export_end = ecall_code == Some(crate::tensor::TENSOR_EXPORT_END_V1);
+        if import_begin {
+            assert!(
+                self.pending_tensor_segment.is_none(),
+                "nested TensorBus IMPORT_BEGIN in shard planner"
+            );
+            self.pending_tensor_segment = Some(PendingTensorSegment {
+                start_cycle: step_cycle,
+                steps: vec![step],
+            });
+            return;
+        }
+        if let Some(pending) = self.pending_tensor_segment.as_mut() {
+            pending.steps.push(step);
+            if export_end {
+                let pending = self
+                    .pending_tensor_segment
+                    .take()
+                    .expect("pending TensorBus segment");
+                self.admit_tensor_segment(pending);
+            }
+            return;
+        }
+        self.admit_regular_step(step);
+    }
+
+    fn admit_regular_step(&mut self, step: PendingTensorStep) {
+        if self.cost_model.is_some() {
+            self.observe_modeled_step(step.cycle, step.kind, step.ecall_code);
+        } else if let Some(code) = step.ecall_code {
+            self.observe_ecall_step(step.cycle, code, step.generic_cells);
+        } else {
+            self.observe_step(step.cycle, step.generic_cells);
+        }
+    }
+
+    fn tensor_segment_candidate(&self, steps: &[PendingTensorStep]) -> u64 {
+        if let Some(model) = &self.cost_model {
+            let mut counts = self.num_instances.clone();
+            for step in steps {
+                for &chip in model.chips_for_step(step.kind, step.ecall_code) {
+                    counts[chip as usize] = counts[chip as usize].saturating_add(1);
+                }
+            }
+            model.shard_cost(&counts)
+        } else {
+            let mut cells = self.cur_cells;
+            let mut counts = self.cur_ecall_counts.clone();
+            let mut peaks = self.cur_ecall_peak_cells.clone();
+            for step in steps {
+                if let Some(code) = step.ecall_code {
+                    let old_count = counts.get(&code).copied().unwrap_or_default();
+                    let old_peak = peaks.get(&code).copied().unwrap_or_default();
+                    let new_peak =
+                        ecall_peak_cells(step.generic_cells, old_count.saturating_add(1));
+                    cells = cells.saturating_add(new_peak.saturating_sub(old_peak));
+                    counts.insert(code, old_count.saturating_add(1));
+                    peaks.insert(code, new_peak);
+                } else {
+                    cells = cells.saturating_add(step.generic_cells);
+                }
+            }
+            cells
+        }
+    }
+
+    fn tensor_segment_would_exceed(&self, steps: &[PendingTensorStep]) -> bool {
+        self.candidate_would_exceed_shard_with_steps(
+            self.tensor_segment_candidate(steps),
+            steps.len(),
+        )
+    }
+
+    fn candidate_would_exceed_shard_with_steps(&self, candidate_cost: u64, steps: usize) -> bool {
+        let target = if self.shard_id == 0 {
+            self.target_cell_first_shard
+        } else {
+            self.max_cell_per_shard
+        };
+        candidate_cost > target
+            || self
+                .cur_cycle_in_shard
+                .saturating_add(FullTracer::SUBCYCLES_PER_INSN.saturating_mul(steps as Cycle))
+                >= self.max_cycle_per_shard
+    }
+
+    fn admit_tensor_segment(&mut self, pending: PendingTensorSegment) {
+        assert!(
+            pending
+                .steps
+                .last()
+                .is_some_and(|step| step.ecall_code == Some(crate::tensor::TENSOR_EXPORT_END_V1))
+        );
+        if self.cur_step_count > 0 && self.tensor_segment_would_exceed(&pending.steps) {
+            self.finish_current_shard(pending.start_cycle);
+        }
+        if self.tensor_segment_would_exceed(&pending.steps) {
+            panic!(
+                "TensorBus IMPORT_BEGIN..EXPORT_END modeled cost {} exceeds shard budget {}",
+                self.tensor_segment_candidate(&pending.steps),
+                if self.shard_id == 0 {
+                    self.target_cell_first_shard
+                } else {
+                    self.max_cell_per_shard
+                }
+            );
+        }
+        for step in pending.steps {
+            self.admit_tensor_step_without_split(step);
+        }
+    }
+
+    fn admit_tensor_step_without_split(&mut self, step: PendingTensorStep) {
+        if let Some(model) = &self.cost_model {
+            let chips = model
+                .chips_for_step(step.kind, step.ecall_code)
+                .iter()
+                .map(|&chip| chip as usize)
+                .collect::<SmallVec<[_; 2]>>();
+            let candidate = self.preview_modeled_chips(&chips);
+            self.record_replay_step(step.kind);
+            for chip in chips {
+                self.num_instances[chip] = self.num_instances[chip].saturating_add(1);
+            }
+            (
+                self.cur_trace_cells,
+                self.cur_main_peak,
+                self.cur_tower_peak,
+                self.cur_cells,
+            ) = candidate;
+        } else {
+            self.record_replay_step(step.kind);
+            if let Some(code) = step.ecall_code {
+                self.add_ecall_step(code, step.generic_cells);
+            } else {
+                self.cur_cells = self.cur_cells.saturating_add(step.generic_cells);
+            }
+        }
         self.cur_cycle_in_shard = self
             .cur_cycle_in_shard
             .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
@@ -1328,6 +1506,10 @@ impl ShardPlanBuilder {
         assert!(
             !self.finalized,
             "shard plan cannot be finalized multiple times"
+        );
+        assert!(
+            self.pending_tensor_segment.is_none(),
+            "unterminated TensorBus IMPORT_BEGIN in shard planner"
         );
         self.flush_replay_range();
         self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
@@ -2596,21 +2778,13 @@ impl PreflightTracer {
         let mut next_start = self.current_shard_start_cycle;
         if let Some(planner) = self.planner.as_mut() {
             let old_shard = planner.shard_id;
-            if planner.cost_model.is_some() {
-                planner.observe_modeled_step(self.cycle, self.last_kind, ecall_code);
-            } else {
-                let step_cells = self
-                    .config
-                    .step_cell_extractor
-                    .as_ref()
-                    .map(|extractor| extractor.cells_for_kind(self.last_kind, ecall_code))
-                    .unwrap_or(0);
-                if let Some(ecall_code) = ecall_code {
-                    planner.observe_ecall_step(self.cycle, ecall_code, step_cells);
-                } else {
-                    planner.observe_step(self.cycle, step_cells);
-                }
-            }
+            let step_cells = self
+                .config
+                .step_cell_extractor
+                .as_ref()
+                .map(|extractor| extractor.cells_for_kind(self.last_kind, ecall_code))
+                .unwrap_or(0);
+            planner.observe_tensor_segment_step(self.cycle, self.last_kind, ecall_code, step_cells);
             split = planner.shard_id != old_shard;
             next_start = planner.current_shard_start_cycle();
         }
@@ -2837,6 +3011,10 @@ impl PreflightTracer {
     pub(crate) fn record_native_shard_split(&mut self) {
         self.capture_shard_preview(self.cycle);
         let planner = self.planner.as_mut().expect("shard planner missing");
+        assert!(
+            planner.pending_tensor_segment.is_none(),
+            "AOT shard planner attempted to cut inside TensorBus IMPORT_BEGIN..EXPORT_END"
+        );
         let next_shard_cycle = self.cycle;
         planner.flush_replay_range();
         planner.record_predicted_shard_cost();
@@ -3430,6 +3608,28 @@ mod tests {
         generic_planner.observe_modeled_step(4, InsnKind::ECALL, Some(7));
         assert_eq!(generic_planner.current_shard_id(), 0);
         assert_eq!(generic_planner.cur_cells(), 2);
+    }
+
+    #[test]
+    fn tensor_bus_sections_are_reserved_before_import_and_only_cut_after_export() {
+        let mut planner = ShardPlanBuilder::new(4, Cycle::MAX);
+        planner.observe_tensor_segment_step(4, InsnKind::ADD, None, 1);
+        for (cycle, code) in [
+            (8, crate::tensor::TENSOR_IMPORT_BEGIN_V1),
+            (12, crate::tensor::TENSOR_HANDLE_ATTENTION_V1),
+            (16, crate::tensor::TENSOR_HANDLE_FFN_V1),
+            (20, crate::tensor::TENSOR_EXPORT_END_V1),
+            (24, crate::tensor::TENSOR_IMPORT_BEGIN_V1),
+            (28, crate::tensor::TENSOR_HANDLE_ATTENTION_V1),
+            (32, crate::tensor::TENSOR_HANDLE_FFN_V1),
+            (36, crate::tensor::TENSOR_EXPORT_END_V1),
+        ] {
+            planner.observe_tensor_segment_step(cycle, InsnKind::ECALL, Some(code), 1);
+        }
+        assert_eq!(planner.current_shard_id(), 2);
+        assert_eq!(planner.shard_cycle_boundaries(), &[4, 8, 24]);
+        assert_eq!(planner.cur_step_count(), 4);
+        assert_eq!(planner.cur_cells(), 4);
     }
 
     #[derive(Debug)]

@@ -9,6 +9,7 @@ mod sha_extend;
 mod tensor;
 mod tensor_attention;
 mod tensor_block;
+mod tensor_bus;
 mod tensor_production;
 mod tensor_rms;
 mod uint256;
@@ -30,6 +31,10 @@ pub use tensor_attention::{
 pub use tensor_block::{
     TensorAttentionBlockReducedCoreInstruction, TensorAttentionBlockReducedEcallInstruction,
     TensorFfnBlockReducedCoreInstruction, TensorFfnBlockReducedEcallInstruction,
+};
+pub use tensor_bus::{
+    TensorBusExportEndEcallInstruction, TensorBusHandleAttentionEcallInstruction,
+    TensorBusHandleFfnEcallInstruction, TensorBusImportBeginEcallInstruction,
 };
 pub use tensor_production::{
     TensorMatMulGate5SmallHiddenEcallInstruction, TensorMatMulGate5SmallHiddenFinalizeInstruction,

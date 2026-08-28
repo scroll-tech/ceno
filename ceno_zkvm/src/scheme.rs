@@ -110,7 +110,7 @@ impl PublicValues {
     pub fn iter_field<'a, Base: PrimeCharacteristicRing + 'a>(
         &'a self,
     ) -> impl Iterator<Item = Base> + 'a {
-        [
+        let fields = [
             Base::from_u32(self.exit_code & 0xffff),
             Base::from_u32((self.exit_code >> 16) & 0xffff),
             Base::from_u32(self.init_pc),
@@ -122,15 +122,17 @@ impl PublicValues {
             Base::from_u32(self.heap_shard_len),
             Base::from_u32(self.hint_start_addr),
             Base::from_u32(self.hint_shard_len),
-        ]
-        .into_iter()
-        .chain(self.shard_rw_sum.iter().map(|value| Base::from_u32(*value)))
-        .chain(self.public_io_digest.iter().flat_map(|word| {
-            [
-                Base::from_u32(word & 0xffff),
-                Base::from_u32((word >> 16) & 0xffff),
-            ]
-        }))
+        ];
+        let fields = fields
+            .into_iter()
+            .chain(self.shard_rw_sum.iter().map(|value| Base::from_u32(*value)))
+            .chain(self.public_io_digest.iter().flat_map(|word| {
+                [
+                    Base::from_u32(word & 0xffff),
+                    Base::from_u32((word >> 16) & 0xffff),
+                ]
+            }));
+        fields
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -16,3 +16,6 @@ getrandom = { version = "0.2.15", features = ["custom"], default-features = fals
 getrandom_v3 = { package = "getrandom", version = "0.3", default-features = false }
 serde.workspace = true
 tiny-keccak.workspace = true
+
+[features]
+llama-tiny = []

@@ -4,7 +4,7 @@ mod dummy_circuit;
 pub use dummy_circuit::DummyConfig;
 
 mod dummy_ecall;
-pub use dummy_ecall::LargeEcallDummy;
+pub use dummy_ecall::{LargeEcallConfig, LargeEcallDummy};
 
 #[cfg(test)]
 mod test;

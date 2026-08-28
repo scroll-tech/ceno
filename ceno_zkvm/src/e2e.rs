@@ -2610,6 +2610,15 @@ pub fn generate_witness<'a, E: ExtensionField>(
             pi.hint_shard_len = (shard_ctx.shard_hint_addr_range.end
                 - shard_ctx.shard_hint_addr_range.start)
                 / (WORD_SIZE as u32);
+            #[cfg(feature = "llama-tiny")]
+            {
+                let events = crate::tables::events_from_syscalls(
+                    shard_ctx.syscall_witnesses.as_ref(),
+                    &shard_ctx,
+                );
+                crate::tables::verify_atomic_tensor_bus_shard_for_preflight(&events)
+                    .expect("TensorBus shard plan split or malformed a resident section");
+            }
 
 
             if let Some(target_shard_id) = target_shard_id {
@@ -4525,8 +4534,70 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Legacy Gate-5 whole-registry trim harness; do not use for PCS diagnosis"]
-    fn gate5_tensor_guest_trim_ladder() {
+    #[cfg(feature = "llama-tiny")]
+    #[ignore = "TensorBus handle ABI proof E2E; run explicitly"]
+    fn tensor_bus_handle_v1_proves_and_verifies() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, ZKVMProver, prepare_fulltracer_aot_program,
+                prepare_preflight_aot_program, run_e2e_full_trace_verify, run_e2e_proof,
+                setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+
+        let program = ceno_emul::Program::load_elf(ceno_examples::tensor_bus_handle_v1, u32::MAX)
+            .expect("load TensorBus handle guest");
+        let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        {
+            let init_mem = ctx.setup_init_mem(&[]);
+            let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+            let step_cell_extractor: Arc<dyn ceno_emul::StepCellExtractor> =
+                raw_step_cell_extractor;
+            let preflight_aot = prepare_preflight_aot_program(
+                Arc::clone(&ctx.program),
+                &ctx.platform,
+                &ctx.multi_prover,
+                step_cell_extractor,
+                &init_mem,
+            );
+            ctx.fulltracer_aot_program =
+                Some(prepare_fulltracer_aot_program(preflight_aot.as_ref()));
+            ctx.preflight_aot_program = Some(preflight_aot);
+        }
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+        let tensor_bus_index = vk
+            .circuit_index_to_name
+            .iter()
+            .find_map(|(index, name)| (name == "TensorBusCircuit").then_some(*index))
+            .expect("TensorBusCircuit is registered under llama-tiny");
+        assert!(
+            proofs
+                .iter()
+                .any(|proof| proof.chip_proofs.contains_key(&tensor_bus_index)),
+            "resident TensorBus E2E must contain the proof-bound Core relation"
+        );
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+    }
+
+    #[test]
+    #[cfg(feature = "llama-tiny")]
+    #[ignore = "Llama-tiny topology proof E2E; run explicitly"]
+    fn llama_tiny_topology_e2e() {
         use crate::{
             e2e::{
                 KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver, emulate_program,
@@ -4551,125 +4622,24 @@ mod tests {
             .with_test_writer()
             .try_init();
 
-        let selector =
-            std::env::var("CENO_TENSOR_TRIM_GUEST").unwrap_or_else(|_| "zero".to_owned());
-        let (guest, expected_ecalls, provider): (&[u8], usize, Arc<dyn TensorWitnessProvider>) =
-            match selector.as_str() {
-                "zero" => (
-                    ceno_examples::ceno_rt_mini,
-                    0usize,
-                    // The non-tensor control never reads this provider, but
-                    // `DeterministicTileProvider` intentionally rejects an
-                    // empty committed tile set. Keep one inert tile so the
-                    // same full GPU E2E harness can exercise no-tensor PCS.
-                    Arc::new(
-                        DeterministicTileProvider::new(73, vec![encode_i32_le(&[0])]).unwrap(),
-                    ),
-                ),
-                "matmul" => (
-                    ceno_examples::tensor_matmul_v1,
-                    1,
-                    Arc::new(
-                        DeterministicTileProvider::new(
-                            41,
-                            vec![encode_i32_le(&[65_536, 0, 0, 65_536, 65_536, 65_536])],
-                        )
-                        .unwrap(),
-                    ),
-                ),
-                "rms" => (
-                    ceno_examples::tensor_rms_lookup_v1,
-                    1,
-                    Arc::new(
-                        DeterministicTileProvider::new(73, vec![encode_i32_le(&[0])]).unwrap(),
-                    ),
-                ),
-                "attention_reduced" => (
-                    ceno_examples::tensor_attention_reduced_v1,
-                    1,
-                    Arc::new(
-                        DeterministicTileProvider::new(73, vec![encode_i32_le(&[0])]).unwrap(),
-                    ),
-                ),
-                "hidden" => {
-                    let (_, _, provider) =
-                        ceno_emul::tensor::production::sparse_production_dot_fixture(
-                            ceno_emul::tensor::production::ProductionMatMulSignature::HiddenK4096,
-                            81,
-                            23,
-                        )
-                        .expect("build K4096 hidden fixture");
-                    (
-                        ceno_examples::tensor_matmul_hidden_v1,
-                        1,
-                        Arc::new(provider),
-                    )
-                }
-                "small_hidden" => {
-                    let (_, _, provider) =
-                        ceno_emul::tensor::production::sparse_production_dot_fixture(
-                            ceno_emul::tensor::production::ProductionMatMulSignature::Gate5SmallHiddenK64,
-                            81,
-                            23,
-                        )
-                        .expect("build K64 small hidden fixture");
-                    (
-                        ceno_examples::tensor_matmul_gate5_small_hidden_v1,
-                        1,
-                        Arc::new(provider),
-                    )
-                }
-                "attention" => (
-                    ceno_examples::llama_attention_fused_reduced_v1,
-                    1,
-                    Arc::new(
-                        DeterministicTileProvider::new(
-                            73,
-                            (0..7)
-                                .map(|_| encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]))
-                                .collect(),
-                        )
-                        .unwrap(),
-                    ),
-                ),
-                "pair" => (
-                    ceno_examples::llama_layer_fused_reduced_v1,
-                    2,
-                    Arc::new(
-                        DeterministicTileProvider::new(
-                            73,
-                            (0..7)
-                                .map(|_| encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]))
-                                .collect(),
-                        )
-                        .unwrap(),
-                    ),
-                ),
-                "topology32" => (
-                    ceno_examples::llama_10m_topology_v1,
-                    64,
-                    Arc::new(
-                        DeterministicTileProvider::new(
-                            73,
-                            (0..7)
-                                .map(|_| encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]))
-                                .collect(),
-                        )
-                        .unwrap(),
-                    ),
-                ),
-                other => panic!(
-                    "unknown CENO_TENSOR_TRIM_GUEST={other:?}; expected zero, matmul, rms, attention_reduced, small_hidden, hidden, attention, pair, or topology32"
-                ),
-            };
+        let guest = ceno_examples::llama_10m_topology_v1;
+        let expected_ecalls = 64;
+        let provider: Arc<dyn TensorWitnessProvider> = Arc::new(
+            DeterministicTileProvider::new(
+                73,
+                (0..7)
+                    .map(|_| encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]))
+                    .collect(),
+            )
+            .unwrap(),
+        );
         tracing::info!(
-            guest = %selector,
+            guest = "llama_10m_topology_v1",
             expected_ecalls,
-            "Gate-5 tensor guest trim candidate"
+            "Llama-tiny tensor guest"
         );
 
-        let program =
-            ceno_emul::Program::load_elf(guest, u32::MAX).expect("load cargo-ceno trim guest");
+        let program = ceno_emul::Program::load_elf(guest, u32::MAX).expect("load Llama-tiny guest");
         let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
         let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
         ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
@@ -4750,12 +4720,12 @@ mod tests {
         let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
         let provider_metrics = provider.metrics();
         tracing::info!(
-            guest = %selector,
+            guest = "llama_10m_topology_v1",
             elapsed_ms = start.elapsed().as_millis(),
             provider_reads = provider_metrics.read_calls,
             provider_h2d_bytes = provider_metrics.h2d_bytes,
             provider_d2h_bytes = provider_metrics.d2h_bytes,
-            "Gate-5 tensor guest trim completed"
+            "Llama-tiny tensor guest completed"
         );
         run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
     }

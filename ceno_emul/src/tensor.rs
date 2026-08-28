@@ -8,16 +8,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{Result, anyhow, bail, ensure};
 use tiny_keccak::{Hasher, Keccak};
 
+pub mod bus;
 pub mod llama;
 pub mod planner;
 pub mod production;
+#[cfg(feature = "tensor-cuda")]
+pub mod resident;
 
 pub use ceno_rt::tensor::{
     TENSOR_ABI_V1, TENSOR_ATTENTION_BLOCK_REDUCED_V1, TENSOR_ATTENTION_REDUCED_V1,
-    TENSOR_FFN_BLOCK_REDUCED_V1, TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1, TENSOR_MATMUL_HIDDEN_V1,
-    TENSOR_MATMUL_INTERMEDIATE_V1, TENSOR_MATMUL_V1, TENSOR_RMS_LOOKUP_V1,
-    TensorAttentionReducedDescV1, TensorBlockReducedDescV1, TensorMatMulDescV1,
-    TensorProductionMatMulDescV1, TensorRmsLookupDescV1,
+    TENSOR_EXPORT_END_V1, TENSOR_FFN_BLOCK_REDUCED_V1, TENSOR_HANDLE_ATTENTION_V1,
+    TENSOR_HANDLE_FFN_V1, TENSOR_IMPORT_BEGIN_V1, TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1,
+    TENSOR_MATMUL_HIDDEN_V1, TENSOR_MATMUL_INTERMEDIATE_V1, TENSOR_MATMUL_V1, TENSOR_RMS_LOOKUP_V1,
+    TensorAttentionReducedDescV1, TensorBlockReducedDescV1, TensorHandleOpDescV1,
+    TensorMatMulDescV1, TensorProductionMatMulDescV1, TensorRmsLookupDescV1,
 };
 
 pub const ZKLLM_FIXED_V1: u32 = 1;

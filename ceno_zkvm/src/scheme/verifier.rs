@@ -580,6 +580,38 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         // check num proofs
         let num_proofs = vm_proof.chip_proofs.len();
+        #[cfg(feature = "llama-tiny")]
+        {
+            let circuit_index = |name: &str| {
+                self.vk
+                    .circuit_index_to_name
+                    .iter()
+                    .find_map(|(index, circuit_name)| (circuit_name == name).then_some(*index))
+            };
+            let core_present = circuit_index("TensorBusCircuit")
+                .is_some_and(|index| vm_proof.chip_proofs.contains_key(&index));
+            let producer_names = [
+                "TensorBusTENSOR_IMPORT_BEGIN_V1Ecall",
+                "TensorBusTENSOR_HANDLE_ATTENTION_V1Ecall",
+                "TensorBusTENSOR_HANDLE_FFN_V1Ecall",
+                "TensorBusTENSOR_EXPORT_END_V1Ecall",
+            ];
+            let producer_present = producer_names.map(|name| {
+                circuit_index(name).is_some_and(|index| vm_proof.chip_proofs.contains_key(&index))
+            });
+            if producer_present.iter().any(|present| *present)
+                && (!core_present || producer_present.iter().any(|present| !present))
+            {
+                return Err(ZKVMError::InvalidProof(
+                    "TensorBus producer proofs require one complete TensorBus Core relation".into(),
+                ));
+            }
+            if core_present && producer_present.iter().any(|present| !present) {
+                return Err(ZKVMError::InvalidProof(
+                    "TensorBus Core proof requires all four TensorBus producer proofs".into(),
+                ));
+            }
+        }
         for index in vm_proof.chip_proofs.keys() {
             let circuit_name = self.vk.circuit_index_to_name.get(index).ok_or_else(|| {
                 ZKVMError::VKNotFound(

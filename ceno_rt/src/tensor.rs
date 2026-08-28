@@ -15,7 +15,132 @@ pub const TENSOR_MATMUL_INTERMEDIATE_V1: u32 = 0x00ff_0007;
 /// raw-ecall -> ordered tile -> finalize shape as hidden MatMul, but a small
 /// K so GPU PCS iterations stay interactive.  It is not a stable ABI.
 pub const TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1: u32 = 0x00ff_0008;
+/// Reserved legacy lifecycle opcodes.  Resident handles deliberately do not
+/// use separate begin/end calls: IMPORT_BEGIN and EXPORT_END are the bounds.
+pub const TENSOR_IMPORT_BEGIN_V1: u32 = 0x00ff_000b;
+pub const TENSOR_EXPORT_END_V1: u32 = 0x00ff_000c;
+/// Tiny-only opaque-handle attention and FFN transitions.  These are distinct
+/// from the pointer ABI: all activation bytes remain in TensorBus.
+pub const TENSOR_HANDLE_ATTENTION_V1: u32 = 0x00ff_000d;
+pub const TENSOR_HANDLE_FFN_V1: u32 = 0x00ff_000e;
 pub const TENSOR_ABI_V1: u32 = 1;
+
+/// Opaque TensorBus value identity. Device pointers never enter the guest ABI.
+#[repr(C, align(8))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct TensorHandleV1 {
+    pub tensor_id: u64,
+    pub version: u32,
+    pub reserved: u32,
+}
+
+const _: () = assert!(core::mem::size_of::<TensorHandleV1>() == 16);
+
+/// Explicit RAM-to-TensorBus boundary and resident-segment open. `meta_ptr`
+/// identifies caller-owned shape/quantization metadata; TensorBus validates it
+/// independently of RAM.
+#[repr(C, align(32))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TensorImportBeginDescV1 {
+    pub abi_version: u32,
+    pub flags: u32,
+    pub input_ptr: u32,
+    pub input_len: u32,
+    pub meta_ptr: u32,
+    pub meta_len: u32,
+    pub output_handle_ptr: u32,
+    pub reserved: u32,
+}
+
+/// Explicit TensorBus-to-RAM boundary and resident-segment close.
+#[repr(C, align(32))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TensorExportEndDescV1 {
+    pub abi_version: u32,
+    pub flags: u32,
+    pub input_handle_ptr: u32,
+    pub output_ptr: u32,
+    pub output_len: u32,
+    pub meta_ptr: u32,
+    pub meta_len: u32,
+    pub reserved: u32,
+}
+
+/// Fixed-width handle-to-handle operator descriptor.  The metadata is carried
+/// explicitly so the constrained event binds the output shape/quantization.
+#[repr(C, align(32))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TensorHandleOpDescV1 {
+    pub abi_version: u32,
+    pub flags: u32,
+    pub input_handle_ptr: u32,
+    pub output_handle_ptr: u32,
+    pub meta_ptr: u32,
+    pub meta_len: u32,
+    pub reserved: [u32; 2],
+}
+
+const _: () = assert!(core::mem::size_of::<TensorHandleOpDescV1>() == 32);
+
+const _: () = assert!(core::mem::size_of::<TensorImportBeginDescV1>() == 32);
+const _: () = assert!(core::mem::size_of::<TensorExportEndDescV1>() == 32);
+
+#[inline(always)]
+unsafe fn tensor_segment_ecall_v1(desc: *const u8, ecall: u32) {
+    #[cfg(target_arch = "riscv32")]
+    unsafe {
+        core::arch::asm!("ecall", in("a0") desc as u32, in("t0") ecall);
+    }
+    #[cfg(not(target_arch = "riscv32"))]
+    {
+        let _ = (desc, ecall);
+        panic!("TensorBus operations are only available in an RV32 guest");
+    }
+}
+
+/// Import guest RAM into TensorBus, open the resident segment, and write an
+/// opaque handle at `output_handle_ptr`.
+#[inline(always)]
+pub unsafe fn tensor_import_begin_v1(desc: &TensorImportBeginDescV1) {
+    unsafe {
+        tensor_segment_ecall_v1(
+            desc as *const TensorImportBeginDescV1 as *const u8,
+            TENSOR_IMPORT_BEGIN_V1,
+        )
+    }
+}
+
+/// Materialize a TensorBus handle into guest RAM and close its resident
+/// segment.
+#[inline(always)]
+pub unsafe fn tensor_export_end_v1(desc: &TensorExportEndDescV1) {
+    unsafe {
+        tensor_segment_ecall_v1(
+            desc as *const TensorExportEndDescV1 as *const u8,
+            TENSOR_EXPORT_END_V1,
+        )
+    }
+}
+
+#[inline(always)]
+pub unsafe fn tensor_handle_attention_v1(desc: &TensorHandleOpDescV1) {
+    unsafe {
+        tensor_segment_ecall_v1(
+            desc as *const TensorHandleOpDescV1 as *const u8,
+            TENSOR_HANDLE_ATTENTION_V1,
+        )
+    }
+}
+
+#[inline(always)]
+pub unsafe fn tensor_handle_ffn_v1(desc: &TensorHandleOpDescV1) {
+    unsafe {
+        tensor_segment_ecall_v1(
+            desc as *const TensorHandleOpDescV1 as *const u8,
+            TENSOR_HANDLE_FFN_V1,
+        )
+    }
+}
 
 /// Statically-shaped matrix multiplication descriptor.
 ///

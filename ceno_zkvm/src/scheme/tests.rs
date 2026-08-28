@@ -76,10 +76,9 @@ fn test_public_values_iter_field_matches_query_order() {
         .map(|i| public_values.query_by_index::<E>(i))
         .collect_vec();
 
-    assert_eq!(
-        PublicValues::flattened_len(),
-        11 + SEPTIC_EXTENSION_DEGREE * 2 + 16
-    );
+    let expected_len =
+        11 + SEPTIC_EXTENSION_DEGREE * 2 + 16 + if cfg!(feature = "llama-tiny") { 8 } else { 0 };
+    assert_eq!(PublicValues::flattened_len(), expected_len);
     assert_eq!(from_iter, from_query);
 }
 

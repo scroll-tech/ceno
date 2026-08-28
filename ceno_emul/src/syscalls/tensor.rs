@@ -3,7 +3,7 @@
 use anyhow::{Result, ensure};
 
 use crate::{
-    Change, EmuContext, Platform, Tracer, VMState, WriteOp,
+    ByteAddr, Change, EmuContext, Platform, Tracer, VMState, WriteOp,
     tensor::{TENSOR_ABI_V1, TensorMatMulDescV1, ZKLLM_FIXED_V1, execute_committed_matmul},
     utils::MemoryView,
 };
@@ -17,6 +17,324 @@ pub const TENSOR_ROOT_WORDS: usize = 8;
 pub const TENSOR_SIGNATURE_2X3X2: u32 = 7;
 pub const TENSOR_RESCALE_SHIFT: u32 = 16;
 
+const TENSOR_TRANSFER_DESC_WORDS: usize = 8;
+const TENSOR_META_WORDS: usize = 4;
+const TENSOR_HANDLE_WORDS: usize = 4;
+
+fn tensor_bus_event(code: u32, fields: impl IntoIterator<Item = u32>) -> [u32; 25] {
+    let mut event = [0; 25];
+    event[0] = 3; // CustomRWTag::TensorBusEvent
+    event[1] = code;
+    for (slot, word) in event[2..].iter_mut().zip(fields) {
+        *slot = word;
+    }
+    event
+}
+
+/// The reduced Llama topology carries one `[sequence=2, hidden=4]` activation
+/// between its attention and FFN blocks. The default profile reserves one
+/// Llama-2-7B hidden activation (4096 i32 words). The handle ABI has a
+/// feature-selected fixed width so its import/export RAM effects can be
+/// represented by fixed-size ECALL AIR traces.
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_BUS_FIXED_TRANSFER_WORDS: u32 = 4;
+#[cfg(not(feature = "llama-tiny"))]
+pub const TENSOR_BUS_FIXED_TRANSFER_WORDS: u32 = 4096;
+
+fn require_fixed_tensor_bus_words(words: u32) -> Result<()> {
+    ensure!(
+        words == TENSOR_BUS_FIXED_TRANSFER_WORDS,
+        "TensorBus transfer length must be {TENSOR_BUS_FIXED_TRANSFER_WORDS} words for the selected profile"
+    );
+    Ok(())
+}
+
+fn tensor_bus_reg_ops(desc_ptr: u32) -> Vec<WriteOp> {
+    vec![WriteOp::new_register_op(
+        Platform::reg_arg0(),
+        Change::new(desc_ptr, desc_ptr),
+        0,
+    )]
+}
+
+fn tensor_bus_meta(words: [u32; TENSOR_META_WORDS]) -> Result<crate::tensor::bus::TensorBusMeta> {
+    ensure!(words[3] == 0, "TensorBus metadata reserved word is nonzero");
+    ensure!(words[1] != 0, "TensorBus shape is empty");
+    Ok(crate::tensor::bus::TensorBusMeta {
+        byte_len: words[0] as usize,
+        shape: vec![words[1]],
+        quantization_id: words[2],
+    })
+}
+
+fn tensor_bus_handle(
+    words: [u32; TENSOR_HANDLE_WORDS],
+) -> Result<crate::tensor::bus::TensorHandle> {
+    ensure!(words[3] == 0, "TensorBus handle reserved word is nonzero");
+    Ok(crate::tensor::bus::TensorHandle {
+        tensor_id: u64::from(words[0]) | (u64::from(words[1]) << 32),
+        version: words[2],
+    })
+}
+
+fn tensor_bus_words<T: Tracer>(
+    vm: &VMState<T>,
+    ptr: u32,
+    words: usize,
+) -> Result<(Vec<u32>, Vec<WriteOp>)> {
+    ensure!(
+        ptr.is_multiple_of(4),
+        "TensorBus pointer is not word aligned"
+    );
+    let start = ByteAddr(ptr).waddr();
+    Ok((0..words)
+        .map(|index| {
+            let addr = start + index;
+            let value = vm.peek_memory(addr);
+            (
+                value,
+                WriteOp {
+                    addr,
+                    value: Change::new(value, value),
+                    previous_cycle: 0,
+                },
+            )
+        })
+        .unzip())
+}
+
+pub fn tensor_import_begin_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
+    let desc_ptr = vm.peek_register(Platform::reg_arg0());
+    let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
+    let words = desc.words();
+    let desc_ops = desc.mem_ops();
+    ensure!(
+        words[0] == TENSOR_ABI_V1 && words[1] == 0 && words[7] == 0,
+        "invalid TensorBus import descriptor"
+    );
+    ensure!(
+        words[5] == TENSOR_META_WORDS as u32,
+        "unsupported TensorBus metadata length"
+    );
+    let meta_view = MemoryView::<_, TENSOR_META_WORDS>::new(vm, words[4]);
+    let meta_words = meta_view.words();
+    let meta = tensor_bus_meta(meta_words)?;
+    let meta_ops = meta_view.mem_ops();
+    ensure!(
+        meta.byte_len == words[3] as usize * 4,
+        "TensorBus import length mismatch"
+    );
+    require_fixed_tensor_bus_words(words[3])?;
+    let (input, input_ops) = tensor_bus_words(vm, words[2], words[3] as usize)?;
+    let input = input
+        .into_iter()
+        .map(|word| word as i32)
+        .collect::<Vec<_>>();
+    let (handle, records) = vm.tensor_bus_import_begin(meta, input.clone())?;
+    #[cfg(feature = "tensor-cuda")]
+    vm.tensor_bus_resident_import(handle, &input)?;
+    let mut handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[6]);
+    handle_view.write([
+        handle.tensor_id as u32,
+        (handle.tensor_id >> 32) as u32,
+        handle.version,
+        0,
+    ]);
+    let mut witness = SyscallWitness::new(
+        desc_ops
+            .into_iter()
+            .chain(meta_ops)
+            .chain(input_ops)
+            .chain(handle_view.mem_ops())
+            .collect(),
+        tensor_bus_reg_ops(desc_ptr),
+    );
+    witness.tensor_bus_records = records;
+    witness.tensor_bus_event = Some(tensor_bus_event(
+        TensorImportBeginV1Spec::CODE,
+        words
+            .into_iter()
+            .chain(meta_words)
+            .chain([
+                handle.tensor_id as u32,
+                (handle.tensor_id >> 32) as u32,
+                handle.version,
+                0,
+            ])
+            .chain(std::iter::repeat_n(0, 4)),
+    ));
+    witness.tensor_bus_event_cycle = Some(vm.tracer().cycle());
+    Ok(SyscallEffects {
+        witness,
+        next_pc: None,
+    })
+}
+
+pub fn tensor_export_end_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
+    let desc_ptr = vm.peek_register(Platform::reg_arg0());
+    let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
+    let words = desc.words();
+    let desc_ops = desc.mem_ops();
+    ensure!(
+        words[0] == TENSOR_ABI_V1 && words[1] == 0 && words[7] == 0,
+        "invalid TensorBus export descriptor"
+    );
+    ensure!(
+        words[6] == TENSOR_META_WORDS as u32,
+        "unsupported TensorBus metadata length"
+    );
+    let handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[2]);
+    let handle = tensor_bus_handle(handle_view.words())?;
+    let handle_ops = handle_view.mem_ops();
+    let meta_view = MemoryView::<_, TENSOR_META_WORDS>::new(vm, words[5]);
+    let meta_words = meta_view.words();
+    let meta = tensor_bus_meta(meta_words)?;
+    let meta_ops = meta_view.mem_ops();
+    #[cfg(not(feature = "tensor-cuda"))]
+    let (output, records) = vm.tensor_bus_export_end(handle)?;
+    #[cfg(feature = "tensor-cuda")]
+    let (output, records) = {
+        let (output, records) = vm.tensor_bus_export(handle)?;
+        let resident_output = vm.tensor_bus_resident_export(handle)?;
+        ensure!(
+            resident_output == output,
+            "TensorBus CUDA output disagrees with CPU relation"
+        );
+        vm.tensor_bus_end()?;
+        (output, records)
+    };
+    ensure!(
+        meta.byte_len == output.len() * 4 && words[4] as usize == output.len(),
+        "TensorBus export length mismatch"
+    );
+    require_fixed_tensor_bus_words(words[4])?;
+    let (before, mut output_ops) = tensor_bus_words(vm, words[3], output.len())?;
+    for (op, value) in output_ops.iter_mut().zip(output) {
+        op.value.after = value as u32;
+    }
+    let _ = before;
+    let mut witness = SyscallWitness::new(
+        desc_ops
+            .into_iter()
+            .chain(handle_ops)
+            .chain(meta_ops)
+            .chain(output_ops)
+            .collect(),
+        tensor_bus_reg_ops(desc_ptr),
+    );
+    witness.tensor_bus_records = records;
+    witness.tensor_bus_event = Some(tensor_bus_event(
+        TensorExportEndV1Spec::CODE,
+        words
+            .into_iter()
+            .chain(meta_words)
+            .chain([
+                handle.tensor_id as u32,
+                (handle.tensor_id >> 32) as u32,
+                handle.version,
+                0,
+            ])
+            .chain(std::iter::repeat_n(0, 4)),
+    ));
+    witness.tensor_bus_event_cycle = Some(vm.tracer().cycle());
+    Ok(SyscallEffects {
+        witness,
+        next_pc: None,
+    })
+}
+
+fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<SyscallEffects> {
+    let desc_ptr = vm.peek_register(Platform::reg_arg0());
+    let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
+    let words = desc.words();
+    let desc_ops = desc.mem_ops();
+    ensure!(
+        words[0] == TENSOR_ABI_V1
+            && words[1] == 0
+            && words[5] == TENSOR_META_WORDS as u32
+            && words[6] == 0
+            && words[7] == 0,
+        "invalid TensorBus handle operator descriptor"
+    );
+    let input_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[2]);
+    let input_words = input_view.words();
+    let input = tensor_bus_handle(input_words)?;
+    let input_ops = input_view.mem_ops();
+    let meta_view = MemoryView::<_, TENSOR_META_WORDS>::new(vm, words[4]);
+    let meta_words = meta_view.words();
+    let meta = tensor_bus_meta(meta_words)?;
+    let meta_ops = meta_view.mem_ops();
+    ensure!(
+        meta.byte_len == TENSOR_BUS_FIXED_TRANSFER_WORDS as usize * 4,
+        "TensorBus operator metadata length mismatch"
+    );
+    let transform = move |input: &[i32]| -> Result<Vec<i32>> {
+        ensure!(
+            input.len() == TENSOR_BUS_FIXED_TRANSFER_WORDS as usize,
+            "TensorBus operator input length mismatch"
+        );
+        Ok(match code {
+            crate::tensor::TENSOR_HANDLE_ATTENTION_V1 => vec![
+                input[0],
+                input[1],
+                input[2].wrapping_add(input[0]),
+                input[3].wrapping_add(input[1]),
+            ],
+            crate::tensor::TENSOR_HANDLE_FFN_V1 => input
+                .iter()
+                .map(|word| word.wrapping_mul(2).wrapping_add(1))
+                .collect(),
+            _ => unreachable!("fixed TensorBus operator code"),
+        })
+    };
+    let (output, records) = vm.tensor_bus_apply(input, meta, code, transform)?;
+    #[cfg(feature = "tensor-cuda")]
+    vm.tensor_bus_resident_apply(input, output, code)?;
+    let mut output_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[3]);
+    output_view.write([
+        output.tensor_id as u32,
+        (output.tensor_id >> 32) as u32,
+        output.version,
+        0,
+    ]);
+    let mut witness = SyscallWitness::new(
+        desc_ops
+            .into_iter()
+            .chain(input_ops)
+            .chain(meta_ops)
+            .chain(output_view.mem_ops())
+            .collect(),
+        tensor_bus_reg_ops(desc_ptr),
+    );
+    witness.tensor_bus_records = records;
+    witness.tensor_bus_event = Some(tensor_bus_event(
+        code,
+        words
+            .into_iter()
+            .chain(meta_words)
+            .chain(input_words)
+            .chain([
+                output.tensor_id as u32,
+                (output.tensor_id >> 32) as u32,
+                output.version,
+                0,
+            ]),
+    ));
+    witness.tensor_bus_event_cycle = Some(vm.tracer().cycle());
+    Ok(SyscallEffects {
+        witness,
+        next_pc: None,
+    })
+}
+
+pub fn tensor_handle_attention_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
+    tensor_handle_op_v1(vm, crate::tensor::TENSOR_HANDLE_ATTENTION_V1)
+}
+
+pub fn tensor_handle_ffn_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
+    tensor_handle_op_v1(vm, crate::tensor::TENSOR_HANDLE_FFN_V1)
+}
+
 pub struct TensorMatMulV1Spec;
 pub struct TensorMatMulHiddenV1Spec;
 pub struct TensorMatMulIntermediateV1Spec;
@@ -24,6 +342,10 @@ pub struct TensorRmsLookupV1Spec;
 pub struct TensorAttentionReducedV1Spec;
 pub struct TensorAttentionBlockReducedV1Spec;
 pub struct TensorFfnBlockReducedV1Spec;
+pub struct TensorImportBeginV1Spec;
+pub struct TensorExportEndV1Spec;
+pub struct TensorHandleAttentionV1Spec;
+pub struct TensorHandleFfnV1Spec;
 
 pub const ATTENTION_REDUCED_PROFILE_V1: u32 = 1;
 pub const ATTENTION_RESCALE_SHIFT_Q20_V1: u32 = 20;
@@ -120,6 +442,42 @@ impl SyscallSpec for TensorMatMulV1Spec {
     const MEM_OPS_COUNT: usize =
         TENSOR_DESC_WORDS + TENSOR_INPUT_WORDS + TENSOR_ROOT_WORDS + TENSOR_OUTPUT_WORDS;
     const CODE: u32 = crate::tensor::TENSOR_MATMUL_V1;
+}
+
+impl SyscallSpec for TensorImportBeginV1Spec {
+    const NAME: &'static str = "TENSOR_IMPORT_BEGIN_V1";
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize = TENSOR_TRANSFER_DESC_WORDS
+        + TENSOR_META_WORDS
+        + TENSOR_BUS_FIXED_TRANSFER_WORDS as usize
+        + TENSOR_HANDLE_WORDS;
+    const CODE: u32 = crate::tensor::TENSOR_IMPORT_BEGIN_V1;
+}
+
+impl SyscallSpec for TensorExportEndV1Spec {
+    const NAME: &'static str = "TENSOR_EXPORT_END_V1";
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize = TENSOR_TRANSFER_DESC_WORDS
+        + TENSOR_HANDLE_WORDS
+        + TENSOR_META_WORDS
+        + TENSOR_BUS_FIXED_TRANSFER_WORDS as usize;
+    const CODE: u32 = crate::tensor::TENSOR_EXPORT_END_V1;
+}
+
+impl SyscallSpec for TensorHandleAttentionV1Spec {
+    const NAME: &'static str = "TENSOR_HANDLE_ATTENTION_V1";
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize =
+        TENSOR_TRANSFER_DESC_WORDS + TENSOR_HANDLE_WORDS + TENSOR_META_WORDS + TENSOR_HANDLE_WORDS;
+    const CODE: u32 = crate::tensor::TENSOR_HANDLE_ATTENTION_V1;
+}
+
+impl SyscallSpec for TensorHandleFfnV1Spec {
+    const NAME: &'static str = "TENSOR_HANDLE_FFN_V1";
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize =
+        TENSOR_TRANSFER_DESC_WORDS + TENSOR_HANDLE_WORDS + TENSOR_META_WORDS + TENSOR_HANDLE_WORDS;
+    const CODE: u32 = crate::tensor::TENSOR_HANDLE_FFN_V1;
 }
 
 impl SyscallSpec for TensorMatMulHiddenV1Spec {
@@ -810,5 +1168,146 @@ mod tests {
         assert_eq!(ffn_output, [2, -4, 7, -10]);
         assert!(tensor_attention_block_reduced_v1(&block_vm(true, true)).is_err());
         assert!(tensor_ffn_block_reduced_v1(&block_vm(false, true)).is_err());
+    }
+
+    fn tensor_bus_vm() -> (VMState<crate::FullTracer>, u32, u32) {
+        let mut vm = VMState::new(CENO_PLATFORM.clone(), Arc::new(Program::from(&[][..])));
+        let base = CENO_PLATFORM.heap.start + 0x4000;
+        let import_ptr = base + 0x100;
+        let export_ptr = base + 0x200;
+        let input_ptr = base + 0x1000;
+        let output_ptr = input_ptr + TENSOR_BUS_FIXED_TRANSFER_WORDS * 4 + 0x1000;
+        let meta_ptr = output_ptr + TENSOR_BUS_FIXED_TRANSFER_WORDS * 4 + 0x1000;
+        let handle_ptr = meta_ptr + 0x100;
+        let words = TENSOR_BUS_FIXED_TRANSFER_WORDS as usize;
+        let mut input = vec![0; words];
+        input[..4].copy_from_slice(&[3, (-5i32) as u32, 7, (-11i32) as u32]);
+        for (ptr, words) in [
+            (
+                import_ptr,
+                vec![
+                    TENSOR_ABI_V1,
+                    0,
+                    input_ptr,
+                    TENSOR_BUS_FIXED_TRANSFER_WORDS,
+                    meta_ptr,
+                    4,
+                    handle_ptr,
+                    0,
+                ],
+            ),
+            (
+                export_ptr,
+                vec![
+                    TENSOR_ABI_V1,
+                    0,
+                    handle_ptr,
+                    output_ptr,
+                    TENSOR_BUS_FIXED_TRANSFER_WORDS,
+                    meta_ptr,
+                    4,
+                    0,
+                ],
+            ),
+            (
+                meta_ptr,
+                vec![
+                    TENSOR_BUS_FIXED_TRANSFER_WORDS * 4,
+                    TENSOR_BUS_FIXED_TRANSFER_WORDS,
+                    16,
+                    0,
+                ],
+            ),
+            (input_ptr, input),
+            (output_ptr, vec![0; words]),
+            (handle_ptr, vec![0; 4]),
+        ] {
+            for (index, word) in words.into_iter().enumerate() {
+                vm.init_memory(ByteAddr(ptr).waddr() + index, word);
+            }
+        }
+        (vm, import_ptr, export_ptr)
+    }
+
+    #[test]
+    fn tensor_bus_syscalls_materialize_opaque_handles_without_pointer_abi_changes() {
+        let (mut vm, import_ptr, export_ptr) = tensor_bus_vm();
+        vm.init_register_unsafe(Platform::reg_arg0(), import_ptr);
+        let import = tensor_import_begin_v1(&mut vm).unwrap();
+        for op in &import.witness.mem_ops {
+            vm.init_memory(op.addr, op.value.after);
+        }
+        vm.init_register_unsafe(Platform::reg_arg0(), export_ptr);
+        let export = tensor_export_end_v1(&mut vm).unwrap();
+        assert_eq!(
+            export.witness.mem_ops[16..]
+                .iter()
+                .map(|op| op.value.after as i32)
+                .collect::<Vec<_>>(),
+            {
+                let mut expected = vec![0; TENSOR_BUS_FIXED_TRANSFER_WORDS as usize];
+                expected[..4].copy_from_slice(&[3, -5, 7, -11]);
+                expected
+            }
+        );
+        crate::tensor::bus::verify_tensor_bus_witnesses(&[
+            import.witness.clone(),
+            export.witness.clone(),
+        ])
+        .unwrap();
+    }
+
+    #[test]
+    fn tensor_bus_syscalls_reject_lifecycle_and_offline_record_tampering() {
+        let (mut vm, import_ptr, export_ptr) = tensor_bus_vm();
+        vm.init_register_unsafe(Platform::reg_arg0(), export_ptr);
+        assert!(tensor_export_end_v1(&mut vm).is_err());
+        vm.init_register_unsafe(Platform::reg_arg0(), import_ptr);
+        let import = tensor_import_begin_v1(&mut vm).unwrap();
+        let mut tampered = import.witness.clone();
+        let crate::tensor::bus::TensorBusRecord::Write(write) = &mut tampered.tensor_bus_records[0]
+        else {
+            panic!("import must emit a TensorBus write");
+        };
+        write.handle.version = 1;
+        assert!(crate::tensor::bus::verify_tensor_bus_witnesses(&[tampered]).is_ok());
+        let mut read_tampered = import.witness;
+        read_tampered.tensor_bus_records[0] =
+            crate::tensor::bus::TensorBusRecord::Read(crate::tensor::bus::TensorReadRecord {
+                segment_id: 7,
+                handle: crate::tensor::bus::TensorHandle {
+                    tensor_id: 1,
+                    version: 1,
+                },
+                meta: crate::tensor::bus::TensorBusMeta {
+                    byte_len: 8,
+                    shape: vec![2],
+                    quantization_id: 16,
+                },
+                consumer: crate::tensor::bus::TensorBusSyscall::Export,
+                order: 0,
+            });
+        assert!(crate::tensor::bus::verify_tensor_bus_witnesses(&[read_tampered]).is_err());
+    }
+
+    #[cfg(feature = "llama-tiny")]
+    #[test]
+    fn llama_tiny_tensor_bus_rejects_non_topology_transfer_lengths() {
+        let (mut vm, import_ptr, export_ptr) = tensor_bus_vm();
+
+        vm.init_memory(ByteAddr(import_ptr).waddr() + 3u32, 2);
+        vm.init_register_unsafe(Platform::reg_arg0(), import_ptr);
+        assert!(tensor_import_begin_v1(&mut vm).is_err());
+
+        // The failed import leaves no handle; restore the fixed profile and
+        // execute it before checking the export-side rejection independently.
+        vm.init_memory(
+            ByteAddr(import_ptr).waddr() + 3u32,
+            TENSOR_BUS_FIXED_TRANSFER_WORDS,
+        );
+        tensor_import_begin_v1(&mut vm).unwrap();
+        vm.init_memory(ByteAddr(export_ptr).waddr() + 4u32, 2);
+        vm.init_register_unsafe(Platform::reg_arg0(), export_ptr);
+        assert!(tensor_export_end_v1(&mut vm).is_err());
     }
 }
