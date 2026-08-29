@@ -77,7 +77,12 @@ pub struct TensorHandleOpDescV1 {
     pub output_handle_ptr: u32,
     pub meta_ptr: u32,
     pub meta_len: u32,
-    pub reserved: [u32; 2],
+    /// Canonical base of this resident block's guest hint window.  The
+    /// current resident operators do not dereference it yet; it is bound by
+    /// their fixed descriptor/RAM witness so a block cannot silently route to
+    /// another block's declared window.
+    pub hint_base: u32,
+    pub reserved: u32,
 }
 
 const _: () = assert!(core::mem::size_of::<TensorHandleOpDescV1>() == 32);

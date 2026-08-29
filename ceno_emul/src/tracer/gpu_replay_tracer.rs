@@ -141,6 +141,7 @@ pub struct GpuReplayTracer {
     pub(super) recyclable: Option<GpuReplayChunk>,
     retain_complete_shard: bool,
     range_descriptors: Arc<Vec<crate::GpuReplayRangeDescriptor>>,
+    tensor_fallback_intervals: Arc<Vec<crate::GpuReplayFallbackInterval>>,
     pub(super) next_range_descriptor: usize,
     ordinal: usize,
     shard_start_cycle: Cycle,
@@ -176,6 +177,7 @@ impl GpuReplayTracer {
             recyclable: None,
             retain_complete_shard: false,
             range_descriptors: Arc::new(Vec::new()),
+            tensor_fallback_intervals: Arc::new(Vec::new()),
             next_range_descriptor: 0,
             ordinal: 0,
             shard_start_cycle,
@@ -222,6 +224,8 @@ impl GpuReplayTracer {
             next_access_len: events.len(),
             next_access_cursor: &mut self.next_access_cursor,
             error: &mut self.native_error,
+            tensor_fallback_intervals: self.tensor_fallback_intervals.as_ptr(),
+            tensor_fallback_interval_len: self.tensor_fallback_intervals.len(),
         }
     }
 
@@ -376,6 +380,17 @@ impl GpuReplayTracer {
                 ),
             );
         }
+    }
+
+    pub fn install_tensor_fallback_intervals(
+        &mut self,
+        intervals: Arc<Vec<crate::GpuReplayFallbackInterval>>,
+    ) {
+        assert_eq!(
+            self.ordinal, 0,
+            "GPU replay Tensor intervals installed after execution started"
+        );
+        self.tensor_fallback_intervals = intervals;
     }
 
     /// Permit CPU replay to retain every range in one prepared shard while GPU
@@ -681,6 +696,8 @@ pub(crate) struct GpuReplayNativeTraceState {
     pub next_access_len: usize,
     pub next_access_cursor: *mut usize,
     pub error: *mut u32,
+    pub tensor_fallback_intervals: *const crate::GpuReplayFallbackInterval,
+    pub tensor_fallback_interval_len: usize,
 }
 
 impl Tracer for GpuReplayTracer {

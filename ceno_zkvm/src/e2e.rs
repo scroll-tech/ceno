@@ -151,6 +151,12 @@ pub struct EmulationResult<'a> {
     pub pi: PublicValues,
     pub shard_ctx_builder: ShardContextBuilder,
     pub shard_cycle_boundaries: Arc<Vec<Cycle>>,
+    /// Planner-estimated cell cost for each finalized shard.  Exposed so
+    /// benchmark runners can document capacity-based shard admission.
+    pub predicted_shard_costs: Arc<Vec<u64>>,
+    /// Complete TensorBus regions atomically admitted by preflight.
+    pub admitted_tensor_segments: Arc<Vec<ceno_emul::TensorSegmentPlan>>,
+    pub direct_fallback_spans: Arc<Vec<ceno_emul::GpuReplayFallbackInterval>>,
     pub replay_range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
     pub replay_shard_previews: Arc<Vec<ceno_emul::GpuShardPreview>>,
     pub replay_range_capacity: usize,
@@ -206,6 +212,7 @@ pub struct MultiProver {
     pub max_provers: usize,
     pub max_cell_per_shard: u64,
     pub max_cycle_per_shard: Cycle,
+    pub tensor_segment_inner_repetitions: Option<usize>,
 }
 
 impl MultiProver {
@@ -221,7 +228,14 @@ impl MultiProver {
             max_provers,
             max_cell_per_shard,
             max_cycle_per_shard,
+            tensor_segment_inner_repetitions: None,
         }
+    }
+
+    pub fn with_tensor_segment_inner_repetitions(mut self, repetitions: usize) -> Self {
+        assert!(repetitions > 0);
+        self.tensor_segment_inner_repetitions = Some(repetitions);
+        self
     }
 }
 
@@ -232,6 +246,7 @@ impl Default for MultiProver {
             max_provers: 1,
             max_cell_per_shard: u64::MAX,
             max_cycle_per_shard: DEFAULT_MAX_CYCLE_PER_SHARDS,
+            tensor_segment_inner_repetitions: None,
         }
     }
 }
@@ -1228,6 +1243,7 @@ struct CompactReplayPipelineInput {
     next_accesses: Arc<NextCycleAccess>,
     shard_cycle_boundaries: Arc<Vec<Cycle>>,
     range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
+    tensor_intervals: Arc<Vec<ceno_emul::GpuReplayFallbackInterval>>,
     chunk_capacity: usize,
     tensor_proof_context: Option<Arc<TensorProofContext>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -1284,6 +1300,7 @@ fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactRe
                 input.next_accesses,
                 input.shard_cycle_boundaries,
                 input.range_descriptors,
+                input.tensor_intervals,
                 input.chunk_capacity,
                 input.tensor_proof_context,
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -1416,6 +1433,7 @@ impl CompactStepReplay {
         next_accesses: Arc<NextCycleAccess>,
         shard_cycle_boundaries: Arc<Vec<Cycle>>,
         range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
+        tensor_intervals: Arc<Vec<ceno_emul::GpuReplayFallbackInterval>>,
         chunk_capacity: usize,
         tensor_proof_context: Option<Arc<TensorProofContext>>,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))] aot: Arc<
@@ -1441,6 +1459,8 @@ impl CompactStepReplay {
         }
         vm.tracer_mut()
             .install_range_descriptors(range_descriptors.clone());
+        vm.tracer_mut()
+            .install_tensor_fallback_intervals(tensor_intervals);
         for record in &init_mem_state.hints {
             vm.init_memory(record.addr.into(), record.value);
         }
@@ -1796,7 +1816,8 @@ pub fn emulate_program<'a>(
         multi_prover.max_cycle_per_shard,
     )
     .with_step_cell_extractor(step_cell_extractor)
-    .with_replay_range_capacity(replay_range_capacity);
+    .with_replay_range_capacity(replay_range_capacity)
+    .with_tensor_segment_inner_repetitions(multi_prover.tensor_segment_inner_repetitions);
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let aot_tracer_config = tracer_config.clone();
     let preflight_program = program.clone();
@@ -2054,6 +2075,9 @@ pub fn emulate_program<'a>(
     let full_tracer_config = FullTracerConfig {
         max_step_shard: plan_builder.max_step_shard(),
     };
+    let predicted_shard_costs = Arc::new(plan_builder.predicted_shard_costs().to_vec());
+    let admitted_tensor_segments = Arc::new(plan_builder.admitted_tensor_segments().to_vec());
+    let direct_fallback_spans = Arc::new(plan_builder.direct_fallback_spans().to_vec());
     let (shard_cycle_boundaries, replay_range_descriptors) = plan_builder.into_replay_plan();
     let shard_cycle_boundaries = Arc::new(shard_cycle_boundaries);
     let replay_range_descriptors = Arc::new(replay_range_descriptors);
@@ -2081,6 +2105,9 @@ pub fn emulate_program<'a>(
         exit_code,
         shard_ctx_builder,
         shard_cycle_boundaries: shard_cycle_boundaries.clone(),
+        predicted_shard_costs,
+        admitted_tensor_segments,
+        direct_fallback_spans,
         replay_range_descriptors,
         replay_shard_previews,
         replay_range_capacity,
@@ -2310,6 +2337,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             shard_ctx_builder.next_accesses(),
             emul_result.shard_cycle_boundaries.clone(),
             emul_result.replay_range_descriptors.clone(),
+            emul_result.direct_fallback_spans.clone(),
             emul_result.replay_range_capacity,
             shard_ctx_builder.tensor_proof_context(),
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -2325,6 +2353,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             next_accesses: shard_ctx_builder.next_accesses(),
             shard_cycle_boundaries: emul_result.shard_cycle_boundaries.clone(),
             range_descriptors: emul_result.replay_range_descriptors.clone(),
+            tensor_intervals: emul_result.direct_fallback_spans.clone(),
             chunk_capacity: emul_result.replay_range_capacity,
             tensor_proof_context: shard_ctx_builder.tensor_proof_context(),
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -3513,7 +3542,8 @@ pub fn prepare_preflight_aot_program(
         multi_prover.max_cell_per_shard,
         multi_prover.max_cycle_per_shard,
     )
-    .with_step_cell_extractor(step_cell_extractor);
+    .with_step_cell_extractor(step_cell_extractor)
+    .with_tensor_segment_inner_repetitions(multi_prover.tensor_segment_inner_repetitions);
     let aot = ceno_emul::aot::AotProgram::load_or_train_preflight_with_config(
         platform,
         program.clone(),

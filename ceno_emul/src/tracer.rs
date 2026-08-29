@@ -815,6 +815,13 @@ pub struct ShardPlanBuilder {
     /// observed. This lets IMPORT_BEGIN reserve the complete fixed segment and
     /// prevents a shard cut between its device-resident operations.
     pending_tensor_segment: Option<PendingTensorSegment>,
+    /// Audit-only summaries of matched TensorBus regions.  A region is
+    /// recorded only after its complete dynamic begin..end trace has been
+    /// atomically admitted, so this remains valid across AOT basic blocks.
+    admitted_tensor_segments: Vec<TensorSegmentPlan>,
+    direct_fallback_spans: Vec<crate::GpuReplayFallbackInterval>,
+    tensor_segment_inner_repetitions: Option<usize>,
+    tensor_segment_template: Option<Vec<PendingTensorStep>>,
     finalized: bool,
 }
 
@@ -822,6 +829,16 @@ pub struct ShardPlanBuilder {
 struct PendingTensorSegment {
     start_cycle: Cycle,
     steps: Vec<PendingTensorStep>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TensorSegmentPlan {
+    pub shard_id: usize,
+    pub start_cycle: Cycle,
+    pub end_cycle: Cycle,
+    pub step_count: usize,
+    /// The complete shard cost after this region's atomic admission.
+    pub shard_cost_after_admission: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -872,6 +889,10 @@ impl ShardPlanBuilder {
             replay_unsupported_count: 0,
             replay_descriptors: Vec::new(),
             pending_tensor_segment: None,
+            admitted_tensor_segments: Vec::new(),
+            direct_fallback_spans: Vec::new(),
+            tensor_segment_inner_repetitions: None,
+            tensor_segment_template: None,
             finalized: false,
         }
     }
@@ -883,6 +904,18 @@ impl ShardPlanBuilder {
             "GPU replay capacity cannot change after counting starts"
         );
         self.replay_range_capacity = capacity;
+    }
+
+    pub fn set_tensor_segment_inner_repetitions(&mut self, repetitions: Option<usize>) {
+        assert!(
+            repetitions.is_none_or(|value| value > 0),
+            "Tensor segment inner repetitions must be nonzero"
+        );
+        assert!(
+            self.pending_tensor_segment.is_none() && self.cur_step_count == 0,
+            "Tensor segment shape cannot change after planning starts"
+        );
+        self.tensor_segment_inner_repetitions = repetitions;
     }
 
     pub fn replay_descriptors(&self) -> &[crate::GpuReplayRangeDescriptor] {
@@ -912,6 +945,23 @@ impl ShardPlanBuilder {
 
     pub fn predicted_shard_costs(&self) -> &[u64] {
         &self.predicted_shard_costs
+    }
+
+    pub fn admitted_tensor_segments(&self) -> &[TensorSegmentPlan] {
+        &self.admitted_tensor_segments
+    }
+
+    pub fn direct_fallback_spans(&self) -> &[crate::GpuReplayFallbackInterval] {
+        &self.direct_fallback_spans
+    }
+
+    fn record_direct_fallback_span(&mut self, start_cycle: Cycle, end_cycle: Cycle) {
+        assert!(start_cycle <= end_cycle, "invalid direct fallback span");
+        self.direct_fallback_spans
+            .push(crate::GpuReplayFallbackInterval {
+                start_cycle,
+                end_cycle,
+            });
     }
 
     pub fn into_cycle_boundaries(self) -> Vec<Cycle> {
@@ -1108,6 +1158,38 @@ impl ShardPlanBuilder {
                 .last()
                 .is_some_and(|step| step.ecall_code == Some(crate::tensor::TENSOR_EXPORT_END_V1))
         );
+        if let Some(repetitions) = self.tensor_segment_inner_repetitions {
+            let attention = pending
+                .steps
+                .iter()
+                .filter(|step| step.ecall_code == Some(crate::tensor::TENSOR_HANDLE_ATTENTION_V1))
+                .count();
+            let ffn = pending
+                .steps
+                .iter()
+                .filter(|step| step.ecall_code == Some(crate::tensor::TENSOR_HANDLE_FFN_V1))
+                .count();
+            assert_eq!(
+                (attention, ffn),
+                (repetitions, repetitions),
+                "Tensor segment does not match its configured inner-layer count"
+            );
+            let shape = |steps: &[PendingTensorStep]| {
+                steps
+                    .iter()
+                    .map(|step| (step.kind, step.ecall_code, step.generic_cells))
+                    .collect::<Vec<_>>()
+            };
+            if let Some(template) = &self.tensor_segment_template {
+                assert_eq!(
+                    shape(&pending.steps),
+                    shape(template),
+                    "Tensor resident-loop segment changed its configured instruction profile"
+                );
+            } else {
+                self.tensor_segment_template = Some(pending.steps.clone());
+            }
+        }
         if self.cur_step_count > 0 && self.tensor_segment_would_exceed(&pending.steps) {
             self.finish_current_shard(pending.start_cycle);
         }
@@ -1122,9 +1204,23 @@ impl ShardPlanBuilder {
                 }
             );
         }
+        let start_cycle = pending.start_cycle;
+        let end_cycle = pending
+            .steps
+            .last()
+            .expect("TensorBus region must contain EXPORT_END")
+            .cycle;
+        let step_count = pending.steps.len();
         for step in pending.steps {
             self.admit_tensor_step_without_split(step);
         }
+        self.admitted_tensor_segments.push(TensorSegmentPlan {
+            shard_id: self.shard_id,
+            start_cycle,
+            end_cycle,
+            step_count,
+            shard_cost_after_admission: self.cur_cells,
+        });
     }
 
     fn admit_tensor_step_without_split(&mut self, step: PendingTensorStep) {
@@ -1216,6 +1312,31 @@ impl ShardPlanBuilder {
                 .cur_cycle_in_shard
                 .saturating_add(FullTracer::SUBCYCLES_PER_INSN)
                 >= self.max_cycle_per_shard
+    }
+
+    fn regular_step_would_split(
+        &self,
+        kind: InsnKind,
+        ecall_code: Option<Word>,
+        generic_cells: u64,
+    ) -> bool {
+        if self.cur_step_count == 0 {
+            return false;
+        }
+        let candidate = if let Some(model) = &self.cost_model {
+            let chips = model
+                .chips_for_step(kind, ecall_code)
+                .iter()
+                .map(|&chip| chip as usize)
+                .collect::<SmallVec<[_; 2]>>();
+            self.preview_modeled_chips(&chips).3
+        } else if let Some(code) = ecall_code {
+            self.cur_cells
+                .saturating_add(self.ecall_step_delta(code, generic_cells))
+        } else {
+            self.cur_cells.saturating_add(generic_cells)
+        };
+        self.candidate_would_exceed_shard(candidate)
     }
 
     fn finish_current_shard(&mut self, next_shard_cycle: Cycle) {
@@ -1326,6 +1447,10 @@ impl ShardPlanBuilder {
         let descriptor = crate::GpuReplayRangeDescriptor {
             shard_id: u32::try_from(self.shard_id).expect("GPU replay shard id exceeds u32"),
             sequence: self.replay_range_sequence,
+            start_cycle: self.current_shard_start_cycle
+                + Cycle::try_from(self.replay_range_start)
+                    .expect("GPU replay range start does not fit Cycle")
+                    * FullTracer::SUBCYCLES_PER_INSN,
             range_start: u32::try_from(self.replay_range_start)
                 .expect("GPU replay range start exceeds u32"),
             range_len: u32::try_from(self.replay_range_len)
@@ -2405,6 +2530,12 @@ pub struct PreflightTracer {
     platform_heap_start: ByteAddr,
     platform_hint_start: ByteAddr,
     defer_mmio_bounds: bool,
+    // Stable AOT entry guard for the dynamic IMPORT_BEGIN..EXPORT_END region
+    // and the short post-export reconciliation window.  The latter keeps
+    // exact per-step planning through the first ordinary capacity cut after
+    // a region, where block-atomic AOT admission would otherwise cut early.
+    direct_tensor_region_active: bool,
+    direct_tensor_region_start_cycle: Option<Cycle>,
     config: PreflightTracerConfig,
 }
 
@@ -2481,6 +2612,7 @@ pub(crate) struct PreflightNativeTraceState {
     pub replay_fallback_count: *mut usize,
     pub replay_unsupported_count: *mut usize,
     pub replay_range_capacity: usize,
+    pub tensor_region_active: *const bool,
 }
 
 #[derive(Clone)]
@@ -2490,6 +2622,7 @@ pub struct PreflightTracerConfig {
     max_cycle_per_shard: Cycle,
     step_cell_extractor: Option<Arc<dyn StepCellExtractor>>,
     replay_range_capacity: usize,
+    tensor_segment_inner_repetitions: Option<usize>,
 }
 
 impl fmt::Debug for PreflightTracer {
@@ -2534,6 +2667,7 @@ impl PreflightTracerConfig {
             max_cycle_per_shard,
             step_cell_extractor: None,
             replay_range_capacity: 256 * 1024,
+            tensor_segment_inner_repetitions: None,
         }
     }
 
@@ -2560,6 +2694,15 @@ impl PreflightTracerConfig {
         self
     }
 
+    pub fn with_tensor_segment_inner_repetitions(mut self, repetitions: Option<usize>) -> Self {
+        assert!(
+            repetitions.is_none_or(|value| value > 0),
+            "Tensor segment inner repetitions must be nonzero"
+        );
+        self.tensor_segment_inner_repetitions = repetitions;
+        self
+    }
+
     pub fn step_cell_extractor(&self) -> Option<Arc<dyn StepCellExtractor>> {
         self.step_cell_extractor.clone()
     }
@@ -2573,6 +2716,7 @@ impl Default for PreflightTracerConfig {
             max_cycle_per_shard: Cycle::MAX,
             step_cell_extractor: None,
             replay_range_capacity: 256 * 1024,
+            tensor_segment_inner_repetitions: None,
         }
     }
 }
@@ -2614,6 +2758,7 @@ impl PreflightTracer {
             cost_model,
         );
         planner.set_replay_range_capacity(config.replay_range_capacity);
+        planner.set_tensor_segment_inner_repetitions(config.tensor_segment_inner_repetitions);
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             pc: Default::default(),
@@ -2635,6 +2780,8 @@ impl PreflightTracer {
             platform_heap_start: ByteAddr::from(platform.heap.start),
             platform_hint_start: ByteAddr::from(platform.hints.start),
             defer_mmio_bounds: false,
+            direct_tensor_region_active: false,
+            direct_tensor_region_start_cycle: None,
             config,
         };
         tracer.reset_register_tracking();
@@ -2747,6 +2894,7 @@ impl PreflightTracer {
             replay_fallback_count: &mut planner.replay_fallback_count,
             replay_unsupported_count: &mut planner.replay_unsupported_count,
             replay_range_capacity: planner.replay_range_capacity,
+            tensor_region_active: &self.direct_tensor_region_active,
         }
     }
 
@@ -2774,6 +2922,7 @@ impl PreflightTracer {
 
     #[inline(always)]
     fn observe_current_step(&mut self, ecall_code: Option<Word>) {
+        let was_direct_tensor_region_active = self.direct_tensor_region_active;
         let mut split = false;
         let mut next_start = self.current_shard_start_cycle;
         if let Some(planner) = self.planner.as_mut() {
@@ -2784,12 +2933,39 @@ impl PreflightTracer {
                 .as_ref()
                 .map(|extractor| extractor.cells_for_kind(self.last_kind, ecall_code))
                 .unwrap_or(0);
+            let was_pending_tensor_region = planner.pending_tensor_segment.is_some();
             planner.observe_tensor_segment_step(self.cycle, self.last_kind, ecall_code, step_cells);
             split = planner.shard_id != old_shard;
+            let is_pending_tensor_region = planner.pending_tensor_segment.is_some();
+            self.direct_tensor_region_active = if is_pending_tensor_region {
+                true
+            } else if was_pending_tensor_region {
+                // Keep exact per-step planning through the first ordinary
+                // boundary after every EXPORT_END, even when the region's
+                // own atomic admission cut back to IMPORT_BEGIN.
+                true
+            } else if split {
+                // The cut was already made at the correct dynamic step.
+                false
+            } else {
+                self.direct_tensor_region_active
+            };
             next_start = planner.current_shard_start_cycle();
         }
         if split {
             self.capture_shard_preview(self.cycle);
+        }
+        if !was_direct_tensor_region_active && self.direct_tensor_region_active {
+            self.direct_tensor_region_start_cycle = Some(self.cycle);
+        } else if was_direct_tensor_region_active && !self.direct_tensor_region_active {
+            let start_cycle = self
+                .direct_tensor_region_start_cycle
+                .take()
+                .expect("direct Tensor fallback span closed without an opening step");
+            self.planner
+                .as_mut()
+                .expect("shard planner missing")
+                .record_direct_fallback_span(start_cycle, self.cycle);
         }
         self.current_shard_start_cycle = next_start;
     }
@@ -3029,6 +3205,44 @@ impl PreflightTracer {
         planner.cur_cycle_in_shard = 0;
         planner.cur_step_count = 0;
         self.current_shard_start_cycle = next_shard_cycle;
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn prepare_native_fallback_shard_start(
+        &mut self,
+        kind: InsnKind,
+        ecall_code: Option<Word>,
+    ) {
+        if !self.direct_tensor_region_active
+            || self
+                .planner
+                .as_ref()
+                .is_some_and(|planner| planner.pending_tensor_segment.is_some())
+        {
+            return;
+        }
+        let cells_for = |kind, code| {
+            self.config
+                .step_cell_extractor
+                .as_ref()
+                .map(|extractor| extractor.cells_for_kind(kind, code))
+                .unwrap_or(0)
+        };
+        let planner = self.planner.as_ref().expect("shard planner missing");
+        let should_split = if ecall_code == Some(crate::tensor::TENSOR_IMPORT_BEGIN_V1)
+            && self.config.tensor_segment_inner_repetitions.is_some()
+            && let Some(template) = planner.tensor_segment_template.as_deref()
+        {
+            planner.cur_step_count > 0 && planner.tensor_segment_would_exceed(template)
+        } else {
+            planner.regular_step_would_split(kind, ecall_code, cells_for(kind, ecall_code))
+        };
+        if should_split {
+            self.record_native_shard_split();
+        }
     }
 
     #[inline(always)]

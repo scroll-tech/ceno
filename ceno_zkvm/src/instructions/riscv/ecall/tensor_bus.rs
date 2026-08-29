@@ -115,31 +115,49 @@ fn constrain_fixed_tensor_bus<E: ExtensionField, S: SyscallSpec>(
     )?;
     if S::CODE == TensorHandleAttentionV1Spec::CODE || S::CODE == TensorHandleFfnV1Spec::CODE {
         cb.require_equal(
-            || "tensor_bus_op_reserved_0",
-            before(6),
-            E::BaseField::ZERO.expr(),
-        )?;
-        cb.require_equal(
-            || "tensor_bus_op_reserved_1",
+            || "tensor_bus_op_reserved",
             before(7),
             E::BaseField::ZERO.expr(),
         )?;
     }
-    cb.require_equal(
-        || "tensor_bus_meta_len",
-        before(META_LEN),
-        E::BaseField::from_u32(4).expr(),
-    )?;
-    let length = if S::CODE == TensorImportBeginV1Spec::CODE {
-        INPUT_LEN
+    // Descriptor layouts intentionally differ at the boundary:
+    //
+    // import: abi, flags, input_ptr, input_len, meta_ptr, meta_len, ...
+    // export: abi, flags, handle_ptr, output_ptr, output_len, meta_ptr,
+    //         meta_len, ...
+    // op:     abi, flags, input_handle, output_handle, meta_ptr, meta_len,
+    //         hint_base, ...
+    let meta_len = if S::CODE == TensorExportEndV1Spec::CODE {
+        6
     } else {
-        OUTPUT_LEN
+        META_LEN
     };
     cb.require_equal(
-        || "tensor_bus_fixed_words",
-        before(length),
-        E::BaseField::from_u32(ceno_emul::TENSOR_BUS_FIXED_TRANSFER_WORDS).expr(),
+        || "tensor_bus_meta_len",
+        before(meta_len),
+        E::BaseField::from_u32(4).expr(),
     )?;
+    if S::CODE == TensorImportBeginV1Spec::CODE || S::CODE == TensorExportEndV1Spec::CODE {
+        let length = if S::CODE == TensorImportBeginV1Spec::CODE {
+            INPUT_LEN
+        } else {
+            OUTPUT_LEN
+        };
+        cb.require_equal(
+            || "tensor_bus_fixed_words",
+            before(length),
+            E::BaseField::from_u32(ceno_emul::TENSOR_BUS_FIXED_TRANSFER_WORDS).expr(),
+        )?;
+    } else {
+        // Handle operators have no descriptor transfer-length field. Their
+        // metadata begins after descriptor + input handle, and binds the same
+        // fixed activation width in bytes.
+        cb.require_equal(
+            || "tensor_bus_op_meta_byte_len",
+            before(META_START_OP),
+            E::BaseField::from_u32(ceno_emul::TENSOR_BUS_FIXED_TRANSFER_WORDS * 4).expr(),
+        )?;
+    }
     cb.require_equal(
         || "tensor_bus_key_local_shard_cycle",
         config.key_local_shard_cycle.expr(),

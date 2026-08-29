@@ -1,4 +1,4 @@
-use crate::{InsnKind, StepRecord};
+use crate::{Cycle, InsnKind, StepRecord};
 use std::mem::MaybeUninit;
 use strum::{EnumCount, IntoEnumIterator};
 
@@ -135,11 +135,20 @@ pub const fn gpu_typed_kind_spec(kind: InsnKind) -> Option<GpuTypedKindSpec> {
 pub struct GpuReplayRangeDescriptor {
     pub shard_id: u32,
     pub sequence: u32,
+    /// Global VM cycle of the first record in this replay range.
+    pub start_cycle: Cycle,
     pub range_start: u32,
     pub range_len: u32,
     pub family_counts: [usize; InsnKind::COUNT],
     pub fallback_count: usize,
     pub unsupported_count: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GpuReplayFallbackInterval {
+    pub start_cycle: Cycle,
+    pub end_cycle: Cycle,
 }
 
 impl GpuReplayRangeDescriptor {

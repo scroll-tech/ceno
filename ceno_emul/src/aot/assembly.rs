@@ -85,6 +85,63 @@ pub(super) fn write_assembly_part(
         writeln!(file, "    movq 0(%rsp), %rax")?;
         writeln!(file, "    cmpq %rbp, %rax")?;
         writeln!(file, "    jae ceno_aot_done")?;
+        if trace_style == AssemblyTraceStyle::GpuReplayDirect {
+            writeln!(
+                file,
+                "    movq {AOT_CTX_GPU_REPLAY_TENSOR_INTERVALS_OFFSET}(%r12), %rax"
+            )?;
+            writeln!(file, "    testq %rax, %rax")?;
+            writeln!(file, "    je .L_gpu_replay_dispatch_direct")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %rdx"
+            )?;
+            writeln!(file, "    movq (%rdx), %rdx")?;
+            writeln!(file, "    xorq %rcx, %rcx")?;
+            writeln!(file, ".L_gpu_replay_dispatch_interval:")?;
+            writeln!(
+                file,
+                "    cmpq {AOT_CTX_GPU_REPLAY_TENSOR_INTERVAL_LEN_OFFSET}(%r12), %rcx"
+            )?;
+            writeln!(file, "    jae .L_gpu_replay_dispatch_direct")?;
+            writeln!(file, "    movq %rcx, %r8")?;
+            writeln!(file, "    shlq $4, %r8")?;
+            writeln!(file, "    leaq (%rax,%r8), %r8")?;
+            writeln!(file, "    cmpq 0(%r8), %rdx")?;
+            writeln!(file, "    jb .L_gpu_replay_dispatch_next")?;
+            writeln!(file, "    cmpq 8(%r8), %rdx")?;
+            writeln!(file, "    ja .L_gpu_replay_dispatch_next")?;
+            emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC, trace_style)?;
+            writeln!(file, "    jmp ceno_aot_dispatch")?;
+            writeln!(file, ".L_gpu_replay_dispatch_next:")?;
+            writeln!(file, "    incq %rcx")?;
+            writeln!(file, "    jmp .L_gpu_replay_dispatch_interval")?;
+            writeln!(file, ".L_gpu_replay_dispatch_direct:")?;
+            // GPU replay's raw resume labels sit after the guarded native
+            // successor labels. Once outside an authoritative fallback span,
+            // dispatch must select those raw labels directly rather than the
+            // block tree, whose leaders are intentionally guarded.
+            let fallback_label = ".L_gpu_replay_dispatch_fallback";
+            writeln!(file, "    movl %r15d, %eax")?;
+            writeln!(file, "    subl ${:#010x}, %eax", program.base_address)?;
+            writeln!(file, "    testl $3, %eax")?;
+            writeln!(file, "    jne {fallback_label}")?;
+            writeln!(
+                file,
+                "    cmpl ${}, %eax",
+                program.instructions.len() * PC_STEP_SIZE
+            )?;
+            writeln!(file, "    jae {fallback_label}")?;
+            writeln!(file, "    shrl $2, %eax")?;
+            writeln!(file, "    leaq ceno_aot_gpu_resume_table(%rip), %rdx")?;
+            writeln!(file, "    movq (%rdx,%rax,8), %rax")?;
+            writeln!(file, "    testq %rax, %rax")?;
+            writeln!(file, "    je {fallback_label}")?;
+            writeln!(file, "    jmp *%rax")?;
+            writeln!(file, "{fallback_label}:")?;
+            emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC, trace_style)?;
+            writeln!(file, "    jmp ceno_aot_dispatch")?;
+        }
         emit_dispatch_tree(&mut file, blocks, &labels, 0, blocks.len())?;
     }
     let blocks_by_pc = blocks
@@ -111,6 +168,66 @@ pub(super) fn write_assembly_part(
             file,
             "    movl $0, {AOT_CTX_FALLBACK_RECOVERY_REASON_OFFSET}(%r12)"
         )?;
+        // Tensor-region instructions were interpreted during preflight so
+        // that IMPORT_BEGIN..EXPORT_END could be admitted atomically. Replay
+        // consumes those exact cycle intervals through the same tracer path;
+        // all other blocks remain on the direct typed emitter.
+        if trace_style == AssemblyTraceStyle::GpuReplayDirect {
+            let direct_label = format!(".L_gpu_replay_tensor_direct_{block_idx}");
+            let loop_label = format!(".L_gpu_replay_tensor_interval_{block_idx}");
+            let next_label = format!(".L_gpu_replay_tensor_interval_next_{block_idx}");
+            writeln!(
+                file,
+                "    movq {AOT_CTX_GPU_REPLAY_TENSOR_INTERVALS_OFFSET}(%r12), %rax"
+            )?;
+            writeln!(file, "    testq %rax, %rax")?;
+            writeln!(file, "    je {direct_label}")?;
+            writeln!(
+                file,
+                "    movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %rdx"
+            )?;
+            writeln!(file, "    movq (%rdx), %rdx")?;
+            writeln!(file, "    xorq %rcx, %rcx")?;
+            writeln!(file, "{loop_label}:")?;
+            writeln!(
+                file,
+                "    cmpq {AOT_CTX_GPU_REPLAY_TENSOR_INTERVAL_LEN_OFFSET}(%r12), %rcx"
+            )?;
+            writeln!(file, "    jae {direct_label}")?;
+            writeln!(file, "    movq %rcx, %r8")?;
+            writeln!(file, "    shlq $4, %r8")?;
+            writeln!(file, "    leaq (%rax,%r8), %r8")?;
+            writeln!(file, "    cmpq 0(%r8), %rdx")?;
+            writeln!(file, "    jb {next_label}")?;
+            writeln!(file, "    cmpq 8(%r8), %rdx")?;
+            writeln!(file, "    ja {next_label}")?;
+            emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC, trace_style)?;
+            writeln!(file, "    jmp ceno_aot_dispatch")?;
+            writeln!(file, "{next_label}:")?;
+            writeln!(file, "    incq %rcx")?;
+            writeln!(file, "    jmp {loop_label}")?;
+            writeln!(file, "{direct_label}:")?;
+        }
+        // TensorBus regions are admitted only at their matching EXPORT_END.
+        // Direct block planning mutates cost and access state eagerly, so it
+        // cannot be rolled back to IMPORT_BEGIN.  While the planner owns a
+        // pending region, dispatch each native block through the exact
+        // preflight fallback.  IMPORT/EXPORT are block boundaries, making
+        // this guard loop-safe; direct AOT resumes immediately after export.
+        if trace_style.is_preflight_production() {
+            let direct_label = format!(".L_preflight_tensor_region_direct_{block_idx}");
+            writeln!(
+                file,
+                "    movq {AOT_CTX_PREFLIGHT_TENSOR_REGION_ACTIVE_OFFSET}(%r12), %rax"
+            )?;
+            writeln!(file, "    testq %rax, %rax")?;
+            writeln!(file, "    je {direct_label}")?;
+            writeln!(file, "    cmpb $0, (%rax)")?;
+            writeln!(file, "    je {direct_label}")?;
+            emit_call_current_pc(&mut file, AOT_FALLBACK_DYNAMIC_PC, trace_style)?;
+            writeln!(file, "    jmp ceno_aot_dispatch")?;
+            writeln!(file, "{direct_label}:")?;
+        }
         let block_plan = if trace_style.uses_preflight_block_plan() {
             preflight_block_plan_kind(program, block)?
         } else {
@@ -281,6 +398,16 @@ pub(super) fn write_assembly_part(
                 writeln!(file, ".hidden {resume_label}")?;
                 writeln!(file, ".type {resume_label}, @function")?;
                 writeln!(file, "{resume_label}:")?;
+                // Native successor labels re-enter dispatch so an active
+                // authoritative Tensor fallback span cannot fall through to
+                // the direct recorder. The dispatcher resumes at the raw
+                // label below once the span ends.
+                writeln!(file, "    jmp ceno_aot_dispatch")?;
+                let raw_label = format!("ceno_aot_gpu_raw_{pc:08x}");
+                writeln!(file, ".globl {raw_label}")?;
+                writeln!(file, ".hidden {raw_label}")?;
+                writeln!(file, ".type {raw_label}, @function")?;
+                writeln!(file, "{raw_label}:")?;
             }
             let current_memory_access_index =
                 if native_opcode_family(insn.kind) == Some(NativeOpcodeFamily::Memory) {
@@ -498,7 +625,7 @@ pub(super) fn write_assembly_part(
                     .base_address
                     .wrapping_add((index * PC_STEP_SIZE) as u32);
                 if compiled.contains(&pc) {
-                    writeln!(file, "    .quad ceno_aot_gpu_resume_{pc:08x}")?;
+                    writeln!(file, "    .quad ceno_aot_gpu_raw_{pc:08x}")?;
                 } else {
                     writeln!(file, "    .quad 0")?;
                 }
@@ -828,12 +955,16 @@ pub(super) fn emit_gpu_replay_shared_recorder(mut file: impl Write) -> Result<()
 .hidden ceno_aot_gpu_replay_emit_step
 .type ceno_aot_gpu_replay_emit_step, @function
 ceno_aot_gpu_replay_emit_step:
-    subq $48, %rsp
+    subq $64, %rsp
     movl $0, 0(%rsp)
     movl $0, 4(%rsp)
     movl $0, 8(%rsp)
     movl $0, 12(%rsp)
     movl $0, 16(%rsp)
+    // The common compact packer consumes this as the bit immediately after
+    // its second access.  It is either the third access cycle or the future
+    // mask; keep it inside the frame rather than reading the return address.
+    movl $0, 48(%rsp)
 
     movl {AOT_CTX_TRACE_KIND_OFFSET}(%r12), %eax
     cmpq {AOT_CTX_GPU_REPLAY_KIND_COUNT_OFFSET}(%r12), %rax
@@ -1118,7 +1249,7 @@ ceno_aot_gpu_replay_emit_step:
     movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %r8
     addq $4, (%r8)
     movl ${AOT_STATUS_CONTINUE}, %eax
-    addq $48, %rsp
+    addq $64, %rsp
     ret
 
 .L_gpu_replay_compact:
@@ -1222,6 +1353,7 @@ ceno_aot_gpu_replay_emit_step:
     movl 8(%rsp), %edx
 .L_gpu_compact_third_cycle:
     movl %edx, 0(%rsp)
+    movl %edx, 48(%rsp)
     movl 112(%r10), %edx
     cmpl $0, %edx
     jne .L_gpu_compact_third_memory_value
@@ -1282,6 +1414,8 @@ ceno_aot_gpu_replay_emit_step:
     jmp .L_gpu_compact_commit
 
 .L_gpu_compact_pack_2:
+    movl 16(%rsp), %edx
+    movl %edx, 48(%rsp)
     call .L_gpu_compact_pack_common
     movl 40(%rsp), %r8d
     shrl $1, %r8d
@@ -1304,9 +1438,7 @@ ceno_aot_gpu_replay_emit_step:
     movl 16(%rsp), %edi
     cmpl $16, %edi
     jae .L_gpu_replay_bad_compact_mask
-    movl %edi, %eax
-    andl $1, %eax
-    movl %eax, 40(%rsp)
+    movl %edi, 48(%rsp)
     call .L_gpu_compact_pack_common
     shrl $1, %edi
     movb %dil, 16(%r9)
@@ -1383,7 +1515,7 @@ ceno_aot_gpu_replay_emit_step:
     movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %r8
     addq $4, (%r8)
     movl ${AOT_STATUS_CONTINUE}, %eax
-    addq $48, %rsp
+    addq $64, %rsp
     ret
 
 .L_gpu_replay_bad_kind:
@@ -1419,7 +1551,7 @@ ceno_aot_gpu_replay_emit_step:
     movq {AOT_CTX_GPU_REPLAY_ERROR_OFFSET}(%r12), %r8
     movl %edx, (%r8)
     movl ${AOT_STATUS_ERROR}, %eax
-    addq $48, %rsp
+    addq $64, %rsp
     ret
 "#,
         gpu_sentinel = crate::gpu_typed_ingress::GPU_TYPED_NATIVE_SENTINEL,

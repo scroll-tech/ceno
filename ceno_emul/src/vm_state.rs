@@ -51,6 +51,10 @@ pub struct VMState<T: Tracer = FullTracer> {
     committed_public_io: Option<[Word; 8]>,
     tensor_witness_provider: Option<Arc<dyn TensorWitnessProvider>>,
     tensor_bus_segment: Option<TensorBusSegment>,
+    /// Descriptor-bound hint window selected by the first internal resident
+    /// operation.  This is routing metadata only until per-tile hint-read AIR
+    /// is introduced; all operations in one segment must nevertheless agree.
+    tensor_bus_hint_base: Option<u32>,
     #[cfg(feature = "tensor-cuda")]
     tensor_bus_resident: Option<TensorBusResidentSession>,
     next_tensor_bus_segment_id: u64,
@@ -166,6 +170,7 @@ impl<T: Tracer> VMState<T> {
             registers: [0; VM_REG_COUNT],
             tensor_witness_provider: None,
             tensor_bus_segment: None,
+            tensor_bus_hint_base: None,
             #[cfg(feature = "tensor-cuda")]
             tensor_bus_resident: None,
             next_tensor_bus_segment_id: 1,
@@ -371,11 +376,23 @@ impl<T: Tracer> VMState<T> {
         input: TensorHandle,
         meta: TensorBusMeta,
         operator: u32,
+        hint_base: u32,
         transform: F,
     ) -> Result<(TensorHandle, Vec<TensorBusRecord>)>
     where
         F: FnOnce(&[i32]) -> Result<Vec<i32>>,
     {
+        ensure!(
+            self.platform.hints.contains(&hint_base),
+            "TensorBus hint base is outside the guest hint region"
+        );
+        match self.tensor_bus_hint_base {
+            Some(active) => ensure!(
+                active == hint_base,
+                "TensorBus resident operators changed hint base within a segment"
+            ),
+            None => self.tensor_bus_hint_base = Some(hint_base),
+        }
         let segment = self
             .tensor_bus_segment
             .as_mut()
@@ -391,6 +408,7 @@ impl<T: Tracer> VMState<T> {
             .take()
             .ok_or_else(|| anyhow!("TensorBus segment is not active"))?;
         self.completed_tensor_bus_records.extend(segment.end()?);
+        self.tensor_bus_hint_base = None;
         #[cfg(feature = "tensor-cuda")]
         ensure!(
             self.tensor_bus_resident.is_none(),

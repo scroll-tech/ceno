@@ -38,7 +38,8 @@ fn run_segment(seed: i32) -> [i32; WORDS] {
         output_handle_ptr: (&raw mut attention) as *mut TensorHandleV1 as u32,
         meta_ptr: meta.as_ptr() as u32,
         meta_len: meta.len() as u32,
-        reserved: [0; 2],
+        hint_base: 0x2800_0000,
+        reserved: 0,
     };
     let ffn_op = TensorHandleOpDescV1 {
         abi_version: TENSOR_ABI_V1,
@@ -47,7 +48,8 @@ fn run_segment(seed: i32) -> [i32; WORDS] {
         output_handle_ptr: (&raw mut ffn) as *mut TensorHandleV1 as u32,
         meta_ptr: meta.as_ptr() as u32,
         meta_len: meta.len() as u32,
-        reserved: [0; 2],
+        hint_base: 0x2800_0000,
+        reserved: 0,
     };
     let export = TensorExportEndDescV1 {
         abi_version: TENSOR_ABI_V1,

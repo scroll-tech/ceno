@@ -1395,6 +1395,17 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
         .map(|range| range.typed.iter().flatten().count())
         .max()
         .ok_or_else(|| ZKVMError::InvalidWitness("installed fused shard has no ranges".into()))?;
+    // An ordinary trailing shard can have a fused session but no GPU-typed
+    // rows at all.  There is no assignment to launch in that case, and CUDA
+    // correctly rejects a zero-capacity launcher.
+    if stage_capacity == 0 && work_capacity == 0 {
+        // `prepare_fused_assignment` has already placed empty assignments in
+        // FUSED_ASSIGNMENTS for every fused owner.  Keep the ingress active so
+        // the compact-count assignment path consumes those cached empties.
+        state.launched = true;
+        FUSED_INGRESS.with(|slot| *slot.borrow_mut() = Some(state));
+        return Ok(());
+    }
     let mut launcher = FusedRangeLauncher::new(hal.inner.clone(), stage_capacity, work_capacity)
         .map_err(|e| ZKVMError::InvalidWitness(format!("fused launcher init: {e}").into()))?;
     let mut producer_bases = [0usize; InsnKind::COUNT];
@@ -1405,7 +1416,16 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
             let mut work = [FusedRangeWorkItem::default(); InsnKind::COUNT];
             let mut work_count = 0usize;
             let mut cursor = 0usize;
-            for arena in range.typed.iter().flatten() {
+            // A forced shard boundary can leave a zero-row typed arena for a
+            // family that has no registration in this shard.  It contributes
+            // no witness work and must be treated like the provisional path,
+            // which already filters empty arenas before registration lookup.
+            for arena in range
+                .typed
+                .iter()
+                .flatten()
+                .filter(|arena| !arena.is_empty())
+            {
                 let registration =
                     &state.registrations[registration_for_kind[arena.kind() as usize]];
                 let mut offsets = [0u32; 13];

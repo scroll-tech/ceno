@@ -19,7 +19,7 @@ pub(super) unsafe extern "C" fn aot_exec_one<T: Tracer>(
         }
         if !matches!(
             context.fallback_reason,
-            AOT_FALLBACK_ECALL | AOT_FALLBACK_EXCEPTIONAL
+            AOT_FALLBACK_DYNAMIC_PC | AOT_FALLBACK_ECALL | AOT_FALLBACK_EXCEPTIONAL
         ) {
             LAST_AOT_ERROR.with(|slot| {
                 *slot.borrow_mut() = Some(anyhow!(
@@ -77,6 +77,16 @@ pub(super) unsafe extern "C" fn aot_exec_one<T: Tracer>(
     let pc = ByteAddr(pc);
     vm.set_pc(pc);
     let result = (|| -> Result<()> {
+        if context.trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+            let idx = pc.0.wrapping_sub(context.program_base) / PC_STEP_SIZE as u32;
+            let insn = unsafe { *context.instructions.add(idx as usize) };
+            let ecall_code = (insn.kind == InsnKind::ECALL)
+                .then(|| unsafe { *context.registers.add(Platform::reg_ecall() as usize) });
+            let preflight_vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
+            preflight_vm
+                .tracer_mut()
+                .prepare_native_fallback_shard_start(insn.kind, ecall_code);
+        }
         let Some(insn) = vm.fetch(pc.waddr()) else {
             vm.trap(TrapCause::InstructionAccessFault)?;
             bail!(

@@ -16,7 +16,7 @@ pub use tracer::{
     GpuReplayStep, GpuReplayTracer, GpuReplayTracerConfig, LatestAccesses, MemOp, NextAccessEvent,
     NextAccessPair, NextAccessTape, NextCycleAccess, PreflightTracer, PreflightTracerConfig,
     ReadOp, ReplayChunk, ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel,
-    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
+    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, TensorSegmentPlan, Tracer, WriteOp,
 };
 
 mod compact_journal;
@@ -32,8 +32,9 @@ mod gpu_replay;
 mod gpu_typed_ingress;
 pub use gpu_replay::{GpuReplayRoutingError, GpuReplayShardArenas, GpuReplayTypedRange};
 pub use gpu_typed_ingress::{
-    CONTINUATION_ADDRESS_SEND_BOUND, GpuReplayRangeDescriptor, GpuShardPreview, GpuTypedKindSpec,
-    GpuTypedLayout, GpuTypedSoaArena, MAX_SPARSE_ADDRESS_SENDS_PER_STEP, gpu_typed_kind_spec,
+    CONTINUATION_ADDRESS_SEND_BOUND, GpuReplayFallbackInterval, GpuReplayRangeDescriptor,
+    GpuShardPreview, GpuTypedKindSpec, GpuTypedLayout, GpuTypedSoaArena,
+    MAX_SPARSE_ADDRESS_SENDS_PER_STEP, gpu_typed_kind_spec,
 };
 
 mod vm_state;

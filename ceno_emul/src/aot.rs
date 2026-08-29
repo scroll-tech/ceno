@@ -301,14 +301,17 @@ const AOT_CTX_GPU_REPLAY_EVENTS_OFFSET: usize = 896;
 const AOT_CTX_GPU_REPLAY_EVENTS_LEN_OFFSET: usize = 904;
 const AOT_CTX_GPU_REPLAY_EVENT_CURSOR_OFFSET: usize = 912;
 const AOT_CTX_GPU_REPLAY_ERROR_OFFSET: usize = 920;
+const AOT_CTX_PREFLIGHT_TENSOR_REGION_ACTIVE_OFFSET: usize = 928;
+const AOT_CTX_GPU_REPLAY_TENSOR_INTERVALS_OFFSET: usize = 944;
+const AOT_CTX_GPU_REPLAY_TENSOR_INTERVAL_LEN_OFFSET: usize = 952;
 #[cfg(test)]
-const AOT_CTX_GPU_REPLAY_ORDINARY_CALLBACKS_OFFSET: usize = 928;
+const AOT_CTX_GPU_REPLAY_ORDINARY_CALLBACKS_OFFSET: usize = 936;
 
 const AOT_FALLBACK_DYNAMIC_PC: u32 = 1;
 const AOT_FALLBACK_MEMORY_GUARD: u32 = 2;
 const AOT_FALLBACK_ECALL: u32 = 3;
 const AOT_FALLBACK_EXCEPTIONAL: u32 = 4;
-const AOT_ABI_VERSION: u32 = 80;
+const AOT_ABI_VERSION: u32 = 88;
 const AOT_CACHE_MAGIC: &str = "ceno-aot-cache-v7";
 const AOT_EMITTER_SCHEMA: &str = "replay-emitter-schema2";
 const AOT_INITIAL_EVENT_SEED: usize = 20_000_000;
@@ -713,7 +716,10 @@ struct AotRuntimeContext {
     gpu_replay_events_len: usize,
     gpu_replay_event_cursor: *mut usize,
     gpu_replay_error: *mut u32,
+    preflight_tensor_region_active: *const bool,
     gpu_replay_ordinary_callbacks: u64,
+    gpu_replay_tensor_intervals: *const crate::GpuReplayFallbackInterval,
+    gpu_replay_tensor_interval_len: usize,
 }
 
 const PURE_ECALL_CODES: [u32; 11] = [
@@ -1508,6 +1514,7 @@ impl AotProgram {
         let mut preflight_replay_fallback_count = std::ptr::null_mut();
         let mut preflight_replay_unsupported_count = std::ptr::null_mut();
         let mut preflight_replay_range_capacity = 0;
+        let mut preflight_tensor_region_active = std::ptr::null();
         let mut preflight_max_cell_per_shard = u64::MAX;
         let mut preflight_target_cell_first_shard = u64::MAX;
         let mut preflight_max_cycle_per_shard = Cycle::MAX;
@@ -1672,6 +1679,7 @@ impl AotProgram {
                 preflight_replay_fallback_count = state.replay_fallback_count;
                 preflight_replay_unsupported_count = state.replay_unsupported_count;
                 preflight_replay_range_capacity = state.replay_range_capacity;
+                preflight_tensor_region_active = state.tensor_region_active;
                 preflight_max_cell_per_shard = state.planner_max_cell_per_shard;
                 preflight_target_cell_first_shard = state.planner_target_cell_first_shard;
                 preflight_max_cycle_per_shard = state.planner_max_cycle_per_shard;
@@ -1728,6 +1736,8 @@ impl AotProgram {
         let mut gpu_replay_events_len = 0;
         let mut gpu_replay_event_cursor = std::ptr::null_mut();
         let mut gpu_replay_error = std::ptr::null_mut();
+        let mut gpu_replay_tensor_intervals = std::ptr::null();
+        let mut gpu_replay_tensor_interval_len = 0usize;
         if trace_native_steps
             && !cfg!(debug_assertions)
             && TypeId::of::<T>() == TypeId::of::<crate::GpuReplayTracer>()
@@ -1749,6 +1759,8 @@ impl AotProgram {
             gpu_replay_events_len = state.next_access_len;
             gpu_replay_event_cursor = state.next_access_cursor;
             gpu_replay_error = state.error;
+            gpu_replay_tensor_intervals = state.tensor_fallback_intervals;
+            gpu_replay_tensor_interval_len = state.tensor_fallback_interval_len;
         }
         let preflight_step_cells_table = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             preflight_step_cells.as_ptr()
@@ -1966,7 +1978,10 @@ impl AotProgram {
             gpu_replay_events_len,
             gpu_replay_event_cursor,
             gpu_replay_error,
+            preflight_tensor_region_active,
             gpu_replay_ordinary_callbacks: 0,
+            gpu_replay_tensor_intervals,
+            gpu_replay_tensor_interval_len,
         };
         aot_diagnostic_marker(
             "RUNTIME_CONTEXT",

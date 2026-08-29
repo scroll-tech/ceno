@@ -260,7 +260,6 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
         words[0] == TENSOR_ABI_V1
             && words[1] == 0
             && words[5] == TENSOR_META_WORDS as u32
-            && words[6] == 0
             && words[7] == 0,
         "invalid TensorBus handle operator descriptor"
     );
@@ -303,7 +302,7 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
             _ => unreachable!("fixed TensorBus operator code"),
         })
     };
-    let (output, records) = vm.tensor_bus_apply(input, meta, code, transform)?;
+    let (output, records) = vm.tensor_bus_apply(input, meta, code, words[6], transform)?;
     #[cfg(feature = "tensor-cuda")]
     vm.tensor_bus_resident_apply(input, output, code)?;
     let mut output_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[3]);
