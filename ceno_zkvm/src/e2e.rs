@@ -4133,9 +4133,13 @@ pub fn run_e2e_proof_with_precompiled_aot<
     precompiled_fulltracer_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
+    let pipeline_timing = std::env::var_os("CENO_PIPELINE_TIMING").is_some();
     // Emulate program
     let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
     let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
+    let preflight_started = std::time::Instant::now();
+    #[cfg(feature = "tensor-cuda")]
+    let resident_before = ceno_emul::tensor::resident::resident_cuda_metrics();
     let emul_result = emulate_program(
         ctx.program.clone(),
         max_steps,
@@ -4150,6 +4154,31 @@ pub fn run_e2e_proof_with_precompiled_aot<
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         precompiled_fulltracer_aot,
     );
+    if pipeline_timing {
+        #[cfg(feature = "tensor-cuda")]
+        {
+            let resident =
+                ceno_emul::tensor::resident::resident_cuda_metrics().delta_since(resident_before);
+            eprintln!(
+                "pipeline timing phase=preflight elapsed_ms={} resident_sessions={} resident_gpu_ms={:.3} resident_h2d_bytes={} resident_d2h_bytes={} attention_launches={} ffn_launches={} peak_device_bytes={} shard_cells={:?}",
+                preflight_started.elapsed().as_millis(),
+                resident.sessions,
+                resident.inference_gpu_ns as f64 / 1_000_000.0,
+                resident.h2d_bytes,
+                resident.d2h_bytes,
+                resident.attention_launches,
+                resident.ffn_launches,
+                resident.peak_device_bytes,
+                emul_result.predicted_shard_costs,
+            );
+        }
+        #[cfg(not(feature = "tensor-cuda"))]
+        eprintln!(
+            "pipeline timing phase=preflight elapsed_ms={} shard_cells={:?}",
+            preflight_started.elapsed().as_millis(),
+            emul_result.predicted_shard_costs,
+        );
+    }
     create_proofs_streaming(
         emul_result,
         prover,
@@ -4188,6 +4217,8 @@ fn create_proofs_streaming<
         // generation and proving share the same device, so interleaving them
         // would serialize on the GPU while adding thread and queue overhead.
         {
+            let pipeline_timing = std::env::var_os("CENO_PIPELINE_TIMING").is_some();
+            let witness_setup_started = std::time::Instant::now();
             let wit_iter = generate_witness(
                 &ctx.system_config,
                 emulation_result,
@@ -4196,66 +4227,120 @@ fn create_proofs_streaming<
                 init_mem_state,
                 target_shard_id,
             );
+            let witness_setup_elapsed = witness_setup_started.elapsed();
+            if pipeline_timing {
+                eprintln!(
+                    "pipeline timing phase=witness_setup elapsed_ms={}",
+                    witness_setup_elapsed.as_millis(),
+                );
+            }
 
-            let wit_iter: Box<dyn Iterator<Item = _>> =
+            let mut wit_iter: Box<dyn Iterator<Item = _>> =
                 if let Some(target_shard_id) = target_shard_id {
                     Box::new(wit_iter.skip(target_shard_id))
                 } else {
                     Box::new(wit_iter)
                 };
 
-            wit_iter
-                .map(|(zkvm_witness, shard_ctx, pi, _)| {
-                    if is_mock_proving {
-                        MockProver::assert_satisfied_full(
-                            &shard_ctx,
-                            &ctx.system_config.zkvm_cs,
-                            ctx.zkvm_fixed_traces.clone(),
-                            &zkvm_witness,
-                            &pi,
-                            &ctx.program,
-                        );
-                        tracing::info!("Mock proving passed");
-                    }
+            let mut proofs = Vec::new();
+            let mut witness_total = witness_setup_elapsed;
+            let mut proof_total = std::time::Duration::ZERO;
+            loop {
+                let witness_started = std::time::Instant::now();
+                #[cfg(feature = "tensor-cuda")]
+                let resident_before = ceno_emul::tensor::resident::resident_cuda_metrics();
+                let Some((zkvm_witness, shard_ctx, pi, _)) = wit_iter.next() else {
+                    break;
+                };
+                let witness_elapsed = witness_started.elapsed();
+                witness_total += witness_elapsed;
+                #[cfg(feature = "tensor-cuda")]
+                let resident = ceno_emul::tensor::resident::resident_cuda_metrics()
+                    .delta_since(resident_before);
+                let shard_id = shard_ctx.shard_id;
+                if is_mock_proving {
+                    MockProver::assert_satisfied_full(
+                        &shard_ctx,
+                        &ctx.system_config.zkvm_cs,
+                        ctx.zkvm_fixed_traces.clone(),
+                        &zkvm_witness,
+                        &pi,
+                        &ctx.program,
+                    );
+                    tracing::info!("Mock proving passed");
+                }
 
-                    let transcript = Transcript::new(b"riscv");
-                    let start = std::time::Instant::now();
-                    tracing::info!(
-                        target: "ceno_pipeline",
-                        shard_id = shard_ctx.shard_id,
-                        phase = "proof_start",
-                        "compact replay pipeline event"
+                let transcript = Transcript::new(b"riscv");
+                let start = std::time::Instant::now();
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = shard_ctx.shard_id,
+                    phase = "proof_start",
+                    "compact replay pipeline event"
+                );
+                let zkvm_proof =
+                    match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
+                        Ok(proof) => proof,
+                        Err(err) => {
+                            eprintln!(
+                                "create_proof failed for shard {}: {err:?}",
+                                shard_ctx.shard_id
+                            );
+                            let _ = std::io::stderr().flush();
+                            std::process::exit(1);
+                        }
+                    };
+                let proof_elapsed = start.elapsed();
+                proof_total += proof_elapsed;
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = shard_ctx.shard_id,
+                    phase = "proof_end",
+                    elapsed_ms = proof_elapsed.as_millis(),
+                    "compact replay pipeline event"
+                );
+                tracing::debug!(
+                    "{}th shard proof created in {:?}",
+                    shard_ctx.shard_id,
+                    proof_elapsed
+                );
+                #[cfg(feature = "gpu")]
+                crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                tracing::info!("e2e proof stat: {}", zkvm_proof);
+                if pipeline_timing {
+                    #[cfg(feature = "tensor-cuda")]
+                    eprintln!(
+                        "pipeline timing shard={} witness_ms={} base_prove_ms={} resident_sessions={} resident_gpu_ms={:.3} resident_h2d_bytes={} resident_d2h_bytes={} attention_launches={} ffn_launches={} peak_device_bytes={}",
+                        shard_id,
+                        witness_elapsed.as_millis(),
+                        proof_elapsed.as_millis(),
+                        resident.sessions,
+                        resident.inference_gpu_ns as f64 / 1_000_000.0,
+                        resident.h2d_bytes,
+                        resident.d2h_bytes,
+                        resident.attention_launches,
+                        resident.ffn_launches,
+                        resident.peak_device_bytes,
                     );
-                    let zkvm_proof =
-                        match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
-                            Ok(proof) => proof,
-                            Err(err) => {
-                                eprintln!(
-                                    "create_proof failed for shard {}: {err:?}",
-                                    shard_ctx.shard_id
-                                );
-                                let _ = std::io::stderr().flush();
-                                std::process::exit(1);
-                            }
-                        };
-                    tracing::info!(
-                        target: "ceno_pipeline",
-                        shard_id = shard_ctx.shard_id,
-                        phase = "proof_end",
-                        elapsed_ms = start.elapsed().as_millis(),
-                        "compact replay pipeline event"
+                    #[cfg(not(feature = "tensor-cuda"))]
+                    eprintln!(
+                        "pipeline timing shard={} witness_ms={} base_prove_ms={}",
+                        shard_id,
+                        witness_elapsed.as_millis(),
+                        proof_elapsed.as_millis(),
                     );
-                    tracing::debug!(
-                        "{}th shard proof created in {:?}",
-                        shard_ctx.shard_id,
-                        start.elapsed()
-                    );
-                    #[cfg(feature = "gpu")]
-                    crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                    tracing::info!("e2e proof stat: {}", zkvm_proof);
-                    zkvm_proof
-                })
-                .collect_vec()
+                }
+                proofs.push(zkvm_proof);
+            }
+            if pipeline_timing {
+                eprintln!(
+                    "pipeline timing phase=shards witness_ms={} base_prove_ms={} shards={}",
+                    witness_total.as_millis(),
+                    proof_total.as_millis(),
+                    proofs.len(),
+                );
+            }
+            proofs
         }
     });
     metrics::gauge!("num_shards").set(proofs.len() as f64);

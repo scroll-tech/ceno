@@ -10,10 +10,16 @@
 
 use anyhow::{Result, ensure};
 use cudarc::{
-    driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PushKernelArg},
+    driver::{
+        CudaContext, CudaEvent, CudaFunction, CudaSlice, CudaStream, LaunchConfig, PushKernelArg,
+        sys,
+    },
     nvrtc::Ptx,
 };
-use std::sync::Arc;
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicU64, Ordering},
+};
 
 #[cfg(feature = "llama-tiny")]
 pub const RESIDENT_WORDS: usize = 4;
@@ -62,6 +68,57 @@ pub struct TinyResidentTransferMetrics {
     pub attention_launches: u32,
     pub ffn_launches: u32,
     pub peak_device_bytes: u64,
+    pub inference_gpu_ns: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ResidentCudaMetricsSnapshot {
+    pub sessions: u64,
+    pub h2d_bytes: u64,
+    pub d2h_bytes: u64,
+    pub attention_launches: u64,
+    pub ffn_launches: u64,
+    pub peak_device_bytes: u64,
+    pub inference_gpu_ns: u64,
+}
+
+impl ResidentCudaMetricsSnapshot {
+    pub fn delta_since(self, earlier: Self) -> Self {
+        Self {
+            sessions: self.sessions - earlier.sessions,
+            h2d_bytes: self.h2d_bytes - earlier.h2d_bytes,
+            d2h_bytes: self.d2h_bytes - earlier.d2h_bytes,
+            attention_launches: self.attention_launches - earlier.attention_launches,
+            ffn_launches: self.ffn_launches - earlier.ffn_launches,
+            peak_device_bytes: self.peak_device_bytes,
+            inference_gpu_ns: self.inference_gpu_ns - earlier.inference_gpu_ns,
+        }
+    }
+}
+
+static RESIDENT_SESSIONS: AtomicU64 = AtomicU64::new(0);
+static RESIDENT_H2D_BYTES: AtomicU64 = AtomicU64::new(0);
+static RESIDENT_D2H_BYTES: AtomicU64 = AtomicU64::new(0);
+static RESIDENT_ATTENTION_LAUNCHES: AtomicU64 = AtomicU64::new(0);
+static RESIDENT_FFN_LAUNCHES: AtomicU64 = AtomicU64::new(0);
+static RESIDENT_PEAK_DEVICE_BYTES: AtomicU64 = AtomicU64::new(0);
+static RESIDENT_INFERENCE_GPU_NS: AtomicU64 = AtomicU64::new(0);
+
+fn resident_metrics_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CENO_PIPELINE_TIMING").is_some())
+}
+
+pub fn resident_cuda_metrics() -> ResidentCudaMetricsSnapshot {
+    ResidentCudaMetricsSnapshot {
+        sessions: RESIDENT_SESSIONS.load(Ordering::Relaxed),
+        h2d_bytes: RESIDENT_H2D_BYTES.load(Ordering::Relaxed),
+        d2h_bytes: RESIDENT_D2H_BYTES.load(Ordering::Relaxed),
+        attention_launches: RESIDENT_ATTENTION_LAUNCHES.load(Ordering::Relaxed),
+        ffn_launches: RESIDENT_FFN_LAUNCHES.load(Ordering::Relaxed),
+        peak_device_bytes: RESIDENT_PEAK_DEVICE_BYTES.load(Ordering::Relaxed),
+        inference_gpu_ns: RESIDENT_INFERENCE_GPU_NS.load(Ordering::Relaxed),
+    }
 }
 
 /// Owns the input, attention, and output device tensors.  Keeping all three
@@ -75,6 +132,8 @@ pub struct TinyResidentDeviceWitness {
     /// leave it in the recycled input buffer.
     final_is_output: bool,
     metrics: TinyResidentTransferMetrics,
+    inference_start: Option<CudaEvent>,
+    inference_end: Option<CudaEvent>,
 }
 
 impl TinyResidentDeviceWitness {
@@ -126,12 +185,21 @@ impl TinyResidentCudaProvider {
                 attention_launches: 0,
                 ffn_launches: 0,
                 peak_device_bytes: (3 * RESIDENT_WORDS * std::mem::size_of::<i32>()) as u64,
+                inference_gpu_ns: 0,
             },
+            inference_start: None,
+            inference_end: None,
         })
     }
 
     /// Execute attention using only resident device buffers.
     pub fn attention(&self, witness: &mut TinyResidentDeviceWitness) -> Result<()> {
+        if resident_metrics_enabled() && witness.inference_start.is_none() {
+            witness.inference_start = Some(
+                self.stream
+                    .record_event(Some(sys::CUevent_flags::CU_EVENT_DEFAULT))?,
+            );
+        }
         if witness.final_is_output {
             self.launch_attention(&witness.output, &mut witness.attention)?;
         } else {
@@ -156,6 +224,12 @@ impl TinyResidentCudaProvider {
     /// permitted between this and `attention`.
     pub fn ffn(&self, witness: &mut TinyResidentDeviceWitness) -> Result<()> {
         self.launch_ffn(&witness.attention, &mut witness.output)?;
+        if resident_metrics_enabled() {
+            witness.inference_end = Some(
+                self.stream
+                    .record_event(Some(sys::CUevent_flags::CU_EVENT_DEFAULT))?,
+            );
+        }
         witness.final_is_output = true;
         witness.metrics.ffn_launches += 1;
         Ok(())
@@ -181,6 +255,12 @@ impl TinyResidentCudaProvider {
         layers: usize,
     ) -> Result<()> {
         ensure!(layers > 0, "resident block must contain at least one layer");
+        if resident_metrics_enabled() && witness.inference_start.is_none() {
+            witness.inference_start = Some(
+                self.stream
+                    .record_event(Some(sys::CUevent_flags::CU_EVENT_DEFAULT))?,
+            );
+        }
         for layer in 0..layers {
             if layer % 2 == 0 {
                 self.launch_attention(&witness.input, &mut witness.attention)?;
@@ -193,6 +273,12 @@ impl TinyResidentCudaProvider {
             }
             witness.metrics.attention_launches += 1;
             witness.metrics.ffn_launches += 1;
+        }
+        if resident_metrics_enabled() {
+            witness.inference_end = Some(
+                self.stream
+                    .record_event(Some(sys::CUevent_flags::CU_EVENT_DEFAULT))?,
+            );
         }
         Ok(())
     }
@@ -212,6 +298,10 @@ impl TinyResidentCudaProvider {
         // the 4096-word profile, where an asynchronous copy can otherwise
         // observe the FFN buffer before its launch completes.
         self.stream.synchronize()?;
+        if let (Some(start), Some(end)) = (&witness.inference_start, &witness.inference_end) {
+            witness.metrics.inference_gpu_ns =
+                (f64::from(start.elapsed_ms(end)?) * 1_000_000.0).round() as u64;
+        }
         let output = if witness.final_is_output {
             self.stream.memcpy_dtov(&witness.output)?
         } else {
@@ -222,6 +312,21 @@ impl TinyResidentCudaProvider {
             "resident output length changed"
         );
         witness.metrics.d2h_bytes = (RESIDENT_WORDS * std::mem::size_of::<i32>()) as u64;
+        if resident_metrics_enabled() {
+            RESIDENT_SESSIONS.fetch_add(1, Ordering::Relaxed);
+            RESIDENT_H2D_BYTES.fetch_add(witness.metrics.h2d_bytes, Ordering::Relaxed);
+            RESIDENT_D2H_BYTES.fetch_add(witness.metrics.d2h_bytes, Ordering::Relaxed);
+            RESIDENT_ATTENTION_LAUNCHES.fetch_add(
+                u64::from(witness.metrics.attention_launches),
+                Ordering::Relaxed,
+            );
+            RESIDENT_FFN_LAUNCHES
+                .fetch_add(u64::from(witness.metrics.ffn_launches), Ordering::Relaxed);
+            RESIDENT_PEAK_DEVICE_BYTES
+                .fetch_max(witness.metrics.peak_device_bytes, Ordering::Relaxed);
+            RESIDENT_INFERENCE_GPU_NS
+                .fetch_add(witness.metrics.inference_gpu_ns, Ordering::Relaxed);
+        }
         Ok(output)
     }
 }

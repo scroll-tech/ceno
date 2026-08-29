@@ -164,7 +164,7 @@ fn run() {
     let verified = Instant::now();
     let transfer_bytes = RESIDENT_BLOCKS as u64 * WORDS * 4;
     println!(
-        "tied-weight 7B topology E2E verified: resident_blocks={RESIDENT_BLOCKS} layers={} shards=9 proof_bytes_total={total_proof_bytes} proof_bytes_per_shard={proof_bytes:?} h2d_bytes={transfer_bytes} d2h_bytes={transfer_bytes} intermediate_h2d_bytes=0 intermediate_d2h_bytes=0 peak_device_bytes_per_block={} prepare_ms={} keygen_ms={} base_prove_ms={} verify_ms={} total_ms={}",
+        "tied-weight 7B topology E2E verified: resident_blocks={RESIDENT_BLOCKS} layers={} shards=9 proof_bytes_total={total_proof_bytes} proof_bytes_per_shard={proof_bytes:?} h2d_bytes={transfer_bytes} d2h_bytes={transfer_bytes} intermediate_h2d_bytes=0 intermediate_d2h_bytes=0 peak_device_bytes_per_block={} prepare_ms={} keygen_ms={} witness_base_prove_ms={} verify_ms={} total_ms={}",
         RESIDENT_BLOCKS * LAYERS_PER_BLOCK,
         WORDS * 12,
         prepared.duration_since(started).as_millis(),
