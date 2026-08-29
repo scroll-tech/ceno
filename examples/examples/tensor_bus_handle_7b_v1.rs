@@ -16,7 +16,25 @@ use ceno_rt::tensor::{
 const WORDS: usize = 4;
 #[cfg(not(feature = "llama-tiny"))]
 const WORDS: usize = 4096;
+#[cfg(feature = "resident-block-1")]
+const LAYERS: usize = 1;
+#[cfg(feature = "resident-block-2")]
+const LAYERS: usize = 2;
+#[cfg(feature = "resident-block-4")]
+const LAYERS: usize = 4;
+#[cfg(not(any(
+    feature = "resident-block-1",
+    feature = "resident-block-2",
+    feature = "resident-block-4"
+)))]
 const LAYERS: usize = 8;
+
+#[cfg(any(
+    all(feature = "resident-block-1", feature = "resident-block-2"),
+    all(feature = "resident-block-1", feature = "resident-block-4"),
+    all(feature = "resident-block-2", feature = "resident-block-4")
+))]
+compile_error!("resident block multiplier features are mutually exclusive");
 
 fn main() {
     let input = std::array::from_fn::<_, WORDS, _>(|index| index as i32 - 2048);

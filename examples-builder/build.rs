@@ -29,8 +29,27 @@ fn build_elfs() {
     let guest_target_str = guest_target.to_string_lossy().into_owned();
     let mut args = vec!["build", "--examples", "--target-dir", &guest_target_str];
     let llama_tiny = std::env::var_os("CARGO_FEATURE_LLAMA_TINY").is_some();
+    let resident_block_1 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_1").is_some();
+    let resident_block_2 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_2").is_some();
+    let resident_block_4 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_4").is_some();
+    assert!(
+        usize::from(resident_block_1)
+            + usize::from(resident_block_2)
+            + usize::from(resident_block_4)
+            <= 1,
+        "resident block multiplier features are mutually exclusive"
+    );
     if llama_tiny {
         args.extend(["--features", "llama-tiny"]);
+    }
+    if resident_block_1 {
+        args.extend(["--features", "resident-block-1"]);
+    }
+    if resident_block_2 {
+        args.extend(["--features", "resident-block-2"]);
+    }
+    if resident_block_4 {
+        args.extend(["--features", "resident-block-4"]);
     }
     if is_release {
         args.insert(1, "--release"); // insert --release after "build"
@@ -62,6 +81,15 @@ fn build_elfs() {
         let mut ceno_args = vec!["ceno", "build", "--example", example];
         if llama_tiny {
             ceno_args.extend(["--features", "llama-tiny"]);
+        }
+        if resident_block_1 {
+            ceno_args.extend(["--features", "resident-block-1"]);
+        }
+        if resident_block_2 {
+            ceno_args.extend(["--features", "resident-block-2"]);
+        }
+        if resident_block_4 {
+            ceno_args.extend(["--features", "resident-block-4"]);
         }
         if is_release {
             ceno_args.push("--release");
@@ -101,6 +129,9 @@ fn main() {
     println!("cargo:rerun-if-changed=../ceno_rt/src/tensor.rs");
     println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_LLAMA_TINY");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RESIDENT_BLOCK_1");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RESIDENT_BLOCK_2");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RESIDENT_BLOCK_4");
     println!("cargo:rerun-if-env-changed=CARGO_TARGET_DIR");
     build_elfs();
 }

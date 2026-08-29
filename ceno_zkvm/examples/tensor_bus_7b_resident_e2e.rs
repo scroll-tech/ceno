@@ -1,6 +1,6 @@
 //! Direct proof and verifier E2E for one eight-layer resident Llama-shaped block.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use ceno_zkvm::{
     e2e::{
@@ -20,6 +20,26 @@ use mpcs::BasefoldDefault;
 type E = BabyBearExt4;
 type Pcs = BasefoldDefault<E>;
 
+#[cfg(feature = "resident-block-1")]
+const LAYERS: usize = 1;
+#[cfg(feature = "resident-block-2")]
+const LAYERS: usize = 2;
+#[cfg(feature = "resident-block-4")]
+const LAYERS: usize = 4;
+#[cfg(not(any(
+    feature = "resident-block-1",
+    feature = "resident-block-2",
+    feature = "resident-block-4"
+)))]
+const LAYERS: usize = 8;
+
+#[cfg(any(
+    all(feature = "resident-block-1", feature = "resident-block-2"),
+    all(feature = "resident-block-1", feature = "resident-block-4"),
+    all(feature = "resident-block-2", feature = "resident-block-4")
+))]
+compile_error!("resident block multiplier features are mutually exclusive");
+
 #[cfg(feature = "llama-tiny")]
 const TRANSFER_WORDS: u64 = 4;
 #[cfg(not(feature = "llama-tiny"))]
@@ -34,6 +54,7 @@ fn main() {
 }
 
 fn run() {
+    let started = Instant::now();
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
@@ -54,18 +75,21 @@ fn run() {
     );
     ctx.fulltracer_aot_program = Some(prepare_fulltracer_aot_program(preflight_aot.as_ref()));
     ctx.preflight_aot_program = Some(preflight_aot);
+    let prepared = Instant::now();
 
     let (max_num_variables, security_level) = default_backend_config();
     let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
     let device = create_prover(backend);
     let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+    let keyed = Instant::now();
     let prover = ZKVMProver::new(pk.into(), device);
     let init_mem = prover.setup_init_mem(&[]);
     let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+    let proved = Instant::now();
     assert_eq!(
         proofs.len(),
         1,
-        "one atomic eight-layer resident block must use one shard"
+        "one atomic resident block must use one shard"
     );
     let names = [
         "TensorBusCircuit",
@@ -85,11 +109,25 @@ fn run() {
             "resident segment did not prove {name}"
         );
     }
+    let proof_bytes = proofs
+        .iter()
+        .map(|proof| bincode::serialized_size(proof).expect("serialize resident proof"))
+        .sum::<u64>();
+    let proof_chip_count = proofs
+        .iter()
+        .map(|proof| proof.chip_proofs.len())
+        .sum::<usize>();
     run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+    let verified = Instant::now();
     println!(
-        "resident TensorBus E2E verified: layers=8 words={TRANSFER_WORDS} shards=1 h2d_bytes={} d2h_bytes={} intermediate_h2d_bytes=0 intermediate_d2h_bytes=0 attention_launches=8 ffn_launches=8 peak_device_bytes={}",
+        "resident TensorBus E2E verified: layers={LAYERS} words={TRANSFER_WORDS} shards=1 proof_bytes={proof_bytes} proof_chip_count={proof_chip_count} h2d_bytes={} d2h_bytes={} intermediate_h2d_bytes=0 intermediate_d2h_bytes=0 attention_launches={LAYERS} ffn_launches={LAYERS} peak_device_bytes={} prepare_ms={} keygen_ms={} base_prove_ms={} verify_ms={} total_ms={}",
         TRANSFER_WORDS * 4,
         TRANSFER_WORDS * 4,
         TRANSFER_WORDS * 12,
+        prepared.duration_since(started).as_millis(),
+        keyed.duration_since(prepared).as_millis(),
+        proved.duration_since(keyed).as_millis(),
+        verified.duration_since(proved).as_millis(),
+        verified.duration_since(started).as_millis(),
     );
 }

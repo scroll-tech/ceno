@@ -31,4 +31,7 @@ substrate-bn.workspace = true
 
 [features]
 llama-tiny = ["ceno_rt/llama-tiny"]
+resident-block-1 = []
+resident-block-2 = []
+resident-block-4 = []
 profiling = ["k256/std", "k256/ecdsa", "k256/profiling", "p256/std", "p256/ecdsa", "p256/arithmetic", "p256/profiling"]

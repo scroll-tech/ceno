@@ -3048,6 +3048,33 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             common_scalar_offsets,
             common_scalar_indices: vec![],
         };
+        if std::env::var("CENO_GPU_SUMCHECK_PLAN_DIAGNOSTICS")
+            .map(|value| value != "0")
+            .unwrap_or(false)
+        {
+            eprintln!(
+                "[gpu-main-plan] jobs={} chips={} mles={} terms={} max_vars={} max_degree={} groups={}",
+                jobs.len(),
+                chip_data.len(),
+                all_witins_gpu.len(),
+                term_coefficients.len(),
+                max_num_variables,
+                max_degree,
+                common_term_plan.term_offsets.len().saturating_sub(1),
+            );
+            for (group, offsets) in common_term_plan.term_offsets.windows(2).enumerate() {
+                let mle_offsets = &common_term_plan.common_mle_offsets[group..=group + 1];
+                eprintln!(
+                    "[gpu-main-plan-group] group={} nv={} terms={}..{} common_mles={}..{}",
+                    group,
+                    common_groups[group].num_vars,
+                    offsets[0],
+                    offsets[1],
+                    mle_offsets[0],
+                    mle_offsets[1],
+                );
+            }
+        }
         let term_coefficients_gl64: Vec<BB31Ext> =
             unsafe { std::mem::transmute(term_coefficients) };
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =

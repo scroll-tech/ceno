@@ -91,6 +91,9 @@ gpu = ["gkr_iop/gpu", "dep:ceno_gpu", "dep:cudarc", "dep:nvtx"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 llama-tiny = ["ceno_emul/llama-tiny", "ceno-examples/llama-tiny"]
+resident-block-1 = ["ceno-examples/resident-block-1"]
+resident-block-2 = ["ceno-examples/resident-block-2"]
+resident-block-4 = ["ceno-examples/resident-block-4"]
 tensor-cuda = ["ceno_emul/tensor-cuda"]
 nightly-features = [
   "p3/nightly-features",

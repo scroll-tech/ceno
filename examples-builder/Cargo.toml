@@ -13,3 +13,6 @@ glob = "0.3"
 
 [features]
 llama-tiny = []
+resident-block-1 = []
+resident-block-2 = []
+resident-block-4 = []
