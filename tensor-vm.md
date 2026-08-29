@@ -191,6 +191,39 @@ Do not permanently field-expand all model weights.
 The design principle is: commit according to tensor lifetime, not operator
 boundary.
 
+## Resident blocks: Tensor space and hint space
+
+For multi-layer resident execution, Tensor space is the internal activation
+plane and hint space is the model-weight plane. Guest RAM is only a boundary:
+
+```text
+IMPORT_BEGIN(input RAM) -> Tensor x0
+  -> Attention(x0, hint_base, layer 0) -> a0
+  -> Ffn(a0, hint_base, layer 0) -> x1
+  -> ...
+  -> Ffn(aN-1, hint_base, layer N-1) -> xN
+EXPORT_END(xN) -> output RAM
+```
+
+`TensorRef = (segment_id, local_tensor_slot, version)` is not a guest pointer.
+Each attention/FFN chip reads an input TensorRef, derives fixed hint-space
+weight addresses from `(hint_base, layer, profile, role, tile_index)`, and
+writes a fresh TensorRef. The hint-read relation remains proof-authoritative;
+GPU staging/caching uses the same derived tile identities but is never trusted.
+
+Only the imported input and exported final output are outer TensorBus boundary
+values. Attention outputs, FFN outputs, residuals, norms, and temporaries are
+segment-private Tensor-space values. The resident-block Core constrains their
+read/write chain in one MLE/table, while attention and FFN chips constrain
+their Tensor-space I/O, fixed hint reads, and arithmetic/lookup/quantization.
+
+The physical provider ping-pongs two device buffers (`x` and `a`) across the
+block. It uploads only x0 and downloads only xN; device buffers and witnesses
+never enter the guest ABI. Preflight expands all internal chip costs and fixed
+hint ranges from `(hint_base, layer_count, profile)` before atomically admitting
+the block to a shard. This is the architecture for guest-selected 2/4/8/16
+inner unroll capacity tests and the eventual 32-layer topology.
+
 ## Implementation campaign
 
 ### Phase 0: baseline instrumentation

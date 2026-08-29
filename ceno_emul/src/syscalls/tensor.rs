@@ -323,20 +323,9 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
         tensor_bus_reg_ops(desc_ptr),
     );
     witness.tensor_bus_records = records;
-    witness.tensor_bus_event = Some(tensor_bus_event(
-        code,
-        words
-            .into_iter()
-            .chain(meta_words)
-            .chain(input_words)
-            .chain([
-                output.tensor_id as u32,
-                (output.tensor_id >> 32) as u32,
-                output.version,
-                0,
-            ]),
-    ));
-    witness.tensor_bus_event_cycle = Some(vm.tracer().cycle());
+    // Internal resident layers are bound by their own constrained ECALL and
+    // RAM witnesses.  TensorBus records only the import/export boundary, so
+    // no intermediate opaque handle becomes a TensorBus Core event.
     Ok(SyscallEffects {
         witness,
         next_pc: None,

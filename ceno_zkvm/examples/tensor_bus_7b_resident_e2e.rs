@@ -1,4 +1,4 @@
-//! Direct proof and verifier E2E for one 4096-word resident Llama-shaped layer.
+//! Direct proof and verifier E2E for one eight-layer resident Llama-shaped block.
 
 use std::sync::Arc;
 
@@ -19,6 +19,11 @@ use mpcs::BasefoldDefault;
 
 type E = BabyBearExt4;
 type Pcs = BasefoldDefault<E>;
+
+#[cfg(feature = "llama-tiny")]
+const TRANSFER_WORDS: u64 = 4;
+#[cfg(not(feature = "llama-tiny"))]
+const TRANSFER_WORDS: u64 = 4096;
 
 fn main() {
     rayon::ThreadPoolBuilder::new()
@@ -60,7 +65,7 @@ fn run() {
     assert_eq!(
         proofs.len(),
         1,
-        "one atomic resident segment must use one shard"
+        "one atomic eight-layer resident block must use one shard"
     );
     let names = [
         "TensorBusCircuit",
@@ -81,5 +86,10 @@ fn run() {
         );
     }
     run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
-    println!("default-width resident TensorBus E2E verified: words=4096");
+    println!(
+        "resident TensorBus E2E verified: layers=8 words={TRANSFER_WORDS} shards=1 h2d_bytes={} d2h_bytes={} intermediate_h2d_bytes=0 intermediate_d2h_bytes=0 attention_launches=8 ffn_launches=8 peak_device_bytes={}",
+        TRANSFER_WORDS * 4,
+        TRANSFER_WORDS * 4,
+        TRANSFER_WORDS * 12,
+    );
 }

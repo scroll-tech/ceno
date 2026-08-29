@@ -90,7 +90,7 @@ goldilocks = ["forbid_overflow", "nightly-features", "parallel", "bigint-rug"]
 gpu = ["gkr_iop/gpu", "dep:ceno_gpu", "dep:cudarc", "dep:nvtx"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
-llama-tiny = ["ceno_emul/llama-tiny"]
+llama-tiny = ["ceno_emul/llama-tiny", "ceno-examples/llama-tiny"]
 tensor-cuda = ["ceno_emul/tensor-cuda"]
 nightly-features = [
   "p3/nightly-features",

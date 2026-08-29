@@ -150,8 +150,13 @@ fn constrain_fixed_tensor_bus<E: ExtensionField, S: SyscallSpec>(
         config.key_ordinal.expr(),
         E::BaseField::ZERO.expr(),
     )?;
-    let event_record = event_record::<E, S>(config);
-    cb.write_record(|| "tensor_bus_event", RAMType::Custom, event_record)?;
+    // TensorBus is only the host/device boundary.  Internal handle operators
+    // remain ordinary proof-bound ECALLs and RAM transitions, but do not
+    // create TensorBus records or guest-visible intermediate TensorBus values.
+    if S::CODE == TensorImportBeginV1Spec::CODE || S::CODE == TensorExportEndV1Spec::CODE {
+        let event_record = event_record::<E, S>(config);
+        cb.write_record(|| "tensor_bus_event", RAMType::Custom, event_record)?;
+    }
     Ok(())
 }
 

@@ -10,3 +10,6 @@ version.workspace = true
 
 [build-dependencies]
 glob = "0.3"
+
+[features]
+llama-tiny = []

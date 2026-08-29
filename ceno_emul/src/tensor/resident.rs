@@ -45,6 +45,14 @@ pub fn resident_attention_to_ffn_cpu(input: &[i32]) -> Vec<i32> {
         .collect()
 }
 
+pub fn resident_block_8_layers_cpu(input: &[i32]) -> Vec<i32> {
+    let mut words = input.to_vec();
+    for _ in 0..8 {
+        words = resident_attention_to_ffn_cpu(&words);
+    }
+    words
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TinyResidentTransferMetrics {
     pub h2d_bytes: u64,
@@ -63,6 +71,9 @@ pub struct TinyResidentDeviceWitness {
     input: CudaSlice<i32>,
     attention: CudaSlice<i32>,
     output: CudaSlice<i32>,
+    /// `true` when the final activation lives in `output`; odd layer counts
+    /// leave it in the recycled input buffer.
+    final_is_output: bool,
     metrics: TinyResidentTransferMetrics,
 }
 
@@ -106,6 +117,7 @@ impl TinyResidentCudaProvider {
             input,
             attention,
             output,
+            final_is_output: false,
             metrics: TinyResidentTransferMetrics {
                 h2d_bytes: (RESIDENT_WORDS * std::mem::size_of::<i32>()) as u64,
                 d2h_bytes: 0,
@@ -120,28 +132,68 @@ impl TinyResidentCudaProvider {
 
     /// Execute attention using only resident device buffers.
     pub fn attention(&self, witness: &mut TinyResidentDeviceWitness) -> Result<()> {
+        if witness.final_is_output {
+            self.launch_attention(&witness.output, &mut witness.attention)?;
+        } else {
+            self.launch_attention(&witness.input, &mut witness.attention)?;
+        }
+        witness.metrics.attention_launches += 1;
+        Ok(())
+    }
+
+    fn launch_attention(&self, input: &CudaSlice<i32>, output: &mut CudaSlice<i32>) -> Result<()> {
         unsafe {
             self.stream
                 .launch_builder(&self.attention)
-                .arg(&witness.input)
-                .arg(&mut witness.attention)
+                .arg(input)
+                .arg(output)
                 .launch(LaunchConfig::for_num_elems(RESIDENT_WORDS as u32))?;
         }
-        witness.metrics.attention_launches += 1;
         Ok(())
     }
 
     /// Execute FFN using the resident attention output. No host transfer is
     /// permitted between this and `attention`.
     pub fn ffn(&self, witness: &mut TinyResidentDeviceWitness) -> Result<()> {
+        self.launch_ffn(&witness.attention, &mut witness.output)?;
+        witness.final_is_output = true;
+        witness.metrics.ffn_launches += 1;
+        Ok(())
+    }
+
+    fn launch_ffn(&self, input: &CudaSlice<i32>, output: &mut CudaSlice<i32>) -> Result<()> {
         unsafe {
             self.stream
                 .launch_builder(&self.ffn)
-                .arg(&witness.attention)
-                .arg(&mut witness.output)
+                .arg(input)
+                .arg(output)
                 .launch(LaunchConfig::for_num_elems(RESIDENT_WORDS as u32))?;
         }
-        witness.metrics.ffn_launches += 1;
+        Ok(())
+    }
+
+    /// Run a fully resident Llama-shaped block.  Each logical layer uses the
+    /// same attention/FFN kernels; activation buffers ping-pong without any
+    /// host round trip.  The caller exports only after the entire block.
+    pub fn block_layers(
+        &self,
+        witness: &mut TinyResidentDeviceWitness,
+        layers: usize,
+    ) -> Result<()> {
+        ensure!(layers > 0, "resident block must contain at least one layer");
+        for layer in 0..layers {
+            if layer % 2 == 0 {
+                self.launch_attention(&witness.input, &mut witness.attention)?;
+                self.launch_ffn(&witness.attention, &mut witness.output)?;
+                witness.final_is_output = true;
+            } else {
+                self.launch_attention(&witness.output, &mut witness.attention)?;
+                self.launch_ffn(&witness.attention, &mut witness.input)?;
+                witness.final_is_output = false;
+            }
+            witness.metrics.attention_launches += 1;
+            witness.metrics.ffn_launches += 1;
+        }
         Ok(())
     }
 
@@ -160,7 +212,11 @@ impl TinyResidentCudaProvider {
         // the 4096-word profile, where an asynchronous copy can otherwise
         // observe the FFN buffer before its launch completes.
         self.stream.synchronize()?;
-        let output = self.stream.memcpy_dtov(&witness.output)?;
+        let output = if witness.final_is_output {
+            self.stream.memcpy_dtov(&witness.output)?
+        } else {
+            self.stream.memcpy_dtov(&witness.input)?
+        };
         ensure!(
             output.len() == RESIDENT_WORDS,
             "resident output length changed"

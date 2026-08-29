@@ -28,7 +28,7 @@ pub const TENSOR_BUS_EVENT_WORDS: usize = 25;
 const KEY_SHARD_ID: usize = 22;
 const KEY_LOCAL_SHARD_CYCLE: usize = 23;
 const KEY_ORDINAL: usize = 24;
-const TENSOR_BUS_SEGMENT_EVENTS: usize = 4;
+const TENSOR_BUS_SEGMENT_EVENTS: usize = 2;
 
 /// A canonical event is stored on the syscall witness at execution time and
 /// must exactly match the custom write record in TensorBusFixedEcall.
@@ -73,7 +73,7 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
     use ceno_emul::{SyscallSpec, TensorExportEndV1Spec, TensorImportBeginV1Spec};
     if events.len() % TENSOR_BUS_SEGMENT_EVENTS != 0 {
         return Err(tensor_bus_error(
-            "TensorBus events must contain complete import-begin/attention/FFN/export-end sections",
+            "TensorBus events must contain complete import-begin/export-end boundary sections",
         ));
     }
     let mut previous_key = None;
@@ -97,22 +97,14 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
         previous_key = Some(key);
     }
     for section in events.chunks_exact(TENSOR_BUS_SEGMENT_EVENTS) {
-        let mut handles = std::collections::BTreeMap::<(u64, u32), [u32; 4]>::new();
         for (record, event) in section.iter().enumerate() {
-            let expected_code = [
-                TensorImportBeginV1Spec::CODE,
-                ceno_emul::TensorHandleAttentionV1Spec::CODE,
-                ceno_emul::TensorHandleFfnV1Spec::CODE,
-                TensorExportEndV1Spec::CODE,
-            ][record];
+            let expected_code =
+                [TensorImportBeginV1Spec::CODE, TensorExportEndV1Spec::CODE][record];
             if event[1] != expected_code {
                 return Err(tensor_bus_error("TensorBus section event order mismatch"));
             }
             match event[1] {
                 code if code == TensorImportBeginV1Spec::CODE => {
-                    if !handles.is_empty() {
-                        return Err(tensor_bus_error("TensorBus import-begin is not first"));
-                    }
                     if event[5] != ceno_emul::TENSOR_BUS_FIXED_TRANSFER_WORDS
                         || event[10] != event[5] * 4
                     {
@@ -120,47 +112,11 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
                             "TensorBus import fixed metadata mismatch".to_string(),
                         ));
                     }
-                    let key = (
-                        u64::from(event[14]) | (u64::from(event[15]) << 32),
-                        event[16],
-                    );
-                    if key.0 == 0
-                        || handles
-                            .insert(key, [event[10], event[11], event[12], event[13]])
-                            .is_some()
-                    {
+                    let tensor_id = u64::from(event[14]) | (u64::from(event[15]) << 32);
+                    if tensor_id == 0 || event[16] != 0 || event[17] != 0 {
                         return Err(tensor_bus_error(format!(
                             "TensorBus import-begin handle/version invalid"
                         )));
-                    }
-                }
-                code if code == ceno_emul::TensorHandleAttentionV1Spec::CODE
-                    || code == ceno_emul::TensorHandleFfnV1Spec::CODE =>
-                {
-                    if event[10] != ceno_emul::TENSOR_BUS_FIXED_TRANSFER_WORDS * 4
-                        || event[11] != ceno_emul::TENSOR_BUS_FIXED_TRANSFER_WORDS
-                    {
-                        return Err(tensor_bus_error(
-                            "TensorBus operator fixed metadata mismatch",
-                        ));
-                    }
-                    let input = (
-                        u64::from(event[14]) | (u64::from(event[15]) << 32),
-                        event[16],
-                    );
-                    if !handles.contains_key(&input) {
-                        return Err(tensor_bus_error("TensorBus operator input handle missing"));
-                    }
-                    let output = (
-                        u64::from(event[18]) | (u64::from(event[19]) << 32),
-                        event[20],
-                    );
-                    if output.0 == 0
-                        || handles
-                            .insert(output, [event[10], event[11], event[12], event[13]])
-                            .is_some()
-                    {
-                        return Err(tensor_bus_error("TensorBus operator output handle invalid"));
                     }
                 }
                 code if code == TensorExportEndV1Spec::CODE => {
@@ -171,13 +127,10 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
                             "TensorBus export fixed metadata mismatch".to_string(),
                         ));
                     }
-                    let key = (
-                        u64::from(event[14]) | (u64::from(event[15]) << 32),
-                        event[16],
-                    );
-                    if handles.get(&key) != Some(&[event[10], event[11], event[12], event[13]]) {
+                    let tensor_id = u64::from(event[14]) | (u64::from(event[15]) << 32);
+                    if tensor_id == 0 || event[16] != 0 || event[17] != 0 {
                         return Err(tensor_bus_error(
-                            "TensorBus export handle/version/metadata mismatch".to_string(),
+                            "TensorBus export handle is invalid".to_string(),
                         ));
                     }
                 }
@@ -202,7 +155,7 @@ fn verify_atomic_tensor_bus_shard(events: &[TensorBusEvent]) -> Result<(), ZKVME
     }
     if events.len() % TENSOR_BUS_SEGMENT_EVENTS != 0 {
         return Err(tensor_bus_error(
-            "TensorBus shard must contain complete atomic import-begin/attention/FFN/export-end sections",
+            "TensorBus shard must contain complete atomic import-begin/export-end boundary sections",
         ));
     }
     verify_tensor_bus_events(events)
@@ -245,8 +198,6 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
             });
         for (record, expected_code) in [
             ceno_emul::TensorImportBeginV1Spec::CODE,
-            ceno_emul::TensorHandleAttentionV1Spec::CODE,
-            ceno_emul::TensorHandleFfnV1Spec::CODE,
             ceno_emul::TensorExportEndV1Spec::CODE,
         ]
         .into_iter()
@@ -275,10 +226,9 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
                 E::BaseField::ZERO.expr(),
             )?;
         }
-        // Every operator transition transfers its opaque output handle to the
-        // next input. These are the
-        // TensorBus state transitions that ordinary RAM cannot express.
-        for record in [1, 2, 3] {
+        // TensorBus owns just the resident boundary.  Inner attention/FFN
+        // operations are constrained by their own ECALL/RAM witnesses.
+        for record in [1] {
             for word in 10..14 {
                 cb.require_equal(
                     || format!("tensor_bus_meta_{record}_{word}"),
@@ -287,19 +237,15 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
                 )?;
             }
         }
-        for (left, right) in [(0, 1), (1, 2), (2, 3)] {
-            for offset in 0..4 {
-                cb.require_equal(
-                    || format!("tensor_bus_handle_{left}_{right}_{offset}"),
-                    event[left][14 + offset + if left == 1 || left == 2 { 4 } else { 0 }].expr(),
-                    event[right][14 + offset].expr(),
-                )?;
-            }
-        }
+        // Import and export deliberately name different opaque handles.  The
+        // intervening attention/FFN ECALLs, including their RAM read/write
+        // witnesses, constrain the handle chain. TensorBus itself owns only
+        // the host/device boundary and therefore binds both endpoint handles
+        // without inventing a false equality between them.
         cb.require_equal(
             || "tensor_bus_transfer_words",
             event[0][5].expr(),
-            event[3][6].expr(),
+            event[1][6].expr(),
         )?;
         let four = E::BaseField::from_u32(4).expr();
         cb.require_equal(
@@ -309,15 +255,15 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
         )?;
         cb.require_equal(
             || "tensor_bus_export_byte_len",
-            event[3][10].expr(),
-            four * event[3][6].expr(),
+            event[1][10].expr(),
+            four * event[1][6].expr(),
         )?;
         // The complete 25-word event relation is claim-authoritative through
         // custom-RAM product reads.  Do not compare it to PublicValues here:
         // an Instance scalar in this GKR table is unsupported, and a host
         // supplied public tuple would not make the relation any stronger.
-        // The verifier instead requires this Core proof whenever the four
-        // producer proofs are present (and vice versa); the product relation
+        // The verifier instead requires this Core proof whenever the two
+        // boundary producer proofs are present (and vice versa); the product relation
         // binds every event word, including the shard/local-cycle/ordinal key.
         Ok(TensorBusConfig {
             event,
@@ -331,7 +277,7 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
     ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
         // `read_record` uses ordinary custom-RAM records, while the default
         // table builder counts only table-RAM records.  Keep this small
-        // override so the four producer-consumer reads are represented in the
+        // override so the boundary producer-consumer reads are represented in the
         // GKR layer's output group as well as in the product relation.
         let selector = cb.create_placeholder_structural_witin(|| "selector");
         let config = Self::construct_circuit(cb, params)?;
@@ -414,10 +360,7 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ceno_emul::{
-        SyscallSpec, TensorExportEndV1Spec, TensorHandleAttentionV1Spec, TensorHandleFfnV1Spec,
-        TensorImportBeginV1Spec,
-    };
+    use ceno_emul::{SyscallSpec, TensorExportEndV1Spec, TensorImportBeginV1Spec};
 
     fn event(code: u32) -> TensorBusEvent {
         let mut event = [0; TENSOR_BUS_EVENT_WORDS];
@@ -433,19 +376,11 @@ mod tests {
         import[11] = import[5];
         import[12] = 9;
         import[14] = 1;
-        let mut attention = event(TensorHandleAttentionV1Spec::CODE);
-        attention[10..14].copy_from_slice(&import[10..14]);
-        attention[14] = 1;
-        attention[18] = 2;
-        let mut ffn = event(TensorHandleFfnV1Spec::CODE);
-        ffn[10..14].copy_from_slice(&import[10..14]);
-        ffn[14] = 2;
-        ffn[18] = 3;
         let mut export = event(TensorExportEndV1Spec::CODE);
         export[6] = ceno_emul::TENSOR_BUS_FIXED_TRANSFER_WORDS;
         export[10..14].copy_from_slice(&import[10..14]);
-        export[14] = 3;
-        let mut events = vec![import, attention, ffn, export];
+        export[14] = 1;
+        let mut events = vec![import, export];
         for (index, event) in events.iter_mut().enumerate() {
             event[KEY_LOCAL_SHARD_CYCLE] = (index as u32) * 4;
         }
@@ -475,10 +410,10 @@ mod tests {
         bad_order.swap(0, 1);
         assert!(verify_tensor_bus_events(&bad_order).is_err());
         let mut bad_version = honest.clone();
-        bad_version[2][16] = 1;
+        bad_version[1][16] = 1;
         assert!(verify_tensor_bus_events(&bad_version).is_err());
         let mut bad_meta = honest;
-        bad_meta[3][12] = 99;
+        bad_meta[1][12] = 99;
         assert!(verify_tensor_bus_events(&bad_meta).is_err());
     }
 
@@ -486,17 +421,16 @@ mod tests {
     fn atomic_shard_accepts_multiple_complete_sections_and_rejects_splits() {
         let honest = honest_events();
         assert!(verify_atomic_tensor_bus_shard(&honest).is_ok());
-        assert!(verify_atomic_tensor_bus_shard(&honest[..3]).is_err());
+        assert!(verify_atomic_tensor_bus_shard(&honest[..1]).is_err());
         let mut two_segments = honest.clone();
         for event in &mut two_segments {
             event[KEY_LOCAL_SHARD_CYCLE] += 16;
-            event[14] += 3;
-            event[18] += 3;
+            event[14] += 1;
         }
         two_segments.extend_from_slice(&honest);
         two_segments.sort_by_key(|event| event[KEY_LOCAL_SHARD_CYCLE]);
         assert!(verify_atomic_tensor_bus_shard(&two_segments).is_ok());
-        two_segments.swap(4, 5);
+        two_segments.swap(2, 3);
         assert!(verify_atomic_tensor_bus_shard(&two_segments).is_err());
     }
 }

@@ -289,6 +289,10 @@ impl<T: Tracer> VMState<T> {
                 session.provider.ffn(&mut session.witness)?;
                 session.phase = TensorBusResidentPhase::Ffn;
             }
+            (TensorBusResidentPhase::Ffn, crate::tensor::TENSOR_HANDLE_ATTENTION_V1) => {
+                session.provider.attention(&mut session.witness)?;
+                session.phase = TensorBusResidentPhase::Attention;
+            }
             _ => anyhow::bail!("TensorBus CUDA operator order mismatch"),
         }
         session.handle = output;

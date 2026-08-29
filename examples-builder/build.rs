@@ -2,11 +2,9 @@ use glob::glob;
 use std::{
     fs::{File, read_dir, remove_file},
     io::{self, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
 };
-
-const CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
 fn rerun_all_but_target(dir: &Path) {
     for entry in read_dir(dir).unwrap().filter_map(Result::ok) {
@@ -24,7 +22,16 @@ fn build_elfs() {
     let mut dest = File::create(&dest_path).expect("failed to create vars.rs");
 
     let is_release = std::env::var("PROFILE").unwrap() == "release";
-    let mut args = vec!["build", "--examples", "--target-dir", "target"];
+    let guest_target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .map(|path| path.join("ceno-guest-examples"))
+        .unwrap_or_else(|| PathBuf::from("target"));
+    let guest_target_str = guest_target.to_string_lossy().into_owned();
+    let mut args = vec!["build", "--examples", "--target-dir", &guest_target_str];
+    let llama_tiny = std::env::var_os("CARGO_FEATURE_LLAMA_TINY").is_some();
+    if llama_tiny {
+        args.extend(["--features", "llama-tiny"]);
+    }
     if is_release {
         args.insert(1, "--release"); // insert --release after "build"
     }
@@ -53,6 +60,9 @@ fn build_elfs() {
         // above overwrites them without the AOT basic-block map, while Cargo
         // Ceno currently accepts one example at a time.
         let mut ceno_args = vec!["ceno", "build", "--example", example];
+        if llama_tiny {
+            ceno_args.extend(["--features", "llama-tiny"]);
+        }
         if is_release {
             ceno_args.push("--release");
         }
@@ -61,10 +71,7 @@ fn build_elfs() {
             .current_dir("../examples")
             .env_clear()
             .envs(std::env::vars().filter(|x| !x.0.starts_with("CARGO_")))
-            .env(
-                "CARGO_TARGET_DIR",
-                Path::new(CARGO_MANIFEST_DIR).join("../examples/target"),
-            )
+            .env("CARGO_TARGET_DIR", &guest_target)
             .output()
             .expect("cargo ceno build failed to run");
         if !output.status.success() {
@@ -76,8 +83,11 @@ fn build_elfs() {
             dest,
             r#"#[allow(non_upper_case_globals)]
             pub const {example}: &[u8] =
-                include_bytes!(r"{CARGO_MANIFEST_DIR}/../examples/target/riscv32im-ceno-zkvm-elf/{}/examples/{example}");"#,
-        std::env::var("PROFILE").unwrap()).expect("failed to write vars.rs");
+                include_bytes!(r"{}/riscv32im-ceno-zkvm-elf/{}/examples/{example}");"#,
+            guest_target.display(),
+            std::env::var("PROFILE").unwrap()
+        )
+        .expect("failed to write vars.rs");
     }
     rerun_all_but_target(Path::new("../examples"));
     rerun_all_but_target(Path::new("../ceno_rt"));
@@ -90,5 +100,7 @@ fn main() {
     // scan above does not notice this file on every Cargo implementation.
     println!("cargo:rerun-if-changed=../ceno_rt/src/tensor.rs");
     println!("cargo:rerun-if-env-changed=PROFILE");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_LLAMA_TINY");
+    println!("cargo:rerun-if-env-changed=CARGO_TARGET_DIR");
     build_elfs();
 }

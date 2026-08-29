@@ -591,8 +591,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 .is_some_and(|index| vm_proof.chip_proofs.contains_key(&index));
             let producer_names = [
                 "TensorBusTENSOR_IMPORT_BEGIN_V1Ecall",
-                "TensorBusTENSOR_HANDLE_ATTENTION_V1Ecall",
-                "TensorBusTENSOR_HANDLE_FFN_V1Ecall",
                 "TensorBusTENSOR_EXPORT_END_V1Ecall",
             ];
             let producer_present = producer_names.map(|name| {
@@ -607,7 +605,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             }
             if core_present && producer_present.iter().any(|present| !present) {
                 return Err(ZKVMError::InvalidProof(
-                    "TensorBus Core proof requires all four TensorBus producer proofs".into(),
+                    "TensorBus Core proof requires both TensorBus boundary producer proofs".into(),
                 ));
             }
         }
