@@ -88,7 +88,7 @@ fn run() {
         .chip_proofs
         .get(&matrix_index)
         .expect("v2 matrix Core proof missing");
-    assert_eq!(matrix.num_instances[0], 8, "expected two matrix sections");
+    assert_eq!(matrix.num_instances[0], 36, "expected nine matrix sections");
     assert!(
         matrix.matrix_reduction.is_some(),
         "matrix reduction missing"
@@ -99,9 +99,32 @@ fn run() {
             .get(&hint_index)
             .expect("HintRef Core proof missing")
             .num_instances[0],
-        8,
-        "two logical role tiles must write eight HintRef values",
+        28,
+        "seven logical role tiles must write 28 HintRef values",
     );
+    let families = [
+        ("LlamaTinyAttentionLinearCore", 62_usize),
+        ("LlamaTinyAttentionRmsCore", 2),
+        ("LlamaTinyAttentionLowDigitCore", 4),
+        ("LlamaTinyAttentionExp3Core", 4),
+        ("LlamaTinyAttentionExp4Core", 4),
+        ("LlamaTinyFfnLinearCore", 30),
+        ("LlamaTinyFfnRmsCore", 2),
+        ("LlamaTinyFfnSwiGluCore", 4),
+    ];
+    let family_indices = families.map(|(name, rows)| {
+        let index = circuit_index(&vk, name);
+        assert_eq!(
+            proofs[0]
+                .chip_proofs
+                .get(&index)
+                .unwrap_or_else(|| panic!("{name} proof missing"))
+                .num_instances[0],
+            rows,
+            "{name} row coverage changed",
+        );
+        index
+    });
 
     let verifier = ZKVMVerifier::new(vk);
     assert!(
@@ -160,6 +183,22 @@ fn run() {
         .push(E::ONE);
     assert!(rejects(&verifier, ordinary_output_tamper));
 
+    let mut row_coverage_tamper = proofs[0].clone();
+    row_coverage_tamper
+        .chip_proofs
+        .get_mut(&family_indices[0])
+        .unwrap()
+        .w_out_evals[0][0] += E::ONE;
+    assert!(rejects(&verifier, row_coverage_tamper));
+
+    let mut row_order_tamper = proofs[0].clone();
+    row_order_tamper
+        .chip_proofs
+        .get_mut(&family_indices[5])
+        .unwrap()
+        .r_out_evals[0][0] += E::ONE;
+    assert!(rejects(&verifier, row_order_tamper));
+
     let mut product_tamper = proofs[0].clone();
     product_tamper
         .chip_proofs
@@ -198,16 +237,51 @@ fn run() {
     sigma_tamper.main_constraint_proof.claimed_sum += E::ONE;
     assert!(rejects(&verifier, sigma_tamper));
 
+    let mut causal_mask_tamper = proofs[0].clone();
+    causal_mask_tamper
+        .chip_proofs
+        .get_mut(&family_indices[0])
+        .unwrap()
+        .w_out_evals[0][0] += E::ONE;
+    assert!(rejects(&verifier, causal_mask_tamper));
+
+    for (category, family_index) in [
+        ("rms", family_indices[1]),
+        ("low_digit", family_indices[2]),
+        ("exp3", family_indices[3]),
+        ("exp4", family_indices[4]),
+        ("swiglu", family_indices[7]),
+    ] {
+        let mut lookup_tamper = proofs[0].clone();
+        lookup_tamper
+            .chip_proofs
+            .get_mut(&family_index)
+            .unwrap()
+            .w_out_evals[0][0] += E::ONE;
+        assert!(
+            rejects(&verifier, lookup_tamper),
+            "{category} tamper verified"
+        );
+    }
+
     let resident =
         ceno_emul::tensor::resident::resident_cuda_metrics().delta_since(resident_before);
     if resident.sessions != 0 {
         assert_eq!(resident.h2d_bytes, resident.sessions * 16);
         assert_eq!(resident.d2h_bytes, resident.sessions * 16);
+        assert_eq!(
+            resident.mock_witness_d2h_bytes,
+            if mock_proving {
+                resident.sessions * 512
+            } else {
+                0
+            }
+        );
         assert_eq!(resident.attention_launches, resident.sessions);
         assert_eq!(resident.ffn_launches, resident.sessions);
     }
     println!(
-        "TensorBus v2 GPU E2E verified: sections=2 hint_rows=8 logical_h2d_bytes=16 logical_d2h_bytes=16 intermediate_transfers=0 physical_replay_sessions={} matrix_specific_pcs_rounds=0 ordinary_witin_openings=1 hint_identity_tamper=reject hint_value_tamper=reject tensor_slot_tamper=reject tensor_version_tamper=reject ordinary_output_tamper=reject product_tamper=reject quotient_tamper=reject remainder_tamper=reject sigma_tamper=reject",
-        resident.sessions,
+        "TensorBus v2 full-layer GPU E2E verified: output=[201,-48,111,157] sections=9 hint_refs=7 family_rows=[62,2,4,4,4,30,2,4] logical_h2d_bytes=16 logical_d2h_bytes=16 intermediate_transfers=0 mock_witness_d2h_bytes={} physical_replay_sessions={} matrix_specific_pcs_rounds=0 ordinary_witin_openings=1 hint_identity_tamper=reject hint_value_tamper=reject tensor_slot_tamper=reject tensor_version_tamper=reject row_coverage_tamper=reject row_order_tamper=reject product_tamper=reject quotient_tamper=reject remainder_tamper=reject causal_mask_tamper=reject rms_lookup_tamper=reject low_digit_lookup_tamper=reject exp3_lookup_tamper=reject exp4_lookup_tamper=reject swiglu_lookup_tamper=reject sigma_tamper=reject",
+        resident.mock_witness_d2h_bytes, resident.sessions,
     );
 }

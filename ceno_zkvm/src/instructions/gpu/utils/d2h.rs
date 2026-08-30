@@ -17,8 +17,11 @@ use ceno_gpu::{
     },
 };
 use ff_ext::ExtensionField;
-use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
-use rustc_hash::FxHashMap;
+use gkr_iop::{
+    RAMType,
+    tables::LookupTable,
+    utils::lk_multiplicity::{Multiplicity, MultiplicityRaw},
+};
 use tracing::info_span;
 use witness::{DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix};
 
@@ -213,7 +216,7 @@ pub(crate) fn gpu_compact_ec_d2h(
 pub(crate) fn gpu_lk_counters_to_multiplicity(
     counters: LkResult,
 ) -> Result<Multiplicity<u64>, ZKVMError> {
-    let mut tables: [FxHashMap<u64, usize>; 8] = Default::default();
+    let mut tables: MultiplicityRaw<u64> = Default::default();
 
     // Dynamic: D2H + direct FxHashMap construction (no LkMultiplicity)
     info_span!("lk_dynamic_d2h").in_scope(|| {

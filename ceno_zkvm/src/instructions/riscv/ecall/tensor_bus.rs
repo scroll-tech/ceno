@@ -29,7 +29,9 @@ use crate::{
 use witness::set_val;
 
 #[cfg(feature = "llama-tiny")]
-use super::tensor_batched_matmul::{tensor_resident_claim_record, tensor_space_record};
+use super::{
+    tensor_batched_matmul::tensor_space_record, tensor_llama_tiny::llama_tiny_layer_state_record,
+};
 
 const ABI: usize = 0;
 const FLAGS: usize = 1;
@@ -268,51 +270,46 @@ fn constrain_v2_tensor_records<E: ExtensionField, S: SyscallSpec>(
             )?;
         }
     } else {
-        let role = if S::CODE == TensorHandleAttentionV1Spec::CODE {
-            ceno_emul::tensor::TENSOR_HINT_ROLE_ATTENTION
+        let attention = S::CODE == TensorHandleAttentionV1Spec::CODE;
+        let (ordinal, family, op, coordinate_row) = if attention {
+            (0, 0, 0, 0)
         } else {
-            ceno_emul::tensor::TENSOR_HINT_ROLE_FFN
+            (112, 7, 112, 56)
         };
-        for row in 0..4 {
-            let record = tensor_resident_claim_record(
-                ecall.dummy_insn.ts().expr(),
-                config.import_cycle.expr(),
-                before(HANDLE_START_OP_INPUT),
-                before(HANDLE_START_OP_INPUT + 1),
-                before(HANDLE_START_OP_INPUT + 2),
-                after(HANDLE_START_OP_OUTPUT),
-                after(HANDLE_START_OP_OUTPUT + 1),
-                after(HANDLE_START_OP_OUTPUT + 2),
-                before(6),
-                before(7),
-                E::BaseField::from_u32(role).expr(),
-                E::BaseField::from_u32(row).expr(),
-                config.operator_output_values[row as usize].expr(),
-            );
-            let rlc = cb.rlc_chip_record(record.clone()) * enabled.clone()
-                + (E::BaseField::ONE.expr() - enabled.clone());
+        let anchor = llama_tiny_layer_state_record(
+            config.import_cycle.expr(),
+            ecall.dummy_insn.ts().expr(),
+            before(HANDLE_START_OP_INPUT),
+            before(HANDLE_START_OP_INPUT + 1),
+            before(HANDLE_START_OP_INPUT + 2),
+            after(HANDLE_START_OP_OUTPUT),
+            after(HANDLE_START_OP_OUTPUT + 1),
+            after(HANDLE_START_OP_OUTPUT + 2),
+            E::BaseField::from_u32(ordinal).expr(),
+            E::BaseField::from_u32(family).expr(),
+            E::BaseField::from_u32(family).expr(),
+            E::BaseField::from_u32(op).expr(),
+            E::BaseField::from_u32(coordinate_row).expr(),
+            E::BaseField::ZERO.expr(),
+            config.layer_anchor_value.expr(),
+            config.layer_anchor_value.expr(),
+            std::array::from_fn(|_| E::BaseField::ZERO.expr()),
+        );
+        let anchor_rlc = cb.rlc_chip_record(anchor.clone()) * enabled.clone()
+            + (E::BaseField::ONE.expr() - enabled.clone());
+        if attention {
             cb.write_rlc_record(
-                || format!("tensor_bus_v2_operator_claim_{row}"),
-                enabled_ram_type.clone(),
-                record,
-                rlc,
+                || "llama_tiny_layer_start",
+                enabled_ram_type,
+                anchor,
+                anchor_rlc,
             )?;
-
-            let output_record = tensor_space_record(
-                config.import_cycle.expr(),
-                after(HANDLE_START_OP_OUTPUT),
-                after(HANDLE_START_OP_OUTPUT + 1),
-                after(HANDLE_START_OP_OUTPUT + 2),
-                E::BaseField::from_u32(row).expr(),
-                config.operator_output_values[row as usize].expr(),
-            );
-            let output_rlc = cb.rlc_chip_record(output_record.clone()) * enabled.clone()
-                + (E::BaseField::ONE.expr() - enabled.clone());
-            cb.write_rlc_record(
-                || format!("tensor_bus_v2_operator_output_{row}"),
-                enabled_ram_type.clone(),
-                output_record,
-                output_rlc,
+        } else {
+            cb.read_rlc_record(
+                || "llama_tiny_layer_end",
+                enabled_ram_type,
+                anchor,
+                anchor_rlc,
             )?;
         }
     }
@@ -383,9 +380,7 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for TensorBusFixedEcall<E
                 cb.create_witin(|| format!("tensor_bus_boundary_sign_{row}"))
             }),
             #[cfg(feature = "llama-tiny")]
-            operator_output_values: std::array::from_fn(|row| {
-                cb.create_witin(|| format!("tensor_bus_operator_output_value_{row}"))
-            }),
+            layer_anchor_value: cb.create_witin(|| "llama_tiny_layer_anchor_value"),
         };
         constrain_fixed_tensor_bus::<E, S>(cb, &config)?;
         Ok(config)
@@ -465,16 +460,23 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for TensorBusFixedEcall<E
                         set_val!(instance, config.boundary_signs[row], u64::from(value < 0));
                     }
                 } else {
-                    let resident = syscall.tensor_resident_matmul.ok_or_else(|| {
+                    let _resident = syscall.tensor_resident_matmul.ok_or_else(|| {
                         ZKVMError::InvalidWitness("TensorBus v2 resident operator missing".into())
                     })?;
-                    for (row, value) in resident.output.into_iter().enumerate() {
-                        instance[config.operator_output_values[row].id as usize] = if value < 0 {
-                            -E::BaseField::from_u64(u64::from(value.unsigned_abs()))
-                        } else {
-                            E::BaseField::from_u64(value as u64)
-                        };
-                    }
+                    let anchor_value = if S::CODE == TensorHandleAttentionV1Spec::CODE {
+                        ceno_emul::tensor::llama_tiny::execute()
+                            .map_err(|error| ZKVMError::InvalidWitness(error.to_string().into()))?
+                            .input_norm[0][0]
+                    } else {
+                        ceno_emul::tensor::llama_tiny::execute()
+                            .map_err(|error| ZKVMError::InvalidWitness(error.to_string().into()))?
+                            .swiglu[0][0]
+                    };
+                    instance[config.layer_anchor_value.id as usize] = if anchor_value < 0 {
+                        -E::BaseField::from_u64(u64::from(anchor_value.unsigned_abs()))
+                    } else {
+                        E::BaseField::from_u64(anchor_value as u64)
+                    };
                 }
             }
         }
@@ -497,5 +499,5 @@ pub struct TensorBusEcallConfig<E: ExtensionField> {
     #[cfg(feature = "llama-tiny")]
     boundary_signs: [multilinear_extensions::WitIn; 4],
     #[cfg(feature = "llama-tiny")]
-    operator_output_values: [multilinear_extensions::WitIn; 4],
+    layer_anchor_value: multilinear_extensions::WitIn,
 }

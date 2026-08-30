@@ -314,8 +314,7 @@ impl<T: Tracer> VMState<T> {
         input: TensorHandle,
         output: TensorHandle,
         operator: u32,
-        weights: [[i8; 2]; 2],
-    ) -> Result<()> {
+    ) -> Result<Option<crate::tensor::TensorLlamaTinyLayerWitness>> {
         let session = self
             .tensor_bus_resident
             .as_mut()
@@ -326,21 +325,19 @@ impl<T: Tracer> VMState<T> {
         );
         match (session.phase, operator) {
             (TensorBusResidentPhase::Imported, crate::tensor::TENSOR_HANDLE_ATTENTION_V1) => {
-                session
-                    .provider
-                    .matmul_2x2(&mut session.witness, weights, true)?;
+                let snapshot = session.provider.matmul_2x2(&mut session.witness, true)?;
                 session.phase = TensorBusResidentPhase::Attention;
+                session.handle = output;
+                return Ok(snapshot);
             }
             (TensorBusResidentPhase::Attention, crate::tensor::TENSOR_HANDLE_FFN_V1) => {
-                session
-                    .provider
-                    .matmul_2x2(&mut session.witness, weights, false)?;
+                let snapshot = session.provider.matmul_2x2(&mut session.witness, false)?;
                 session.phase = TensorBusResidentPhase::Ffn;
+                session.handle = output;
+                return Ok(snapshot);
             }
             _ => anyhow::bail!("TensorBus CUDA v2 operator order mismatch"),
         }
-        session.handle = output;
-        Ok(())
     }
 
     #[cfg(feature = "tensor-cuda")]

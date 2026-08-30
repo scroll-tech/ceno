@@ -10,6 +10,8 @@ use tiny_keccak::{Hasher, Keccak};
 
 pub mod bus;
 pub mod llama;
+#[cfg(feature = "llama-tiny")]
+pub mod llama_tiny;
 pub mod planner;
 pub mod production;
 #[cfg(feature = "tensor-cuda")]
@@ -35,8 +37,8 @@ pub use ceno_rt::tensor::{
 #[cfg(feature = "llama-tiny")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TensorBatchedMatMul2x2Witness {
-    pub a: [[i8; 2]; 2],
-    pub w: [[i8; 2]; 2],
+    pub a: [[i32; 2]; 2],
+    pub w: [[i32; 2]; 2],
     pub quotient: [[i16; 2]; 2],
     pub remainder: [[u16; 2]; 2],
 }
@@ -45,6 +47,24 @@ pub struct TensorBatchedMatMul2x2Witness {
 pub const TENSOR_HINT_ROLE_ATTENTION: u32 = 1;
 #[cfg(feature = "llama-tiny")]
 pub const TENSOR_HINT_ROLE_FFN: u32 = 2;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_Q: u32 = 3;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_K: u32 = 4;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_V: u32 = 5;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_QK: u32 = 6;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_PV: u32 = 7;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_O: u32 = 8;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_GATE: u32 = 9;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_UP: u32 = 10;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_DOWN: u32 = 11;
 
 /// Logical private-weight identity. There is intentionally no address, seed,
 /// or public model root in this compute-only fixture contract.
@@ -59,7 +79,7 @@ pub struct TensorHintRef {
 
 /// Generate a bounded tile without retaining an eager model allocation.
 #[cfg(feature = "llama-tiny")]
-pub fn generate_tensor_hint_tile(hint: TensorHintRef) -> Result<[[i8; 2]; 2]> {
+pub fn generate_tensor_hint_tile(hint: TensorHintRef) -> Result<[[i32; 2]; 2]> {
     ensure!(
         hint.profile == TENSOR_PROFILE_LLAMA_TINY,
         "unsupported logical tensor profile"
@@ -69,6 +89,13 @@ pub fn generate_tensor_hint_tile(hint: TensorHintRef) -> Result<[[i8; 2]; 2]> {
     match hint.role {
         TENSOR_HINT_ROLE_ATTENTION => Ok([[1, 1], [0, 1]]),
         TENSOR_HINT_ROLE_FFN => Ok([[2, 0], [0, 2]]),
+        TENSOR_HINT_ROLE_Q => Ok(llama_tiny::Q_WEIGHT),
+        TENSOR_HINT_ROLE_K => Ok(llama_tiny::K_WEIGHT),
+        TENSOR_HINT_ROLE_V => Ok(llama_tiny::V_WEIGHT),
+        TENSOR_HINT_ROLE_O => Ok(llama_tiny::O_WEIGHT),
+        TENSOR_HINT_ROLE_GATE => Ok(llama_tiny::GATE_WEIGHT),
+        TENSOR_HINT_ROLE_UP => Ok(llama_tiny::UP_WEIGHT),
+        TENSOR_HINT_ROLE_DOWN => Ok(llama_tiny::DOWN_WEIGHT),
         _ => bail!("unsupported logical tensor role"),
     }
 }
@@ -83,6 +110,9 @@ pub struct TensorResidentMatMulWitness {
     pub input_version: u32,
     pub output_tensor_id: u64,
     pub output_version: u32,
+    /// Set only when the MatMul RHS is another resident tensor (QK/PV).
+    pub rhs_tensor_id: Option<u64>,
+    pub rhs_tensor_version: Option<u32>,
     pub hint: TensorHintRef,
     pub input: [i32; 4],
     pub output: [i32; 4],
@@ -96,6 +126,16 @@ pub struct TensorResidentBoundaryWitness {
     pub tensor_id: u64,
     pub version: u32,
     pub values: [i32; 4],
+}
+
+/// Complete provider-owned witness for one descriptor-v2 llama-tiny layer.
+/// The proof collector consumes this snapshot; the independent integer oracle
+/// is used only to check it.
+#[cfg(feature = "llama-tiny")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TensorLlamaTinyLayerWitness {
+    pub trace: llama_tiny::LlamaTinyLayerTrace,
+    pub matrices: [TensorBatchedMatMul2x2Witness; 9],
 }
 
 pub const ZKLLM_FIXED_V1: u32 = 1;

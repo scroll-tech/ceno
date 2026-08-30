@@ -113,6 +113,10 @@ pub struct SyscallWitness {
     /// shared batched-matrix Core.
     #[cfg(feature = "llama-tiny")]
     pub tensor_resident_matmul: Option<crate::tensor::TensorResidentMatMulWitness>,
+    /// Provider-recorded complete layer snapshot, attached to the second call
+    /// of the descriptor-v2 attention/FFN pair.
+    #[cfg(feature = "llama-tiny")]
+    pub tensor_llama_tiny_layer: Option<crate::tensor::TensorLlamaTinyLayerWitness>,
     /// V2 import/export value boundary for the Tensor-space product relation.
     #[cfg(feature = "llama-tiny")]
     pub tensor_resident_boundary: Option<crate::tensor::TensorResidentBoundaryWitness>,
@@ -132,6 +136,8 @@ impl SyscallWitness {
             tensor_batched_matmul_2x2: None,
             #[cfg(feature = "llama-tiny")]
             tensor_resident_matmul: None,
+            #[cfg(feature = "llama-tiny")]
+            tensor_llama_tiny_layer: None,
             #[cfg(feature = "llama-tiny")]
             tensor_resident_boundary: None,
         }

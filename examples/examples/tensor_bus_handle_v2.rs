@@ -7,7 +7,7 @@ use ceno_rt::tensor::{
 };
 
 fn main() {
-    let input = [1_i32, -2, 3, -4];
+    let input = [128_i32, -64, 64, 128];
     let mut output = [0_i32; 4];
     let meta = [16_u32, 4, 1, 0];
     let mut imported = TensorHandleV1::default();
@@ -61,5 +61,5 @@ fn main() {
         tensor_handle_ffn_v2(&ffn_op);
         tensor_export_end_v1(&export);
     }
-    assert_eq!(output, [2, -2, 6, -2]);
+    assert_eq!(output, [201, -48, 111, 157]);
 }

@@ -94,8 +94,15 @@ use tracing::info_span;
 
 #[cfg(feature = "llama-tiny")]
 use crate::instructions::riscv::ecall::{
-    TensorBatchedMatMul2x2EcallInstruction, TensorBatchedMatMulCoreInstruction,
-    TensorHintRefCoreInstruction,
+    LlamaTinyAttentionExp3Core, LlamaTinyAttentionExp4Core, LlamaTinyAttentionLinearCore,
+    LlamaTinyAttentionLowDigitCore, LlamaTinyAttentionRmsCore, LlamaTinyFfnLinearCore,
+    LlamaTinyFfnRmsCore, LlamaTinyFfnSwiGluCore, TensorBatchedMatMul2x2EcallInstruction,
+    TensorBatchedMatMulCoreInstruction, TensorHintRefCoreInstruction,
+    tensor_llama_tiny::{audit_layer_graph, collect_layer_sections},
+};
+#[cfg(feature = "llama-tiny")]
+use crate::tables::{
+    RmsInvTableCircuit, SoftmaxExp3TableCircuit, SoftmaxExp4TableCircuit, SwiGluTableCircuit,
 };
 #[cfg(feature = "llama-tiny")]
 use ceno_emul::TensorBatchedMatMul2x2V1Spec;
@@ -317,6 +324,30 @@ pub struct Rv32imConfig<E: ExtensionField> {
     #[cfg(feature = "llama-tiny")]
     pub tensor_hint_ref_core_config:
         <TensorHintRefCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_attention_linear_config:
+        <LlamaTinyAttentionLinearCore<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_attention_rms_config:
+        <LlamaTinyAttentionRmsCore<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_attention_low_digit_config:
+        <LlamaTinyAttentionLowDigitCore<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_attention_exp3_config:
+        <LlamaTinyAttentionExp3Core<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_attention_exp4_config:
+        <LlamaTinyAttentionExp4Core<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_ffn_linear_config:
+        <LlamaTinyFfnLinearCore<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_ffn_rms_config:
+        <LlamaTinyFfnRmsCore<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_ffn_swiglu_config:
+        <LlamaTinyFfnSwiGluCore<E> as Instruction<E>>::InstructionConfig,
     pub tensor_hidden_ecall_config:
         Option<<TensorMatMulHiddenEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
     /// The production K1024 tile circuit is deliberately absent from
@@ -390,6 +421,14 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub or_table_config: <OrTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub xor_table_config: <XorTableCircuit<E> as TableCircuit<E>>::TableConfig,
     pub ltu_config: <LtuTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_softmax_exp3_config: <SoftmaxExp3TableCircuit<E> as TableCircuit<E>>::TableConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_softmax_exp4_config: <SoftmaxExp4TableCircuit<E> as TableCircuit<E>>::TableConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_rms_inv_config: <RmsInvTableCircuit<E> as TableCircuit<E>>::TableConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_swiglu_config: <SwiGluTableCircuit<E> as TableCircuit<E>>::TableConfig,
     #[cfg(not(feature = "u16limb_circuit"))]
     pub pow_config: <PowTableCircuit<E> as TableCircuit<E>>::TableConfig,
     // record InsnKind -> cells
@@ -864,6 +903,29 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         #[cfg(feature = "llama-tiny")]
         let tensor_hint_ref_core_config =
             cs.register_opcode_circuit::<TensorHintRefCoreInstruction<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_attention_linear_config =
+            cs.register_opcode_circuit::<LlamaTinyAttentionLinearCore<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_attention_rms_config =
+            cs.register_opcode_circuit::<LlamaTinyAttentionRmsCore<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_attention_low_digit_config =
+            cs.register_opcode_circuit::<LlamaTinyAttentionLowDigitCore<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_attention_exp3_config =
+            cs.register_opcode_circuit::<LlamaTinyAttentionExp3Core<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_attention_exp4_config =
+            cs.register_opcode_circuit::<LlamaTinyAttentionExp4Core<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_ffn_linear_config =
+            cs.register_opcode_circuit::<LlamaTinyFfnLinearCore<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_ffn_rms_config = cs.register_opcode_circuit::<LlamaTinyFfnRmsCore<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_ffn_swiglu_config =
+            cs.register_opcode_circuit::<LlamaTinyFfnSwiGluCore<E>>();
         if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_matmul {
             assert!(
                 ecall_cells_map
@@ -972,6 +1034,54 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     .expect("TensorBus handle cost chips missing");
                 chips.push(matrix_chip);
                 chips.push(hint_chip);
+            }
+
+            let attention_family_names = [
+                <LlamaTinyAttentionLinearCore<E>>::name(),
+                <LlamaTinyAttentionRmsCore<E>>::name(),
+                <LlamaTinyAttentionLowDigitCore<E>>::name(),
+                <LlamaTinyAttentionExp3Core<E>>::name(),
+                <LlamaTinyAttentionExp4Core<E>>::name(),
+            ];
+            let ffn_family_names = [
+                <LlamaTinyFfnLinearCore<E>>::name(),
+                <LlamaTinyFfnRmsCore<E>>::name(),
+                <LlamaTinyFfnSwiGluCore<E>>::name(),
+            ];
+            for (handle_name, family_names) in [
+                (
+                    <TensorBusHandleAttentionEcallInstruction<E>>::name(),
+                    attention_family_names.as_slice(),
+                ),
+                (
+                    <TensorBusHandleFfnEcallInstruction<E>>::name(),
+                    ffn_family_names.as_slice(),
+                ),
+            ] {
+                for family_name in family_names {
+                    let family_cs = cs
+                        .get_cs(family_name)
+                        .expect("llama-tiny family Core circuit");
+                    let family_cells = (family_cs.zkvm_v1_css.num_witin as u64
+                        + family_cs.zkvm_v1_css.num_structural_witin as u64
+                        + family_cs.zkvm_v1_css.num_fixed as u64)
+                        * (1 << family_cs.rotation_vars().unwrap_or(0));
+                    assert!(
+                        ecall_cells_map
+                            .insert(family_name.clone(), family_cells)
+                            .is_none()
+                    );
+                    *ecall_cells_map
+                        .get_mut(&handle_name)
+                        .expect("TensorBus handle cost missing") += family_cells;
+                    let chip = chip_specs.len();
+                    chip_specs.push(chip_cost_spec(family_cs));
+                    ecall_name_to_chips.insert(family_name.clone(), vec![chip]);
+                    ecall_name_to_chips
+                        .get_mut(&handle_name)
+                        .expect("TensorBus handle cost chips missing")
+                        .push(chip);
+                }
             }
         }
         let tensor_hidden_ecall_config =
@@ -1310,6 +1420,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             TensorBatchedMatMul2x2V1Spec::CODE,
             TensorBatchedMatMulCoreInstruction::<E>::name(),
         );
+        #[cfg(feature = "llama-tiny")]
+        map_ecall(
+            TensorHandleAttentionV1Spec::CODE,
+            TensorBusHandleAttentionEcallInstruction::<E>::name(),
+        );
+        #[cfg(feature = "llama-tiny")]
+        map_ecall(
+            TensorHandleFfnV1Spec::CODE,
+            TensorBusHandleFfnEcallInstruction::<E>::name(),
+        );
         if !minimal_tensor_e2e_registry {
             map_ecall(
                 ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1,
@@ -1436,6 +1556,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let or_table_config = cs.register_table_circuit::<OrTableCircuit<E>>();
         let xor_table_config = cs.register_table_circuit::<XorTableCircuit<E>>();
         let ltu_config = cs.register_table_circuit::<LtuTableCircuit<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_softmax_exp3_config = cs.register_table_circuit::<SoftmaxExp3TableCircuit<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_softmax_exp4_config = cs.register_table_circuit::<SoftmaxExp4TableCircuit<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_rms_inv_config = cs.register_table_circuit::<RmsInvTableCircuit<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_swiglu_config = cs.register_table_circuit::<SwiGluTableCircuit<E>>();
         #[cfg(not(feature = "u16limb_circuit"))]
         let pow_config = cs.register_table_circuit::<PowTableCircuit<E>>();
 
@@ -1510,6 +1638,22 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             tensor_batched_matmul_core_config,
             #[cfg(feature = "llama-tiny")]
             tensor_hint_ref_core_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_attention_linear_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_attention_rms_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_attention_low_digit_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_attention_exp3_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_attention_exp4_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_ffn_linear_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_ffn_rms_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_ffn_swiglu_config,
             tensor_hidden_ecall_config,
             tensor_production_tile_config,
             tensor_gate5_small_hidden_tile_config,
@@ -1549,6 +1693,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             or_table_config,
             xor_table_config,
             ltu_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_softmax_exp3_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_softmax_exp4_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_rms_inv_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_swiglu_config,
             #[cfg(not(feature = "u16limb_circuit"))]
             pow_config,
             inst_cells_map,
@@ -1661,6 +1813,44 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<TensorHintRefCoreInstruction<E>>(
             cs,
             &self.tensor_hint_ref_core_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinyAttentionLinearCore<E>>(
+            cs,
+            &self.llama_tiny_attention_linear_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinyAttentionRmsCore<E>>(
+            cs,
+            &self.llama_tiny_attention_rms_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinyAttentionLowDigitCore<E>>(
+            cs,
+            &self.llama_tiny_attention_low_digit_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinyAttentionExp3Core<E>>(
+            cs,
+            &self.llama_tiny_attention_exp3_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinyAttentionExp4Core<E>>(
+            cs,
+            &self.llama_tiny_attention_exp4_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinyFfnLinearCore<E>>(
+            cs,
+            &self.llama_tiny_ffn_linear_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed
+            .register_opcode_circuit::<LlamaTinyFfnRmsCore<E>>(cs, &self.llama_tiny_ffn_rms_config);
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinyFfnSwiGluCore<E>>(
+            cs,
+            &self.llama_tiny_ffn_swiglu_config,
         );
         if let Some(config) = &self.tensor_hidden_ecall_config {
             fixed.register_opcode_circuit::<TensorMatMulHiddenEcallInstruction<E>>(cs, config);
@@ -1782,6 +1972,22 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &());
         fixed.register_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &());
         fixed.register_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &());
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_table_circuit::<SoftmaxExp3TableCircuit<E>>(
+            cs,
+            &self.llama_softmax_exp3_config,
+            &(),
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_table_circuit::<SoftmaxExp4TableCircuit<E>>(
+            cs,
+            &self.llama_softmax_exp4_config,
+            &(),
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_table_circuit::<RmsInvTableCircuit<E>>(cs, &self.llama_rms_inv_config, &());
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_table_circuit::<SwiGluTableCircuit<E>>(cs, &self.llama_swiglu_config, &());
         #[cfg(not(feature = "u16limb_circuit"))]
         fixed.register_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &());
     }
@@ -2092,60 +2298,137 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 )
             })?;
 
-            let mut resident_records = [
-                TensorHandleAttentionV1Spec::CODE,
-                TensorHandleFfnV1Spec::CODE,
-            ]
-            .into_iter()
-            .flat_map(|code| {
+            let resident_for = |code| {
                 instrunction_dispatch_ctx
                     .records_for_ecall_code(code)
                     .unwrap_or(&[])
                     .iter()
                     .copied()
-            })
-            .filter(|index| {
-                shard_steps[*index]
-                    .syscall(&shard_ctx.syscall_witnesses)
-                    .is_some_and(|syscall| syscall.tensor_resident_matmul.is_some())
-            })
-            .collect_vec();
-            resident_records.sort_unstable();
+                    .filter(|index| {
+                        shard_steps[*index]
+                            .syscall(&shard_ctx.syscall_witnesses)
+                            .is_some_and(|syscall| syscall.tensor_resident_matmul.is_some())
+                    })
+                    .collect_vec()
+            };
+            let attention_records = resident_for(TensorHandleAttentionV1Spec::CODE);
+            let ffn_records = resident_for(TensorHandleFfnV1Spec::CODE);
+            if !attention_records.is_empty() || !ffn_records.is_empty() {
+                let layer_sections = collect_layer_sections(
+                    shard_ctx,
+                    shard_steps,
+                    &attention_records,
+                    &ffn_records,
+                )?;
+                audit_layer_graph(&layer_sections)?;
+                let mut matrix_sections = layer_sections
+                    .iter()
+                    .flat_map(|section| section.matrices.iter().cloned())
+                    .collect_vec();
+                for index in standalone_records {
+                    let step = &shard_steps[*index];
+                    let syscall = step.syscall(&shard_ctx.syscall_witnesses).ok_or_else(|| {
+                        ZKVMError::InvalidWitness("tiny batched MatMul syscall missing".into())
+                    })?;
+                    let payload = syscall.tensor_batched_matmul_2x2.ok_or_else(|| {
+                        ZKVMError::InvalidWitness("tiny batched MatMul payload missing".into())
+                    })?;
+                    matrix_sections.push(
+                        crate::instructions::riscv::ecall::tensor_batched_matmul::TensorBatchedMatMulSection {
+                            cycle: step.cycle() - shard_ctx.current_shard_offset_cycle(),
+                            call_id: syscall.reg_ops[0].value.after as u64,
+                            a: payload.a,
+                            w: payload.w,
+                            resident: None,
+                        },
+                    );
+                }
+                let hints = layer_sections
+                    .iter()
+                    .flat_map(|section| section.hints)
+                    .collect_vec();
 
-            let mut matrix_records = standalone_records.to_vec();
-            matrix_records.extend(resident_records.iter().copied());
-            matrix_records.sort_unstable();
-            if !matrix_records.is_empty() {
-                info_span!(
-                    "assign_chip",
-                    chip = %<TensorBatchedMatMulCoreInstruction<E>>::name(),
-                    n = matrix_records.len()
-                )
-                .in_scope(|| {
-                    witness.assign_opcode_circuit::<TensorBatchedMatMulCoreInstruction<E>>(
-                        cs,
-                        shard_ctx,
+                let matrix_cs = cs
+                    .get_cs(&<TensorBatchedMatMulCoreInstruction<E>>::name())
+                    .expect("llama-tiny matrix Core circuit");
+                let (matrix_witness, matrix_lkm) =
+                    TensorBatchedMatMulCoreInstruction::<E>::assign_sections(
                         &self.tensor_batched_matmul_core_config,
-                        shard_steps,
-                        &matrix_records,
-                    )
-                })?;
-            }
-            if !resident_records.is_empty() {
-                info_span!(
-                    "assign_chip",
-                    chip = %<TensorHintRefCoreInstruction<E>>::name(),
-                    n = resident_records.len()
-                )
-                .in_scope(|| {
-                    witness.assign_opcode_circuit::<TensorHintRefCoreInstruction<E>>(
-                        cs,
-                        shard_ctx,
-                        &self.tensor_hint_ref_core_config,
-                        shard_steps,
-                        &resident_records,
-                    )
-                })?;
+                        matrix_cs.zkvm_v1_css.num_witin as usize,
+                        matrix_cs.zkvm_v1_css.num_structural_witin as usize,
+                        &matrix_sections,
+                    )?;
+                witness.insert_opcode_assignment::<TensorBatchedMatMulCoreInstruction<E>>(
+                    matrix_witness,
+                    matrix_lkm,
+                );
+
+                let hint_cs = cs
+                    .get_cs(&<TensorHintRefCoreInstruction<E>>::name())
+                    .expect("llama-tiny HintRef Core circuit");
+                let (hint_witness, hint_lkm) = TensorHintRefCoreInstruction::<E>::assign_hints(
+                    &self.tensor_hint_ref_core_config,
+                    hint_cs.zkvm_v1_css.num_witin as usize,
+                    hint_cs.zkvm_v1_css.num_structural_witin as usize,
+                    &hints,
+                )?;
+                witness.insert_opcode_assignment::<TensorHintRefCoreInstruction<E>>(
+                    hint_witness,
+                    hint_lkm,
+                );
+
+                macro_rules! assign_llama_family {
+                    ($instruction:ty, $config:expr) => {{
+                        let family_cs = cs
+                            .get_cs(&<$instruction>::name())
+                            .expect("llama-tiny family Core circuit");
+                        let (family_witness, family_lkm) = <$instruction>::assign_layer_sections(
+                            $config,
+                            family_cs.zkvm_v1_css.num_witin as usize,
+                            family_cs.zkvm_v1_css.num_structural_witin as usize,
+                            &layer_sections,
+                        )?;
+                        witness
+                            .insert_opcode_assignment::<$instruction>(family_witness, family_lkm);
+                    }};
+                }
+                assign_llama_family!(
+                    LlamaTinyAttentionLinearCore<E>,
+                    &self.llama_tiny_attention_linear_config
+                );
+                assign_llama_family!(
+                    LlamaTinyAttentionRmsCore<E>,
+                    &self.llama_tiny_attention_rms_config
+                );
+                assign_llama_family!(
+                    LlamaTinyAttentionLowDigitCore<E>,
+                    &self.llama_tiny_attention_low_digit_config
+                );
+                assign_llama_family!(
+                    LlamaTinyAttentionExp3Core<E>,
+                    &self.llama_tiny_attention_exp3_config
+                );
+                assign_llama_family!(
+                    LlamaTinyAttentionExp4Core<E>,
+                    &self.llama_tiny_attention_exp4_config
+                );
+                assign_llama_family!(
+                    LlamaTinyFfnLinearCore<E>,
+                    &self.llama_tiny_ffn_linear_config
+                );
+                assign_llama_family!(LlamaTinyFfnRmsCore<E>, &self.llama_tiny_ffn_rms_config);
+                assign_llama_family!(
+                    LlamaTinyFfnSwiGluCore<E>,
+                    &self.llama_tiny_ffn_swiglu_config
+                );
+            } else if !standalone_records.is_empty() {
+                witness.assign_opcode_circuit::<TensorBatchedMatMulCoreInstruction<E>>(
+                    cs,
+                    shard_ctx,
+                    &self.tensor_batched_matmul_core_config,
+                    shard_steps,
+                    standalone_records,
+                )?;
             }
         }
         if let Some(tensor_hidden_ecall_config) = &self.tensor_hidden_ecall_config {
@@ -2417,6 +2700,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         assign_table!(OrTableCircuit<E>, &self.or_table_config);
         assign_table!(XorTableCircuit<E>, &self.xor_table_config);
         assign_table!(LtuTableCircuit<E>, &self.ltu_config);
+        #[cfg(feature = "llama-tiny")]
+        assign_table!(SoftmaxExp3TableCircuit<E>, &self.llama_softmax_exp3_config);
+        #[cfg(feature = "llama-tiny")]
+        assign_table!(SoftmaxExp4TableCircuit<E>, &self.llama_softmax_exp4_config);
+        #[cfg(feature = "llama-tiny")]
+        assign_table!(RmsInvTableCircuit<E>, &self.llama_rms_inv_config);
+        #[cfg(feature = "llama-tiny")]
+        assign_table!(SwiGluTableCircuit<E>, &self.llama_swiglu_config);
         #[cfg(not(feature = "u16limb_circuit"))]
         assign_table!(PowTableCircuit<E>, &self.pow_config);
 

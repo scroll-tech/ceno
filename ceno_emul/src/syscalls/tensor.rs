@@ -368,28 +368,34 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
         };
         let w = generate_tensor_hint_tile(hint)?;
         let transform = move |values: &[i32]| -> Result<Vec<i32>> {
-            ensure!(values.len() == 4, "llama-tiny matrix input length mismatch");
-            let a = [
-                [i8::try_from(values[0])?, i8::try_from(values[1])?],
-                [i8::try_from(values[2])?, i8::try_from(values[3])?],
-            ];
-            Ok((0..2)
-                .flat_map(|m| {
-                    (0..2).map(move |n| {
-                        (0..2)
-                            .map(|k| i32::from(a[m][k]) * i32::from(w[k][n]))
-                            .sum::<i32>()
-                    })
-                })
-                .collect())
+            ensure!(values.len() == 4, "llama-tiny layer input length mismatch");
+            let trace = crate::tensor::llama_tiny::execute()?;
+            let expected = if code == crate::tensor::TENSOR_HANDLE_ATTENTION_V1 {
+                crate::tensor::llama_tiny::INPUT
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+            } else {
+                trace
+                    .attention_residual
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+            };
+            ensure!(values == expected, "llama-tiny layer handle input mismatch");
+            Ok(if code == crate::tensor::TENSOR_HANDLE_ATTENTION_V1 {
+                trace.attention_residual.into_iter().flatten().collect()
+            } else {
+                trace.output.into_iter().flatten().collect()
+            })
         };
         let (output, records, input_values, output_values, import_cycle) =
             vm.tensor_bus_apply_v2(input, meta, code, transform)?;
         let input_array: [i32; 4] = input_values.try_into().unwrap();
         let output_array: [i32; 4] = output_values.try_into().unwrap();
         let a = [
-            [i8::try_from(input_array[0])?, i8::try_from(input_array[1])?],
-            [i8::try_from(input_array[2])?, i8::try_from(input_array[3])?],
+            [input_array[0], input_array[1]],
+            [input_array[2], input_array[3]],
         ];
         let mut quotient = [[0_i16; 2]; 2];
         let mut remainder = [[0_u16; 2]; 2];
@@ -408,6 +414,8 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
                 input_version: input.version,
                 output_tensor_id: output.tensor_id,
                 output_version: output.version,
+                rhs_tensor_id: None,
+                rhs_tensor_version: None,
                 hint,
                 input: input_array,
                 output: output_array,
@@ -426,11 +434,12 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
     #[cfg(not(feature = "llama-tiny"))]
     let (output, records) = vm.tensor_bus_apply(input, meta, code, words[6], v1_transform)?;
     #[cfg(all(feature = "tensor-cuda", feature = "llama-tiny"))]
-    if let Some(payload) = resident_payload {
-        vm.tensor_bus_resident_apply_v2(input, output, code, payload.matrix.w)?;
+    let resident_layer = if resident_payload.is_some() {
+        vm.tensor_bus_resident_apply_v2(input, output, code)?
     } else {
         vm.tensor_bus_resident_apply(input, output, code)?;
-    }
+        None
+    };
     #[cfg(all(feature = "tensor-cuda", not(feature = "llama-tiny")))]
     vm.tensor_bus_resident_apply(input, output, code)?;
     let mut output_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[3]);
@@ -453,6 +462,10 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
     #[cfg(feature = "llama-tiny")]
     {
         witness.tensor_resident_matmul = resident_payload;
+        #[cfg(feature = "tensor-cuda")]
+        {
+            witness.tensor_llama_tiny_layer = resident_layer;
+        }
     }
     // Internal resident layers are bound by their own constrained ECALL and
     // RAM witnesses.  TensorBus records only the import/export boundary, so
@@ -857,8 +870,14 @@ pub fn tensor_batched_matmul_2x2_v1<T: Tracer>(vm: &VMState<T>) -> Result<Syscal
         .into_iter()
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| anyhow::anyhow!("tiny batched MatMul W value is outside signed byte"))?;
-    let a = [[a_flat[0], a_flat[1]], [a_flat[2], a_flat[3]]];
-    let w = [[w_flat[0], w_flat[1]], [w_flat[2], w_flat[3]]];
+    let a = [
+        [i32::from(a_flat[0]), i32::from(a_flat[1])],
+        [i32::from(a_flat[2]), i32::from(a_flat[3])],
+    ];
+    let w = [
+        [i32::from(w_flat[0]), i32::from(w_flat[1])],
+        [i32::from(w_flat[2]), i32::from(w_flat[3])],
+    ];
     let mut quotient = [[0_i16; 2]; 2];
     let mut remainder = [[0_u16; 2]; 2];
     for m in 0..2 {

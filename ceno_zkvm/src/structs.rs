@@ -491,6 +491,36 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         Ok(())
     }
 
+    /// Insert an opcode assignment derived from a shared, non-step witness
+    /// section. This is the same ownership path as `assign_opcode_circuit`;
+    /// only collection is performed by the caller so sibling Core chips can
+    /// project one immutable oracle section.
+    pub fn insert_opcode_assignment<OC: Instruction<E>>(
+        &mut self,
+        witness: RMMCollections<E::BaseField>,
+        logup_multiplicity: Multiplicity<u64>,
+    ) {
+        assert!(self.combined_lk_mlt.is_none());
+        let witness_instances = witness[0].num_instances();
+        let structural_instances = witness[1].num_instances();
+        if witness_instances > 0 && structural_instances > 0 {
+            assert_eq!(
+                witness_instances,
+                structural_instances,
+                "{}: mismatched num_instances between witness and structural RMMs",
+                OC::name()
+            );
+        }
+        let num_instances = [witness_instances.max(structural_instances), 0];
+        let input = ChipInput::new(OC::name(), witness, num_instances);
+        assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
+        assert!(
+            self.lk_mlts
+                .insert(OC::name(), logup_multiplicity)
+                .is_none()
+        );
+    }
+
     // merge the multiplicities in each opcode circuit into one
     pub fn finalize_lk_multiplicities(&mut self) {
         assert!(self.combined_lk_mlt.is_none());

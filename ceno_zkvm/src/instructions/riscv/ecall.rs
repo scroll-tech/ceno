@@ -14,6 +14,8 @@ pub mod tensor_batched_matmul;
 mod tensor_batched_matmul_ecall;
 mod tensor_block;
 mod tensor_bus;
+#[cfg(feature = "llama-tiny")]
+pub mod tensor_llama_tiny;
 mod tensor_production;
 mod tensor_rms;
 mod uint256;
@@ -43,6 +45,12 @@ pub use tensor_block::{
 pub use tensor_bus::{
     TensorBusExportEndEcallInstruction, TensorBusHandleAttentionEcallInstruction,
     TensorBusHandleFfnEcallInstruction, TensorBusImportBeginEcallInstruction,
+};
+#[cfg(feature = "llama-tiny")]
+pub use tensor_llama_tiny::{
+    LlamaTinyAttentionExp3Core, LlamaTinyAttentionExp4Core, LlamaTinyAttentionLinearCore,
+    LlamaTinyAttentionLowDigitCore, LlamaTinyAttentionRmsCore, LlamaTinyFfnLinearCore,
+    LlamaTinyFfnRmsCore, LlamaTinyFfnSwiGluCore,
 };
 pub use tensor_production::{
     TensorMatMulGate5SmallHiddenEcallInstruction, TensorMatMulGate5SmallHiddenFinalizeInstruction,

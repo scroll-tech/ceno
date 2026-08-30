@@ -312,6 +312,10 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
                             format!("Element: {a} ** {b}")
                         }
                         ROMType::Instruction => format!("PC: {key}"),
+                        ROMType::LlamaSoftmaxExp3 => format!("llama softmax exp3 digit: {key}"),
+                        ROMType::LlamaSoftmaxExp4 => format!("llama softmax exp4 digit: {key}"),
+                        ROMType::LlamaRmsInv => format!("llama RMS energy: {key}"),
+                        ROMType::LlamaSwiGlu => format!("llama SwiGLU raw i16 key: {key}"),
                     };
                     (location, element)
                 } else {
@@ -728,7 +732,16 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
 
             // Check each lookup expr exists in t vec
             for (inst_id, element) in enumerate(&expr_evaluated) {
-                if !table.contains(&element.to_canonical_u64_vec()) {
+                let fixed_table_checked_by_global_multiplicity = matches!(
+                    rom_type,
+                    ROMType::LlamaSoftmaxExp3
+                        | ROMType::LlamaSoftmaxExp4
+                        | ROMType::LlamaRmsInv
+                        | ROMType::LlamaSwiGlu
+                );
+                if !fixed_table_checked_by_global_multiplicity
+                    && !table.contains(&element.to_canonical_u64_vec())
+                {
                     errors.push(MockProverError::LookupError {
                         rom_type: *rom_type,
                         expression: expr.clone(),
@@ -803,6 +816,23 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             lkm_from_cs.lookup_pow2(*arg1)
                         }
                         ROMType::Instruction => lkm_from_cs.fetch(*arg0 as u32),
+                        ROMType::LlamaSoftmaxExp3
+                        | ROMType::LlamaSoftmaxExp4
+                        | ROMType::LlamaRmsInv => lkm_from_cs.increment(*rom_type, *arg0),
+                        ROMType::LlamaSwiGlu => {
+                            let modulus = E::BaseField::MODULUS_U64;
+                            let signed = if *arg0 >= modulus - (1 << 15) {
+                                *arg0 as i64 - modulus as i64
+                            } else {
+                                *arg0 as i64
+                            };
+                            let raw = u64::from(
+                                i16::try_from(signed)
+                                    .expect("SwiGLU lookup input must be a signed i16")
+                                    as u16,
+                            );
+                            lkm_from_cs.increment(*rom_type, raw);
+                        }
                     };
                 }
             }

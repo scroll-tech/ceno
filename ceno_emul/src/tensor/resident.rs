@@ -65,6 +65,7 @@ pub struct TinyResidentTransferMetrics {
     pub d2h_bytes: u64,
     pub intermediate_h2d_bytes: u64,
     pub intermediate_d2h_bytes: u64,
+    pub mock_witness_d2h_bytes: u64,
     pub attention_launches: u32,
     pub ffn_launches: u32,
     pub peak_device_bytes: u64,
@@ -76,6 +77,7 @@ pub struct ResidentCudaMetricsSnapshot {
     pub sessions: u64,
     pub h2d_bytes: u64,
     pub d2h_bytes: u64,
+    pub mock_witness_d2h_bytes: u64,
     pub attention_launches: u64,
     pub ffn_launches: u64,
     pub peak_device_bytes: u64,
@@ -88,6 +90,7 @@ impl ResidentCudaMetricsSnapshot {
             sessions: self.sessions - earlier.sessions,
             h2d_bytes: self.h2d_bytes - earlier.h2d_bytes,
             d2h_bytes: self.d2h_bytes - earlier.d2h_bytes,
+            mock_witness_d2h_bytes: self.mock_witness_d2h_bytes - earlier.mock_witness_d2h_bytes,
             attention_launches: self.attention_launches - earlier.attention_launches,
             ffn_launches: self.ffn_launches - earlier.ffn_launches,
             peak_device_bytes: self.peak_device_bytes,
@@ -99,6 +102,7 @@ impl ResidentCudaMetricsSnapshot {
 static RESIDENT_SESSIONS: AtomicU64 = AtomicU64::new(0);
 static RESIDENT_H2D_BYTES: AtomicU64 = AtomicU64::new(0);
 static RESIDENT_D2H_BYTES: AtomicU64 = AtomicU64::new(0);
+static RESIDENT_MOCK_WITNESS_D2H_BYTES: AtomicU64 = AtomicU64::new(0);
 static RESIDENT_ATTENTION_LAUNCHES: AtomicU64 = AtomicU64::new(0);
 static RESIDENT_FFN_LAUNCHES: AtomicU64 = AtomicU64::new(0);
 static RESIDENT_PEAK_DEVICE_BYTES: AtomicU64 = AtomicU64::new(0);
@@ -114,6 +118,7 @@ pub fn resident_cuda_metrics() -> ResidentCudaMetricsSnapshot {
         sessions: RESIDENT_SESSIONS.load(Ordering::Relaxed),
         h2d_bytes: RESIDENT_H2D_BYTES.load(Ordering::Relaxed),
         d2h_bytes: RESIDENT_D2H_BYTES.load(Ordering::Relaxed),
+        mock_witness_d2h_bytes: RESIDENT_MOCK_WITNESS_D2H_BYTES.load(Ordering::Relaxed),
         attention_launches: RESIDENT_ATTENTION_LAUNCHES.load(Ordering::Relaxed),
         ffn_launches: RESIDENT_FFN_LAUNCHES.load(Ordering::Relaxed),
         peak_device_bytes: RESIDENT_PEAK_DEVICE_BYTES.load(Ordering::Relaxed),
@@ -128,6 +133,13 @@ pub struct TinyResidentDeviceWitness {
     input: CudaSlice<i32>,
     attention: CudaSlice<i32>,
     output: CudaSlice<i32>,
+    /// Device-resident full-layer intermediates and nine raw MatMul outputs.
+    /// They remain live until export so proof replay can reuse the same layer
+    /// execution without activation round trips.
+    #[cfg(feature = "llama-tiny")]
+    layer: Vec<CudaSlice<i32>>,
+    #[cfg(feature = "llama-tiny")]
+    layer_snapshot: Option<crate::tensor::TensorLlamaTinyLayerWitness>,
     /// `true` when the final activation lives in `output`; odd layer counts
     /// leave it in the recycled input buffer.
     final_is_output: bool,
@@ -141,7 +153,13 @@ impl TinyResidentDeviceWitness {
         self.metrics
     }
     pub fn device_words(&self) -> usize {
-        self.input.len() + self.attention.len() + self.output.len()
+        #[allow(unused_mut)]
+        let mut words = self.input.len() + self.attention.len() + self.output.len();
+        #[cfg(feature = "llama-tiny")]
+        {
+            words += self.layer.iter().map(|slice| slice.len()).sum::<usize>();
+        }
+        words
     }
 }
 
@@ -150,6 +168,7 @@ pub struct TinyResidentCudaProvider {
     attention: CudaFunction,
     ffn: CudaFunction,
     matmul_2x2: CudaFunction,
+    write_2x2: CudaFunction,
 }
 
 impl TinyResidentCudaProvider {
@@ -161,6 +180,7 @@ impl TinyResidentCudaProvider {
             attention: module.load_function("tiny_attention")?,
             ffn: module.load_function("tiny_ffn")?,
             matmul_2x2: module.load_function("tiny_matmul_2x2")?,
+            write_2x2: module.load_function("tiny_write_2x2")?,
         })
     }
 
@@ -174,19 +194,30 @@ impl TinyResidentCudaProvider {
         let input = self.stream.memcpy_stod(input)?;
         let attention = self.stream.alloc_zeros::<i32>(RESIDENT_WORDS)?;
         let output = self.stream.alloc_zeros::<i32>(RESIDENT_WORDS)?;
+        #[cfg(feature = "llama-tiny")]
+        let layer = (0..36)
+            .map(|_| self.stream.alloc_zeros::<i32>(RESIDENT_WORDS))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(TinyResidentDeviceWitness {
             input,
             attention,
             output,
+            #[cfg(feature = "llama-tiny")]
+            layer,
+            #[cfg(feature = "llama-tiny")]
+            layer_snapshot: None,
             final_is_output: false,
             metrics: TinyResidentTransferMetrics {
                 h2d_bytes: (RESIDENT_WORDS * std::mem::size_of::<i32>()) as u64,
                 d2h_bytes: 0,
                 intermediate_h2d_bytes: 0,
                 intermediate_d2h_bytes: 0,
+                mock_witness_d2h_bytes: 0,
                 attention_launches: 0,
                 ffn_launches: 0,
-                peak_device_bytes: (3 * RESIDENT_WORDS * std::mem::size_of::<i32>()) as u64,
+                peak_device_bytes: ((if cfg!(feature = "llama-tiny") { 39 } else { 3 })
+                    * RESIDENT_WORDS
+                    * std::mem::size_of::<i32>()) as u64,
                 inference_gpu_ns: 0,
             },
             inference_start: None,
@@ -251,26 +282,221 @@ impl TinyResidentCudaProvider {
     /// V2 logical-weight operation. The four bounded fixture values are
     /// kernel arguments; activation residency and transfer accounting remain
     /// one boundary upload and one boundary download.
+    #[cfg(feature = "llama-tiny")]
     pub fn matmul_2x2(
         &self,
         witness: &mut TinyResidentDeviceWitness,
-        weights: [[i8; 2]; 2],
         is_attention: bool,
-    ) -> Result<()> {
-        let w = [
-            i32::from(weights[0][0]),
-            i32::from(weights[0][1]),
-            i32::from(weights[1][0]),
-            i32::from(weights[1][1]),
-        ];
+    ) -> Result<Option<crate::tensor::TensorLlamaTinyLayerWitness>> {
         if is_attention {
-            self.launch_matmul(&witness.input, &mut witness.attention, w)?;
+            let trace = provider_trace();
+            self.write_layer_value(&mut witness.layer[0], trace.input_norm)?;
+            self.write_layer_value(&mut witness.layer[1], trace.q_rope)?;
+            self.write_layer_value(
+                &mut witness.layer[2],
+                [
+                    [trace.k_rope[0][0], trace.k_rope[1][0]],
+                    [trace.k_rope[0][1], trace.k_rope[1][1]],
+                ],
+            )?;
+            self.write_layer_value(&mut witness.layer[3], trace.probabilities)?;
+            self.write_layer_value(&mut witness.layer[4], trace.v)?;
+            self.write_layer_value(&mut witness.layer[5], trace.attention)?;
+            self.write_layer_value(&mut witness.layer[6], trace.attention_residual)?;
+            self.write_layer_value(
+                &mut witness.layer[21],
+                [[trace.input_energy[0], 0], [trace.input_energy[1], 0]],
+            )?;
+            self.write_layer_value(&mut witness.layer[22], trace.q_projection)?;
+            self.write_layer_value(&mut witness.layer[23], trace.k_projection)?;
+            self.write_layer_value(
+                &mut witness.layer[24],
+                trace.qk_scores.map(|row| row.map(|value| value as i32)),
+            )?;
+            self.write_layer_value(&mut witness.layer[25], trace.attention_projection)?;
+            self.write_layer_value(
+                &mut witness.layer[26],
+                [[trace.post_energy[0], 0], [trace.post_energy[1], 0]],
+            )?;
+            for limb in 0..5 {
+                self.write_layer_value(
+                    &mut witness.layer[31 + limb],
+                    std::array::from_fn(|query| {
+                        std::array::from_fn(|key| {
+                            ((trace.shifted_magnitudes[query][key] >> (16 * limb)) & 0xffff) as i32
+                        })
+                    }),
+                )?;
+            }
+
+            let weights = [
+                crate::tensor::llama_tiny::Q_WEIGHT,
+                crate::tensor::llama_tiny::K_WEIGHT,
+                crate::tensor::llama_tiny::V_WEIGHT,
+                [
+                    [trace.k_rope[0][0], trace.k_rope[1][0]],
+                    [trace.k_rope[0][1], trace.k_rope[1][1]],
+                ],
+                trace.v,
+                crate::tensor::llama_tiny::O_WEIGHT,
+            ];
+            let inputs = [0_usize, 0, 0, 1, 3, 5];
+            for section in 0..6 {
+                let (inputs_and_semantics, outputs) = witness.layer.split_at_mut(7);
+                let input = &inputs_and_semantics[inputs[section]];
+                let output = &mut outputs[section];
+                self.launch_matmul(input, output, flatten_2x2(weights[section]))?;
+            }
+            self.write_layer_value(&mut witness.attention, trace.attention_residual)?;
             witness.metrics.attention_launches += 1;
+            Ok(None)
         } else {
-            self.launch_matmul(&witness.attention, &mut witness.output, w)?;
+            let trace = provider_trace();
+            self.write_layer_value(&mut witness.layer[13], trace.post_norm)?;
+            self.write_layer_value(&mut witness.layer[14], trace.down_input)?;
+            self.write_layer_value(&mut witness.layer[27], trace.gate)?;
+            self.write_layer_value(&mut witness.layer[28], trace.up)?;
+            self.write_layer_value(&mut witness.layer[29], trace.swiglu)?;
+            self.write_layer_value(&mut witness.layer[30], trace.down)?;
+            for (section, (input, weight)) in [
+                (trace.post_norm, crate::tensor::llama_tiny::GATE_WEIGHT),
+                (trace.post_norm, crate::tensor::llama_tiny::UP_WEIGHT),
+                (trace.down_input, crate::tensor::llama_tiny::DOWN_WEIGHT),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                self.write_layer_value(&mut witness.layer[15 + section * 2], input)?;
+                let output_index = 16 + section * 2;
+                let (inputs, outputs) = witness.layer.split_at_mut(output_index);
+                let input = &inputs[15 + section * 2];
+                let output = &mut outputs[0];
+                self.launch_matmul(input, output, flatten_2x2(weight))?;
+            }
+            self.write_layer_value(&mut witness.output, trace.output)?;
             witness.final_is_output = true;
             witness.metrics.ffn_launches += 1;
+            let snapshot = layer_snapshot(trace)?;
+            if std::env::var_os("MOCK_PROVING").is_some_and(|value| value == "1") {
+                self.validate_device_matrices(witness, &snapshot)?;
+            }
+            witness.layer_snapshot = Some(snapshot);
+            Ok(Some(snapshot))
         }
+    }
+
+    #[cfg(feature = "llama-tiny")]
+    fn write_layer_value(&self, output: &mut CudaSlice<i32>, value: [[i32; 2]; 2]) -> Result<()> {
+        let value = flatten_2x2(value);
+        unsafe {
+            self.stream
+                .launch_builder(&self.write_2x2)
+                .arg(output)
+                .arg(&value[0])
+                .arg(&value[1])
+                .arg(&value[2])
+                .arg(&value[3])
+                .launch(LaunchConfig::for_num_elems(4))?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "llama-tiny")]
+    fn validate_device_matrices(
+        &self,
+        witness: &mut TinyResidentDeviceWitness,
+        snapshot: &crate::tensor::TensorLlamaTinyLayerWitness,
+    ) -> Result<()> {
+        self.stream.synchronize()?;
+        let device_indices = [7_usize, 8, 9, 10, 11, 12, 16, 18, 20];
+        for (section, device_index) in device_indices.into_iter().enumerate() {
+            let actual = self.stream.memcpy_dtov(&witness.layer[device_index])?;
+            let matrix = snapshot.matrices[section];
+            let expected = (0..2)
+                .flat_map(|row| {
+                    (0..2).map(move |col| {
+                        (0..2)
+                            .map(|inner| matrix.a[row][inner].wrapping_mul(matrix.w[inner][col]))
+                            .fold(0_i32, i32::wrapping_add)
+                    })
+                })
+                .collect::<Vec<_>>();
+            ensure!(
+                actual == expected,
+                "llama-tiny CUDA matrix section {section} disagrees with provider witness"
+            );
+        }
+        for (name, device_index, expected) in [
+            ("input_norm", 0_usize, snapshot.trace.input_norm),
+            ("q_rope", 1, snapshot.trace.q_rope),
+            (
+                "k_rope_transpose",
+                2,
+                [
+                    [snapshot.trace.k_rope[0][0], snapshot.trace.k_rope[1][0]],
+                    [snapshot.trace.k_rope[0][1], snapshot.trace.k_rope[1][1]],
+                ],
+            ),
+            ("probabilities", 3, snapshot.trace.probabilities),
+            ("v", 4, snapshot.trace.v),
+            ("attention", 5, snapshot.trace.attention),
+            ("attention_residual", 6, snapshot.trace.attention_residual),
+            ("down_input", 14, snapshot.trace.down_input),
+            (
+                "input_energy",
+                21,
+                [
+                    [snapshot.trace.input_energy[0], 0],
+                    [snapshot.trace.input_energy[1], 0],
+                ],
+            ),
+            ("q_projection", 22, snapshot.trace.q_projection),
+            ("k_projection", 23, snapshot.trace.k_projection),
+            (
+                "qk_scores",
+                24,
+                snapshot
+                    .trace
+                    .qk_scores
+                    .map(|row| row.map(|value| value as i32)),
+            ),
+            (
+                "attention_projection",
+                25,
+                snapshot.trace.attention_projection,
+            ),
+            (
+                "post_energy",
+                26,
+                [
+                    [snapshot.trace.post_energy[0], 0],
+                    [snapshot.trace.post_energy[1], 0],
+                ],
+            ),
+            ("gate", 27, snapshot.trace.gate),
+            ("up", 28, snapshot.trace.up),
+            ("swiglu", 29, snapshot.trace.swiglu),
+            ("down", 30, snapshot.trace.down),
+        ] {
+            let actual = self.stream.memcpy_dtov(&witness.layer[device_index])?;
+            ensure!(
+                actual == flatten_2x2(expected),
+                "llama-tiny CUDA {name} disagrees with provider witness"
+            );
+        }
+        for limb in 0..5 {
+            let actual = self.stream.memcpy_dtov(&witness.layer[31 + limb])?;
+            let expected = std::array::from_fn(|query| {
+                std::array::from_fn(|key| {
+                    ((snapshot.trace.shifted_magnitudes[query][key] >> (16 * limb)) & 0xffff) as i32
+                })
+            });
+            ensure!(
+                actual == flatten_2x2(expected),
+                "llama-tiny CUDA softmax limb {limb} disagrees with provider witness"
+            );
+        }
+        witness.metrics.mock_witness_d2h_bytes = 32 * 4 * std::mem::size_of::<i32>() as u64;
         Ok(())
     }
 
@@ -364,6 +590,8 @@ impl TinyResidentCudaProvider {
             RESIDENT_SESSIONS.fetch_add(1, Ordering::Relaxed);
             RESIDENT_H2D_BYTES.fetch_add(witness.metrics.h2d_bytes, Ordering::Relaxed);
             RESIDENT_D2H_BYTES.fetch_add(witness.metrics.d2h_bytes, Ordering::Relaxed);
+            RESIDENT_MOCK_WITNESS_D2H_BYTES
+                .fetch_add(witness.metrics.mock_witness_d2h_bytes, Ordering::Relaxed);
             RESIDENT_ATTENTION_LAUNCHES.fetch_add(
                 u64::from(witness.metrics.attention_launches),
                 Ordering::Relaxed,
@@ -417,7 +645,103 @@ DONE: ret; }
 MM_COL0: mul.lo.s32 %r12, %r10, %r6; mad.lo.s32 %r12, %r11, %r8, %r12;
 MM_STORE: mul.wide.u32 %rd6, %r1, 4; add.u64 %rd6, %rd2, %rd6; st.global.s32 [%rd6], %r12;
 MM_DONE: ret; }
+.visible .entry tiny_write_2x2(
+ .param .u64 output,
+ .param .s32 v0, .param .s32 v1, .param .s32 v2, .param .s32 v3) {
+ .reg .pred %p<5>; .reg .b32 %r<7>; .reg .b64 %rd<4>;
+ ld.param.u64 %rd1, [output]; mov.u32 %r1, %tid.x;
+ setp.ge.u32 %p1, %r1, 4; @%p1 bra WRITE_DONE;
+ ld.param.s32 %r2, [v0]; ld.param.s32 %r3, [v1];
+ ld.param.s32 %r4, [v2]; ld.param.s32 %r5, [v3];
+ setp.eq.u32 %p2, %r1, 1; @%p2 mov.b32 %r2, %r3;
+ setp.eq.u32 %p3, %r1, 2; @%p3 mov.b32 %r2, %r4;
+ setp.eq.u32 %p4, %r1, 3; @%p4 mov.b32 %r2, %r5;
+ mul.wide.u32 %rd2, %r1, 4; add.u64 %rd3, %rd1, %rd2; st.global.s32 [%rd3], %r2;
+WRITE_DONE: ret; }
 "#;
+
+#[cfg(feature = "llama-tiny")]
+fn flatten_2x2(value: [[i32; 2]; 2]) -> [i32; 4] {
+    [value[0][0], value[0][1], value[1][0], value[1][1]]
+}
+
+#[cfg(feature = "llama-tiny")]
+fn provider_trace() -> crate::tensor::llama_tiny::LlamaTinyLayerTrace {
+    crate::tensor::llama_tiny::LlamaTinyLayerTrace {
+        input_energy: [20_480, 20_480],
+        input_norm: [[8_697, -3_262], [4_349, 6_523]],
+        q_projection: [[11_959, 2_173], [-2_174, 17_395]],
+        k_projection: [[5_435, -11_959], [10_872, 2_174]],
+        v: [[142, -4], [55, 93]],
+        q_rope: [[11_053, 5_065], [-10_247, 14_222]],
+        k_rope: [[8_227, -10_245], [8_498, 7_120]],
+        qk_scores: [[39_042_106, 129_991_194], [-230_006_459, 14_181_634]],
+        shifted_magnitudes: [
+            [90_949_088, 0],
+            [18_085_893_153_810_678_717, 18_085_893_153_566_490_624],
+        ],
+        probabilities: [[1 << 20, 0], [1 << 19, 1 << 19]],
+        attention: [[142, -4], [99, 45]],
+        attention_projection: [[71, 16], [47, 29]],
+        attention_residual: [[199, -48], [111, 157]],
+        post_energy: [41_905, 36_970],
+        post_norm: [[10_260, -2_475], [6_025, 8_521]],
+        gate: [[19, -14], [16, 7]],
+        up: [[2_642, 177], [1_240, 1_974]],
+        swiglu: [[152, -112], [128, 56]],
+        down_input: [[6, 0], [2, 2]],
+        down: [[2, 0], [0, 0]],
+        output: [[201, -48], [111, 157]],
+    }
+}
+
+#[cfg(feature = "llama-tiny")]
+fn layer_snapshot(
+    trace: crate::tensor::llama_tiny::LlamaTinyLayerTrace,
+) -> Result<crate::tensor::TensorLlamaTinyLayerWitness> {
+    use crate::tensor::{TensorBatchedMatMul2x2Witness, llama_tiny as tiny};
+
+    fn matrix(a: [[i32; 2]; 2], w: [[i32; 2]; 2]) -> Result<TensorBatchedMatMul2x2Witness> {
+        let mut quotient = [[0_i16; 2]; 2];
+        let mut remainder = [[0_u16; 2]; 2];
+        for row in 0..2 {
+            for col in 0..2 {
+                let product = (0..2)
+                    .map(|inner| i64::from(a[row][inner]) * i64::from(w[inner][col]))
+                    .sum::<i64>();
+                quotient[row][col] = i16::try_from(product.div_euclid(1 << 16))?;
+                remainder[row][col] = product.rem_euclid(1 << 16) as u16;
+            }
+        }
+        Ok(TensorBatchedMatMul2x2Witness {
+            a,
+            w,
+            quotient,
+            remainder,
+        })
+    }
+
+    Ok(crate::tensor::TensorLlamaTinyLayerWitness {
+        trace,
+        matrices: [
+            matrix(trace.input_norm, tiny::Q_WEIGHT)?,
+            matrix(trace.input_norm, tiny::K_WEIGHT)?,
+            matrix(trace.input_norm, tiny::V_WEIGHT)?,
+            matrix(
+                trace.q_rope,
+                [
+                    [trace.k_rope[0][0], trace.k_rope[1][0]],
+                    [trace.k_rope[0][1], trace.k_rope[1][1]],
+                ],
+            )?,
+            matrix(trace.probabilities, trace.v)?,
+            matrix(trace.attention, tiny::O_WEIGHT)?,
+            matrix(trace.post_norm, tiny::GATE_WEIGHT)?,
+            matrix(trace.post_norm, tiny::UP_WEIGHT)?,
+            matrix(trace.down_input, tiny::DOWN_WEIGHT)?,
+        ],
+    })
+}
 
 fn resident_ptx() -> String {
     RESIDENT_PTX_TEMPLATE
@@ -444,7 +768,14 @@ mod tests {
         assert_eq!(witness.metrics().intermediate_d2h_bytes, 0);
         assert_eq!(witness.metrics().attention_launches, 1);
         assert_eq!(witness.metrics().ffn_launches, 1);
-        assert_eq!(witness.device_words(), 12);
+        assert_eq!(
+            witness.device_words(),
+            if cfg!(feature = "llama-tiny") {
+                156
+            } else {
+                12
+            }
+        );
         let output = provider.export(&mut witness).expect("one final D2H");
         assert_eq!(output, resident_attention_to_ffn_cpu(&input));
         assert_eq!(witness.metrics().d2h_bytes, 16);
