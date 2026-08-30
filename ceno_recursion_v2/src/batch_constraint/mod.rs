@@ -23,6 +23,12 @@ use crate::{
     tracegen::{ModuleChip, RowMajorChip},
 };
 
+mod matrix_correction;
+use matrix_correction::{
+    MainAlphaPowAir, MainAlphaPowTraceGenerator, MainMatrixCorrectionAir,
+    MainMatrixCorrectionTraceGenerator, MainProofValueAir, MainProofValueTraceGenerator,
+};
+
 #[cfg(feature = "cuda")]
 mod cuda;
 
@@ -33,6 +39,11 @@ pub struct BatchConstraintModule {
     eval_bus: crate::bus::MainEvalBus,
     contribution_bus: crate::bus::MainContributionBus,
     tower_point_bus: crate::bus::TowerMainPointBus,
+    initial_claim_bus: crate::bus::MainInitialClaimBus,
+    alpha_pow_bus: crate::bus::MainAlphaPowBus,
+    expression_count_bus: crate::bus::MainExpressionCountBus,
+    matrix_correction_shape_bus: crate::bus::MainMatrixCorrectionShapeBus,
+    matrix_value_bus: crate::bus::MatrixReductionValueBus,
 }
 
 impl BatchConstraintModule {
@@ -48,6 +59,11 @@ impl BatchConstraintModule {
             eval_bus: bus_inventory.main_eval_bus,
             contribution_bus: bus_inventory.main_contribution_bus,
             tower_point_bus: bus_inventory.tower_main_point_bus,
+            initial_claim_bus: bus_inventory.main_initial_claim_bus,
+            alpha_pow_bus: bus_inventory.main_alpha_pow_bus,
+            expression_count_bus: bus_inventory.main_expression_count_bus,
+            matrix_correction_shape_bus: bus_inventory.main_matrix_correction_shape_bus,
+            matrix_value_bus: bus_inventory.matrix_reduction_value_bus,
         }
     }
 
@@ -68,7 +84,7 @@ impl BatchConstraintModule {
 
 impl AirModule for BatchConstraintModule {
     fn num_airs(&self) -> usize {
-        5
+        8
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -77,6 +93,15 @@ impl AirModule for BatchConstraintModule {
                 transcript_bus: self.transcript_bus,
                 global_claim_bus: self.global_claim_bus,
                 global_point_bus: self.global_point_bus,
+                initial_claim_bus: self.initial_claim_bus,
+            }) as AirRef<_>,
+            Arc::new(MainProofValueAir {
+                initial_claim_bus: self.initial_claim_bus,
+            }) as AirRef<_>,
+            Arc::new(MainAlphaPowAir {
+                transcript_bus: self.transcript_bus,
+                expression_count_bus: self.expression_count_bus,
+                alpha_pow_bus: self.alpha_pow_bus,
             }) as AirRef<_>,
             Arc::new(MainEvalAbsorbAir {
                 transcript_bus: self.transcript_bus,
@@ -89,6 +114,13 @@ impl AirModule for BatchConstraintModule {
             Arc::new(MainFrontloadTermAir {
                 eval_bus: self.eval_bus,
                 global_point_bus: self.global_point_bus,
+                contribution_bus: self.contribution_bus,
+            }) as AirRef<_>,
+            Arc::new(MainMatrixCorrectionAir {
+                shape_bus: self.matrix_correction_shape_bus,
+                alpha_pow_bus: self.alpha_pow_bus,
+                matrix_value_bus: self.matrix_value_bus,
+                eval_bus: self.eval_bus,
                 contribution_bus: self.contribution_bus,
             }) as AirRef<_>,
             Arc::new(MainFinalClaimAir {
@@ -119,9 +151,12 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         let ctx = BatchConstraintTraceCtx { records: &records };
         let chips = [
             BatchConstraintModuleChip::GlobalSumcheck,
+            BatchConstraintModuleChip::ProofValue,
+            BatchConstraintModuleChip::AlphaPow,
             BatchConstraintModuleChip::EvalAbsorb,
             BatchConstraintModuleChip::TowerPointEq,
             BatchConstraintModuleChip::FrontloadTerm,
+            BatchConstraintModuleChip::MatrixCorrection,
             BatchConstraintModuleChip::FinalClaim,
         ];
         chips
@@ -143,9 +178,12 @@ struct BatchConstraintTraceCtx<'a> {
 
 enum BatchConstraintModuleChip {
     GlobalSumcheck,
+    ProofValue,
+    AlphaPow,
     EvalAbsorb,
     TowerPointEq,
     FrontloadTerm,
+    MatrixCorrection,
     FinalClaim,
 }
 
@@ -154,9 +192,12 @@ impl BatchConstraintModuleChip {
     fn stable_name(&self) -> &'static str {
         match self {
             BatchConstraintModuleChip::GlobalSumcheck => "GlobalSumcheck",
+            BatchConstraintModuleChip::ProofValue => "ProofValue",
+            BatchConstraintModuleChip::AlphaPow => "AlphaPow",
             BatchConstraintModuleChip::EvalAbsorb => "EvalAbsorb",
             BatchConstraintModuleChip::TowerPointEq => "TowerPointEq",
             BatchConstraintModuleChip::FrontloadTerm => "FrontloadTerm",
+            BatchConstraintModuleChip::MatrixCorrection => "MatrixCorrection",
             BatchConstraintModuleChip::FinalClaim => "FinalClaim",
         }
     }
@@ -164,9 +205,14 @@ impl BatchConstraintModuleChip {
     fn record_count(&self, ctx: &BatchConstraintTraceCtx<'_>) -> usize {
         match self {
             BatchConstraintModuleChip::GlobalSumcheck => ctx.records.global_sumcheck_records.len(),
+            BatchConstraintModuleChip::ProofValue => ctx.records.proof_value_records.len(),
+            BatchConstraintModuleChip::AlphaPow => ctx.records.alpha_pow_records.len(),
             BatchConstraintModuleChip::EvalAbsorb => ctx.records.eval_records.len(),
             BatchConstraintModuleChip::TowerPointEq => ctx.records.tower_point_eq_records.len(),
             BatchConstraintModuleChip::FrontloadTerm => ctx.records.frontload_term_records.len(),
+            BatchConstraintModuleChip::MatrixCorrection => {
+                ctx.records.matrix_correction_records.len()
+            }
             BatchConstraintModuleChip::FinalClaim => ctx.records.final_claim_records.len(),
         }
     }
@@ -179,9 +225,12 @@ impl RowMajorChip<F> for BatchConstraintModuleChip {
     fn trace_name(&self) -> &'static str {
         match self {
             BatchConstraintModuleChip::GlobalSumcheck => "MainGlobalSumcheckAir",
+            BatchConstraintModuleChip::ProofValue => "MainProofValueAir",
+            BatchConstraintModuleChip::AlphaPow => "MainAlphaPowAir",
             BatchConstraintModuleChip::EvalAbsorb => "MainEvalAbsorbAir",
             BatchConstraintModuleChip::TowerPointEq => "MainTowerPointEqAir",
             BatchConstraintModuleChip::FrontloadTerm => "MainFrontloadTermAir",
+            BatchConstraintModuleChip::MatrixCorrection => "MainMatrixCorrectionAir",
             BatchConstraintModuleChip::FinalClaim => "MainFinalClaimAir",
         }
     }
@@ -197,6 +246,10 @@ impl RowMajorChip<F> for BatchConstraintModuleChip {
                     &ctx.records.global_sumcheck_records.as_slice(),
                     required_height,
                 ),
+            BatchConstraintModuleChip::ProofValue => MainProofValueTraceGenerator
+                .generate_trace(&ctx.records.proof_value_records.as_slice(), required_height),
+            BatchConstraintModuleChip::AlphaPow => MainAlphaPowTraceGenerator
+                .generate_trace(&ctx.records.alpha_pow_records.as_slice(), required_height),
             BatchConstraintModuleChip::EvalAbsorb => MainEvalAbsorbTraceGenerator
                 .generate_trace(&ctx.records.eval_records.as_slice(), required_height),
             BatchConstraintModuleChip::TowerPointEq => MainTowerPointEqTraceGenerator
@@ -207,6 +260,11 @@ impl RowMajorChip<F> for BatchConstraintModuleChip {
             BatchConstraintModuleChip::FrontloadTerm => MainFrontloadTermTraceGenerator
                 .generate_trace(
                     &ctx.records.frontload_term_records.as_slice(),
+                    required_height,
+                ),
+            BatchConstraintModuleChip::MatrixCorrection => MainMatrixCorrectionTraceGenerator
+                .generate_trace(
+                    &ctx.records.matrix_correction_records.as_slice(),
                     required_height,
                 ),
             BatchConstraintModuleChip::FinalClaim => MainFinalClaimTraceGenerator
@@ -275,9 +333,12 @@ mod cuda_tracegen {
             let trace_ctx = BatchConstraintTraceCtx { records: &records };
             let chips = [
                 BatchConstraintModuleChip::GlobalSumcheck,
+                BatchConstraintModuleChip::ProofValue,
+                BatchConstraintModuleChip::AlphaPow,
                 BatchConstraintModuleChip::EvalAbsorb,
                 BatchConstraintModuleChip::TowerPointEq,
                 BatchConstraintModuleChip::FrontloadTerm,
+                BatchConstraintModuleChip::MatrixCorrection,
                 BatchConstraintModuleChip::FinalClaim,
             ];
             chips

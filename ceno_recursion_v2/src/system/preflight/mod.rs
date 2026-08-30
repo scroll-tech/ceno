@@ -95,6 +95,45 @@ pub struct MainPreflight {
     pub tower_point_eqs: Vec<MainTowerPointEqRecord>,
     pub frontload_terms: Vec<MainFrontloadTermRecord>,
     pub final_claims: Vec<MainFinalClaimRecord>,
+    pub alpha_tidx: usize,
+    pub alpha_pows: Vec<MainAlphaPowRecord>,
+    pub matrix_corrections: Vec<MainMatrixCorrectionRecord>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainProofValueRecord {
+    pub proof_idx: usize,
+    pub claimed_sum: EF,
+    pub main_out_evals_len: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainAlphaPowRecord {
+    pub proof_idx: usize,
+    pub air_idx: usize,
+    pub alpha_idx: usize,
+    pub num_exprs: usize,
+    pub alpha_tidx: usize,
+    pub alpha: EF,
+    pub value: EF,
+    pub lookup_count: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainMatrixCorrectionRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub air_idx: usize,
+    pub correction_idx: usize,
+    pub alpha_idx: usize,
+    pub eval_idx: usize,
+    pub matrix_kind: usize,
+    pub matrix_idx: usize,
+    pub matrix_tidx: usize,
+    pub claim: EF,
+    pub alpha_pow: EF,
+    pub selector_eval: EF,
+    pub contribution: EF,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -660,6 +699,9 @@ pub enum MainSelectorPointSourceKind {
     EccXY,
     EccSlope,
     EccX3Y3,
+    MatrixA,
+    MatrixW,
+    MatrixOutput,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -697,6 +739,7 @@ pub struct MainSelectorEvalRecord {
     pub ecc_rt_tidxs: Vec<usize>,
     pub ecc_xy_selector_idx: Option<usize>,
     pub ecc_x3y3_selector_idx: Option<usize>,
+    pub matrix_value_tidxs: Vec<usize>,
     pub value: EF,
 }
 
@@ -721,6 +764,9 @@ pub struct MainSelectorPointRecord {
     pub source_round_idx: usize,
     pub source_value: EF,
     pub derive_kind: MainSelectorPointDeriveKind,
+    pub matrix_kind: usize,
+    pub matrix_idx: usize,
+    pub matrix_tidx: usize,
 }
 
 #[derive(Clone, Debug)]

@@ -5,8 +5,9 @@ mod types;
 pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
     BatchConstraintPreflight, ChipTranscriptRange, EccReplayClaims, ForkTranscriptLog,
-    MainEccRtRecord, MainEvalRecord, MainFinalClaimRecord, MainFrontloadTermRecord,
-    MainGlobalSumcheckRecord, MainGlobalSumcheckRoundRecord, MainPreflight, MainSelectorEvalRecord,
+    MainAlphaPowRecord, MainEccRtRecord, MainEvalRecord, MainFinalClaimRecord,
+    MainFrontloadTermRecord, MainGlobalSumcheckRecord, MainGlobalSumcheckRoundRecord,
+    MainMatrixCorrectionRecord, MainPreflight, MainProofValueRecord, MainSelectorEvalRecord,
     MainSelectorKind, MainSelectorPointDeriveKind, MainSelectorPointRecord,
     MainSelectorPointSourceKind, MainTowerPointEqRecord, MainTranscriptRecord,
     MatrixReductionReplayClaims, MatrixReductionRoundReplay, PcsBaseInputLeafHashRecord,

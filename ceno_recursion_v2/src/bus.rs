@@ -141,6 +141,49 @@ define_typed_per_proof_permutation_bus!(MainGlobalClaimBus, MainGlobalClaimMessa
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainInitialClaimMessage<T> {
+    pub claimed_sum: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(MainInitialClaimBus, MainInitialClaimMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainAlphaPowMessage<T> {
+    pub air_idx: T,
+    pub alpha_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(MainAlphaPowBus, MainAlphaPowMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainExpressionCountMessage<T> {
+    pub air_idx: T,
+    pub num_exprs: T,
+}
+
+define_typed_per_proof_permutation_bus!(MainExpressionCountBus, MainExpressionCountMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainMatrixCorrectionShapeMessage<T> {
+    pub air_idx: T,
+    pub correction_idx: T,
+    pub alpha_idx: T,
+    pub eval_idx: T,
+    pub matrix_kind: T,
+    pub matrix_idx: T,
+}
+
+define_typed_per_proof_permutation_bus!(
+    MainMatrixCorrectionShapeBus,
+    MainMatrixCorrectionShapeMessage
+);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct MainGlobalPointMessage<T> {
     pub round_idx: T,
     pub value: [T; D_EF],

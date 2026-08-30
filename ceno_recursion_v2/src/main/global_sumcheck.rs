@@ -17,7 +17,7 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 use crate::{
     bus::{
         MainGlobalClaimBus, MainGlobalClaimMessage, MainGlobalPointBus, MainGlobalPointMessage,
-        TranscriptBus, TranscriptBusMessage,
+        MainInitialClaimBus, MainInitialClaimMessage, TranscriptBus, TranscriptBusMessage,
     },
     system::MainGlobalSumcheckRecord,
     tracegen::RowMajorChip,
@@ -48,6 +48,7 @@ pub struct MainGlobalSumcheckAir {
     pub transcript_bus: TranscriptBus,
     pub global_claim_bus: MainGlobalClaimBus,
     pub global_point_bus: MainGlobalPointBus,
+    pub initial_claim_bus: MainInitialClaimBus,
 }
 
 impl<F: Field> BaseAir<F> for MainGlobalSumcheckAir {
@@ -72,6 +73,15 @@ where
         );
         let local: &MainGlobalSumcheckCols<AB::Var> = (*local_row).borrow();
         let next: &MainGlobalSumcheckCols<AB::Var> = (*next_row).borrow();
+
+        self.initial_claim_bus.receive(
+            builder,
+            local.proof_idx,
+            MainInitialClaimMessage {
+                claimed_sum: local.claim_in.map(Into::into),
+            },
+            local.is_enabled * local.is_first,
+        );
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_last);

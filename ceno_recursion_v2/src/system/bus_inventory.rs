@@ -9,10 +9,11 @@ use recursion_circuit::{
 
 use crate::bus::{
     CachedCommitBus as LocalCachedCommitBus, EccRtBus, ForkFinalSampleBus,
-    ForkedTranscriptBus as LocalForkedTranscriptBus, LookupChallengeBus, MainBus,
+    ForkedTranscriptBus as LocalForkedTranscriptBus, LookupChallengeBus, MainAlphaPowBus, MainBus,
     MainContributionBus, MainEccRtChallengeBus, MainEccRtEquationTotalsBus, MainEccRtQuarkFinalBus,
-    MainEccRtSumcheckFinalBus, MainEvalBus, MainExpressionClaimBus, MainGlobalClaimBus,
-    MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
+    MainEccRtSumcheckFinalBus, MainEvalBus, MainExpressionClaimBus, MainExpressionCountBus,
+    MainGlobalClaimBus, MainGlobalPointBus, MainInitialClaimBus, MainMatrixCorrectionShapeBus,
+    MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
     MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
     MatrixReductionPresenceBus, MatrixReductionValueBus, PcsBaseInputOpeningBus,
     PcsBasefoldEvalBus, PcsBasefoldFinalExpectedBus, PcsBasefoldFinalPointBus, PcsBasefoldQueryBus,
@@ -44,6 +45,10 @@ pub struct BusInventory {
     pub main_sumcheck_output_bus: MainSumcheckOutputBus,
     pub main_expression_claim_bus: MainExpressionClaimBus,
     pub main_global_claim_bus: MainGlobalClaimBus,
+    pub main_initial_claim_bus: MainInitialClaimBus,
+    pub main_alpha_pow_bus: MainAlphaPowBus,
+    pub main_expression_count_bus: MainExpressionCountBus,
+    pub main_matrix_correction_shape_bus: MainMatrixCorrectionShapeBus,
     pub main_global_point_bus: MainGlobalPointBus,
     pub main_eval_bus: MainEvalBus,
     pub main_contribution_bus: MainContributionBus,
@@ -116,6 +121,10 @@ impl BusInventory {
         let main_sumcheck_output_bus = MainSumcheckOutputBus::new(b.new_bus_idx());
         let main_expression_claim_bus = MainExpressionClaimBus::new(b.new_bus_idx());
         let main_global_claim_bus = MainGlobalClaimBus::new(b.new_bus_idx());
+        let main_initial_claim_bus = MainInitialClaimBus::new(b.new_bus_idx());
+        let main_alpha_pow_bus = MainAlphaPowBus::new(b.new_bus_idx());
+        let main_expression_count_bus = MainExpressionCountBus::new(b.new_bus_idx());
+        let main_matrix_correction_shape_bus = MainMatrixCorrectionShapeBus::new(b.new_bus_idx());
         let main_global_point_bus = MainGlobalPointBus::new(b.new_bus_idx());
         let main_eval_bus = MainEvalBus::new(b.new_bus_idx());
         let main_contribution_bus = MainContributionBus::new(b.new_bus_idx());
@@ -181,6 +190,10 @@ impl BusInventory {
             main_sumcheck_output_bus,
             main_expression_claim_bus,
             main_global_claim_bus,
+            main_initial_claim_bus,
+            main_alpha_pow_bus,
+            main_expression_count_bus,
+            main_matrix_correction_shape_bus,
             main_global_point_bus,
             main_eval_bus,
             main_contribution_bus,

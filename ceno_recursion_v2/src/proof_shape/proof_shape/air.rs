@@ -20,8 +20,9 @@ use crate::{
     bus::{
         AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage, ForkFinalSampleBus,
         ForkFinalSampleMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
-        LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage, MainSelectorShapeBus,
-        MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
+        LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage, MainExpressionCountBus,
+        MainExpressionCountMessage, MainMatrixCorrectionShapeBus, MainMatrixCorrectionShapeMessage,
+        MainSelectorShapeBus, MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
         MainSelectorSparseIndexShapeMessage, MatrixReductionPresenceBus,
         MatrixReductionPresenceMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
         TranscriptBusMessage,
@@ -126,6 +127,8 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
     pub matrix_reduction_presence_bus: MatrixReductionPresenceBus,
     pub matrix_reduction_air_idx: Option<usize>,
+    pub main_expression_count_bus: MainExpressionCountBus,
+    pub main_matrix_correction_shape_bus: MainMatrixCorrectionShapeBus,
 }
 
 impl<F, const NUM_LIMBS: usize, const LIMB_BITS: usize> BaseAir<F>
@@ -251,6 +254,34 @@ where
                         fork_id: local.fork_id.into(),
                         log_height: local.log_height.into(),
                         final_sample_tidx: local.after_forked_challenge_1_tidx.into(),
+                    },
+                    local.is_present * local.is_valid * is_current_air.clone(),
+                );
+            }
+
+            self.main_expression_count_bus.send(
+                builder,
+                local.proof_idx,
+                MainExpressionCountMessage {
+                    air_idx: AB::Expr::from_usize(i),
+                    num_exprs: AB::Expr::from_usize(air_data.num_main_exprs),
+                },
+                local.is_present
+                    * local.is_valid
+                    * is_current_air.clone()
+                    * AB::Expr::from_bool(air_data.num_main_exprs != 0),
+            );
+            for correction in &air_data.matrix_corrections {
+                self.main_matrix_correction_shape_bus.send(
+                    builder,
+                    local.proof_idx,
+                    MainMatrixCorrectionShapeMessage {
+                        air_idx: AB::Expr::from_usize(i),
+                        correction_idx: AB::Expr::from_usize(correction.correction_idx),
+                        alpha_idx: AB::Expr::from_usize(correction.alpha_offset),
+                        eval_idx: AB::Expr::from_usize(correction.eval_idx),
+                        matrix_kind: AB::Expr::from_usize(correction.matrix_kind),
+                        matrix_idx: AB::Expr::from_usize(correction.matrix_idx),
                     },
                     local.is_present * local.is_valid * is_current_air.clone(),
                 );

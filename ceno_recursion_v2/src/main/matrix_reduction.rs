@@ -1,6 +1,6 @@
 use core::borrow::{Borrow, BorrowMut};
 
-use ceno_zkvm::scheme::matrix_reduction::{MATRIX_REDUCTION_COLUMNS, MATRIX_REDUCTION_SCALE};
+use ceno_zkvm::scheme::matrix_reduction::MATRIX_REDUCTION_SCALE;
 use ff_ext::ExtensionField;
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
@@ -15,19 +15,17 @@ use crate::{
     bus::{
         ForkedTranscriptBus, ForkedTranscriptBusMessage, MatrixReductionPresenceBus,
         MatrixReductionPresenceMessage, MatrixReductionValueBus, MatrixReductionValueMessage,
-        PcsOpeningEvalMessage, PcsOpeningPointBus, PcsOpeningPointMessage,
-        PcsSemanticOpeningEvalBus,
     },
-    system::{PcsOpeningCommitKind, Preflight, RecursionField, RecursionProof},
+    system::{Preflight, RecursionField, RecursionProof},
     tracegen::RowMajorChip,
     utils::{ext_field_add, ext_field_multiply, ext_field_one_minus, ext_field_subtract},
 };
 
-const OUTPUT_POINT: usize = 0;
-const OUTPUT_EVAL: usize = 1;
-const SUMCHECK_CHALLENGE: usize = 2;
+pub(crate) const OUTPUT_POINT: usize = 0;
+pub(crate) const OUTPUT_EVAL: usize = 1;
+pub(crate) const SUMCHECK_CHALLENGE: usize = 2;
 const SUMCHECK_EVAL: usize = 3;
-const FINAL_EVAL: usize = 4;
+pub(crate) const FINAL_EVAL: usize = 4;
 
 #[derive(Clone)]
 pub struct MatrixValueRecord {
@@ -67,31 +65,12 @@ pub struct MatrixRoundRecord {
     final_evals: [RecursionField; 2],
 }
 
-#[derive(Clone)]
-pub struct MatrixOpeningRecord {
-    pub(super) proof_idx: usize,
-    pub(super) air_idx: usize,
-    pub(super) is_point: bool,
-    pub(super) pcs_round_idx: usize,
-    pub(super) coord_or_eval_idx: usize,
-    source_kind: usize,
-    source_idx: usize,
-    source_tidx: usize,
-    has_value_source: bool,
-    value: RecursionField,
-}
-
 pub fn collect_records(
-    proofs: &[RecursionProof],
+    _proofs: &[RecursionProof],
     preflights: &[Preflight],
-) -> (
-    Vec<MatrixValueRecord>,
-    Vec<MatrixRoundRecord>,
-    Vec<MatrixOpeningRecord>,
-) {
+) -> (Vec<MatrixValueRecord>, Vec<MatrixRoundRecord>) {
     let mut values = Vec::new();
     let mut rounds = Vec::new();
-    let mut openings = Vec::new();
     for (proof_idx, preflight) in preflights.iter().enumerate() {
         for claims in preflight
             .gkr
@@ -191,105 +170,9 @@ pub fn collect_records(
                     value,
                 });
             }
-            for (pcs_round, point) in claims.opening_points.iter().enumerate() {
-                let padded_len = proofs
-                    .get(proof_idx)
-                    .and_then(|proof| proof.additional_witness_openings.get(pcs_round))
-                    .map_or(point.len(), |opening| opening.point.len());
-                for coord_idx in 0..padded_len {
-                    let Some(value) = point.get(coord_idx).copied() else {
-                        openings.push(MatrixOpeningRecord {
-                            proof_idx,
-                            air_idx: claims.air_idx,
-                            is_point: true,
-                            pcs_round_idx: pcs_round + 1,
-                            coord_or_eval_idx: coord_idx,
-                            source_kind: OUTPUT_POINT,
-                            source_idx: 0,
-                            source_tidx: 0,
-                            has_value_source: false,
-                            value: RecursionField::ZERO,
-                        });
-                        continue;
-                    };
-                    let (source_kind, source_idx) = match (pcs_round, coord_idx) {
-                        (0, 0) => (SUMCHECK_CHALLENGE, 0),
-                        (0, 1) => (OUTPUT_POINT, 1),
-                        (0, i) => (SUMCHECK_CHALLENGE, i - 1),
-                        (1, 0) => (OUTPUT_POINT, 0),
-                        (1, 1) => (SUMCHECK_CHALLENGE, 0),
-                        (1, i) => (SUMCHECK_CHALLENGE, i - 1),
-                        (2, i) => (OUTPUT_POINT, i),
-                        _ => unreachable!(),
-                    };
-                    openings.push(MatrixOpeningRecord {
-                        proof_idx,
-                        air_idx: claims.air_idx,
-                        is_point: true,
-                        pcs_round_idx: pcs_round + 1,
-                        coord_or_eval_idx: coord_idx,
-                        source_kind,
-                        source_idx,
-                        source_tidx: match source_kind {
-                            OUTPUT_POINT => claims.output_point_tidx + source_idx * D_EF,
-                            SUMCHECK_CHALLENGE => claims.rounds[source_idx].challenge_tidx,
-                            _ => unreachable!(),
-                        },
-                        has_value_source: true,
-                        value,
-                    });
-                }
-            }
-            for (pcs_round, column, source_kind, source_idx, value) in [
-                (
-                    1,
-                    claims.witness_offset,
-                    FINAL_EVAL,
-                    0,
-                    claims.final_evals[0],
-                ),
-                (
-                    2,
-                    claims.witness_offset + MATRIX_REDUCTION_COLUMNS[1],
-                    FINAL_EVAL,
-                    1,
-                    claims.final_evals[1],
-                ),
-                (
-                    3,
-                    claims.witness_offset + MATRIX_REDUCTION_COLUMNS[2],
-                    OUTPUT_EVAL,
-                    0,
-                    claims.output_evals[0],
-                ),
-                (
-                    3,
-                    claims.witness_offset + MATRIX_REDUCTION_COLUMNS[3],
-                    OUTPUT_EVAL,
-                    1,
-                    claims.output_evals[1],
-                ),
-            ] {
-                openings.push(MatrixOpeningRecord {
-                    proof_idx,
-                    air_idx: claims.air_idx,
-                    is_point: false,
-                    pcs_round_idx: pcs_round,
-                    coord_or_eval_idx: column,
-                    source_kind,
-                    source_idx,
-                    value,
-                    source_tidx: match source_kind {
-                        FINAL_EVAL => claims.final_eval_tidx + source_idx * D_EF,
-                        OUTPUT_EVAL => claims.output_eval_tidx + source_idx * D_EF,
-                        _ => unreachable!(),
-                    },
-                    has_value_source: true,
-                });
-            }
         }
     }
-    (values, rounds, openings)
+    (values, rounds)
 }
 
 #[repr(C)]
@@ -746,87 +629,6 @@ where
     }
 }
 
-#[repr(C)]
-#[derive(AlignedBorrow, Debug)]
-pub struct MatrixOpeningCols<T> {
-    is_enabled: T,
-    proof_idx: T,
-    air_idx: T,
-    is_point: T,
-    pcs_round_idx: T,
-    coord_or_eval_idx: T,
-    source_kind: T,
-    source_idx: T,
-    source_tidx: T,
-    has_value_source: T,
-    value: [T; D_EF],
-}
-pub struct MatrixOpeningAir {
-    pub value_bus: MatrixReductionValueBus,
-    pub point_bus: PcsOpeningPointBus,
-    pub eval_bus: PcsSemanticOpeningEvalBus,
-}
-impl<F: Field> BaseAir<F> for MatrixOpeningAir {
-    fn width(&self) -> usize {
-        MatrixOpeningCols::<F>::width()
-    }
-}
-impl<F: Field> BaseAirWithPublicValues<F> for MatrixOpeningAir {}
-impl<F: Field> PartitionedBaseAir<F> for MatrixOpeningAir {}
-impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MatrixOpeningAir {
-    fn eval(&self, builder: &mut AB) {
-        let main = builder.main();
-        let row = main.row_slice(0).expect("row");
-        let local: &MatrixOpeningCols<AB::Var> = (*row).borrow();
-        builder.assert_bool(local.is_enabled);
-        builder.assert_bool(local.is_point);
-        builder.assert_bool(local.has_value_source);
-        builder
-            .when(local.is_enabled * (AB::Expr::ONE - local.is_point))
-            .assert_one(local.has_value_source);
-        for limb in local.value {
-            builder
-                .when(local.is_enabled * (AB::Expr::ONE - local.has_value_source))
-                .assert_zero(limb);
-        }
-        self.value_bus.lookup_key(
-            builder,
-            local.proof_idx,
-            MatrixReductionValueMessage {
-                air_idx: local.air_idx.into(),
-                kind: local.source_kind.into(),
-                idx: local.source_idx.into(),
-                tidx: local.source_tidx.into(),
-                value: local.value.map(Into::into),
-            },
-            local.is_enabled * local.has_value_source,
-        );
-        self.point_bus.lookup_key(
-            builder,
-            local.proof_idx,
-            PcsOpeningPointMessage {
-                pcs_round_idx: local.pcs_round_idx.into(),
-                opening_idx: AB::Expr::ZERO,
-                coord_idx: local.coord_or_eval_idx.into(),
-                value: local.value.map(Into::into),
-            },
-            local.is_enabled * local.is_point,
-        );
-        self.eval_bus.lookup_key(
-            builder,
-            local.proof_idx,
-            PcsOpeningEvalMessage {
-                pcs_round_idx: local.pcs_round_idx.into(),
-                opening_idx: AB::Expr::ZERO,
-                commit_kind: AB::Expr::from_usize(PcsOpeningCommitKind::Witin.as_usize()),
-                eval_idx: local.coord_or_eval_idx.into(),
-                value: local.value.map(Into::into),
-            },
-            local.is_enabled * (AB::Expr::ONE - local.is_point),
-        );
-    }
-}
-
 fn trace_height(len: usize, required: Option<usize>) -> Option<usize> {
     let valid = len.max(1);
     required.map_or_else(
@@ -906,34 +708,6 @@ impl RowMajorChip<F> for MatrixRoundTraceGenerator {
             c.final_evals = r
                 .final_evals
                 .map(|x: RecursionField| -> [F; D_EF] { x.as_bases().try_into().unwrap() });
-        }
-        Some(RowMajorMatrix::new(t, w))
-    }
-}
-pub struct MatrixOpeningTraceGenerator;
-impl RowMajorChip<F> for MatrixOpeningTraceGenerator {
-    type Ctx<'a> = &'a [MatrixOpeningRecord];
-    fn generate_trace(
-        &self,
-        records: &Self::Ctx<'_>,
-        required: Option<usize>,
-    ) -> Option<RowMajorMatrix<F>> {
-        let w = MatrixOpeningCols::<F>::width();
-        let h = trace_height(records.len(), required)?;
-        let mut t = vec![F::ZERO; h * w];
-        for (row, r) in t.chunks_exact_mut(w).zip((*records).iter()) {
-            let c: &mut MatrixOpeningCols<F> = row.borrow_mut();
-            c.is_enabled = F::ONE;
-            c.proof_idx = F::from_usize(r.proof_idx);
-            c.air_idx = F::from_usize(r.air_idx);
-            c.is_point = F::from_bool(r.is_point);
-            c.pcs_round_idx = F::from_usize(r.pcs_round_idx);
-            c.coord_or_eval_idx = F::from_usize(r.coord_or_eval_idx);
-            c.source_kind = F::from_usize(r.source_kind);
-            c.source_idx = F::from_usize(r.source_idx);
-            c.source_tidx = F::from_usize(r.source_tidx);
-            c.has_value_source = F::from_bool(r.has_value_source);
-            c.value = r.value.as_bases().try_into().unwrap();
         }
         Some(RowMajorMatrix::new(t, w))
     }

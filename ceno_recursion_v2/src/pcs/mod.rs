@@ -687,24 +687,6 @@ impl PcsModule {
         TS: FiatShamirTranscript<BabyBearPoseidon2Config>
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
-        let matrix_claims = preflight
-            .gkr
-            .chips
-            .iter()
-            .filter_map(|chip| chip.matrix_reduction_replay.as_ref())
-            .collect_vec();
-        if matrix_claims.len() > 1 {
-            bail!("multiple matrix reduction replay claims in one proof");
-        }
-        let matrix_claims = matrix_claims.first().map(|claims| (*claims).clone());
-        let expected_additional_rounds = usize::from(matrix_claims.is_some()) * 3;
-        if proof.additional_witness_openings.len() != expected_additional_rounds {
-            bail!(
-                "additional WitIn opening count mismatch: {} != {expected_additional_rounds}",
-                proof.additional_witness_openings.len()
-            );
-        }
-
         let mut rounds = Vec::new();
         let witin_openings = preflight
             .pcs
@@ -721,105 +703,12 @@ impl PcsModule {
                 )
             })
             .collect_vec();
-        let witin_trace_shapes = witin_openings
-            .iter()
-            .map(|(num_vars, (_, evals))| (*num_vars, evals.len()))
-            .collect_vec();
         rounds.push((
             2usize,
             proof.witin_commit.clone(),
             witin_openings,
             PcsOpeningCommitKind::Witin,
         ));
-
-        if let Some(claims) = matrix_claims.as_ref() {
-            let [a_col, w_col, q_col, r_col] =
-                ceno_zkvm::scheme::matrix_reduction::MATRIX_REDUCTION_COLUMNS;
-            let semantic_evals = [
-                (0usize, claims.witness_offset + a_col),
-                (1usize, claims.witness_offset + w_col),
-                (2usize, claims.witness_offset + q_col),
-                (2usize, claims.witness_offset + r_col),
-            ];
-            for (additional_idx, opening) in proof.additional_witness_openings.iter().enumerate() {
-                let pcs_round_idx = additional_idx + 1;
-                let logical_len = claims.opening_points[additional_idx].len();
-                if opening.point.len() < logical_len {
-                    bail!(
-                        "matrix opening point {additional_idx} is shorter than its logical point"
-                    );
-                }
-                for (coord_idx, value) in opening.point.iter().copied().enumerate() {
-                    preflight.pcs.opening_points.push(PcsOpeningPointRecord {
-                        proof_idx: 0,
-                        pcs_round_idx,
-                        opening_idx: 0,
-                        coord_idx,
-                        global_round_idx: 0,
-                        has_main_global: false,
-                        has_matrix_point: true,
-                        is_zero_tail: false,
-                        value,
-                    });
-                }
-                for (eval_idx, value) in opening.evals.iter().copied().enumerate() {
-                    preflight.pcs.opening_evals.push(PcsOpeningEvalRecord {
-                        proof_idx: 0,
-                        pcs_round_idx,
-                        opening_idx: 0,
-                        commit_kind: PcsOpeningCommitKind::Witin,
-                        eval_idx,
-                        main_idx: 0,
-                        main_eval_idx: 0,
-                        has_main_eval: false,
-                        has_matrix_eval: semantic_evals
-                            .iter()
-                            .any(|&(round, column)| round == additional_idx && column == eval_idx),
-                        value,
-                        raw_value: value,
-                    });
-                }
-                let mut eval_offset = 0usize;
-                let trace_openings = witin_trace_shapes
-                    .iter()
-                    .map(|&(num_vars, width)| {
-                        let next_offset = eval_offset + width;
-                        let evals = opening
-                            .evals
-                            .get(eval_offset..next_offset)
-                            .ok_or_else(|| {
-                                eyre::eyre!(
-                                    "matrix WitIn round {additional_idx} evals do not match trace widths"
-                                )
-                            })?
-                            .to_vec();
-                        let point = opening
-                            .point
-                            .get(..num_vars)
-                            .ok_or_else(|| {
-                                eyre::eyre!(
-                                    "matrix WitIn round {additional_idx} point is shorter than trace point"
-                                )
-                            })?
-                            .to_vec();
-                        eval_offset = next_offset;
-                        Ok((num_vars, (point, evals)))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                if eval_offset != opening.evals.len() {
-                    bail!(
-                        "matrix WitIn round {additional_idx} eval count {} does not match trace widths {eval_offset}",
-                        opening.evals.len()
-                    );
-                }
-                rounds.push((
-                    2usize,
-                    proof.witin_commit.clone(),
-                    trace_openings,
-                    PcsOpeningCommitKind::Witin,
-                ));
-            }
-        }
 
         let fixed_openings = preflight
             .pcs

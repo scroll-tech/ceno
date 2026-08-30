@@ -178,20 +178,12 @@ fn collect_rows(
                     commitment,
                 );
             }
-            let witin_round_count = 1 + 3 * usize::from(
-                proof
-                    .chip_proofs
-                    .values()
-                    .any(|chip| chip.matrix_reduction.is_some()),
+            accumulate_commit_height_lookup_counts(
+                &mut lookup_counts,
+                proof_idx,
+                2,
+                &proof.witin_commit,
             );
-            for _ in 0..witin_round_count {
-                accumulate_commit_height_lookup_counts(
-                    &mut lookup_counts,
-                    proof_idx,
-                    2,
-                    &proof.witin_commit,
-                );
-            }
 
             rows.into_iter()
                 .filter_map(|(proof_idx, commitment_kind, height_idx, tidx)| {

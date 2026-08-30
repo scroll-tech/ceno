@@ -4,7 +4,7 @@ pub(crate) mod eval_absorb;
 pub(crate) mod final_claim;
 pub(crate) mod frontload;
 pub(crate) mod global_sumcheck;
-mod matrix_reduction;
+pub(crate) mod matrix_reduction;
 pub(crate) mod selector;
 pub(crate) mod tower_point;
 mod trace;
@@ -46,9 +46,8 @@ use self::{
         MainEccRtTraceGenerator,
     },
     matrix_reduction::{
-        MatrixOpeningAir, MatrixOpeningRecord, MatrixOpeningTraceGenerator, MatrixRoundAir,
-        MatrixRoundRecord, MatrixRoundTraceGenerator, MatrixValueAir, MatrixValueRecord,
-        MatrixValueTraceGenerator,
+        MatrixRoundAir, MatrixRoundRecord, MatrixRoundTraceGenerator, MatrixValueAir,
+        MatrixValueRecord, MatrixValueTraceGenerator,
     },
     selector::{
         MAX_SELECTOR_POINT_VARS, MAX_SELECTOR_SPARSE_INDICES, MainSelectorEvalAir,
@@ -65,8 +64,7 @@ use crate::{
         MainEccRtEquationTotalsBus, MainEccRtQuarkFinalBus, MainEccRtSumcheckFinalBus, MainEvalBus,
         MainExpressionClaimBus, MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus,
         MainSelectorShapeBus, MainSelectorSparseIndexShapeBus, MatrixReductionPresenceBus,
-        MatrixReductionValueBus, PcsOpeningPointBus, PcsSemanticOpeningEvalBus, TowerMainPointBus,
-        TranscriptBus,
+        MatrixReductionValueBus, TowerMainPointBus, TranscriptBus,
     },
     system::{
         AirModule, BusIndexManager, BusInventory, EccReplayClaims, GlobalCtxCpu, MainEccRtRecord,
@@ -108,8 +106,6 @@ pub struct MainModule {
     tower_main_point_bus: TowerMainPointBus,
     matrix_reduction_presence_bus: MatrixReductionPresenceBus,
     matrix_reduction_value_bus: MatrixReductionValueBus,
-    pcs_opening_point_bus: PcsOpeningPointBus,
-    pcs_semantic_opening_eval_bus: PcsSemanticOpeningEvalBus,
 }
 
 impl MainModule {
@@ -135,8 +131,6 @@ impl MainModule {
         let tower_main_point_bus = bus_inventory.tower_main_point_bus;
         let matrix_reduction_presence_bus = bus_inventory.matrix_reduction_presence_bus;
         let matrix_reduction_value_bus = bus_inventory.matrix_reduction_value_bus;
-        let pcs_opening_point_bus = bus_inventory.pcs_opening_point_bus;
-        let pcs_semantic_opening_eval_bus = bus_inventory.pcs_semantic_opening_eval_bus;
         Self {
             main_bus,
             expression_claim_bus,
@@ -157,8 +151,6 @@ impl MainModule {
             tower_main_point_bus,
             matrix_reduction_presence_bus,
             matrix_reduction_value_bus,
-            pcs_opening_point_bus,
-            pcs_semantic_opening_eval_bus,
         }
     }
 
@@ -416,6 +408,12 @@ impl MainModule {
                         && record.source_kind == MainSelectorPointSourceKind::EccXY
                 })
                 .flat_map(|record| record.transcript_tidx..record.transcript_tidx + D_EF)
+                .chain(
+                    (!preflight.main.alpha_pows.is_empty())
+                        .then_some(preflight.main.alpha_tidx..preflight.main.alpha_tidx + D_EF)
+                        .into_iter()
+                        .flatten(),
+                )
                 .collect::<std::collections::BTreeSet<_>>();
             let values = preflight.transcript.values();
             let samples = preflight.transcript.samples();
@@ -436,7 +434,7 @@ impl MainModule {
                 });
             }
         }
-        let (matrix_value_records, matrix_round_records, matrix_opening_records) =
+        let (matrix_value_records, matrix_round_records) =
             matrix_reduction::collect_records(proofs, preflights);
         let semantic_fork_tidxs = selector_point_records
             .iter()
@@ -507,7 +505,6 @@ impl MainModule {
             transcript_records,
             matrix_value_records,
             matrix_round_records,
-            matrix_opening_records,
         })
     }
 
@@ -527,6 +524,21 @@ impl MainModule {
         let tower_main_point_records = build_tower_main_point_records(child_vk, proofs, preflights)
             .map_err(|err| eyre!("failed to build tower point records for main prefix: {err}"))?;
         let mut global_sumcheck_records = Vec::with_capacity(preflights.len());
+        let proof_value_records = proofs
+            .iter()
+            .enumerate()
+            .map(|(proof_idx, proof)| crate::system::MainProofValueRecord {
+                proof_idx,
+                claimed_sum: proof.main_constraint_proof.claimed_sum,
+                main_out_evals_len: proof
+                    .chip_proofs
+                    .values()
+                    .map(|chip| chip.main_out_evals.len())
+                    .sum(),
+            })
+            .collect_vec();
+        let mut alpha_pow_records = Vec::new();
+        let mut matrix_correction_records = Vec::new();
         let mut eval_records =
             Vec::with_capacity(preflights.iter().map(|p| p.main.evals.len()).sum());
         let mut selector_eval_records =
@@ -561,6 +573,23 @@ impl MainModule {
                     record
                 },
             ));
+            alpha_pow_records.extend(preflight.main.alpha_pows.iter().cloned().map(
+                move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                },
+            ));
+            matrix_correction_records.extend(
+                preflight
+                    .main
+                    .matrix_corrections
+                    .iter()
+                    .cloned()
+                    .map(move |mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    }),
+            );
             final_claim_records.extend(preflight.main.final_claims.iter().cloned().map(
                 move |mut record| {
                     record.proof_idx = proof_idx;
@@ -694,6 +723,11 @@ impl MainModule {
                 .entry((record.proof_idx, record.idx, record.eval_idx))
                 .or_default() += 1;
         }
+        for record in &matrix_correction_records {
+            *eval_lookup_counts
+                .entry((record.proof_idx, record.idx, record.eval_idx))
+                .or_default() += 1;
+        }
         for (proof_idx, preflight) in preflights.iter().enumerate() {
             for record in &preflight.pcs.opening_evals {
                 if record.has_main_eval {
@@ -721,9 +755,12 @@ impl MainModule {
 
         Ok(MainBatchConstraintRecords {
             global_sumcheck_records,
+            proof_value_records,
+            alpha_pow_records,
             eval_records,
             tower_point_eq_records,
             frontload_term_records,
+            matrix_correction_records,
             final_claim_records,
         })
     }
@@ -737,20 +774,22 @@ pub(crate) struct MainCollectedRecords {
     pub(crate) transcript_records: Vec<crate::system::MainTranscriptRecord>,
     pub(crate) matrix_value_records: Vec<MatrixValueRecord>,
     pub(crate) matrix_round_records: Vec<MatrixRoundRecord>,
-    pub(crate) matrix_opening_records: Vec<MatrixOpeningRecord>,
 }
 
 pub(crate) struct MainBatchConstraintRecords {
     pub(crate) global_sumcheck_records: Vec<crate::system::MainGlobalSumcheckRecord>,
+    pub(crate) proof_value_records: Vec<crate::system::MainProofValueRecord>,
+    pub(crate) alpha_pow_records: Vec<crate::system::MainAlphaPowRecord>,
     pub(crate) eval_records: Vec<MainEvalRecord>,
     pub(crate) tower_point_eq_records: Vec<MainTowerPointEqRecord>,
     pub(crate) frontload_term_records: Vec<MainFrontloadTermRecord>,
+    pub(crate) matrix_correction_records: Vec<crate::system::MainMatrixCorrectionRecord>,
     pub(crate) final_claim_records: Vec<MainFinalClaimRecord>,
 }
 
 impl AirModule for MainModule {
     fn num_airs(&self) -> usize {
-        13
+        12
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -794,6 +833,7 @@ impl AirModule for MainModule {
                 transcript_bus: self.transcript_bus,
                 forked_transcript_bus: self.forked_transcript_bus,
                 ecc_rt_bus: self.ecc_rt_bus,
+                matrix_value_bus: self.matrix_reduction_value_bus,
             }) as AirRef<_>,
             Arc::new(MainSelectorFormulaAir {
                 global_point_bus: self.main_global_point_bus,
@@ -814,11 +854,6 @@ impl AirModule for MainModule {
             Arc::new(MatrixRoundAir {
                 presence_bus: self.matrix_reduction_presence_bus,
                 value_bus: self.matrix_reduction_value_bus,
-            }) as AirRef<_>,
-            Arc::new(MatrixOpeningAir {
-                value_bus: self.matrix_reduction_value_bus,
-                point_bus: self.pcs_opening_point_bus,
-                eval_bus: self.pcs_semantic_opening_eval_bus,
             }) as AirRef<_>,
         ]
     }
@@ -868,7 +903,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             ref mut transcript_records,
             ref mut matrix_value_records,
             ref mut matrix_round_records,
-            ref mut matrix_opening_records,
         } = records;
         tracing::info!(
             elapsed_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
@@ -905,15 +939,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             .sort_by_key(|record| (record.proof_idx, record.air_idx, record.kind, record.idx));
         matrix_round_records
             .sort_by_key(|record| (record.proof_idx, record.air_idx, record.round_idx));
-        matrix_opening_records.sort_by_key(|record| {
-            (
-                record.proof_idx,
-                record.air_idx,
-                record.is_point,
-                record.pcs_round_idx,
-                record.coord_or_eval_idx,
-            )
-        });
         tracing::info!(
             elapsed_ms = sort_start.elapsed().as_secs_f64() * 1000.0,
             main_count = main_records.len(),
@@ -931,7 +956,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             transcript_records,
             matrix_value_records,
             matrix_round_records,
-            matrix_opening_records,
         };
         let chips = [
             MainModuleChip::Main,
@@ -946,7 +970,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             MainModuleChip::SelectorEval,
             MainModuleChip::MatrixValue,
             MainModuleChip::MatrixRound,
-            MainModuleChip::MatrixOpening,
         ];
         let span = tracing::Span::current();
         let contexts = chips
@@ -973,7 +996,6 @@ struct MainTraceCtx<'a> {
     transcript_records: &'a [crate::system::MainTranscriptRecord],
     matrix_value_records: &'a [MatrixValueRecord],
     matrix_round_records: &'a [MatrixRoundRecord],
-    matrix_opening_records: &'a [MatrixOpeningRecord],
 }
 
 enum MainModuleChip {
@@ -989,7 +1011,6 @@ enum MainModuleChip {
     SelectorEval,
     MatrixValue,
     MatrixRound,
-    MatrixOpening,
 }
 
 impl RowMajorChip<F> for MainModuleChip {
@@ -1010,7 +1031,6 @@ impl RowMajorChip<F> for MainModuleChip {
             MainModuleChip::SelectorEval => "MainSelectorEvalAir",
             MainModuleChip::MatrixValue => "MatrixValueAir",
             MainModuleChip::MatrixRound => "MatrixRoundAir",
-            MainModuleChip::MatrixOpening => "MatrixOpeningAir",
         }
     }
 
@@ -1051,8 +1071,6 @@ impl RowMajorChip<F> for MainModuleChip {
             MainModuleChip::MatrixRound => {
                 MatrixRoundTraceGenerator.generate_trace(&ctx.matrix_round_records, required_height)
             }
-            MainModuleChip::MatrixOpening => MatrixOpeningTraceGenerator
-                .generate_trace(&ctx.matrix_opening_records, required_height),
         }
     }
 }
@@ -1092,7 +1110,6 @@ mod cuda_tracegen {
                 ref mut transcript_records,
                 ref mut matrix_value_records,
                 ref mut matrix_round_records,
-                ref mut matrix_opening_records,
             } = records;
             tracing::info!(
                 elapsed_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
@@ -1130,15 +1147,6 @@ mod cuda_tracegen {
                 .sort_by_key(|record| (record.proof_idx, record.air_idx, record.kind, record.idx));
             matrix_round_records
                 .sort_by_key(|record| (record.proof_idx, record.air_idx, record.round_idx));
-            matrix_opening_records.sort_by_key(|record| {
-                (
-                    record.proof_idx,
-                    record.air_idx,
-                    record.is_point,
-                    record.pcs_round_idx,
-                    record.coord_or_eval_idx,
-                )
-            });
             tracing::info!(
                 elapsed_ms = sort_start.elapsed().as_secs_f64() * 1000.0,
                 main_count = main_records.len(),
@@ -1156,7 +1164,6 @@ mod cuda_tracegen {
                 transcript_records: &transcript_records,
                 matrix_value_records: &matrix_value_records,
                 matrix_round_records: &matrix_round_records,
-                matrix_opening_records: &matrix_opening_records,
             };
             let chips = [
                 MainModuleChip::Main,
@@ -1171,7 +1178,6 @@ mod cuda_tracegen {
                 MainModuleChip::SelectorEval,
                 MainModuleChip::MatrixValue,
                 MainModuleChip::MatrixRound,
-                MainModuleChip::MatrixOpening,
             ];
             chips
                 .iter()
@@ -1505,6 +1511,22 @@ where
     (values, tidxs)
 }
 
+fn matrix_point_tidxs(claims: &MatrixReductionReplayClaims, point_idx: usize) -> Vec<usize> {
+    let point = &claims.opening_points[point_idx];
+    (0..point.len())
+        .map(|coord_idx| match (point_idx, coord_idx) {
+            (0, 0) => claims.rounds[0].challenge_tidx,
+            (0, 1) => claims.output_point_tidx + D_EF,
+            (0, i) => claims.rounds[i - 1].challenge_tidx,
+            (1, 0) => claims.output_point_tidx,
+            (1, 1) => claims.rounds[0].challenge_tidx,
+            (1, i) => claims.rounds[i - 1].challenge_tidx,
+            (2, i) => claims.output_point_tidx + i * D_EF,
+            _ => unreachable!(),
+        })
+        .collect()
+}
+
 struct MainReplayLayer<'a> {
     air_idx: usize,
     fork_id: usize,
@@ -1524,6 +1546,8 @@ struct MainReplayLayer<'a> {
     ecc_rt_tidxs: Vec<usize>,
     ecc_xy_selector_idx: Option<usize>,
     ecc_x3y3_selector_idx: Option<usize>,
+    matrix_value_tidxs: Vec<Vec<usize>>,
+    matrix_claims: Option<MatrixReductionReplayClaims>,
 }
 
 fn replay_batched_main_preflight<TS>(
@@ -1618,17 +1642,11 @@ where
         let mut ecc_x3y3_selector_idx = None;
         let mut selector_point_sources =
             vec![MainSelectorPointSourceKind::TowerMain; layer.out_sel_and_eval_exprs.len()];
+        let mut matrix_value_tidxs = vec![Vec::new(); layer.out_sel_and_eval_exprs.len()];
         let mut out_evals =
             vec![PointAndEval::new(rt_main, RecursionField::ZERO); gkr_circuit.n_evaluations];
-        if chip_proof.main_out_evals.len() > gkr_circuit.n_evaluations {
-            bail!(
-                "{name} main output eval length {} exceeds gkr output length {}",
-                chip_proof.main_out_evals.len(),
-                gkr_circuit.n_evaluations
-            );
-        }
-        for (out_eval, eval) in out_evals.iter_mut().zip(chip_proof.main_out_evals.iter()) {
-            out_eval.eval = *eval;
+        if !chip_proof.main_out_evals.is_empty() {
+            bail!("{name} main output evaluations must be empty");
         }
 
         if !layer.rotation_exprs.1.is_empty() {
@@ -1664,6 +1682,45 @@ where
                 &rotation_claims.target_evals,
                 &rotation_claims.origin_point,
             )?;
+        }
+
+        match (name.as_str(), tower_record.matrix_reduction_replay.as_ref()) {
+            ("TensorBatchedMatMulCore", Some(claims)) => {
+                let Some([a_group, w_group, output_group]) = layer.matrix_selector_group_indices()
+                else {
+                    bail!("matrix claims expected but first-layer groups are missing");
+                };
+                selector_point_sources[a_group] = MainSelectorPointSourceKind::MatrixA;
+                selector_point_sources[w_group] = MainSelectorPointSourceKind::MatrixW;
+                selector_point_sources[output_group] = MainSelectorPointSourceKind::MatrixOutput;
+                matrix_value_tidxs[a_group] = matrix_point_tidxs(claims, 0);
+                matrix_value_tidxs[w_group] = matrix_point_tidxs(claims, 1);
+                matrix_value_tidxs[output_group] = matrix_point_tidxs(claims, 2);
+                assign_group_evals(
+                    &mut out_evals,
+                    &layer.out_sel_and_eval_exprs[a_group].1,
+                    &[claims.final_evals[0]],
+                    &claims.opening_points[0],
+                )?;
+                assign_group_evals(
+                    &mut out_evals,
+                    &layer.out_sel_and_eval_exprs[w_group].1,
+                    &[claims.final_evals[1]],
+                    &claims.opening_points[1],
+                )?;
+                assign_group_evals(
+                    &mut out_evals,
+                    &layer.out_sel_and_eval_exprs[output_group].1,
+                    &claims.output_evals,
+                    &claims.opening_points[2],
+                )?;
+            }
+            ("TensorBatchedMatMulCore", None) => bail!("matrix Core chip is missing its reduction"),
+            (_, Some(_)) => bail!("non-matrix circuit {name} carries a matrix reduction"),
+            (_, None) if layer.matrix_selector_group_indices().is_some() => {
+                bail!("non-matrix circuit {name} carries matrix first-layer groups")
+            }
+            (_, None) => {}
         }
 
         if let Some(ecc_proof) = chip_proof.ecc_proof.as_ref() {
@@ -1778,6 +1835,8 @@ where
             ecc_rt_tidxs,
             ecc_xy_selector_idx,
             ecc_x3y3_selector_idx,
+            matrix_value_tidxs,
+            matrix_claims: tower_record.matrix_reduction_replay.clone(),
         });
         total_evals += eval_len;
         total_exprs += layer.exprs.len();
@@ -1813,7 +1872,43 @@ where
         );
     }
 
-    let alpha_pows = sample_challenge_pows(ts, total_exprs, b"combine subset evals");
+    let (alpha_pows, alpha, alpha_tidx) =
+        sample_challenge_pows_with_tidx_and_alpha(ts, total_exprs, b"combine subset evals");
+    preflight.main.alpha_tidx = alpha_tidx;
+    for layer in &layers {
+        let matrix_offsets = layer
+            .layer
+            .matrix_selector_group_indices()
+            .map(|groups| {
+                groups
+                    .into_iter()
+                    .flat_map(|group| {
+                        let start = layer.layer.out_sel_and_eval_exprs[..group]
+                            .iter()
+                            .map(|(_, evals)| evals.len())
+                            .sum::<usize>();
+                        (0..layer.layer.out_sel_and_eval_exprs[group].1.len())
+                            .map(move |offset| start + offset)
+                    })
+                    .collect::<std::collections::BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        for alpha_idx in 0..layer.layer.exprs.len() {
+            preflight
+                .main
+                .alpha_pows
+                .push(crate::system::MainAlphaPowRecord {
+                    proof_idx: 0,
+                    air_idx: layer.air_idx,
+                    alpha_idx,
+                    num_exprs: layer.layer.exprs.len(),
+                    alpha_tidx,
+                    alpha,
+                    value: alpha_pows[layer.alpha_start + alpha_idx],
+                    lookup_count: usize::from(matrix_offsets.contains(&alpha_idx)),
+                });
+        }
+    }
     let (global_in_point, expected_evaluation, challenge_tidxs) = replay_main_sumcheck(
         ts,
         main_proof.claimed_sum,
@@ -1836,7 +1931,7 @@ where
     let tower_point_eqs = build_main_tower_point_eq_records(&layers, &global_in_point);
     let selector_evals =
         build_main_selector_eval_records(&layers, &main_proof.proof.evals, &global_in_point)?;
-    let (acc, frontload_terms, final_claims) = build_final_claim_records(
+    let (acc, frontload_terms, final_claims, matrix_corrections) = build_final_claim_records(
         &layers,
         &main_proof.proof.evals,
         &pcs_challenges,
@@ -1919,7 +2014,7 @@ where
             eval_lookup_counts[global_eval_idx] += 1;
             preflight.pcs.opening_evals.push(PcsOpeningEvalRecord {
                 proof_idx: 0,
-                pcs_round_idx: 1 + proof.additional_witness_openings.len(),
+                pcs_round_idx: 1,
                 opening_idx,
                 commit_kind: PcsOpeningCommitKind::Fixed,
                 eval_idx,
@@ -1965,6 +2060,7 @@ where
     preflight.main.tower_point_eqs.extend(tower_point_eqs);
     preflight.main.frontload_terms.extend(frontload_terms);
     preflight.main.final_claims.extend(final_claims);
+    preflight.main.matrix_corrections.extend(matrix_corrections);
     Ok(())
 }
 
@@ -2378,6 +2474,9 @@ fn build_main_selector_point_records(
                 source_round_idx: 0,
                 source_value: RecursionField::ZERO,
                 derive_kind: MainSelectorPointDeriveKind::Identity,
+                matrix_kind: 0,
+                matrix_idx: 0,
+                matrix_tidx: 0,
             });
         }
     }
@@ -2582,6 +2681,28 @@ fn build_main_selector_point_records(
                         ));
                     }
                 }
+            }
+            MainSelectorPointSourceKind::MatrixA
+            | MainSelectorPointSourceKind::MatrixW
+            | MainSelectorPointSourceKind::MatrixOutput => {
+                use matrix_reduction::{OUTPUT_POINT, SUMCHECK_CHALLENGE};
+                let (kind, idx) = match (point.source_kind, point.round_idx) {
+                    (MainSelectorPointSourceKind::MatrixA, 0) => (SUMCHECK_CHALLENGE, 0),
+                    (MainSelectorPointSourceKind::MatrixA, 1) => (OUTPUT_POINT, 1),
+                    (MainSelectorPointSourceKind::MatrixA, i) => (SUMCHECK_CHALLENGE, i - 1),
+                    (MainSelectorPointSourceKind::MatrixW, 0) => (OUTPUT_POINT, 0),
+                    (MainSelectorPointSourceKind::MatrixW, 1) => (SUMCHECK_CHALLENGE, 0),
+                    (MainSelectorPointSourceKind::MatrixW, i) => (SUMCHECK_CHALLENGE, i - 1),
+                    (MainSelectorPointSourceKind::MatrixOutput, i) => (OUTPUT_POINT, i),
+                    _ => unreachable!(),
+                };
+                point.matrix_kind = kind;
+                point.matrix_idx = idx;
+                point.matrix_tidx = eval
+                    .matrix_value_tidxs
+                    .get(point.round_idx)
+                    .copied()
+                    .unwrap_or(0);
             }
         }
     }
@@ -3103,6 +3224,7 @@ fn build_main_selector_eval_records(
                     ecc_rt_tidxs: layer.ecc_rt_tidxs.clone(),
                     ecc_xy_selector_idx: layer.ecc_xy_selector_idx,
                     ecc_x3y3_selector_idx: layer.ecc_x3y3_selector_idx,
+                    matrix_value_tidxs: layer.matrix_value_tidxs[selector_idx].clone(),
                     value: RecursionField::ZERO,
                 });
                 continue;
@@ -3143,6 +3265,7 @@ fn build_main_selector_eval_records(
                     ecc_rt_tidxs: layer.ecc_rt_tidxs.clone(),
                     ecc_xy_selector_idx: layer.ecc_xy_selector_idx,
                     ecc_x3y3_selector_idx: layer.ecc_x3y3_selector_idx,
+                    matrix_value_tidxs: layer.matrix_value_tidxs[selector_idx].clone(),
                     value: RecursionField::ZERO,
                 });
                 continue;
@@ -3181,6 +3304,7 @@ fn build_main_selector_eval_records(
                 ecc_rt_tidxs: layer.ecc_rt_tidxs.clone(),
                 ecc_xy_selector_idx: layer.ecc_xy_selector_idx,
                 ecc_x3y3_selector_idx: layer.ecc_x3y3_selector_idx,
+                matrix_value_tidxs: layer.matrix_value_tidxs[selector_idx].clone(),
                 value: expected_eval,
             });
         }
@@ -3235,10 +3359,12 @@ fn build_final_claim_records(
     RecursionField,
     Vec<MainFrontloadTermRecord>,
     Vec<MainFinalClaimRecord>,
+    Vec<crate::system::MainMatrixCorrectionRecord>,
 )> {
     let mut acc = RecursionField::ZERO;
     let mut frontload_records = Vec::new();
     let mut records = Vec::with_capacity(layers.len());
+    let mut matrix_corrections = Vec::new();
     for (idx, layer) in layers.iter().enumerate() {
         let layer_evals = &main_evals[layer.eval_start..layer.eval_start + layer.eval_len];
         validate_direct_structural_evals(layer, layer_evals, global_in_point)?;
@@ -3277,18 +3403,86 @@ fn build_final_claim_records(
                 "layer monomial contribution mismatch at chip {idx}: {monomial_contribution} != {contribution}"
             );
         }
-        let acc_in = acc;
-        acc += contribution;
-        records.push(MainFinalClaimRecord {
-            proof_idx: 0,
-            idx,
-            contribution,
-            acc_in,
-            acc_out: acc,
-            expected: expected_evaluation,
-        });
+        let mut contributions = vec![(contribution, None)];
+        if let Some(claims) = layer.matrix_claims.as_ref() {
+            let Some(groups) = layer.layer.matrix_selector_group_indices() else {
+                bail!("matrix claims expected but groups are missing");
+            };
+            let structural_offset = layer.layer.n_witin + layer.layer.n_fixed;
+            for (group, matrix_kind, matrix_base_idx, claim_values, claim_tidx) in [
+                (
+                    groups[0],
+                    matrix_reduction::FINAL_EVAL,
+                    0usize,
+                    claims.final_evals.to_vec()[..1].to_vec(),
+                    claims.final_eval_tidx,
+                ),
+                (
+                    groups[1],
+                    matrix_reduction::FINAL_EVAL,
+                    1usize,
+                    claims.final_evals.to_vec()[1..].to_vec(),
+                    claims.final_eval_tidx + D_EF,
+                ),
+                (
+                    groups[2],
+                    matrix_reduction::OUTPUT_EVAL,
+                    0usize,
+                    claims.output_evals.to_vec(),
+                    claims.output_eval_tidx,
+                ),
+            ] {
+                let gkr_iop::selector::SelectorType::Whole(Expression::StructuralWitIn(wit_id, _)) =
+                    &layer.layer.out_sel_and_eval_exprs[group].0
+                else {
+                    bail!("matrix selector must be whole structural witness");
+                };
+                let eval_idx = structural_offset + *wit_id as usize;
+                let alpha_offset = layer.layer.out_sel_and_eval_exprs[..group]
+                    .iter()
+                    .map(|(_, evals)| evals.len())
+                    .sum::<usize>();
+                for (matrix_idx, claim) in claim_values.into_iter().enumerate() {
+                    let alpha_idx = alpha_offset + matrix_idx;
+                    let alpha_pow = alpha_pows[layer.alpha_start + alpha_idx];
+                    let selector_eval = layer_evals[eval_idx];
+                    let correction = -alpha_pow * claim * selector_eval;
+                    let record = crate::system::MainMatrixCorrectionRecord {
+                        proof_idx: 0,
+                        idx,
+                        air_idx: layer.air_idx,
+                        correction_idx: contributions.len() - 1,
+                        alpha_idx,
+                        eval_idx,
+                        matrix_kind,
+                        matrix_idx: matrix_base_idx + matrix_idx,
+                        matrix_tidx: claim_tidx + matrix_idx * D_EF,
+                        claim,
+                        alpha_pow,
+                        selector_eval,
+                        contribution: correction,
+                    };
+                    contributions.push((correction, Some(record)));
+                }
+            }
+        }
+        for (contribution, correction) in contributions {
+            let acc_in = acc;
+            acc += contribution;
+            records.push(MainFinalClaimRecord {
+                proof_idx: 0,
+                idx,
+                contribution,
+                acc_in,
+                acc_out: acc,
+                expected: expected_evaluation,
+            });
+            if let Some(correction) = correction {
+                matrix_corrections.push(correction);
+            }
+        }
     }
-    Ok((acc, frontload_records, records))
+    Ok((acc, frontload_records, records, matrix_corrections))
 }
 
 fn validate_direct_structural_evals(
@@ -3697,15 +3891,22 @@ fn either_to_ext(
     }
 }
 
-fn sample_challenge_pows<TS>(ts: &mut TS, size: usize, label: &[u8]) -> Vec<RecursionField>
+fn sample_challenge_pows_with_tidx_and_alpha<TS>(
+    ts: &mut TS,
+    size: usize,
+    label: &[u8],
+) -> (Vec<RecursionField>, RecursionField, usize)
 where
-    TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config>
+        + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
 {
     transcript_observe_label(ts, label);
+    let tidx = ts.len();
     let alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
-    iter::successors(Some(RecursionField::ONE), move |prev| Some(*prev * alpha))
+    let pows = iter::successors(Some(RecursionField::ONE), move |prev| Some(*prev * alpha))
         .take(size)
-        .collect()
+        .collect();
+    (pows, alpha, tidx)
 }
 
 fn sample_challenge_pows_with_tidx<TS>(

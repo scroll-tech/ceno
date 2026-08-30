@@ -70,6 +70,7 @@ cuda = [
   "recursion-circuit/cuda",
 ]
 default = ["parallel"]
+llama-tiny = ["ceno-examples/llama-tiny", "ceno_zkvm/llama-tiny"]
 parallel = [
   "openvm-cpu-backend/parallel",
   "openvm-stark-backend/parallel",
