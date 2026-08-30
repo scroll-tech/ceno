@@ -224,6 +224,46 @@ hint ranges from `(hint_base, layer_count, profile)` before atomically admitting
 the block to a shard. This is the architecture for guest-selected 2/4/8/16
 inner unroll capacity tests and the eventual 32-layer topology.
 
+### zkLLM-compatible Llama-2-7B/2048 workload
+
+The fair zkLLM comparison is a batch-one, full-sequence forward/prefill over
+2048 input tokens. It is not one-token decoding against a 2048-token KV cache.
+Every layer therefore computes Q, K, and V for all 2048 rows and proves the
+full `[32 heads, 2048 queries, 2048 keys]` causal-attention domain. A cached
+one-token decode remains a separate benchmark track.
+
+The production workload uses Llama-2-7B dimensions `hidden=4096`, `heads=32`,
+`head_dim=128`, `intermediate=11008`, and `layers=32`. It connects the existing
+K4096/K11008 dot-product relations into complete batched matrices and includes
+RMSNorm, Q/K/V/O projections, RoPE, causal masking, segmented zkLLM softmax,
+residuals, gate/up/down projections, SwiGLU, and all Q16/Q20 rescaling and
+remainder relations. The complete Ceno pass additionally includes embedding,
+final RMSNorm, LM head, and final-position argmax. Report both transformer-core
+time and complete-pass time because the released zkLLM layer driver does not
+provide an equivalent embedding-through-argmax executable.
+
+The comparison authority is the CCS Table 1 experiment: Q16 data/model scaling,
+five size-2^16 attention tlookups, sequence 2048, and its stated proving-time
+boundary. The archived refactored demo is an operator-reference implementation,
+not the authority for reproducing Table 1 timing. Report Ceno's proof-bound
+RoPE, causal mask, non-interactive transcript, and argmax as stricter additions.
+
+For the compute-only milestone, external tensors use logical HintRefs derived
+from `(model_profile, layer, role, tile_index)` rather than guest virtual
+addresses. The guest does not pass `hint_base`. A lazy deterministic fixture
+provider generates weight tiles on demand and supplies them as unauthenticated
+private witnesses. Each logical HintRef is product-bound once and reused by all
+consumers, so unauthenticated does not permit inconsistent per-read weights.
+Arithmetic and lookup relations remain proof-authoritative,
+but no model root, seed, or 25.10-GiB hint polynomial is authenticated. Thus
+lazy generation removes guest-hint materialization only; it must not be counted
+as model commitment, hint loading, or real weight-bandwidth performance.
+
+The decode track, when implemented later, applies the same HintRef mechanism to
+external K/V cache tensors and reports one-token-at-context-2048 separately.
+The zkLLM-compatible prefill track has no input KV-cache hint: its K/V tensors
+are produced by the 2048-row Q/K/V projections inside the proved workload.
+
 ## Implementation campaign
 
 ### Phase 0: baseline instrumentation
