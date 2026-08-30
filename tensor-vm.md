@@ -198,18 +198,20 @@ plane and hint space is the model-weight plane. Guest RAM is only a boundary:
 
 ```text
 IMPORT_BEGIN(input RAM) -> Tensor x0
-  -> Attention(x0, hint_base, layer 0) -> a0
-  -> Ffn(a0, hint_base, layer 0) -> x1
+  -> Attention(x0, HintRef(profile, layer 0, role, tile)) -> a0
+  -> Ffn(a0, HintRef(profile, layer 0, role, tile)) -> x1
   -> ...
-  -> Ffn(aN-1, hint_base, layer N-1) -> xN
+  -> Ffn(aN-1, HintRef(profile, layer N-1, role, tile)) -> xN
 EXPORT_END(xN) -> output RAM
 ```
 
 `TensorRef = (segment_id, local_tensor_slot, version)` is not a guest pointer.
-Each attention/FFN chip reads an input TensorRef, derives fixed hint-space
-weight addresses from `(hint_base, layer, profile, role, tile_index)`, and
-writes a fresh TensorRef. The hint-read relation remains proof-authoritative;
-GPU staging/caching uses the same derived tile identities but is never trusted.
+Each v2 attention/FFN call reads one input TensorRef, allocates a fresh output
+TensorRef, and identifies weights by
+`HintRef = (profile, layer, role, tile_index)`. The production v2 descriptor has
+no guest `hint_base`. The HintRef relation remains proof-authoritative; GPU
+generation, staging, and caching use the same logical identity but are never
+trusted.
 
 Only the imported input and exported final output are outer TensorBus boundary
 values. Attention outputs, FFN outputs, residuals, norms, and temporaries are
@@ -219,10 +221,10 @@ their Tensor-space I/O, fixed hint reads, and arithmetic/lookup/quantization.
 
 The physical provider ping-pongs two device buffers (`x` and `a`) across the
 block. It uploads only x0 and downloads only xN; device buffers and witnesses
-never enter the guest ABI. Preflight expands all internal chip costs and fixed
-hint ranges from `(hint_base, layer_count, profile)` before atomically admitting
-the block to a shard. This is the architecture for guest-selected 2/4/8/16
-inner unroll capacity tests and the eventual 32-layer topology.
+never enter the guest ABI. Preflight expands all internal chip costs and logical
+HintRef ranges from `(profile, layer_count)` before atomically admitting the
+block to a shard. This is the architecture for guest-selected 2/4/8/16 inner
+unroll capacity tests and the eventual 32-layer topology.
 
 ### zkLLM-compatible Llama-2-7B/2048 workload
 
@@ -275,48 +277,134 @@ intermediate activation across the Tensor-space boundary.
 
 ### Stage-1 batched matrix proof milestone
 
-The `llama-tiny` stage-1 implementation replaces the scalar output-dot proof
-shape with one complete-matrix guest call per Core section. This distinction is
-material: extrapolating the old scalar path to one exact production layer would
-require 87,031,808 output-dot/finalize calls, 406,847,488 K1024 tile rows, and
-at least 4.547 TiB for only the `input_raw` and `input_neg_carry` witness
-fields. Those scalar counts are no longer the implementation plan; production
-dimensions still require later matrix/attention providers and are not claimed
-complete by this tiny gate.
+The production design replaces one scalar-output ECALL per output coordinate
+with one compact row ECALL per output row. The row record is keyed by shard,
+segment, operation ordinal, and row index; rows for one matrix operation must be
+ordered, duplicate-free, and cover `0..M`. They share operation, shape,
+TensorRef, and HintRef identities, write disjoint ranges of one output
+TensorRef, and are coalesced into one tiled GPU GEMM. Row records are execution
+descriptors, not copies of A or W and not TensorBus boundary events.
 
-One tiny section commits a complete 2x2 A, W, quotient, and remainder relation
-in four logical rows, rather than one row per `(m,n,k)` multiplication. The Core
-has 26 witness columns independent of the section count. A, W, Q, and R occupy
-stable local columns 0, 3, 6, and 9; a verifier-known repeating structural
-column binds logical rows to physical MLE row order. Repeated guest calls append
-complete four-row sections to the same registered Core trace. The focused guest
-makes two calls, hence one eight-row Core with two sections.
+The exact production call-count projection is:
 
-The matrix relation is a circuit-scoped auxiliary reduction analogous in
-placement to rotation proof replay. It batches all complete sections, leaves
-the existing tower and batched-main sumchecks unchanged, and derives exactly
-three additional A, W, and output opening points. The ordinary WitIn round and
-these three rounds all open every committed witness polynomial against the same
-shard `witin_commit`; native verification locates the four semantic columns by
-deterministic circuit order and rejects nonzero point tails. GPU Jagged opening
-streams evaluations trace-by-trace, so the extra rounds do not collect all
-witness MLE columns on the host.
+| Scope | Scalar-output ECALLs | Row ECALLs | Reduction |
+|---|---:|---:|---:|
+| One Llama-2-7B/2048 layer | 229,638,144 | 145,408 | 1,579x |
+| 32 layers plus LM head | 7,413,956,608 | 4,655,104 | 1,593x |
 
-The real-guest focused GPU E2E passed with two sections, exactly three
-same-commitment rounds, independent native verification, and independent
-product, quotient, and remainder proof-tamper rejection. The final run reported
-a 553-MiB CUDA pool peak. Its GPU-produced proof and VK were then replayed by
-recursion-v2 with Basefold PoW validation intact; the focused constraint and
-LogUp check completed with:
+This changes call and witness representation, not the required arithmetic. One
+production layer still contains 448,824,082,432 matrix multiplications. Under
+the former scalar Core specifically, projections alone expanded to 87,031,808
+output-dot/finalize rows and 406,847,488 K1024 tile rows. Each tile row carried
+at least 2,048 `input_raw` plus 1,024 `input_neg_carry` fields, so those two
+fields alone extrapolated to 4.547 TiB. The batched design removes that
+materialized scalar-product witness: larger M, K, and N increase MLE height and
+matrix-sumcheck work instead of multiplying circuit columns by K or N.
+
+The implemented `llama-tiny` gate proves the shared trace and reduction shape;
+it is not yet the general production row-descriptor/provider implementation.
+One tiny section stores complete 2x2 A, W, quotient Q, and remainder R matrices
+in four logical rows, rather than materializing one row per `(m,n,k)` product.
+Repeated guest/operator calls append complete four-row sections to the same
+registered Core trace. The focused resident guest makes two calls, so its eight
+logical rows need no padding; in general `4 * sections` rows are padded to the
+next power of two.
+
+The arithmetic payload uses 26 witness fields: signed A, W, and Q values with
+magnitude/sign decompositions, plus R and its sixteen canonical bits. The
+resident Tensor-space/HintRef integration adds fifteen identity, ordering, and
+routing fields, for 41 committed MatMul WitIn MLEs. Five structural columns bind
+physical row order, the three matrix terminal points, and the ordinary prefix;
+they do not grow with K, N, or section count. A, W, Q, and R remain at stable
+local WitIn columns 0, 3, 6, and 9.
+
+The available scalar-versus-batched evidence has different scopes and is kept
+explicit rather than normalized into a synthetic benchmark:
+
+| Metric | Former scalar production extrapolation | Final tiny architecture-B gate |
+|---|---:|---:|
+| ECALL/row scale | 87,031,808 projection output dots and 406,847,488 K1024 tile rows per layer | 2 complete calls, 8 logical and 8 padded Core rows |
+| MatMul-owned committed MLEs | not recorded | 41 WitIn MLEs |
+| MatMul columns | exact total not recorded; two arrays alone used 3,072 fields per tile row | 41 WitIn plus 5 structural columns |
+| Materialized witness | at least 4.547 TiB for the two named arrays | compact A/W/Q/R plus identity/routing fields; byte total not separately recorded |
+| Setup/keygen time | unavailable for this extrapolation | unavailable for the final fixture |
+| Witness/base-proving time | unavailable for this extrapolation | pass recorded; isolated time unavailable |
+| Peak memory | at least the 4.547-TiB materialization before other fields | 409-MiB CUDA pool peak |
+
+The production row-ECALL projections above are workload counts, while the right
+column is the actually executed 2x2 proof gate. Production-width setup, proving,
+and peak-memory comparisons remain future measurements.
+
+Signed/range constraints, canonical `0 <= R < 2^16`, ECALL-to-Core
+consistency, physical/logical row ordering, and the offline product relations
+remain ordinary first-layer constraints in the existing batched-main flow. The
+Core is read-only for offline-memory accounting, like other consumer-only
+ecalls: for resident rows it reads the operator claim, input Tensor-space value,
+and HintRef value. The handle ECALL writes the matching operator claim and fresh
+output Tensor-space version; IMPORT writes the initial version, EXPORT reads the
+final version, and the HintRef Core writes each unique logical tile value once.
+Inactive conditional reads use the existing `Undefined` neutral record. Thus
+the Core does not invent a compensating write, and one producer/one consumer
+balances every active relation.
+
+The circuit-scoped auxiliary matrix sumcheck proves
+
+```text
+Q(output_point) * 2^16 + R(output_point)
+  = sum_(k, section) A(k, m, section) * W(n, k, section)
+      * eq(output_section_point, section)
+```
+
+The left side is the auxiliary sumcheck's `claimed_sum`; its own verifier uses
+it as the initial sum and checks the terminal A/W product evaluation. This
+equality-weighted reduction batches all padded complete sections. It returns A
+and W evaluations at their respective terminal points and Q/R evaluations at
+the shared output point. The MatMul first GKR layer registers three groups,
+`[A]`, `[W]`, and `[Q,R]`. For the unchanged batched-main challenge powers, the
+prover, native verifier, and recursion replay append the same four correction
+monomials:
+
+```text
+-alpha_A * A_claim * eq(A_point, x)
+-alpha_W * W_claim * eq(W_point, x)
+-alpha_Q * Q_claim * eq(output_point, x)
+-alpha_R * R_claim * eq(output_point, x)
+```
+
+These terms bind the matrix terminal claims through the existing main
+sumcheck's final evaluation. They do not add or replace a tower layer, change
+the batched-main protocol or round count, or alter the legacy ordinary-chip
+claim flow. `main_out_evals` remains empty. Batched-main reduces the four
+semantic columns at its ordinary global point, and the original single WitIn
+PCS opening against the existing `witin_commit` authenticates them. There are
+zero Matrix-specific PCS rounds and no separate tensor commitment.
+
+The final architecture-B real-guest GPU E2E passed Mock proving, real base
+proving, and independent native Rust verification with one atomic shard, two
+MatMul sections, eight HintRef rows, one ordinary WitIn opening, logical
+H2D/D2H of 16/16 bytes, and zero intermediate transfers. It rejected HintRef
+identity/value, Tensor slot/version, injected ordinary main-output, matrix
+product, quotient, remainder, and recovered-main-claim tampering. The recorded
+CUDA pool peak was 409 MiB. The fresh proof was 994,605 bytes and its VK was
+139,010,634 bytes. Separate setup/keygen, witness-generation, base-proving,
+native-verification, recursion, and peak-host-memory measurements were not
+recorded for this final architecture-B fixture and remain unavailable rather
+than inferred from superseded runs.
+
+Only after the independent Rust verifier passed was that same proof/VK fixture
+replayed by recursion-v2. Basefold PoW validation remained intact, the four
+selector-equality corrections and legacy main claimed sum were constrained,
+and the focused constraint/LogUp check completed with:
 
 ```text
 recursion-v2 app replay constraints verified: proofs=1 matrix_chips=1
 ```
 
-This milestone proves the compact matrix-proof ownership, opening, native
-verification, and recursion path. It does not yet implement a complete tiny
-transformer layer, a production-width matrix provider, authenticated model
-weights, or the production attention schedule.
+This milestone proves compact MatMul trace ownership, the auxiliary reduction,
+fusion into batched-main, the original single opening, native verification, and
+recursion replay. It does not yet implement a complete tiny transformer layer,
+general production row descriptors/providers, authenticated model weights, or
+the production attention schedule.
 
 The decode track, when implemented later, applies the same HintRef mechanism to
 external K/V cache tensors and reports one-token-at-context-2048 separately.
