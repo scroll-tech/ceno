@@ -95,6 +95,7 @@ use tracing::info_span;
 #[cfg(feature = "llama-tiny")]
 use crate::instructions::riscv::ecall::{
     TensorBatchedMatMul2x2EcallInstruction, TensorBatchedMatMulCoreInstruction,
+    TensorHintRefCoreInstruction,
 };
 #[cfg(feature = "llama-tiny")]
 use ceno_emul::TensorBatchedMatMul2x2V1Spec;
@@ -313,6 +314,9 @@ pub struct Rv32imConfig<E: ExtensionField> {
     #[cfg(feature = "llama-tiny")]
     pub tensor_batched_matmul_core_config:
         <TensorBatchedMatMulCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub tensor_hint_ref_core_config:
+        <TensorHintRefCoreInstruction<E> as Instruction<E>>::InstructionConfig,
     pub tensor_hidden_ecall_config:
         Option<<TensorMatMulHiddenEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
     /// The production K1024 tile circuit is deliberately absent from
@@ -857,6 +861,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         #[cfg(feature = "llama-tiny")]
         let tensor_batched_matmul_core_config =
             cs.register_opcode_circuit::<TensorBatchedMatMulCoreInstruction<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let tensor_hint_ref_core_config =
+            cs.register_opcode_circuit::<TensorHintRefCoreInstruction<E>>();
         if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_matmul {
             assert!(
                 ecall_cells_map
@@ -927,6 +934,45 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 })
                 .collect();
             ecall_name_to_chips.insert(<TensorBatchedMatMulCoreInstruction<E>>::name(), chips);
+
+            let hint_name = <TensorHintRefCoreInstruction<E>>::name();
+            let hint_cs = cs.get_cs(&hint_name).expect("tiny HintRef circuit");
+            let hint_cells = (hint_cs.zkvm_v1_css.num_witin as u64
+                + hint_cs.zkvm_v1_css.num_structural_witin as u64
+                + hint_cs.zkvm_v1_css.num_fixed as u64)
+                * (1 << hint_cs.rotation_vars().unwrap_or(0));
+            assert!(
+                ecall_cells_map
+                    .insert(hint_name.clone(), hint_cells)
+                    .is_none()
+            );
+            let hint_chip = chip_specs.len();
+            chip_specs.push(chip_cost_spec(hint_cs));
+            ecall_name_to_chips.insert(hint_name, vec![hint_chip]);
+
+            let matrix_name = <TensorBatchedMatMulCoreInstruction<E>>::name();
+            let matrix_cs = cs.get_cs(&matrix_name).expect("tiny matrix Core circuit");
+            let matrix_cells = (matrix_cs.zkvm_v1_css.num_witin as u64
+                + matrix_cs.zkvm_v1_css.num_structural_witin as u64
+                + matrix_cs.zkvm_v1_css.num_fixed as u64)
+                * (1 << matrix_cs.rotation_vars().unwrap_or(0));
+            let matrix_chip = *ecall_name_to_chips
+                .get(&matrix_name)
+                .and_then(|chips| chips.last())
+                .expect("tiny matrix Core cost chip");
+            for handle_name in [
+                <TensorBusHandleAttentionEcallInstruction<E>>::name(),
+                <TensorBusHandleFfnEcallInstruction<E>>::name(),
+            ] {
+                *ecall_cells_map
+                    .get_mut(&handle_name)
+                    .expect("TensorBus handle cost missing") += matrix_cells + hint_cells;
+                let chips = ecall_name_to_chips
+                    .get_mut(&handle_name)
+                    .expect("TensorBus handle cost chips missing");
+                chips.push(matrix_chip);
+                chips.push(hint_chip);
+            }
         }
         let tensor_hidden_ecall_config =
             (!minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_hidden).then(|| {
@@ -1462,6 +1508,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             tensor_batched_matmul_ecall_config,
             #[cfg(feature = "llama-tiny")]
             tensor_batched_matmul_core_config,
+            #[cfg(feature = "llama-tiny")]
+            tensor_hint_ref_core_config,
             tensor_hidden_ecall_config,
             tensor_production_tile_config,
             tensor_gate5_small_hidden_tile_config,
@@ -1608,6 +1656,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<TensorBatchedMatMulCoreInstruction<E>>(
             cs,
             &self.tensor_batched_matmul_core_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<TensorHintRefCoreInstruction<E>>(
+            cs,
+            &self.tensor_hint_ref_core_config,
         );
         if let Some(config) = &self.tensor_hidden_ecall_config {
             fixed.register_opcode_circuit::<TensorMatMulHiddenEcallInstruction<E>>(cs, config);
@@ -2020,10 +2073,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         }
         #[cfg(feature = "llama-tiny")]
         {
-            let records = instrunction_dispatch_ctx
+            let standalone_records = instrunction_dispatch_ctx
                 .records_for_ecall_code(TensorBatchedMatMul2x2V1Spec::CODE)
                 .unwrap_or(&[]);
-            let n = records.len();
+            let n = standalone_records.len();
             info_span!(
                 "assign_chip",
                 chip = %<TensorBatchedMatMul2x2EcallInstruction<E>>::name(),
@@ -2035,23 +2088,65 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     shard_ctx,
                     &self.tensor_batched_matmul_ecall_config,
                     shard_steps,
-                    records,
+                    standalone_records,
                 )
             })?;
-            info_span!(
-                "assign_chip",
-                chip = %<TensorBatchedMatMulCoreInstruction<E>>::name(),
-                n
-            )
-            .in_scope(|| {
-                witness.assign_opcode_circuit::<TensorBatchedMatMulCoreInstruction<E>>(
-                    cs,
-                    shard_ctx,
-                    &self.tensor_batched_matmul_core_config,
-                    shard_steps,
-                    records,
+
+            let mut resident_records = [
+                TensorHandleAttentionV1Spec::CODE,
+                TensorHandleFfnV1Spec::CODE,
+            ]
+            .into_iter()
+            .flat_map(|code| {
+                instrunction_dispatch_ctx
+                    .records_for_ecall_code(code)
+                    .unwrap_or(&[])
+                    .iter()
+                    .copied()
+            })
+            .filter(|index| {
+                shard_steps[*index]
+                    .syscall(&shard_ctx.syscall_witnesses)
+                    .is_some_and(|syscall| syscall.tensor_resident_matmul.is_some())
+            })
+            .collect_vec();
+            resident_records.sort_unstable();
+
+            let mut matrix_records = standalone_records.to_vec();
+            matrix_records.extend(resident_records.iter().copied());
+            matrix_records.sort_unstable();
+            if !matrix_records.is_empty() {
+                info_span!(
+                    "assign_chip",
+                    chip = %<TensorBatchedMatMulCoreInstruction<E>>::name(),
+                    n = matrix_records.len()
                 )
-            })?;
+                .in_scope(|| {
+                    witness.assign_opcode_circuit::<TensorBatchedMatMulCoreInstruction<E>>(
+                        cs,
+                        shard_ctx,
+                        &self.tensor_batched_matmul_core_config,
+                        shard_steps,
+                        &matrix_records,
+                    )
+                })?;
+            }
+            if !resident_records.is_empty() {
+                info_span!(
+                    "assign_chip",
+                    chip = %<TensorHintRefCoreInstruction<E>>::name(),
+                    n = resident_records.len()
+                )
+                .in_scope(|| {
+                    witness.assign_opcode_circuit::<TensorHintRefCoreInstruction<E>>(
+                        cs,
+                        shard_ctx,
+                        &self.tensor_hint_ref_core_config,
+                        shard_steps,
+                        &resident_records,
+                    )
+                })?;
+            }
         }
         if let Some(tensor_hidden_ecall_config) = &self.tensor_hidden_ecall_config {
             assign_ecall_with_config!(

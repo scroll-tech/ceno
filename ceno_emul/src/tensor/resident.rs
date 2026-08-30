@@ -149,6 +149,7 @@ pub struct TinyResidentCudaProvider {
     stream: Arc<CudaStream>,
     attention: CudaFunction,
     ffn: CudaFunction,
+    matmul_2x2: CudaFunction,
 }
 
 impl TinyResidentCudaProvider {
@@ -159,6 +160,7 @@ impl TinyResidentCudaProvider {
             stream: context.default_stream(),
             attention: module.load_function("tiny_attention")?,
             ffn: module.load_function("tiny_ffn")?,
+            matmul_2x2: module.load_function("tiny_matmul_2x2")?,
         })
     }
 
@@ -242,6 +244,52 @@ impl TinyResidentCudaProvider {
                 .arg(input)
                 .arg(output)
                 .launch(LaunchConfig::for_num_elems(RESIDENT_WORDS as u32))?;
+        }
+        Ok(())
+    }
+
+    /// V2 logical-weight operation. The four bounded fixture values are
+    /// kernel arguments; activation residency and transfer accounting remain
+    /// one boundary upload and one boundary download.
+    pub fn matmul_2x2(
+        &self,
+        witness: &mut TinyResidentDeviceWitness,
+        weights: [[i8; 2]; 2],
+        is_attention: bool,
+    ) -> Result<()> {
+        let w = [
+            i32::from(weights[0][0]),
+            i32::from(weights[0][1]),
+            i32::from(weights[1][0]),
+            i32::from(weights[1][1]),
+        ];
+        if is_attention {
+            self.launch_matmul(&witness.input, &mut witness.attention, w)?;
+            witness.metrics.attention_launches += 1;
+        } else {
+            self.launch_matmul(&witness.attention, &mut witness.output, w)?;
+            witness.final_is_output = true;
+            witness.metrics.ffn_launches += 1;
+        }
+        Ok(())
+    }
+
+    fn launch_matmul(
+        &self,
+        input: &CudaSlice<i32>,
+        output: &mut CudaSlice<i32>,
+        w: [i32; 4],
+    ) -> Result<()> {
+        unsafe {
+            self.stream
+                .launch_builder(&self.matmul_2x2)
+                .arg(input)
+                .arg(output)
+                .arg(&w[0])
+                .arg(&w[1])
+                .arg(&w[2])
+                .arg(&w[3])
+                .launch(LaunchConfig::for_num_elems(4))?;
         }
         Ok(())
     }
@@ -352,6 +400,23 @@ DONE: ret; }
  mul.wide.u32 %rd3, %r1, 4; add.u64 %rd4, %rd1, %rd3; ld.global.s32 %r2, [%rd4];
  mul.lo.s32 %r2, %r2, 2; add.s32 %r2, %r2, 1; add.u64 %rd4, %rd2, %rd3; st.global.s32 [%rd4], %r2;
 DONE: ret; }
+.visible .entry tiny_matmul_2x2(
+ .param .u64 input, .param .u64 output,
+ .param .s32 w00, .param .s32 w01, .param .s32 w10, .param .s32 w11) {
+ .reg .pred %p<2>; .reg .b32 %r<14>; .reg .b64 %rd<7>;
+ ld.param.u64 %rd1, [input]; ld.param.u64 %rd2, [output];
+ ld.param.s32 %r6, [w00]; ld.param.s32 %r7, [w01];
+ ld.param.s32 %r8, [w10]; ld.param.s32 %r9, [w11];
+ mov.u32 %r1, %tid.x; setp.ge.u32 %p1, %r1, 4; @%p1 bra MM_DONE;
+ shr.u32 %r2, %r1, 1; and.b32 %r3, %r1, 1;
+ mul.lo.u32 %r4, %r2, 2; mul.wide.u32 %rd3, %r4, 4;
+ add.u64 %rd4, %rd1, %rd3; ld.global.s32 %r10, [%rd4];
+ add.u64 %rd5, %rd4, 4; ld.global.s32 %r11, [%rd5];
+ setp.eq.u32 %p1, %r3, 0; @%p1 bra MM_COL0;
+ mul.lo.s32 %r12, %r10, %r7; mad.lo.s32 %r12, %r11, %r9, %r12; bra MM_STORE;
+MM_COL0: mul.lo.s32 %r12, %r10, %r6; mad.lo.s32 %r12, %r11, %r8, %r12;
+MM_STORE: mul.wide.u32 %rd6, %r1, 4; add.u64 %rd6, %rd2, %rd6; st.global.s32 [%rd6], %r12;
+MM_DONE: ret; }
 "#;
 
 fn resident_ptx() -> String {

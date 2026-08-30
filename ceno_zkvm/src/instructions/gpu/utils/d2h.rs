@@ -414,6 +414,33 @@ pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
         compact
     };
 
+    // MockProver evaluates the host matrices directly before the real GPU
+    // proof. Keep a host mirror only for that explicit diagnostic mode while
+    // retaining the device backing as the source used by the GPU prover.
+    if std::env::var_os("MOCK_PROVING").is_some() && num_cols != 0 {
+        let gpu_data = device_buffer.to_vec().map_err(|e| {
+            ZKVMError::InvalidWitness(format!("GPU mock witness D2H failed: {e}").into())
+        })?;
+        let gpu_data: Vec<E::BaseField> = unsafe {
+            let mut data = std::mem::ManuallyDrop::new(gpu_data);
+            Vec::from_raw_parts(
+                data.as_mut_ptr() as *mut E::BaseField,
+                data.len(),
+                data.capacity(),
+            )
+        };
+        let mut host_data = Vec::with_capacity(num_rows * num_cols);
+        for row in 0..num_rows {
+            for col in 0..num_cols {
+                host_data.push(gpu_data[col * num_rows + row]);
+            }
+        }
+        let mut matrix =
+            RowMajorMatrix::<E::BaseField>::new_by_values(host_data, num_cols, padding);
+        matrix.set_device_backing(device_buffer, DeviceMatrixLayout::ColMajor);
+        return Ok(matrix);
+    }
+
     // Keep the original col-major witness buffer as the source of truth for GPU commit.
     // The GPU path must not allocate and zero a duplicate padded host matrix merely to
     // carry shape metadata for this already device-owned result.

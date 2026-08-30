@@ -26,7 +26,10 @@ pub use ceno_rt::tensor::{
     TensorMatMulDescV1, TensorProductionMatMulDescV1, TensorRmsLookupDescV1,
 };
 #[cfg(feature = "llama-tiny")]
-pub use ceno_rt::tensor::{TENSOR_BATCHED_MATMUL_2X2_V1, TensorBatchedMatMul2x2DescV1};
+pub use ceno_rt::tensor::{
+    TENSOR_ABI_V2, TENSOR_BATCHED_MATMUL_2X2_V1, TENSOR_PROFILE_LLAMA_TINY,
+    TensorBatchedMatMul2x2DescV1, TensorHandleOpDescV2,
+};
 
 /// Compact proof-side payload for one complete tiny 2x2 call.
 #[cfg(feature = "llama-tiny")]
@@ -36,6 +39,63 @@ pub struct TensorBatchedMatMul2x2Witness {
     pub w: [[i8; 2]; 2],
     pub quotient: [[i16; 2]; 2],
     pub remainder: [[u16; 2]; 2],
+}
+
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_ATTENTION: u32 = 1;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_HINT_ROLE_FFN: u32 = 2;
+
+/// Logical private-weight identity. There is intentionally no address, seed,
+/// or public model root in this compute-only fixture contract.
+#[cfg(feature = "llama-tiny")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TensorHintRef {
+    pub profile: u32,
+    pub layer: u32,
+    pub role: u32,
+    pub tile_index: u32,
+}
+
+/// Generate a bounded tile without retaining an eager model allocation.
+#[cfg(feature = "llama-tiny")]
+pub fn generate_tensor_hint_tile(hint: TensorHintRef) -> Result<[[i8; 2]; 2]> {
+    ensure!(
+        hint.profile == TENSOR_PROFILE_LLAMA_TINY,
+        "unsupported logical tensor profile"
+    );
+    ensure!(hint.layer == 0, "llama-tiny has exactly one layer");
+    ensure!(hint.tile_index == 0, "llama-tiny has exactly one role tile");
+    match hint.role {
+        TENSOR_HINT_ROLE_ATTENTION => Ok([[1, 1], [0, 1]]),
+        TENSOR_HINT_ROLE_FFN => Ok([[2, 0], [0, 2]]),
+        _ => bail!("unsupported logical tensor role"),
+    }
+}
+
+/// Proof-side payload retained for a v2 resident operator. Activations remain
+/// outside guest RAM; import/export are the only value materializations.
+#[cfg(feature = "llama-tiny")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TensorResidentMatMulWitness {
+    pub import_cycle: u64,
+    pub input_tensor_id: u64,
+    pub input_version: u32,
+    pub output_tensor_id: u64,
+    pub output_version: u32,
+    pub hint: TensorHintRef,
+    pub input: [i32; 4],
+    pub output: [i32; 4],
+    pub matrix: TensorBatchedMatMul2x2Witness,
+}
+
+#[cfg(feature = "llama-tiny")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TensorResidentBoundaryWitness {
+    pub import_cycle: u64,
+    pub tensor_id: u64,
+    pub version: u32,
+    pub values: [i32; 4],
 }
 
 pub const ZKLLM_FIXED_V1: u32 = 1;

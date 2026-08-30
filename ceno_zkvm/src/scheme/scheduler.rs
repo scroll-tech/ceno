@@ -167,8 +167,6 @@ pub struct ChipTaskResult<'a, PB: ProverBackend> {
     pub opening_evals: MainSumcheckEvals<PB::E>,
     /// Opening point for this proof
     pub input_opening_point: Point<PB::E>,
-    /// Prover-only matrix points routed into generic shard WitIn rounds.
-    pub matrix_opening_points: Option<[Point<PB::E>; 3]>,
     /// Deferred main-constraint proving job.
     pub main_constraint_job: Option<MainConstraintJob<'a, PB>>,
     /// Whether this circuit has witness or fixed polynomials

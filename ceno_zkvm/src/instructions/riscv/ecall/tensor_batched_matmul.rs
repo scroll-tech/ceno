@@ -1,8 +1,14 @@
-use std::marker::PhantomData;
+use std::{collections::BTreeMap, marker::PhantomData};
 
 use ceno_emul::{InsnKind, StepIndex, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
-use gkr_iop::utils::lk_multiplicity::Multiplicity;
+use gkr_iop::{
+    chip::Chip,
+    default_out_eval_groups,
+    gkr::{GKRCircuit, layer::Layer},
+    selector::SelectorType,
+    utils::lk_multiplicity::Multiplicity,
+};
 use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitIn};
 use p3::field::PrimeCharacteristicRing;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
@@ -24,6 +30,9 @@ pub const TENSOR_BATCHED_MATMUL_Q_COL: usize = 6;
 pub const TENSOR_BATCHED_MATMUL_R_COL: usize = 9;
 pub const TENSOR_BATCHED_MATMUL_SCALE: i64 = 1 << 16;
 pub const TENSOR_BATCHED_MATMUL_STATE_VERSION: u32 = 5;
+pub const TENSOR_RESIDENT_STATE_VERSION: u32 = 6;
+pub const TENSOR_SPACE_VERSION: u32 = 1;
+pub const TENSOR_HINT_REF_VERSION: u32 = 2;
 
 #[derive(Clone, Debug)]
 pub struct TensorBatchedMatMulSection {
@@ -31,6 +40,81 @@ pub struct TensorBatchedMatMulSection {
     pub call_id: u64,
     pub a: [[i8; 2]; 2],
     pub w: [[i8; 2]; 2],
+    pub resident: Option<ceno_emul::tensor::TensorResidentMatMulWitness>,
+}
+
+pub(crate) fn tensor_space_record<E: ExtensionField>(
+    import_cycle: Expression<E>,
+    tensor_id_lo: Expression<E>,
+    tensor_id_hi: Expression<E>,
+    version: Expression<E>,
+    index: Expression<E>,
+    value: Expression<E>,
+) -> Vec<Expression<E>> {
+    vec![
+        CustomRWTag::TensorState.expr::<E>(),
+        E::BaseField::from_u32(TENSOR_SPACE_VERSION).expr(),
+        import_cycle,
+        tensor_id_lo,
+        tensor_id_hi,
+        version,
+        index,
+        value,
+    ]
+}
+
+pub(crate) fn tensor_hint_ref_record<E: ExtensionField>(
+    profile: Expression<E>,
+    layer: Expression<E>,
+    role: Expression<E>,
+    tile: Expression<E>,
+    index: Expression<E>,
+    value: Expression<E>,
+) -> Vec<Expression<E>> {
+    vec![
+        CustomRWTag::TensorState.expr::<E>(),
+        E::BaseField::from_u32(TENSOR_HINT_REF_VERSION).expr(),
+        profile,
+        layer,
+        role,
+        tile,
+        index,
+        value,
+    ]
+}
+
+pub(crate) fn tensor_resident_claim_record<E: ExtensionField>(
+    cycle: Expression<E>,
+    import_cycle: Expression<E>,
+    input_id_lo: Expression<E>,
+    input_id_hi: Expression<E>,
+    input_version: Expression<E>,
+    output_id_lo: Expression<E>,
+    output_id_hi: Expression<E>,
+    output_version: Expression<E>,
+    profile: Expression<E>,
+    layer: Expression<E>,
+    role: Expression<E>,
+    row: Expression<E>,
+    output_value: Expression<E>,
+) -> Vec<Expression<E>> {
+    vec![
+        CustomRWTag::TensorState.expr::<E>(),
+        E::BaseField::from_u32(TENSOR_RESIDENT_STATE_VERSION).expr(),
+        cycle,
+        import_cycle,
+        input_id_lo,
+        input_id_hi,
+        input_version,
+        output_id_lo,
+        output_id_hi,
+        output_version,
+        profile,
+        layer,
+        role,
+        row,
+        output_value,
+    ]
 }
 
 pub(crate) fn tensor_batched_matmul_state_record<E: ExtensionField>(
@@ -72,9 +156,165 @@ pub struct TensorBatchedMatMulCoreConfig {
     call_id: WitIn,
     logical_row: WitIn,
     physical_logical_row: StructuralWitIn,
+    is_resident: WitIn,
+    import_cycle: WitIn,
+    input_id_lo: WitIn,
+    input_id_hi: WitIn,
+    input_version: WitIn,
+    output_id_lo: WitIn,
+    output_id_hi: WitIn,
+    output_version: WitIn,
+    profile: WitIn,
+    layer: WitIn,
+    role: WitIn,
+    tile: WitIn,
 }
 
 pub struct TensorBatchedMatMulCoreInstruction<E>(PhantomData<E>);
+
+#[derive(Debug)]
+pub struct TensorHintRefCoreConfig {
+    profile: WitIn,
+    layer: WitIn,
+    role: WitIn,
+    tile: WitIn,
+    index: WitIn,
+    value: WitIn,
+    magnitude: WitIn,
+    sign: WitIn,
+}
+
+pub struct TensorHintRefCoreInstruction<E>(PhantomData<E>);
+
+impl<E: ExtensionField> Instruction<E> for TensorHintRefCoreInstruction<E> {
+    type InstructionConfig = TensorHintRefCoreConfig;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [InsnKind] {
+        &[]
+    }
+    fn name() -> String {
+        "TensorHintRefCore".into()
+    }
+
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _: &ProgramParams,
+    ) -> Result<Self::InstructionConfig, ZKVMError> {
+        let profile = cb.create_witin(|| "tensor_hint_profile");
+        let layer = cb.create_witin(|| "tensor_hint_layer");
+        let role = cb.create_witin(|| "tensor_hint_role");
+        let tile = cb.create_witin(|| "tensor_hint_tile");
+        let index = cb.create_witin(|| "tensor_hint_index");
+        let value = cb.create_witin(|| "tensor_hint_value");
+        let magnitude = cb.create_witin(|| "tensor_hint_magnitude");
+        let sign = cb.create_witin(|| "tensor_hint_sign");
+        constrain_signed(cb, "tensor_hint", value, magnitude, sign, 8)?;
+        cb.write_record(
+            || "tensor_hint_ref_write",
+            RAMType::Custom,
+            tensor_hint_ref_record(
+                profile.expr(),
+                layer.expr(),
+                role.expr(),
+                tile.expr(),
+                index.expr(),
+                value.expr(),
+            ),
+        )?;
+        Ok(TensorHintRefCoreConfig {
+            profile,
+            layer,
+            role,
+            tile,
+            index,
+            value,
+            magnitude,
+            sign,
+        })
+    }
+
+    fn assign_instance(
+        _: &Self::InstructionConfig,
+        _: &mut ShardContext,
+        _: &mut [E::BaseField],
+        _: &mut LkMultiplicity,
+        _: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        Err(ZKVMError::InvalidWitness(
+            "HintRef Core is assigned by unique logical tiles".into(),
+        ))
+    }
+
+    fn assign_instances(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        steps: &[StepRecord],
+        indices: &[StepIndex],
+    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        let mut hints = BTreeMap::new();
+        for index in indices {
+            let syscall = steps[*index]
+                .syscall(&shard_ctx.syscall_witnesses)
+                .ok_or_else(|| {
+                    ZKVMError::InvalidWitness("resident operator syscall missing".into())
+                })?;
+            if let Some(payload) = syscall.tensor_resident_matmul {
+                if let Some(previous) = hints.insert(payload.hint, payload.matrix.w) {
+                    if previous != payload.matrix.w {
+                        return Err(ZKVMError::InvalidWitness(
+                            "HintRef value changed between reads".into(),
+                        ));
+                    }
+                }
+            }
+        }
+        if hints.is_empty() {
+            return Err(ZKVMError::InvalidWitness(
+                "HintRef Core needs a resident tile".into(),
+            ));
+        }
+        let rows = hints.len() * 4;
+        let mut witness = RowMajorMatrix::new(rows, num_witin, InstancePaddingStrategy::Default);
+        let mut structural =
+            RowMajorMatrix::new(rows, num_structural_witin, InstancePaddingStrategy::Default);
+        let mut lkm = LkMultiplicity::default();
+        for ((row, structural_row), (hint, values)) in witness
+            .iter_mut()
+            .zip(structural.iter_mut())
+            .zip(hints.iter().flat_map(|(hint, matrix)| {
+                matrix
+                    .iter()
+                    .flatten()
+                    .enumerate()
+                    .map(move |(i, v)| (hint, (i, *v)))
+            }))
+        {
+            if num_structural_witin > 0 {
+                *structural_row.last_mut().unwrap() = E::BaseField::ONE;
+            }
+            set_val!(row, config.profile, u64::from(hint.profile));
+            set_val!(row, config.layer, u64::from(hint.layer));
+            set_val!(row, config.role, u64::from(hint.role));
+            set_val!(row, config.tile, u64::from(hint.tile_index));
+            set_val!(row, config.index, values.0 as u64);
+            assign_signed(
+                config.value,
+                config.magnitude,
+                config.sign,
+                row,
+                &mut lkm,
+                i64::from(values.1),
+                8,
+            );
+        }
+        witness.padding_by_strategy();
+        structural.padding_by_strategy();
+        Ok(([witness, structural], lkm.into_finalize_result()))
+    }
+}
 
 fn constrain_signed<E: ExtensionField>(
     cb: &mut CircuitBuilder<E>,
@@ -130,6 +370,19 @@ impl<E: ExtensionField> Instruction<E> for TensorBatchedMatMulCoreInstruction<E>
             || "tensor_batched_physical_logical_row",
             StructuralWitInType::OuterRepeatingIncrementalSequence { k: 2, n: 32 },
         );
+        let is_resident = cb.create_witin(|| "tensor_batched_is_resident");
+        let import_cycle = cb.create_witin(|| "tensor_batched_import_cycle");
+        let input_id_lo = cb.create_witin(|| "tensor_batched_input_id_lo");
+        let input_id_hi = cb.create_witin(|| "tensor_batched_input_id_hi");
+        let input_version = cb.create_witin(|| "tensor_batched_input_version");
+        let output_id_lo = cb.create_witin(|| "tensor_batched_output_id_lo");
+        let output_id_hi = cb.create_witin(|| "tensor_batched_output_id_hi");
+        let output_version = cb.create_witin(|| "tensor_batched_output_version");
+        let profile = cb.create_witin(|| "tensor_batched_profile");
+        let layer = cb.create_witin(|| "tensor_batched_layer");
+        let role = cb.create_witin(|| "tensor_batched_role");
+        let tile = cb.create_witin(|| "tensor_batched_tile");
+        cb.assert_bit(|| "tensor_batched_is_resident_bit", is_resident.expr())?;
 
         cb.require_equal(
             || "tensor_batched_logical_row_matches_physical_row",
@@ -154,18 +407,81 @@ impl<E: ExtensionField> Instruction<E> for TensorBatchedMatMulCoreInstruction<E>
             remainder.expr(),
             reconstructed,
         )?;
-        cb.read_record(
+        let standalone_record = tensor_batched_matmul_state_record(
+            cycle.expr(),
+            call_id.expr(),
+            logical_row.expr(),
+            a.expr(),
+            w.expr(),
+            q.expr(),
+            remainder.expr(),
+        );
+        let standalone_selector = E::BaseField::ONE.expr() - is_resident.expr();
+        let standalone_rlc = cb.rlc_chip_record(standalone_record.clone())
+            * standalone_selector.clone()
+            + is_resident.expr();
+        let conditional_custom_type = |selector: Expression<E>| {
+            E::BaseField::from_u64(RAMType::Custom as u64).expr() * selector.clone()
+                + E::BaseField::from_u64(RAMType::Undefined as u64).expr()
+                    * (E::BaseField::ONE.expr() - selector)
+        };
+        cb.read_rlc_record(
             || "tensor_batched_matmul_state",
-            RAMType::Custom,
-            tensor_batched_matmul_state_record(
-                cycle.expr(),
-                call_id.expr(),
-                logical_row.expr(),
-                a.expr(),
-                w.expr(),
-                q.expr(),
-                remainder.expr(),
-            ),
+            conditional_custom_type(standalone_selector),
+            standalone_record,
+            standalone_rlc,
+        )?;
+        let resident_claim = tensor_resident_claim_record(
+            cycle.expr(),
+            import_cycle.expr(),
+            input_id_lo.expr(),
+            input_id_hi.expr(),
+            input_version.expr(),
+            output_id_lo.expr(),
+            output_id_hi.expr(),
+            output_version.expr(),
+            profile.expr(),
+            layer.expr(),
+            role.expr(),
+            logical_row.expr(),
+            q.expr() * TENSOR_BATCHED_MATMUL_SCALE as u64 + remainder.expr(),
+        );
+        let resident_selector = is_resident.expr();
+        let resident_padding = E::BaseField::ONE.expr() - resident_selector.clone();
+        cb.read_rlc_record(
+            || "tensor_resident_claim",
+            conditional_custom_type(resident_selector.clone()),
+            resident_claim.clone(),
+            cb.rlc_chip_record(resident_claim) * resident_selector.clone()
+                + resident_padding.clone(),
+        )?;
+        let input_record = tensor_space_record(
+            import_cycle.expr(),
+            input_id_lo.expr(),
+            input_id_hi.expr(),
+            input_version.expr(),
+            logical_row.expr(),
+            a.expr(),
+        );
+        cb.read_rlc_record(
+            || "tensor_space_input",
+            conditional_custom_type(resident_selector.clone()),
+            input_record.clone(),
+            cb.rlc_chip_record(input_record) * resident_selector.clone() + resident_padding.clone(),
+        )?;
+        let hint_record = tensor_hint_ref_record(
+            profile.expr(),
+            layer.expr(),
+            role.expr(),
+            tile.expr(),
+            logical_row.expr(),
+            w.expr(),
+        );
+        cb.read_rlc_record(
+            || "tensor_hint_ref_read",
+            conditional_custom_type(resident_selector.clone()),
+            hint_record.clone(),
+            cb.rlc_chip_record(hint_record) * resident_selector + resident_padding,
         )?;
 
         Ok(TensorBatchedMatMulCoreConfig {
@@ -184,7 +500,69 @@ impl<E: ExtensionField> Instruction<E> for TensorBatchedMatMulCoreInstruction<E>
             call_id,
             logical_row,
             physical_logical_row,
+            is_resident,
+            import_cycle,
+            input_id_lo,
+            input_id_hi,
+            input_version,
+            output_id_lo,
+            output_id_hi,
+            output_version,
+            profile,
+            layer,
+            role,
+            tile,
         })
+    }
+
+    fn build_gkr_iop_circuit(
+        cb: &mut CircuitBuilder<E>,
+        param: &ProgramParams,
+    ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
+        let config = Self::construct_circuit(cb, param)?;
+
+        // These three structural slots are replaced by eq(point, x) MLEs during
+        // batched-main proving. They bind the matrix reduction's three terminal
+        // points without introducing another PCS opening.
+        let matrix_a_selector = cb.create_placeholder_structural_witin(|| "matrix_a_selector");
+        let matrix_w_selector = cb.create_placeholder_structural_witin(|| "matrix_w_selector");
+        let matrix_output_selector =
+            cb.create_placeholder_structural_witin(|| "matrix_output_selector");
+
+        // Keep the ordinary row-prefix selector last: assignment materializes
+        // that selector in the final structural column, while the three dynamic
+        // matrix selectors are materialized by batched-main itself.
+        let selector = cb.create_placeholder_structural_witin(|| "selector");
+        let selector_type = SelectorType::Prefix(selector.expr());
+        cb.cs.r_selector = Some(selector_type.clone());
+        cb.cs.w_selector = Some(selector_type.clone());
+        cb.cs.lk_selector = Some(selector_type.clone());
+        cb.cs.zero_selector = Some(selector_type);
+
+        let mut chip = Chip::new_from_cb(cb);
+        let ordinary_output_count = chip.final_out_evals.len();
+        let mut layer = Layer::from_circuit_builder(
+            cb,
+            format!("{}_main", Self::name()),
+            default_out_eval_groups(cb),
+        );
+        layer.add_matrix_identity_groups(
+            [
+                matrix_a_selector.expr(),
+                matrix_w_selector.expr(),
+                matrix_output_selector.expr(),
+            ],
+            [
+                config.a.expr(),
+                config.w.expr(),
+                config.q.expr(),
+                config.remainder.expr(),
+            ],
+        );
+        chip.n_evaluations += 4;
+        chip.final_out_evals = (0..ordinary_output_count + 4).collect();
+        chip.add_layer(layer);
+        Ok((config, chip.gkr_circuit()))
     }
 
     fn assign_instance(
@@ -214,15 +592,28 @@ impl<E: ExtensionField> Instruction<E> for TensorBatchedMatMulCoreInstruction<E>
                 let syscall = step.syscall(&shard_ctx.syscall_witnesses).ok_or_else(|| {
                     ZKVMError::InvalidWitness("tiny batched MatMul syscall missing".into())
                 })?;
-                let payload = syscall.tensor_batched_matmul_2x2.ok_or_else(|| {
-                    ZKVMError::InvalidWitness("tiny batched MatMul payload missing".into())
-                })?;
-                Ok(TensorBatchedMatMulSection {
-                    cycle: step.cycle() - shard_ctx.current_shard_offset_cycle(),
-                    call_id: syscall.reg_ops[0].value.after as u64,
-                    a: payload.a,
-                    w: payload.w,
-                })
+                if let Some(payload) = syscall.tensor_batched_matmul_2x2 {
+                    Ok(TensorBatchedMatMulSection {
+                        cycle: step.cycle() - shard_ctx.current_shard_offset_cycle(),
+                        call_id: syscall.reg_ops[0].value.after as u64,
+                        a: payload.a,
+                        w: payload.w,
+                        resident: None,
+                    })
+                } else if let Some(mut resident) = syscall.tensor_resident_matmul {
+                    resident.import_cycle = shard_ctx.aligned_current_ts(resident.import_cycle);
+                    Ok(TensorBatchedMatMulSection {
+                        cycle: step.cycle() - shard_ctx.current_shard_offset_cycle(),
+                        call_id: step.cycle(),
+                        a: resident.matrix.a,
+                        w: resident.matrix.w,
+                        resident: Some(resident),
+                    })
+                } else {
+                    Err(ZKVMError::InvalidWitness(
+                        "tiny batched MatMul payload missing".into(),
+                    ))
+                }
             })
             .collect::<Result<Vec<_>, ZKVMError>>()?;
         Self::assign_sections(config, num_witin, num_structural_witin, &sections)
@@ -273,6 +664,32 @@ impl<E: ExtensionField> TensorBatchedMatMulCoreInstruction<E> {
                 config.physical_logical_row,
                 logical_row as u64
             );
+            if let Some(resident) = section.resident {
+                set_val!(row, config.is_resident, 1);
+                set_val!(row, config.import_cycle, resident.import_cycle);
+                set_val!(
+                    row,
+                    config.input_id_lo,
+                    u64::from(resident.input_tensor_id as u32)
+                );
+                set_val!(row, config.input_id_hi, resident.input_tensor_id >> 32);
+                set_val!(row, config.input_version, u64::from(resident.input_version));
+                set_val!(
+                    row,
+                    config.output_id_lo,
+                    u64::from(resident.output_tensor_id as u32)
+                );
+                set_val!(row, config.output_id_hi, resident.output_tensor_id >> 32);
+                set_val!(
+                    row,
+                    config.output_version,
+                    u64::from(resident.output_version)
+                );
+                set_val!(row, config.profile, u64::from(resident.hint.profile));
+                set_val!(row, config.layer, u64::from(resident.hint.layer));
+                set_val!(row, config.role, u64::from(resident.hint.role));
+                set_val!(row, config.tile, u64::from(resident.hint.tile_index));
+            }
 
             assign_signed(
                 config.a,

@@ -28,6 +28,9 @@ use crate::{
 };
 use witness::set_val;
 
+#[cfg(feature = "llama-tiny")]
+use super::tensor_batched_matmul::{tensor_resident_claim_record, tensor_space_record};
+
 const ABI: usize = 0;
 const FLAGS: usize = 1;
 const INPUT_LEN: usize = 3;
@@ -45,6 +48,10 @@ const META_START_EXPORT: usize = 12;
 const HANDLE_START_OP_INPUT: usize = 8;
 const META_START_OP: usize = 12;
 const HANDLE_START_OP_OUTPUT: usize = 16;
+#[cfg(feature = "llama-tiny")]
+const VALUE_START_IMPORT: usize = META_START + 4;
+#[cfg(feature = "llama-tiny")]
+const VALUE_START_EXPORT: usize = META_START_EXPORT + 4;
 
 /// The emitted event has a fixed field layout so an offline table can consume
 /// all four ABI calls with one record type.
@@ -101,24 +108,49 @@ fn constrain_fixed_tensor_bus<E: ExtensionField, S: SyscallSpec>(
         E::BaseField::from_u32(S::CODE).expr(),
     )?;
     let before = |index: usize| ecall.mem_writes[index].1.before.value();
+    #[cfg(not(feature = "llama-tiny"))]
     cb.require_equal(|| "tensor_bus_abi", before(ABI), E::BaseField::ONE.expr())?;
+    #[cfg(feature = "llama-tiny")]
+    {
+        cb.assert_bit(|| "tensor_bus_abi_v2_bit", config.abi_v2.expr())?;
+        cb.require_equal(
+            || "tensor_bus_abi",
+            before(ABI),
+            E::BaseField::ONE.expr() + config.abi_v2.expr(),
+        )?;
+    }
     cb.require_equal(
         || "tensor_bus_flags",
         before(FLAGS),
         E::BaseField::ZERO.expr(),
     )?;
 
-    cb.require_equal(
-        || "tensor_bus_reserved",
-        before(RESERVED),
-        E::BaseField::ZERO.expr(),
-    )?;
-    if S::CODE == TensorHandleAttentionV1Spec::CODE || S::CODE == TensorHandleFfnV1Spec::CODE {
+    if S::CODE == TensorImportBeginV1Spec::CODE || S::CODE == TensorExportEndV1Spec::CODE {
         cb.require_equal(
-            || "tensor_bus_op_reserved",
-            before(7),
+            || "tensor_bus_reserved",
+            before(RESERVED),
             E::BaseField::ZERO.expr(),
         )?;
+    } else {
+        #[cfg(not(feature = "llama-tiny"))]
+        cb.require_equal(
+            || "tensor_bus_op_reserved",
+            before(RESERVED),
+            E::BaseField::ZERO.expr(),
+        )?;
+        #[cfg(feature = "llama-tiny")]
+        {
+            let abi_v1 = E::BaseField::ONE.expr() - config.abi_v2.expr();
+            cb.require_zero(|| "tensor_bus_v1_op_reserved", abi_v1 * before(RESERVED))?;
+            cb.require_zero(
+                || "tensor_bus_v2_profile",
+                config.abi_v2.expr()
+                    * (before(6)
+                        - E::BaseField::from_u32(ceno_emul::tensor::TENSOR_PROFILE_LLAMA_TINY)
+                            .expr()),
+            )?;
+            cb.require_zero(|| "tensor_bus_v2_layer", config.abi_v2.expr() * before(7))?;
+        }
     }
     // Descriptor layouts intentionally differ at the boundary:
     //
@@ -175,6 +207,138 @@ fn constrain_fixed_tensor_bus<E: ExtensionField, S: SyscallSpec>(
         let event_record = event_record::<E, S>(config);
         cb.write_record(|| "tensor_bus_event", RAMType::Custom, event_record)?;
     }
+    #[cfg(feature = "llama-tiny")]
+    constrain_v2_tensor_records::<E, S>(cb, config)?;
+    Ok(())
+}
+
+#[cfg(feature = "llama-tiny")]
+fn constrain_v2_tensor_records<E: ExtensionField, S: SyscallSpec>(
+    cb: &mut CircuitBuilder<E>,
+    config: &TensorBusEcallConfig<E>,
+) -> Result<(), ZKVMError> {
+    let ecall = &config.ecall;
+    let before = |index: usize| ecall.mem_writes[index].1.before.value();
+    let after = |index: usize| ecall.mem_writes[index].1.after.value();
+    let enabled = config.abi_v2.expr();
+    let enabled_ram_type = E::BaseField::from_u64(RAMType::Custom as u64).expr() * enabled.clone()
+        + E::BaseField::from_u64(RAMType::Undefined as u64).expr()
+            * (E::BaseField::ONE.expr() - enabled.clone());
+
+    if S::CODE == TensorImportBeginV1Spec::CODE {
+        cb.require_zero(
+            || "tensor_bus_v2_import_cycle",
+            enabled.clone() * (config.import_cycle.expr() - ecall.dummy_insn.ts().expr()),
+        )?;
+        for row in 0..4 {
+            let record = tensor_space_record(
+                config.import_cycle.expr(),
+                after(HANDLE_START_IMPORT),
+                after(HANDLE_START_IMPORT + 1),
+                after(HANDLE_START_IMPORT + 2),
+                E::BaseField::from_u32(row).expr(),
+                config.boundary_values[row as usize].expr(),
+            );
+            let rlc = cb.rlc_chip_record(record.clone()) * enabled.clone()
+                + (E::BaseField::ONE.expr() - enabled.clone());
+            cb.write_rlc_record(
+                || format!("tensor_bus_v2_import_value_{row}"),
+                enabled_ram_type.clone(),
+                record,
+                rlc,
+            )?;
+        }
+    } else if S::CODE == TensorExportEndV1Spec::CODE {
+        for row in 0..4 {
+            let record = tensor_space_record(
+                config.import_cycle.expr(),
+                before(HANDLE_START_EXPORT),
+                before(HANDLE_START_EXPORT + 1),
+                before(HANDLE_START_EXPORT + 2),
+                E::BaseField::from_u32(row).expr(),
+                config.boundary_values[row as usize].expr(),
+            );
+            let rlc = cb.rlc_chip_record(record.clone()) * enabled.clone()
+                + (E::BaseField::ONE.expr() - enabled.clone());
+            cb.read_rlc_record(
+                || format!("tensor_bus_v2_export_value_{row}"),
+                enabled_ram_type.clone(),
+                record,
+                rlc,
+            )?;
+        }
+    } else {
+        let role = if S::CODE == TensorHandleAttentionV1Spec::CODE {
+            ceno_emul::tensor::TENSOR_HINT_ROLE_ATTENTION
+        } else {
+            ceno_emul::tensor::TENSOR_HINT_ROLE_FFN
+        };
+        for row in 0..4 {
+            let record = tensor_resident_claim_record(
+                ecall.dummy_insn.ts().expr(),
+                config.import_cycle.expr(),
+                before(HANDLE_START_OP_INPUT),
+                before(HANDLE_START_OP_INPUT + 1),
+                before(HANDLE_START_OP_INPUT + 2),
+                after(HANDLE_START_OP_OUTPUT),
+                after(HANDLE_START_OP_OUTPUT + 1),
+                after(HANDLE_START_OP_OUTPUT + 2),
+                before(6),
+                before(7),
+                E::BaseField::from_u32(role).expr(),
+                E::BaseField::from_u32(row).expr(),
+                config.operator_output_values[row as usize].expr(),
+            );
+            let rlc = cb.rlc_chip_record(record.clone()) * enabled.clone()
+                + (E::BaseField::ONE.expr() - enabled.clone());
+            cb.write_rlc_record(
+                || format!("tensor_bus_v2_operator_claim_{row}"),
+                enabled_ram_type.clone(),
+                record,
+                rlc,
+            )?;
+
+            let output_record = tensor_space_record(
+                config.import_cycle.expr(),
+                after(HANDLE_START_OP_OUTPUT),
+                after(HANDLE_START_OP_OUTPUT + 1),
+                after(HANDLE_START_OP_OUTPUT + 2),
+                E::BaseField::from_u32(row).expr(),
+                config.operator_output_values[row as usize].expr(),
+            );
+            let output_rlc = cb.rlc_chip_record(output_record.clone()) * enabled.clone()
+                + (E::BaseField::ONE.expr() - enabled.clone());
+            cb.write_rlc_record(
+                || format!("tensor_bus_v2_operator_output_{row}"),
+                enabled_ram_type.clone(),
+                output_record,
+                output_rlc,
+            )?;
+        }
+    }
+
+    if S::CODE == TensorImportBeginV1Spec::CODE || S::CODE == TensorExportEndV1Spec::CODE {
+        let raw_value = |row: usize| {
+            if S::CODE == TensorImportBeginV1Spec::CODE {
+                before(VALUE_START_IMPORT + row)
+            } else {
+                after(VALUE_START_EXPORT + row)
+            }
+        };
+        for row in 0..4 {
+            cb.assert_bit(
+                || format!("tensor_bus_v2_boundary_sign_{row}"),
+                config.boundary_signs[row].expr(),
+            )?;
+            cb.require_zero(
+                || format!("tensor_bus_v2_boundary_twos_complement_{row}"),
+                enabled.clone()
+                    * (raw_value(row)
+                        - config.boundary_values[row].expr()
+                        - config.boundary_signs[row].expr() * (1_u64 << 32)),
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -206,6 +370,22 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for TensorBusFixedEcall<E
             key_shard_id: cb.create_witin(|| "tensor_bus_key_shard_id"),
             key_local_shard_cycle: cb.create_witin(|| "tensor_bus_key_local_shard_cycle"),
             key_ordinal: cb.create_witin(|| "tensor_bus_key_ordinal"),
+            #[cfg(feature = "llama-tiny")]
+            abi_v2: cb.create_witin(|| "tensor_bus_abi_v2"),
+            #[cfg(feature = "llama-tiny")]
+            import_cycle: cb.create_witin(|| "tensor_bus_import_cycle"),
+            #[cfg(feature = "llama-tiny")]
+            boundary_values: std::array::from_fn(|row| {
+                cb.create_witin(|| format!("tensor_bus_boundary_value_{row}"))
+            }),
+            #[cfg(feature = "llama-tiny")]
+            boundary_signs: std::array::from_fn(|row| {
+                cb.create_witin(|| format!("tensor_bus_boundary_sign_{row}"))
+            }),
+            #[cfg(feature = "llama-tiny")]
+            operator_output_values: std::array::from_fn(|row| {
+                cb.create_witin(|| format!("tensor_bus_operator_output_value_{row}"))
+            }),
         };
         constrain_fixed_tensor_bus::<E, S>(cb, &config)?;
         Ok(config)
@@ -232,6 +412,72 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for TensorBusFixedEcall<E
             shard_ctx.aligned_current_ts(step.cycle())
         );
         set_val!(instance, config.key_ordinal, 0_u64);
+        #[cfg(feature = "llama-tiny")]
+        {
+            let syscall = step
+                .syscall(&shard_ctx.syscall_witnesses)
+                .ok_or_else(|| ZKVMError::InvalidWitness("TensorBus syscall missing".into()))?;
+            let abi = syscall
+                .mem_ops
+                .first()
+                .ok_or_else(|| ZKVMError::InvalidWitness("TensorBus descriptor missing".into()))?
+                .value
+                .before;
+            let abi_v2 = u64::from(abi == ceno_emul::tensor::TENSOR_ABI_V2);
+            set_val!(instance, config.abi_v2, abi_v2);
+            if abi_v2 == 1 {
+                let import_cycle = if S::CODE == TensorImportBeginV1Spec::CODE {
+                    step.cycle()
+                } else if S::CODE == TensorExportEndV1Spec::CODE {
+                    syscall
+                        .tensor_resident_boundary
+                        .ok_or_else(|| {
+                            ZKVMError::InvalidWitness("TensorBus v2 export boundary missing".into())
+                        })?
+                        .import_cycle
+                } else {
+                    syscall
+                        .tensor_resident_matmul
+                        .ok_or_else(|| {
+                            ZKVMError::InvalidWitness(
+                                "TensorBus v2 resident operator missing".into(),
+                            )
+                        })?
+                        .import_cycle
+                };
+                set_val!(
+                    instance,
+                    config.import_cycle,
+                    shard_ctx.aligned_current_ts(import_cycle)
+                );
+                if S::CODE == TensorImportBeginV1Spec::CODE
+                    || S::CODE == TensorExportEndV1Spec::CODE
+                {
+                    let boundary = syscall.tensor_resident_boundary.ok_or_else(|| {
+                        ZKVMError::InvalidWitness("TensorBus v2 boundary missing".into())
+                    })?;
+                    for (row, value) in boundary.values.into_iter().enumerate() {
+                        instance[config.boundary_values[row].id as usize] = if value < 0 {
+                            -E::BaseField::from_u64(u64::from(value.unsigned_abs()))
+                        } else {
+                            E::BaseField::from_u64(value as u64)
+                        };
+                        set_val!(instance, config.boundary_signs[row], u64::from(value < 0));
+                    }
+                } else {
+                    let resident = syscall.tensor_resident_matmul.ok_or_else(|| {
+                        ZKVMError::InvalidWitness("TensorBus v2 resident operator missing".into())
+                    })?;
+                    for (row, value) in resident.output.into_iter().enumerate() {
+                        instance[config.operator_output_values[row].id as usize] = if value < 0 {
+                            -E::BaseField::from_u64(u64::from(value.unsigned_abs()))
+                        } else {
+                            E::BaseField::from_u64(value as u64)
+                        };
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -242,4 +488,14 @@ pub struct TensorBusEcallConfig<E: ExtensionField> {
     key_shard_id: multilinear_extensions::WitIn,
     key_local_shard_cycle: multilinear_extensions::WitIn,
     key_ordinal: multilinear_extensions::WitIn,
+    #[cfg(feature = "llama-tiny")]
+    abi_v2: multilinear_extensions::WitIn,
+    #[cfg(feature = "llama-tiny")]
+    import_cycle: multilinear_extensions::WitIn,
+    #[cfg(feature = "llama-tiny")]
+    boundary_values: [multilinear_extensions::WitIn; 4],
+    #[cfg(feature = "llama-tiny")]
+    boundary_signs: [multilinear_extensions::WitIn; 4],
+    #[cfg(feature = "llama-tiny")]
+    operator_output_values: [multilinear_extensions::WitIn; 4],
 }

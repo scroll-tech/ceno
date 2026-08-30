@@ -80,7 +80,6 @@ fn run() {
         matrix.matrix_reduction.is_some(),
         "matrix reduction missing"
     );
-    assert_eq!(proofs[0].additional_witness_openings.len(), 3);
 
     if let Some(dir) = std::env::var_os("CENO_TENSOR_MATMUL_RECURSION_FIXTURE_DIR") {
         let dir = std::path::PathBuf::from(dir);
@@ -152,7 +151,11 @@ fn run() {
         "remainder tamper verified"
     );
 
+    let mut sigma_tamper = proofs[0].clone();
+    sigma_tamper.main_constraint_proof.claimed_sum += E::ONE;
+    assert!(rejects(&verifier, sigma_tamper), "sigma tamper verified");
+
     println!(
-        "tiny batched MatMul GPU E2E verified: sections=2 same_commitment_rounds=3 product_tamper=reject quotient_tamper=reject remainder_tamper=reject"
+        "tiny batched MatMul GPU E2E verified: sections=2 matrix_specific_pcs_rounds=0 ordinary_witin_openings=1 product_tamper=reject quotient_tamper=reject remainder_tamper=reject sigma_tamper=reject"
     );
 }

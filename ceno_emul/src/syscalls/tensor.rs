@@ -4,6 +4,11 @@ use anyhow::{Result, ensure};
 
 #[cfg(feature = "llama-tiny")]
 use crate::tensor::{
+    TENSOR_ABI_V2, TENSOR_HINT_ROLE_ATTENTION, TENSOR_HINT_ROLE_FFN, TensorHintRef,
+    TensorResidentBoundaryWitness, TensorResidentMatMulWitness, generate_tensor_hint_tile,
+};
+#[cfg(feature = "llama-tiny")]
+use crate::tensor::{
     TENSOR_BATCHED_MATMUL_2X2_V1, TensorBatchedMatMul2x2DescV1, TensorBatchedMatMul2x2Witness,
 };
 use crate::{
@@ -28,6 +33,10 @@ pub const TENSOR_BATCHED_MATMUL_2X2_VALUES: usize = 4;
 const TENSOR_TRANSFER_DESC_WORDS: usize = 8;
 const TENSOR_META_WORDS: usize = 4;
 const TENSOR_HANDLE_WORDS: usize = 4;
+
+fn tensor_bus_abi_supported(abi: u32) -> bool {
+    abi == TENSOR_ABI_V1 || cfg!(feature = "llama-tiny") && abi == 2
+}
 
 fn tensor_bus_event(code: u32, fields: impl IntoIterator<Item = u32>) -> [u32; 25] {
     let mut event = [0; 25];
@@ -117,7 +126,7 @@ pub fn tensor_import_begin_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallE
     let words = desc.words();
     let desc_ops = desc.mem_ops();
     ensure!(
-        words[0] == TENSOR_ABI_V1 && words[1] == 0 && words[7] == 0,
+        tensor_bus_abi_supported(words[0]) && words[1] == 0 && words[7] == 0,
         "invalid TensorBus import descriptor"
     );
     ensure!(
@@ -138,7 +147,8 @@ pub fn tensor_import_begin_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallE
         .into_iter()
         .map(|word| word as i32)
         .collect::<Vec<_>>();
-    let (handle, records) = vm.tensor_bus_import_begin(meta, input.clone())?;
+    let import_cycle = vm.tracer().cycle();
+    let (handle, records) = vm.tensor_bus_import_begin(meta, input.clone(), import_cycle)?;
     #[cfg(feature = "tensor-cuda")]
     vm.tensor_bus_resident_import(handle, &input)?;
     let mut handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[6]);
@@ -172,6 +182,15 @@ pub fn tensor_import_begin_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallE
             .chain(std::iter::repeat_n(0, 4)),
     ));
     witness.tensor_bus_event_cycle = Some(vm.tracer().cycle());
+    #[cfg(feature = "llama-tiny")]
+    if words[0] == TENSOR_ABI_V2 {
+        witness.tensor_resident_boundary = Some(TensorResidentBoundaryWitness {
+            import_cycle,
+            tensor_id: handle.tensor_id,
+            version: handle.version,
+            values: input.try_into().expect("llama-tiny boundary is four words"),
+        });
+    }
     Ok(SyscallEffects {
         witness,
         next_pc: None,
@@ -184,7 +203,7 @@ pub fn tensor_export_end_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEff
     let words = desc.words();
     let desc_ops = desc.mem_ops();
     ensure!(
-        words[0] == TENSOR_ABI_V1 && words[1] == 0 && words[7] == 0,
+        tensor_bus_abi_supported(words[0]) && words[1] == 0 && words[7] == 0,
         "invalid TensorBus export descriptor"
     );
     ensure!(
@@ -198,6 +217,8 @@ pub fn tensor_export_end_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEff
     let meta_words = meta_view.words();
     let meta = tensor_bus_meta(meta_words)?;
     let meta_ops = meta_view.mem_ops();
+    #[cfg(feature = "llama-tiny")]
+    let import_cycle = vm.tensor_bus_current_import_cycle()?;
     #[cfg(not(feature = "tensor-cuda"))]
     let (output, records) = vm.tensor_bus_export_end(handle)?;
     #[cfg(feature = "tensor-cuda")]
@@ -225,6 +246,11 @@ pub fn tensor_export_end_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEff
     );
     require_fixed_tensor_bus_words(words[4])?;
     let (before, mut output_ops) = tensor_bus_words(vm, words[3], output.len())?;
+    #[cfg(feature = "llama-tiny")]
+    let boundary_values: [i32; 4] = output
+        .clone()
+        .try_into()
+        .expect("llama-tiny boundary is four words");
     for (op, value) in output_ops.iter_mut().zip(output) {
         op.value.after = value as u32;
     }
@@ -253,6 +279,15 @@ pub fn tensor_export_end_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEff
             .chain(std::iter::repeat_n(0, 4)),
     ));
     witness.tensor_bus_event_cycle = Some(vm.tracer().cycle());
+    #[cfg(feature = "llama-tiny")]
+    if words[0] == TENSOR_ABI_V2 {
+        witness.tensor_resident_boundary = Some(TensorResidentBoundaryWitness {
+            import_cycle,
+            tensor_id: handle.tensor_id,
+            version: handle.version,
+            values: boundary_values,
+        });
+    }
     Ok(SyscallEffects {
         witness,
         next_pc: None,
@@ -264,13 +299,21 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
     let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
     let words = desc.words();
     let desc_ops = desc.mem_ops();
+    let abi_v2 = cfg!(feature = "llama-tiny") && words[0] == 2;
     ensure!(
-        words[0] == TENSOR_ABI_V1
+        tensor_bus_abi_supported(words[0])
             && words[1] == 0
             && words[5] == TENSOR_META_WORDS as u32
-            && words[7] == 0,
+            && (abi_v2 || words[7] == 0),
         "invalid TensorBus handle operator descriptor"
     );
+    #[cfg(feature = "llama-tiny")]
+    if abi_v2 {
+        ensure!(
+            words[6] == crate::tensor::TENSOR_PROFILE_LLAMA_TINY && words[7] == 0,
+            "unsupported llama-tiny logical profile/layer"
+        );
+    }
     let input_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[2]);
     let input_words = input_view.words();
     let input = tensor_bus_handle(input_words)?;
@@ -283,7 +326,7 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
         meta.byte_len == TENSOR_BUS_FIXED_TRANSFER_WORDS as usize * 4,
         "TensorBus operator metadata length mismatch"
     );
-    let transform = move |input: &[i32]| -> Result<Vec<i32>> {
+    let v1_transform = move |input: &[i32]| -> Result<Vec<i32>> {
         ensure!(
             input.len() == TENSOR_BUS_FIXED_TRANSFER_WORDS as usize,
             "TensorBus operator input length mismatch"
@@ -310,8 +353,85 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
             _ => unreachable!("fixed TensorBus operator code"),
         })
     };
-    let (output, records) = vm.tensor_bus_apply(input, meta, code, words[6], transform)?;
-    #[cfg(feature = "tensor-cuda")]
+    #[cfg(feature = "llama-tiny")]
+    let (output, records, resident_payload) = if abi_v2 {
+        let role = match code {
+            crate::tensor::TENSOR_HANDLE_ATTENTION_V1 => TENSOR_HINT_ROLE_ATTENTION,
+            crate::tensor::TENSOR_HANDLE_FFN_V1 => TENSOR_HINT_ROLE_FFN,
+            _ => unreachable!("fixed TensorBus operator code"),
+        };
+        let hint = TensorHintRef {
+            profile: words[6],
+            layer: words[7],
+            role,
+            tile_index: 0,
+        };
+        let w = generate_tensor_hint_tile(hint)?;
+        let transform = move |values: &[i32]| -> Result<Vec<i32>> {
+            ensure!(values.len() == 4, "llama-tiny matrix input length mismatch");
+            let a = [
+                [i8::try_from(values[0])?, i8::try_from(values[1])?],
+                [i8::try_from(values[2])?, i8::try_from(values[3])?],
+            ];
+            Ok((0..2)
+                .flat_map(|m| {
+                    (0..2).map(move |n| {
+                        (0..2)
+                            .map(|k| i32::from(a[m][k]) * i32::from(w[k][n]))
+                            .sum::<i32>()
+                    })
+                })
+                .collect())
+        };
+        let (output, records, input_values, output_values, import_cycle) =
+            vm.tensor_bus_apply_v2(input, meta, code, transform)?;
+        let input_array: [i32; 4] = input_values.try_into().unwrap();
+        let output_array: [i32; 4] = output_values.try_into().unwrap();
+        let a = [
+            [i8::try_from(input_array[0])?, i8::try_from(input_array[1])?],
+            [i8::try_from(input_array[2])?, i8::try_from(input_array[3])?],
+        ];
+        let mut quotient = [[0_i16; 2]; 2];
+        let mut remainder = [[0_u16; 2]; 2];
+        for m in 0..2 {
+            for n in 0..2 {
+                quotient[m][n] = i16::try_from(output_array[m * 2 + n].div_euclid(1 << 16))?;
+                remainder[m][n] = output_array[m * 2 + n].rem_euclid(1 << 16) as u16;
+            }
+        }
+        (
+            output,
+            records,
+            Some(TensorResidentMatMulWitness {
+                import_cycle,
+                input_tensor_id: input.tensor_id,
+                input_version: input.version,
+                output_tensor_id: output.tensor_id,
+                output_version: output.version,
+                hint,
+                input: input_array,
+                output: output_array,
+                matrix: TensorBatchedMatMul2x2Witness {
+                    a,
+                    w,
+                    quotient,
+                    remainder,
+                },
+            }),
+        )
+    } else {
+        let (output, records) = vm.tensor_bus_apply(input, meta, code, words[6], v1_transform)?;
+        (output, records, None)
+    };
+    #[cfg(not(feature = "llama-tiny"))]
+    let (output, records) = vm.tensor_bus_apply(input, meta, code, words[6], v1_transform)?;
+    #[cfg(all(feature = "tensor-cuda", feature = "llama-tiny"))]
+    if let Some(payload) = resident_payload {
+        vm.tensor_bus_resident_apply_v2(input, output, code, payload.matrix.w)?;
+    } else {
+        vm.tensor_bus_resident_apply(input, output, code)?;
+    }
+    #[cfg(all(feature = "tensor-cuda", not(feature = "llama-tiny")))]
     vm.tensor_bus_resident_apply(input, output, code)?;
     let mut output_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[3]);
     output_view.write([
@@ -330,6 +450,10 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
         tensor_bus_reg_ops(desc_ptr),
     );
     witness.tensor_bus_records = records;
+    #[cfg(feature = "llama-tiny")]
+    {
+        witness.tensor_resident_matmul = resident_payload;
+    }
     // Internal resident layers are bound by their own constrained ECALL and
     // RAM witnesses.  TensorBus records only the import/export boundary, so
     // no intermediate opaque handle becomes a TensorBus Core event.

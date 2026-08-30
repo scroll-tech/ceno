@@ -97,7 +97,15 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
         previous_key = Some(key);
     }
     for section in events.chunks_exact(TENSOR_BUS_SEGMENT_EVENTS) {
+        if section[0][2] != section[1][2] {
+            return Err(tensor_bus_error("TensorBus boundary ABI mismatch"));
+        }
         for (record, event) in section.iter().enumerate() {
+            let abi_supported = event[2] == ceno_emul::tensor::TENSOR_ABI_V1
+                || cfg!(feature = "llama-tiny") && event[2] == 2;
+            if !abi_supported {
+                return Err(tensor_bus_error("TensorBus ABI is unsupported"));
+            }
             let expected_code =
                 [TensorImportBeginV1Spec::CODE, TensorExportEndV1Spec::CODE][record];
             if event[1] != expected_code {

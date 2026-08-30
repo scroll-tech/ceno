@@ -19,7 +19,10 @@ use crate::{
     scheme::{
         constants::{MAX_NUM_INSTANCE_BITS, MAX_NUM_INSTANCES, NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
-        utils::{assign_group_evals, derive_ecc_bridge_claims, first_layer_selector_contexts},
+        utils::{
+            assign_group_evals, assign_matrix_group_evals, derive_ecc_bridge_claims,
+            first_layer_selector_contexts, matrix_selector_corrections,
+        },
     },
     structs::{
         ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VK_DIGEST_LEN,
@@ -185,10 +188,14 @@ pub(crate) fn eval_batched_main_frontload_terms<E: ExtensionField>(
     num_var_with_rotation: usize,
     terms: &[Term<Expression<E>, Expression<E>>],
 ) -> E {
+    let constant_term_scale =
+        frontload_constant_term_scale::<E>(global_in_point.len(), num_var_with_rotation);
     let evaluated_terms = terms
         .iter()
         .map(|term| {
-            let scalar = eval_by_expr_with_instance(&[], &[], &[], pi, challenges, &term.scalar);
+            let scalar = eval_by_expr_with_instance(&[], &[], &[], pi, challenges, &term.scalar)
+                .map_either(E::from, |value| value)
+                .into_inner();
             let product_wit_ids = term
                 .product
                 .iter()
@@ -199,7 +206,12 @@ pub(crate) fn eval_batched_main_frontload_terms<E: ExtensionField>(
                     *wit_id as usize
                 })
                 .collect_vec();
-            (scalar, product_wit_ids)
+            let scalar = if product_wit_ids.is_empty() {
+                scalar * constant_term_scale
+            } else {
+                scalar
+            };
+            (Either::Right(scalar), product_wit_ids)
         })
         .collect_vec();
 
@@ -235,6 +247,16 @@ pub(crate) fn eval_batched_main_frontload_terms<E: ExtensionField>(
         VirtualPolynomials::new_from_monimials(1, tail_point.len(), monomial_terms)
             .get_batched_polys();
     frontload::evaluate(&polys.remove(0), tail_point, &raw_mle_evals)
+}
+
+pub(crate) fn frontload_constant_term_scale<E: ExtensionField>(
+    global_num_vars: usize,
+    local_num_vars: usize,
+) -> E {
+    assert!(local_num_vars <= global_num_vars);
+    (0..global_num_vars - local_num_vars)
+        .fold(E::ONE, |power, _| power + power)
+        .inverse()
 }
 
 fn bind_active_tower_eval_round<E: ExtensionField>(
@@ -632,7 +654,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         // fork transcript to support chip concurrently proved
         let mut pending_main_constraints = Vec::with_capacity(num_proofs);
-        let mut matrix_opening_claims = None;
         let mut forked_transcripts = vec![BasicTranscript::new(b"fork"); num_proofs];
         for (index, ((circuit_index, proof), transcript)) in vm_proof
             .chip_proofs
@@ -691,22 +712,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             let grouped_tower_shape = proof.r_out_evals.len() == usize::from(num_reads > 0)
                 && proof.w_out_evals.len() == usize::from(num_writes > 0)
                 && proof.lk_out_evals.len() == usize::from(num_lks > 0);
-            let dense_tower_shape = proof.r_out_evals.len() == num_reads
-                && proof.w_out_evals.len() == num_writes
-                && proof.lk_out_evals.len() == num_lks;
-            if !grouped_tower_shape && !dense_tower_shape {
+            if !grouped_tower_shape {
                 return Err(ZKVMError::InvalidProof(
                     format!(
-                        "{shard_id}th shard tower evaluation length mismatch: ({}, {}, {}) is neither grouped ({}, {}, {}) nor dense ({}, {}, {})",
+                        "{shard_id}th shard grouped tower evaluation length mismatch: ({}, {}, {}) != ({}, {}, {})",
                         proof.r_out_evals.len(),
                         proof.w_out_evals.len(),
                         proof.lk_out_evals.len(),
                         usize::from(num_reads > 0),
                         usize::from(num_writes > 0),
                         usize::from(num_lks > 0),
-                        num_reads,
-                        num_writes,
-                        num_lks,
                     )
                         .into(),
                 ));
@@ -805,33 +820,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 &point_eval,
                 &challenges,
             )?;
-            match (circuit_name.as_str(), proof.matrix_reduction.as_ref()) {
-                ("TensorBatchedMatMulCore", Some(matrix_proof)) => {
-                    if matrix_opening_claims.is_some() {
-                        return Err(ZKVMError::InvalidProof(
-                            "multiple matrix Core reductions in one shard".into(),
-                        ));
-                    }
-                    let claims = crate::scheme::matrix_reduction::verify(
-                        matrix_proof,
-                        num_instance,
-                        transcript,
-                    )?;
-                    matrix_opening_claims = Some((*circuit_index, claims));
-                }
-                ("TensorBatchedMatMulCore", None) => {
-                    return Err(ZKVMError::InvalidProof(
-                        "matrix Core chip is missing its circuit-scoped reduction".into(),
-                    ));
-                }
-                (_, Some(_)) => {
-                    return Err(ZKVMError::InvalidProof(
-                        format!("non-matrix circuit {circuit_name} carries a matrix reduction")
-                            .into(),
-                    ));
-                }
-                (_, None) => {}
-            }
             pending_main_constraints.push(pending_main_constraint);
             let chip_prod_w = proof.w_out_evals.iter().flatten().copied().product::<E>();
             let chip_prod_r = proof.r_out_evals.iter().flatten().copied().product::<E>();
@@ -904,115 +892,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             }
         }
 
-        let expected_additional = usize::from(matrix_opening_claims.is_some()) * 3;
-        if vm_proof.additional_witness_openings.len() != expected_additional {
-            return Err(ZKVMError::InvalidProof(
-                format!(
-                    "additional WitIn opening count {} != expected {expected_additional}",
-                    vm_proof.additional_witness_openings.len()
-                )
-                .into(),
-            ));
-        }
-
-        if let Some((matrix_circuit_idx, claims)) = matrix_opening_claims.as_ref() {
-            let mut total_witin = 0usize;
-            let mut matrix_offset = None;
-            for circuit_idx in vm_proof.chip_proofs.keys() {
-                let name = self
-                    .vk
-                    .circuit_index_to_name
-                    .get(circuit_idx)
-                    .ok_or_else(|| {
-                        ZKVMError::VKNotFound(
-                            format!("circuit index {circuit_idx} missing from vk index map").into(),
-                        )
-                    })?;
-                let circuit_vk = self.vk.circuit_vks.get(name).ok_or_else(|| {
-                    ZKVMError::VKNotFound(format!("circuit {name} missing from vk").into())
-                })?;
-                if circuit_idx == matrix_circuit_idx {
-                    matrix_offset = Some(total_witin);
-                }
-                total_witin += circuit_vk.get_cs().num_witin();
-            }
-            let matrix_offset = matrix_offset.ok_or_else(|| {
-                ZKVMError::InvalidProof("matrix Core witness offset is missing".into())
-            })?;
-            for (round_idx, (opening, logical_point)) in vm_proof
-                .additional_witness_openings
-                .iter()
-                .zip(claims.points.iter())
-                .enumerate()
-            {
-                if opening.evals.len() != total_witin {
-                    return Err(ZKVMError::InvalidProof(
-                        format!(
-                            "matrix WitIn round {round_idx} eval count {} != {total_witin}",
-                            opening.evals.len()
-                        )
-                        .into(),
-                    ));
-                }
-                if opening.point.len() < logical_point.len()
-                    || opening.point[..logical_point.len()] != logical_point[..]
-                    || opening.point[logical_point.len()..]
-                        .iter()
-                        .any(|value| *value != E::ZERO)
-                {
-                    return Err(ZKVMError::InvalidProof(
-                        format!("matrix WitIn round {round_idx} point/tail mismatch").into(),
-                    ));
-                }
-            }
-            let [a_eval, w_eval, q_eval, r_eval] = claims.expected_evals;
-            let expected_columns = [
-                (0usize, matrix_offset + 0, a_eval),
-                (1usize, matrix_offset + 3, w_eval),
-                (2usize, matrix_offset + 6, q_eval),
-                (2usize, matrix_offset + 9, r_eval),
-            ];
-            for (round_idx, eval_idx, expected) in expected_columns {
-                let got = vm_proof.additional_witness_openings[round_idx]
-                    .evals
-                    .get(eval_idx)
-                    .ok_or_else(|| {
-                        ZKVMError::InvalidProof(
-                            format!("matrix witness eval index {eval_idx} is missing").into(),
-                        )
-                    })?;
-                if *got != expected {
-                    return Err(ZKVMError::InvalidProof(
-                        format!("matrix witness opening mismatch at column {eval_idx}").into(),
-                    ));
-                }
-            }
-        }
-
-        // Verify the ordinary WitIn round, followed by exactly three optional
-        // matrix-derived rounds against the same shard commitment.
-        let witin_trace_shapes = witin_openings
-            .iter()
-            .map(|(num_vars, (_, trace_evals))| (*num_vars, trace_evals.len()))
-            .collect_vec();
         let mut rounds = vec![(vm_proof.witin_commit.clone(), witin_openings)];
-        rounds.extend(vm_proof.additional_witness_openings.iter().map(|opening| {
-            let mut offset = 0usize;
-            let trace_openings = witin_trace_shapes
-                .iter()
-                .map(|(num_vars, width)| {
-                    let evals = opening.evals[offset..offset + width].to_vec();
-                    offset += width;
-                    (*num_vars, (opening.point[..*num_vars].to_vec(), evals))
-                })
-                .collect_vec();
-            assert_eq!(
-                offset,
-                opening.evals.len(),
-                "matrix witness evals do not match verifier trace widths"
-            );
-            (vm_proof.witin_commit.clone(), trace_openings)
-        }));
 
         if let Some(fixed_commit) = self.vk.fixed_commit.as_ref()
             && shard_id == 0
@@ -1078,7 +958,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             cs.w_expressions.len() + cs.w_table_expressions.len(),
             cs.lk_expressions.len() + cs.lk_table_expressions.len(),
         );
-        let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
         let next_pow2_instance = next_pow2_instance_padding(num_instances);
         let mut log2_num_instances = ceil_log2(next_pow2_instance);
         if composed_cs.has_ecc_ops() {
@@ -1090,33 +969,34 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let grouped_tower_shape = proof.r_out_evals.len() == usize::from(r_counts_per_instance > 0)
             && proof.w_out_evals.len() == usize::from(w_counts_per_instance > 0)
             && proof.lk_out_evals.len() == usize::from(lk_counts_per_instance > 0);
-        let tower_num_variables = if grouped_tower_shape {
-            let group_num_vars =
-                |op_count: usize| num_var_with_rotation + ceil_log2(op_count.next_power_of_two());
-            let prod_num_variables = proof
-                .r_out_evals
-                .iter()
-                .map(|_| group_num_vars(r_counts_per_instance))
-                .chain(
-                    proof
-                        .w_out_evals
-                        .iter()
-                        .map(|_| group_num_vars(w_counts_per_instance)),
-                )
-                .collect_vec();
-            let logup_num_variables = proof
-                .lk_out_evals
-                .iter()
-                .map(|_| group_num_vars(lk_counts_per_instance))
-                .collect_vec();
-            prod_num_variables
-                .iter()
-                .chain(logup_num_variables.iter())
-                .copied()
-                .collect_vec()
-        } else {
-            vec![num_var_with_rotation; num_batched]
-        };
+        if !grouped_tower_shape {
+            return Err(ZKVMError::InvalidProof(
+                format!("{_name} proof does not use grouped tower outputs").into(),
+            ));
+        }
+        let group_num_vars =
+            |op_count: usize| num_var_with_rotation + ceil_log2(op_count.next_power_of_two());
+        let prod_num_variables = proof
+            .r_out_evals
+            .iter()
+            .map(|_| group_num_vars(r_counts_per_instance))
+            .chain(
+                proof
+                    .w_out_evals
+                    .iter()
+                    .map(|_| group_num_vars(w_counts_per_instance)),
+            )
+            .collect_vec();
+        let logup_num_variables = proof
+            .lk_out_evals
+            .iter()
+            .map(|_| group_num_vars(lk_counts_per_instance))
+            .collect_vec();
+        let tower_num_variables = prod_num_variables
+            .iter()
+            .chain(logup_num_variables.iter())
+            .copied()
+            .collect_vec();
 
         // constrain log2_num_instances within max length
         let check_table_spec_vars = |table_spec: &crate::circuit_builder::SetTableSpec,
@@ -1226,6 +1106,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             shard_ec_sum = Some(ecc_proof.sum.clone());
         }
 
+        let gkr_circuit = gkr_circuit.as_ref().ok_or_else(|| {
+            ZKVMError::InvalidProof(format!("{_name} missing gkr circuit in vk").into())
+        })?;
+        let first_layer = gkr_circuit.layers.first().ok_or_else(|| {
+            ZKVMError::InvalidProof(format!("{_name} empty gkr circuit layers").into())
+        })?;
         if rt_tower.len() < num_var_with_rotation {
             return Err(ZKVMError::InvalidProof(
                 format!(
@@ -1237,13 +1123,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             ));
         }
         let rt_main = rt_tower[rt_tower.len() - num_var_with_rotation..].to_vec();
-
-        let gkr_circuit = gkr_circuit.as_ref().ok_or_else(|| {
-            ZKVMError::InvalidProof(format!("{_name} missing gkr circuit in vk").into())
-        })?;
-        let first_layer = gkr_circuit.layers.first().ok_or_else(|| {
-            ZKVMError::InvalidProof(format!("{_name} empty gkr circuit layers").into())
-        })?;
         let selector_ctxs = first_layer_selector_contexts(
             composed_cs,
             gkr_circuit,
@@ -1253,18 +1132,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         let mut out_evals =
             vec![PointAndEval::new(rt_main.clone(), E::ZERO); gkr_circuit.n_evaluations];
-        if proof.main_out_evals.len() > gkr_circuit.n_evaluations {
+        if !proof.main_out_evals.is_empty() {
             return Err(ZKVMError::InvalidProof(
                 format!(
-                    "{_name} main output eval length {} exceeds gkr output length {}",
+                    "{_name} main output evaluations must be empty, got {}",
                     proof.main_out_evals.len(),
-                    gkr_circuit.n_evaluations,
                 )
                 .into(),
             ));
-        }
-        for (out_eval, eval) in out_evals.iter_mut().zip(proof.main_out_evals.iter()) {
-            out_eval.eval = *eval;
         }
 
         if !first_layer.rotation_exprs.1.is_empty() {
@@ -1320,6 +1195,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 &rotation_claims.target_evals,
                 &rotation_claims.rotation_points.origin,
             );
+        }
+
+        match (_name, proof.matrix_reduction.as_ref()) {
+            ("TensorBatchedMatMulCore", Some(matrix_proof)) => {
+                let claims = crate::scheme::matrix_reduction::verify(
+                    matrix_proof,
+                    proof.num_instances.iter().sum(),
+                    transcript,
+                )?;
+                assign_matrix_group_evals(first_layer, &mut out_evals, &claims)
+                    .map_err(|message| ZKVMError::InvalidProof(message.into()))?;
+            }
+            ("TensorBatchedMatMulCore", None) => {
+                return Err(ZKVMError::InvalidProof(
+                    "matrix Core chip is missing its circuit-scoped reduction".into(),
+                ));
+            }
+            (_, Some(_)) => {
+                return Err(ZKVMError::InvalidProof(
+                    format!("non-matrix circuit {_name} carries a matrix reduction").into(),
+                ));
+            }
+            (_, None) => {
+                if first_layer.matrix_selector_group_indices().is_some() {
+                    return Err(ZKVMError::InvalidProof(
+                        format!("non-matrix circuit {_name} carries matrix first-layer groups")
+                            .into(),
+                    ));
+                }
+            }
         }
 
         let pi = cs
@@ -1544,6 +1449,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     .as_ref()
                     .unwrap(),
             );
+            let grouped_evals = pending_layer
+                .eval_and_dedup_points
+                .iter()
+                .map(|(evals, _)| evals.clone())
+                .collect_vec();
+            for (wit_id, coefficient) in matrix_selector_corrections(
+                pending_layer.layer,
+                &grouped_evals,
+                &alpha_pows[pending_layer.alpha_start
+                    ..pending_layer.alpha_start + pending_layer.layer.exprs.len()],
+            )
+            .map_err(|message| ZKVMError::InvalidProof(message.into()))?
+            {
+                got_claim += coefficient
+                    * layer_evals
+                        [pending_layer.layer.n_witin + pending_layer.layer.n_fixed + wit_id];
+            }
 
             results.push((
                 in_point,

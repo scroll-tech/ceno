@@ -1,6 +1,6 @@
 use super::rv32im::EmuContext;
 use crate::{
-    PC_STEP_SIZE, Program, WORD_SIZE,
+    Cycle, PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     dense_addr_space::PackedMemory,
     platform::Platform,
@@ -55,6 +55,7 @@ pub struct VMState<T: Tracer = FullTracer> {
     /// operation.  This is routing metadata only until per-tile hint-read AIR
     /// is introduced; all operations in one segment must nevertheless agree.
     tensor_bus_hint_base: Option<u32>,
+    tensor_bus_import_cycle: Option<Cycle>,
     #[cfg(feature = "tensor-cuda")]
     tensor_bus_resident: Option<TensorBusResidentSession>,
     next_tensor_bus_segment_id: u64,
@@ -171,6 +172,7 @@ impl<T: Tracer> VMState<T> {
             tensor_witness_provider: None,
             tensor_bus_segment: None,
             tensor_bus_hint_base: None,
+            tensor_bus_import_cycle: None,
             #[cfg(feature = "tensor-cuda")]
             tensor_bus_resident: None,
             next_tensor_bus_segment_id: 1,
@@ -233,6 +235,7 @@ impl<T: Tracer> VMState<T> {
         &mut self,
         meta: TensorBusMeta,
         words: Vec<i32>,
+        import_cycle: Cycle,
     ) -> Result<(TensorHandle, Vec<TensorBusRecord>)> {
         let segment_id = self.next_tensor_bus_segment_id;
         self.next_tensor_bus_segment_id = self
@@ -240,6 +243,7 @@ impl<T: Tracer> VMState<T> {
             .checked_add(1)
             .ok_or_else(|| anyhow!("TensorBus segment id overflow"))?;
         self.tensor_bus_begin(segment_id)?;
+        self.tensor_bus_import_cycle = Some(import_cycle);
         self.tensor_bus_import(meta, words)
     }
 
@@ -299,6 +303,41 @@ impl<T: Tracer> VMState<T> {
                 session.phase = TensorBusResidentPhase::Attention;
             }
             _ => anyhow::bail!("TensorBus CUDA operator order mismatch"),
+        }
+        session.handle = output;
+        Ok(())
+    }
+
+    #[cfg(all(feature = "tensor-cuda", feature = "llama-tiny"))]
+    pub(crate) fn tensor_bus_resident_apply_v2(
+        &mut self,
+        input: TensorHandle,
+        output: TensorHandle,
+        operator: u32,
+        weights: [[i8; 2]; 2],
+    ) -> Result<()> {
+        let session = self
+            .tensor_bus_resident
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus CUDA operator is outside a segment"))?;
+        ensure!(
+            session.handle == input,
+            "TensorBus CUDA handle continuity mismatch"
+        );
+        match (session.phase, operator) {
+            (TensorBusResidentPhase::Imported, crate::tensor::TENSOR_HANDLE_ATTENTION_V1) => {
+                session
+                    .provider
+                    .matmul_2x2(&mut session.witness, weights, true)?;
+                session.phase = TensorBusResidentPhase::Attention;
+            }
+            (TensorBusResidentPhase::Attention, crate::tensor::TENSOR_HANDLE_FFN_V1) => {
+                session
+                    .provider
+                    .matmul_2x2(&mut session.witness, weights, false)?;
+                session.phase = TensorBusResidentPhase::Ffn;
+            }
+            _ => anyhow::bail!("TensorBus CUDA v2 operator order mismatch"),
         }
         session.handle = output;
         Ok(())
@@ -371,6 +410,12 @@ impl<T: Tracer> VMState<T> {
         Ok((words, records))
     }
 
+    #[cfg(feature = "llama-tiny")]
+    pub(crate) fn tensor_bus_current_import_cycle(&self) -> Result<Cycle> {
+        self.tensor_bus_import_cycle
+            .ok_or_else(|| anyhow!("TensorBus segment import cycle is unavailable"))
+    }
+
     pub(crate) fn tensor_bus_apply<F>(
         &mut self,
         input: TensorHandle,
@@ -402,6 +447,42 @@ impl<T: Tracer> VMState<T> {
         Ok((handle, segment.records()[start..].to_vec()))
     }
 
+    #[cfg(feature = "llama-tiny")]
+    pub(crate) fn tensor_bus_apply_v2<F>(
+        &mut self,
+        input: TensorHandle,
+        meta: TensorBusMeta,
+        operator: u32,
+        transform: F,
+    ) -> Result<(
+        TensorHandle,
+        Vec<TensorBusRecord>,
+        Vec<i32>,
+        Vec<i32>,
+        Cycle,
+    )>
+    where
+        F: FnOnce(&[i32]) -> Result<Vec<i32>>,
+    {
+        let import_cycle = self
+            .tensor_bus_import_cycle
+            .ok_or_else(|| anyhow!("TensorBus v2 operator is outside a segment"))?;
+        let segment = self
+            .tensor_bus_segment
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus operator is outside a segment"))?;
+        let start = segment.records().len();
+        let (handle, input_words, output_words) =
+            segment.apply_with_values(input, meta, operator, transform)?;
+        Ok((
+            handle,
+            segment.records()[start..].to_vec(),
+            input_words,
+            output_words,
+            import_cycle,
+        ))
+    }
+
     pub(crate) fn tensor_bus_end(&mut self) -> Result<()> {
         let segment = self
             .tensor_bus_segment
@@ -409,6 +490,7 @@ impl<T: Tracer> VMState<T> {
             .ok_or_else(|| anyhow!("TensorBus segment is not active"))?;
         self.completed_tensor_bus_records.extend(segment.end()?);
         self.tensor_bus_hint_base = None;
+        self.tensor_bus_import_cycle = None;
         #[cfg(feature = "tensor-cuda")]
         ensure!(
             self.tensor_bus_resident.is_none(),

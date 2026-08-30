@@ -45,7 +45,6 @@ use crate::{
 type CreateTableProof<'a, PB> = (
     ZKVMChipProof<<PB as ProverBackend>::E>,
     MainConstraintJob<'a, PB>,
-    Option<[Point<<PB as ProverBackend>::E>; 3]>,
 );
 
 #[cfg(feature = "gpu")]
@@ -243,14 +242,14 @@ where
             cs, input, &rt_main, challenges, transcript,
         )
     })?;
-    let matrix_opening_points = if task.circuit_name == "TensorBatchedMatMulCore" {
+    let matrix_reduction = if task.circuit_name == "TensorBatchedMatMulCore" {
         let (matrix_proof, claims) = crate::scheme::matrix_reduction::prove(
             &input.witness,
             input_num_instances.iter().sum(),
             crate::scheme::matrix_reduction::MATRIX_REDUCTION_COLUMNS,
             transcript,
         )?;
-        Some((matrix_proof, claims.points))
+        Some((matrix_proof, claims))
     } else {
         None
     };
@@ -273,9 +272,7 @@ where
             rotation_proof: rotation.clone().map(|r| r.proof),
             tower_proof,
             ecc_proof: ecc_proof.clone(),
-            matrix_reduction: matrix_opening_points
-                .as_ref()
-                .map(|(proof, _)| proof.clone()),
+            matrix_reduction: matrix_reduction.as_ref().map(|(proof, _)| proof.clone()),
             num_instances: input_num_instances,
         },
         MainConstraintJob {
@@ -288,11 +285,11 @@ where
             rt_tower: rt_main,
             main_out_evals: Vec::new(),
             rotation,
+            matrix_claims: matrix_reduction.map(|(_, claims)| claims),
             ecc_proof,
             challenges: *challenges,
             cs,
         },
-        matrix_opening_points.map(|(_, points)| points),
     ))
 }
 
@@ -632,8 +629,7 @@ impl<
 
             // Phase 3: Collect results
             let collect_results_span = entered_span!("collect_chip_results", profiling_1 = true);
-            let (chip_proofs, main_constraint_jobs, matrix_opening_points) =
-                Self::collect_chip_results(results);
+            let (chip_proofs, main_constraint_jobs) = Self::collect_chip_results(results);
             exit_span!(collect_results_span);
             exit_span!(main_proofs_span);
 
@@ -658,15 +654,13 @@ impl<
             // batch opening pcs
             // generate static info from prover key for expected num variable
             let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
-            let (mpcs_opening_proof, additional_witness_openings) =
-                info_span!("[ceno] pcs_opening").in_scope(|| {
-                self.device.open_with_additional_witness_points(
+            let mpcs_opening_proof = info_span!("[ceno] pcs_opening").in_scope(|| {
+                self.device.open(
                     witness_data,
                     self.get_device_proving_key(shard_ctx)
                         .map(|dpk| dpk.pcs_data.clone()),
                     points,
                     evaluations,
-                    matrix_opening_points,
                     &mut transcript,
                 )
             });
@@ -677,7 +671,6 @@ impl<
                 chip_proofs,
                 main_constraint_proof,
                 witin_commit,
-                additional_witness_openings,
                 mpcs_opening_proof,
             );
 
@@ -754,7 +747,7 @@ impl<
 
                         let mut gpu_task = cast_gpu_chip_task::<E, PCS, PB>(task);
                         prepare_gpu_chip_input(&mut gpu_task, gpu_wd.0);
-                        let (proof, main_constraint_job, matrix_opening_points) =
+                        let (proof, main_constraint_job) =
                             create_gpu_chip_proof::<E, PCS>(&mut gpu_task, transcript)?;
                         let gpu_result = ChipTaskResult {
                             task_id: gpu_task.task_id,
@@ -765,7 +758,6 @@ impl<
                                 fixed_in_evals: vec![],
                             },
                             input_opening_point: vec![],
-                            matrix_opening_points,
                             main_constraint_job: Some(main_constraint_job),
                             has_witness_or_fixed: gpu_task.has_witness_or_fixed,
                         };
@@ -793,8 +785,7 @@ impl<
             // Prepare: deferred extraction for GPU, no-op for CPU
             self.device.prepare_chip_input(&mut task, witness_data);
 
-            let (proof, main_constraint_job, matrix_opening_points) =
-                self.create_chip_proof(&mut task, transcript)?;
+            let (proof, main_constraint_job) = self.create_chip_proof(&mut task, transcript)?;
 
             Ok(ChipTaskResult {
                 task_id: task.task_id,
@@ -805,7 +796,6 @@ impl<
                     fixed_in_evals: vec![],
                 },
                 input_opening_point: vec![],
-                matrix_opening_points,
                 main_constraint_job: Some(main_constraint_job),
                 has_witness_or_fixed: task.has_witness_or_fixed,
             })
@@ -856,6 +846,7 @@ impl<
                     .prove_tower_relation(cs, input, &records, challenges, transcript)
             });
         exit_span!(span);
+
         drop(records);
 
         assert!(
@@ -877,14 +868,14 @@ impl<
                 .prove_rotation(cs, input, &rt_main, challenges, transcript)
         })?;
 
-        let matrix_opening_points = if task.circuit_name == "TensorBatchedMatMulCore" {
+        let matrix_reduction = if task.circuit_name == "TensorBatchedMatMulCore" {
             let (matrix_proof, claims) = crate::scheme::matrix_reduction::prove(
                 &input.witness,
                 input_num_instances.iter().sum(),
                 crate::scheme::matrix_reduction::MATRIX_REDUCTION_COLUMNS,
                 transcript,
             )?;
-            Some((matrix_proof, claims.points))
+            Some((matrix_proof, claims))
         } else {
             None
         };
@@ -929,9 +920,7 @@ impl<
                 rotation_proof: rotation.clone().map(|r| r.proof),
                 tower_proof,
                 ecc_proof: ecc_proof.clone(),
-                matrix_reduction: matrix_opening_points
-                    .as_ref()
-                    .map(|(proof, _)| proof.clone()),
+                matrix_reduction: matrix_reduction.as_ref().map(|(proof, _)| proof.clone()),
                 num_instances: input_num_instances,
             },
             MainConstraintJob {
@@ -944,11 +933,11 @@ impl<
                 rt_tower: rt_main,
                 main_out_evals: Vec::new(),
                 rotation,
+                matrix_claims: matrix_reduction.map(|(_, claims)| claims),
                 ecc_proof,
                 challenges: *challenges,
                 cs,
             },
-            matrix_opening_points.map(|(_, points)| points),
         ))
     }
 
@@ -1135,11 +1124,9 @@ impl<
     ) -> (
         BTreeMap<usize, ZKVMChipProof<E>>,
         Vec<MainConstraintJob<'a, PB>>,
-        Vec<Point<E>>,
     ) {
         let mut chip_proofs = BTreeMap::new();
         let mut main_constraint_jobs = Vec::new();
-        let mut matrix_opening_points = Vec::new();
 
         for result in results {
             tracing::trace!(
@@ -1151,13 +1138,6 @@ impl<
             if let Some(job) = result.main_constraint_job {
                 main_constraint_jobs.push(job);
             }
-            if let Some(points) = result.matrix_opening_points {
-                assert!(
-                    matrix_opening_points.is_empty(),
-                    "only one matrix Core proof is supported per shard"
-                );
-                matrix_opening_points.extend(points);
-            }
             let prev = chip_proofs.insert(result.circuit_idx, result.proof);
             assert!(
                 prev.is_none(),
@@ -1166,7 +1146,7 @@ impl<
             );
         }
 
-        (chip_proofs, main_constraint_jobs, matrix_opening_points)
+        (chip_proofs, main_constraint_jobs)
     }
 }
 

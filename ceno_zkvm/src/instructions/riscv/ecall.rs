@@ -33,7 +33,7 @@ pub use tensor_attention::{
     TensorAttentionReducedCoreInstruction, TensorAttentionReducedEcallInstruction,
 };
 #[cfg(feature = "llama-tiny")]
-pub use tensor_batched_matmul::TensorBatchedMatMulCoreInstruction;
+pub use tensor_batched_matmul::{TensorBatchedMatMulCoreInstruction, TensorHintRefCoreInstruction};
 #[cfg(feature = "llama-tiny")]
 pub use tensor_batched_matmul_ecall::TensorBatchedMatMul2x2EcallInstruction;
 pub use tensor_block::{

@@ -221,6 +221,7 @@ pub struct MainConstraintJob<'a, PB: ProverBackend> {
     pub rt_tower: Point<PB::E>,
     pub main_out_evals: Vec<PB::E>,
     pub rotation: Option<RotationProverOutput<PB::E>>,
+    pub matrix_claims: Option<crate::scheme::matrix_reduction::MatrixOpeningClaims<PB::E>>,
     pub ecc_proof: Option<EccQuarkProof<PB::E>>,
     pub challenges: [PB::E; 2],
     pub cs: &'a ComposedConstrainSystem<PB::E>,
@@ -291,20 +292,6 @@ pub trait OpeningProver<PB: ProverBackend> {
         evals: Vec<Vec<Vec<PB::E>>>,
         transcript: &mut (impl Transcript<PB::E> + 'static),
     ) -> <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Proof;
-
-    #[allow(clippy::too_many_arguments)]
-    fn open_with_additional_witness_points(
-        &self,
-        witness_data: PB::PcsData,
-        fixed_data: Option<Arc<PB::PcsData>>,
-        points: Vec<Point<PB::E>>,
-        evals: Vec<Vec<Vec<PB::E>>>,
-        additional_witness_points: Vec<Point<PB::E>>,
-        transcript: &mut (impl Transcript<PB::E> + 'static),
-    ) -> (
-        <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Proof,
-        Vec<crate::scheme::AdditionalWitnessOpening<PB::E>>,
-    );
 }
 
 pub struct DeviceProvingKey<'a, PB: ProverBackend> {

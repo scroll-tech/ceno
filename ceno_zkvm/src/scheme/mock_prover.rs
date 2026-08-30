@@ -990,6 +990,7 @@ Hints:
 
         let mut lkm_tables = LkMultiplicityRaw::<E>::default();
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
+        let has_shard_gpu_lk = witnesses.lk_mlts().contains_key("__gpu_shard_lk");
 
         // Process all circuits.
         for (circuit_name, chip_inputs) in &witnesses.witnesses {
@@ -1047,7 +1048,13 @@ Hints:
                 );
                 // Assert opcode and check single opcode lk multiplicity
                 // Also combine multiplicity in lkm_opcodes
-                let lkm_from_assignments = witnesses.get_lk_mlt(circuit_name).cloned();
+                // Fused GPU replay records lookup multiplicity once for the
+                // shard, rather than duplicating it across per-chip entries.
+                // The global table-vs-opcode comparison below still checks the
+                // complete multiplicity inferred from these chip constraints.
+                let lkm_from_assignments = (!has_shard_gpu_lk)
+                    .then(|| witnesses.get_lk_mlt(circuit_name).cloned())
+                    .flatten();
 
                 match Self::run_maybe_challenge_with_table(
                     cs,
@@ -1224,6 +1231,9 @@ Hints:
                         let mut records = vec![];
                         let mut writes_within_expr_dedup = HashSet::new();
                         for (row, record_rlc) in enumerate(write_rlc_records) {
+                            if $ram_type == RAMType::Custom && record_rlc == E::ZERO {
+                                continue;
+                            }
                             // TODO: report error
                             assert_eq!(
                                 writes_within_expr_dedup.insert(record_rlc),
@@ -1354,6 +1364,9 @@ Hints:
                         let mut records = vec![];
                         let mut reads_within_expr_dedup = HashSet::new();
                         for (row, record) in enumerate(read_records) {
+                            if $ram_type == RAMType::Custom && record == E::ZERO {
+                                continue;
+                            }
                             // TODO: return error
                             assert_eq!(
                                 reads_within_expr_dedup.insert(record),

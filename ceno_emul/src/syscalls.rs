@@ -109,6 +109,13 @@ pub struct SyscallWitness {
     /// Tiny-only complete matrix payload consumed by the batched Core replay.
     #[cfg(feature = "llama-tiny")]
     pub tensor_batched_matmul_2x2: Option<crate::tensor::TensorBatchedMatMul2x2Witness>,
+    /// V2 resident operator payload consumed by Tensor-space, HintRef, and the
+    /// shared batched-matrix Core.
+    #[cfg(feature = "llama-tiny")]
+    pub tensor_resident_matmul: Option<crate::tensor::TensorResidentMatMulWitness>,
+    /// V2 import/export value boundary for the Tensor-space product relation.
+    #[cfg(feature = "llama-tiny")]
+    pub tensor_resident_boundary: Option<crate::tensor::TensorResidentBoundaryWitness>,
 }
 
 impl SyscallWitness {
@@ -123,6 +130,10 @@ impl SyscallWitness {
             tensor_bus_event_cycle: None,
             #[cfg(feature = "llama-tiny")]
             tensor_batched_matmul_2x2: None,
+            #[cfg(feature = "llama-tiny")]
+            tensor_resident_matmul: None,
+            #[cfg(feature = "llama-tiny")]
+            tensor_resident_boundary: None,
         }
     }
 }

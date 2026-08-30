@@ -27,6 +27,10 @@ pub const TENSOR_EXPORT_END_V1: u32 = 0x00ff_000c;
 pub const TENSOR_HANDLE_ATTENTION_V1: u32 = 0x00ff_000d;
 pub const TENSOR_HANDLE_FFN_V1: u32 = 0x00ff_000e;
 pub const TENSOR_ABI_V1: u32 = 1;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_ABI_V2: u32 = 2;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_PROFILE_LLAMA_TINY: u32 = 1;
 
 /// Opaque TensorBus value identity. Device pointers never enter the guest ABI.
 #[repr(C, align(8))]
@@ -90,6 +94,27 @@ pub struct TensorHandleOpDescV1 {
 
 const _: () = assert!(core::mem::size_of::<TensorHandleOpDescV1>() == 32);
 
+/// Logical-weight handle operator. It deliberately occupies the same eight
+/// words and uses the same attention/FFN ecall numbers as v1. Weight addresses
+/// never enter the guest ABI: `(profile, layer, operator role)` selects the
+/// proof-side HintRef instead.
+#[cfg(feature = "llama-tiny")]
+#[repr(C, align(32))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TensorHandleOpDescV2 {
+    pub abi_version: u32,
+    pub flags: u32,
+    pub input_handle_ptr: u32,
+    pub output_handle_ptr: u32,
+    pub meta_ptr: u32,
+    pub meta_len: u32,
+    pub profile: u32,
+    pub layer: u32,
+}
+
+#[cfg(feature = "llama-tiny")]
+const _: () = assert!(core::mem::size_of::<TensorHandleOpDescV2>() == 32);
+
 const _: () = assert!(core::mem::size_of::<TensorImportBeginDescV1>() == 32);
 const _: () = assert!(core::mem::size_of::<TensorExportEndDescV1>() == 32);
 
@@ -145,6 +170,28 @@ pub unsafe fn tensor_handle_ffn_v1(desc: &TensorHandleOpDescV1) {
     unsafe {
         tensor_segment_ecall_v1(
             desc as *const TensorHandleOpDescV1 as *const u8,
+            TENSOR_HANDLE_FFN_V1,
+        )
+    }
+}
+
+#[cfg(feature = "llama-tiny")]
+#[inline(always)]
+pub unsafe fn tensor_handle_attention_v2(desc: &TensorHandleOpDescV2) {
+    unsafe {
+        tensor_segment_ecall_v1(
+            desc as *const TensorHandleOpDescV2 as *const u8,
+            TENSOR_HANDLE_ATTENTION_V1,
+        )
+    }
+}
+
+#[cfg(feature = "llama-tiny")]
+#[inline(always)]
+pub unsafe fn tensor_handle_ffn_v2(desc: &TensorHandleOpDescV2) {
+    unsafe {
+        tensor_segment_ecall_v1(
+            desc as *const TensorHandleOpDescV2 as *const u8,
             TENSOR_HANDLE_FFN_V1,
         )
     }

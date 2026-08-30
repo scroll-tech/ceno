@@ -161,6 +161,26 @@ impl TensorBusSegment {
         )
     }
 
+    pub fn apply_with_values<F>(
+        &mut self,
+        input: TensorHandle,
+        output_meta: TensorBusMeta,
+        operator: u32,
+        transform: F,
+    ) -> Result<(TensorHandle, Vec<i32>, Vec<i32>)>
+    where
+        F: FnOnce(&[i32]) -> Result<Vec<i32>>,
+    {
+        let input_words = self.read(input, TensorBusSyscall::Operator(operator))?;
+        let output_words = transform(&input_words)?;
+        let output = self.write(
+            output_meta,
+            output_words.clone(),
+            TensorBusSyscall::Operator(operator),
+        )?;
+        Ok((output, input_words, output_words))
+    }
+
     pub fn export(&mut self, input: TensorHandle) -> Result<Vec<i32>> {
         self.read(input, TensorBusSyscall::Export)
     }

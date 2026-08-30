@@ -91,16 +91,6 @@ pub struct MatrixReductionProof<E: ExtensionField> {
     pub final_evals: [E; 2],
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned"
-))]
-pub struct AdditionalWitnessOpening<E: ExtensionField> {
-    pub point: Vec<E>,
-    pub evals: Vec<E>,
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
@@ -240,8 +230,6 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
     pub main_constraint_proof: MainConstraintProof<E>,
     pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
-    /// Generic extra WitIn rounds against `witin_commit`, in transcript order.
-    pub additional_witness_openings: Vec<AdditionalWitnessOpening<E>>,
     pub opening_proof: PCS::Proof,
 }
 
@@ -251,7 +239,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
         main_constraint_proof: MainConstraintProof<E>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
-        additional_witness_openings: Vec<AdditionalWitnessOpening<E>>,
         opening_proof: PCS::Proof,
     ) -> Self {
         Self {
@@ -259,7 +246,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
             chip_proofs,
             main_constraint_proof,
             witin_commit,
-            additional_witness_openings,
             opening_proof,
         }
     }
