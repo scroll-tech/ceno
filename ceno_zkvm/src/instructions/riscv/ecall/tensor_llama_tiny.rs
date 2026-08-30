@@ -1,8 +1,10 @@
 //! Complete one-layer `llama-tiny` semantic Core family.
 //!
-//! The eight circuits deliberately share one row shape.  They are separate
-//! chips because a chip has one circuit-wide lookup selector; consequently
-//! every selected row in a lookup chip has the same lookup arity and table.
+//! The operation circuits deliberately share one narrow row shape. They are
+//! separate chips because a chip has one circuit-wide lookup selector;
+//! consequently every selected row in a lookup chip has the same lookup arity
+//! and table. Seven ordinal bits and small chip-local stages replace the former
+//! 112 circuit-wide one-hot columns.
 
 use std::{collections::BTreeMap, marker::PhantomData};
 
@@ -35,45 +37,119 @@ pub const LLAMA_TINY_ATTENTION_ROWS: usize = 76;
 pub const LLAMA_TINY_FFN_ROWS: usize = 36;
 pub const LLAMA_TINY_TOTAL_ROWS: usize = LLAMA_TINY_ATTENTION_ROWS + LLAMA_TINY_FFN_ROWS;
 
-const FAMILY_ATTENTION_LINEAR: usize = 0;
-const FAMILY_ATTENTION_RMS: usize = 1;
-const FAMILY_ATTENTION_LOW_DIGIT: usize = 2;
-const FAMILY_ATTENTION_EXP3: usize = 3;
-const FAMILY_ATTENTION_EXP4: usize = 4;
-const FAMILY_FFN_LINEAR: usize = 5;
-const FAMILY_FFN_RMS: usize = 6;
-const FAMILY_FFN_SWIGLU: usize = 7;
+const CHIP_RMS_ARITHMETIC: usize = 0;
+const CHIP_RMS_LOOKUP: usize = 1;
+const CHIP_MATMUL_BRIDGE: usize = 2;
+const CHIP_ROPE: usize = 3;
+const CHIP_SOFTMAX_ARITHMETIC: usize = 4;
+const CHIP_SOFTMAX_LOW_DIGIT: usize = 5;
+const CHIP_SOFTMAX_EXP3: usize = 6;
+const CHIP_SOFTMAX_EXP4: usize = 7;
+const CHIP_RESIDUAL: usize = 8;
+const CHIP_SWIGLU_LOOKUP: usize = 9;
+const CHIP_SWIGLU_ARITHMETIC: usize = 10;
 
-const FAMILY_ROWS: [usize; 8] = [62, 2, 4, 4, 4, 30, 2, 4];
-const ATTENTION_LINEAR_ORDINALS: [usize; 62] = [
-    0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
-    28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
-    64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75,
+// These values are part of the private-state record and remain byte-for-byte
+// compatible with the complete-layer proof introduced before the chip split.
+const STATE_ATTENTION_LINEAR: usize = 0;
+const STATE_ATTENTION_RMS: usize = 1;
+const STATE_ATTENTION_LOW_DIGIT: usize = 2;
+const STATE_ATTENTION_EXP3: usize = 3;
+const STATE_ATTENTION_EXP4: usize = 4;
+const STATE_FFN_LINEAR: usize = 5;
+const STATE_FFN_RMS: usize = 6;
+const STATE_FFN_SWIGLU: usize = 7;
+
+const ORDINAL_BITS: usize = 7;
+const LOCAL_INDEX_BITS: usize = 2;
+const MAX_LOCAL_STAGES: usize = 8;
+
+const RMS_ARITHMETIC_ORDINALS: [usize; 20] = [
+    0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 76, 77, 78, 79, 82, 83, 84, 85, 86, 87,
 ];
-const FFN_LINEAR_ORDINALS: [usize; 30] = [
-    76, 77, 78, 79, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 104,
-    105, 106, 107, 108, 109, 110, 111,
+const RMS_LOOKUP_ORDINALS: [usize; 4] = [4, 5, 80, 81];
+const MATMUL_BRIDGE_ORDINALS: [usize; 32] = [
+    12, 13, 14, 15, 20, 21, 22, 23, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 88, 89, 90, 91,
+    92, 93, 94, 95, 96, 97, 98, 99,
 ];
-const FAMILY_ORDINALS: [&[usize]; 8] = [
-    &ATTENTION_LINEAR_ORDINALS,
-    &[4, 5],
-    &[40, 41, 42, 43],
-    &[44, 45, 46, 47],
-    &[48, 49, 50, 51],
-    &FFN_LINEAR_ORDINALS,
-    &[80, 81],
-    &[100, 101, 102, 103],
+const ROPE_ORDINALS: [usize; 4] = [16, 17, 18, 19];
+const SOFTMAX_ARITHMETIC_ORDINALS: [usize; 24] = [
+    24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 52, 53, 54, 55, 56, 57, 58, 59,
+];
+const SOFTMAX_LOW_DIGIT_ORDINALS: [usize; 4] = [40, 41, 42, 43];
+const SOFTMAX_EXP3_ORDINALS: [usize; 4] = [44, 45, 46, 47];
+const SOFTMAX_EXP4_ORDINALS: [usize; 4] = [48, 49, 50, 51];
+const RESIDUAL_ORDINALS: [usize; 8] = [72, 73, 74, 75, 108, 109, 110, 111];
+const SWIGLU_LOOKUP_ORDINALS: [usize; 4] = [100, 101, 102, 103];
+const SWIGLU_ARITHMETIC_ORDINALS: [usize; 4] = [104, 105, 106, 107];
+
+const CHIP_ROWS: [usize; 11] = [20, 4, 32, 4, 24, 4, 4, 4, 8, 4, 4];
+const CHIP_ORDINALS: [&[usize]; 11] = [
+    &RMS_ARITHMETIC_ORDINALS,
+    &RMS_LOOKUP_ORDINALS,
+    &MATMUL_BRIDGE_ORDINALS,
+    &ROPE_ORDINALS,
+    &SOFTMAX_ARITHMETIC_ORDINALS,
+    &SOFTMAX_LOW_DIGIT_ORDINALS,
+    &SOFTMAX_EXP3_ORDINALS,
+    &SOFTMAX_EXP4_ORDINALS,
+    &RESIDUAL_ORDINALS,
+    &SWIGLU_LOOKUP_ORDINALS,
+    &SWIGLU_ARITHMETIC_ORDINALS,
 ];
 
-const FAMILY_NAMES: [&str; 8] = [
-    "LlamaTinyAttentionLinearCore",
-    "LlamaTinyAttentionRmsCore",
-    "LlamaTinyAttentionLowDigitCore",
-    "LlamaTinyAttentionExp3Core",
-    "LlamaTinyAttentionExp4Core",
-    "LlamaTinyFfnLinearCore",
-    "LlamaTinyFfnRmsCore",
-    "LlamaTinyFfnSwiGluCore",
+const CHIP_NAMES: [&str; 11] = [
+    "LlamaTinyRmsArithmeticCore",
+    "LlamaTinyRmsLookupCore",
+    "LlamaTinyMatMulBridgeCore",
+    "LlamaTinyRoPECore",
+    "LlamaTinySoftmaxArithmeticCore",
+    "LlamaTinySoftmaxLowDigitCore",
+    "LlamaTinySoftmaxExp3Core",
+    "LlamaTinySoftmaxExp4Core",
+    "LlamaTinyResidualCore",
+    "LlamaTinySwiGluLookupCore",
+    "LlamaTinySwiGluArithmeticCore",
+];
+
+// (first ordinal, ordinal stride, rows). Every operation stage has at most four
+// rows, so its fixed data is a multilinear polynomial in two local bits.
+const CHIP_STAGES: [&[(usize, usize, usize)]; 11] = [
+    &[
+        (0, 1, 4),
+        (6, 1, 2),
+        (8, 1, 4),
+        (76, 1, 4),
+        (82, 1, 2),
+        (84, 1, 4),
+    ],
+    &[(4, 1, 2), (80, 1, 2)],
+    &[
+        (12, 1, 4),
+        (20, 1, 4),
+        (60, 1, 4),
+        (64, 1, 4),
+        (68, 1, 4),
+        (88, 1, 4),
+        (92, 1, 4),
+        (96, 1, 4),
+    ],
+    &[(16, 1, 4)],
+    &[
+        (24, 1, 4),
+        (28, 3, 4),
+        (29, 3, 4),
+        (30, 3, 4),
+        (52, 1, 4),
+        (56, 1, 2),
+        (58, 1, 2),
+    ],
+    &[(40, 1, 4)],
+    &[(44, 1, 4)],
+    &[(48, 1, 4)],
+    &[(72, 1, 4), (108, 1, 4)],
+    &[(100, 1, 4)],
+    &[(104, 1, 4)],
 ];
 
 const MATRIX_ROLES: [u32; 9] = [
@@ -430,19 +506,16 @@ pub struct LlamaTinyCoreConfig {
     next_output_id_lo: WitIn,
     next_output_id_hi: WitIn,
     next_output_version: WitIn,
-    ordinal: WitIn,
-    next_ordinal: WitIn,
+    ordinal_bits: [WitIn; ORDINAL_BITS],
+    next_ordinal_bits: [WitIn; ORDINAL_BITS],
+    local_index_bits: [WitIn; LOCAL_INDEX_BITS],
+    stage_selectors: [WitIn; MAX_LOCAL_STAGES],
     family: WitIn,
     next_family: WitIn,
     stage: WitIn,
     next_stage: WitIn,
     op: WitIn,
     next_op: WitIn,
-    ordinal_selectors: [WitIn; LLAMA_TINY_TOTAL_ROWS],
-    coordinate_row: WitIn,
-    next_coordinate_row: WitIn,
-    coordinate_col: WitIn,
-    next_coordinate_col: WitIn,
     accumulator: WitIn,
     next_accumulator: WitIn,
     value: WitIn,
@@ -492,15 +565,18 @@ pub struct LlamaTinyCoreConfig {
     lookup_output: WitIn,
 }
 
-pub struct LlamaTinyCoreInstruction<E, const FAMILY: usize>(PhantomData<E>);
-pub type LlamaTinyAttentionLinearCore<E> = LlamaTinyCoreInstruction<E, 0>;
-pub type LlamaTinyAttentionRmsCore<E> = LlamaTinyCoreInstruction<E, 1>;
-pub type LlamaTinyAttentionLowDigitCore<E> = LlamaTinyCoreInstruction<E, 2>;
-pub type LlamaTinyAttentionExp3Core<E> = LlamaTinyCoreInstruction<E, 3>;
-pub type LlamaTinyAttentionExp4Core<E> = LlamaTinyCoreInstruction<E, 4>;
-pub type LlamaTinyFfnLinearCore<E> = LlamaTinyCoreInstruction<E, 5>;
-pub type LlamaTinyFfnRmsCore<E> = LlamaTinyCoreInstruction<E, 6>;
-pub type LlamaTinyFfnSwiGluCore<E> = LlamaTinyCoreInstruction<E, 7>;
+pub struct LlamaTinyCoreInstruction<E, const CHIP: usize>(PhantomData<E>);
+pub type LlamaTinyRmsArithmeticCore<E> = LlamaTinyCoreInstruction<E, 0>;
+pub type LlamaTinyRmsLookupCore<E> = LlamaTinyCoreInstruction<E, 1>;
+pub type LlamaTinyMatMulBridgeCore<E> = LlamaTinyCoreInstruction<E, 2>;
+pub type LlamaTinyRoPECore<E> = LlamaTinyCoreInstruction<E, 3>;
+pub type LlamaTinySoftmaxArithmeticCore<E> = LlamaTinyCoreInstruction<E, 4>;
+pub type LlamaTinySoftmaxLowDigitCore<E> = LlamaTinyCoreInstruction<E, 5>;
+pub type LlamaTinySoftmaxExp3Core<E> = LlamaTinyCoreInstruction<E, 6>;
+pub type LlamaTinySoftmaxExp4Core<E> = LlamaTinyCoreInstruction<E, 7>;
+pub type LlamaTinyResidualCore<E> = LlamaTinyCoreInstruction<E, 8>;
+pub type LlamaTinySwiGluLookupCore<E> = LlamaTinyCoreInstruction<E, 9>;
+pub type LlamaTinySwiGluArithmeticCore<E> = LlamaTinyCoreInstruction<E, 10>;
 
 fn conditional_type<E: ExtensionField>(selector: Expression<E>) -> Expression<E> {
     E::BaseField::from_u64(RAMType::Custom as u64).expr() * selector.clone()
@@ -675,28 +751,57 @@ const fn semantic_write_index(ordinal: usize, port: usize) -> usize {
     }
 }
 
-fn selected_sum<E: ExtensionField>(
-    selectors: &[WitIn; LLAMA_TINY_TOTAL_ROWS],
-    predicate: impl Fn(usize) -> bool,
-) -> Expression<E> {
-    selectors
-        .iter()
+fn binary_expression<E: ExtensionField>(bits: &[WitIn]) -> Expression<E> {
+    bits.iter()
         .enumerate()
-        .filter(|(ordinal, _)| predicate(*ordinal))
-        .fold(E::BaseField::ZERO.expr(), |sum, (_, selector)| {
-            sum + selector.expr()
+        .fold(E::BaseField::ZERO.expr(), |sum, (bit, column)| {
+            sum + column.expr() * (1_u64 << bit)
         })
 }
 
-fn require_selected_equal<E: ExtensionField>(
-    cb: &mut CircuitBuilder<E>,
-    name: impl Into<String>,
-    selector: Expression<E>,
-    left: Expression<E>,
-    right: Expression<E>,
-) -> Result<(), ZKVMError> {
-    let name = name.into();
-    Ok(cb.require_zero(|| name, selector * (left - right))?)
+fn multilinear_constant<E: ExtensionField>(
+    bits: &[WitIn; LOCAL_INDEX_BITS],
+    values: [i64; 4],
+) -> Expression<E> {
+    let x = bits[0].expr();
+    let y = bits[1].expr();
+    signed_constant(values[0])
+        + x.clone() * signed_constant(values[1] - values[0])
+        + y.clone() * signed_constant(values[2] - values[0])
+        + x * y * signed_constant(values[3] - values[2] - values[1] + values[0])
+}
+
+fn stage_constant<E: ExtensionField>(
+    bits: &[WitIn; LOCAL_INDEX_BITS],
+    stage: (usize, usize, usize),
+    value: impl Fn(usize) -> i64,
+) -> Expression<E> {
+    let (base, stride, len) = stage;
+    let mut values = [0_i64; 4];
+    for (local, slot) in values.iter_mut().enumerate() {
+        *slot = value(base + stride * local.min(len - 1));
+    }
+    multilinear_constant::<E>(bits, values)
+}
+
+fn selected_sum<E: ExtensionField, const CHIP: usize>(
+    config: &LlamaTinyCoreConfig,
+    predicate: impl Fn(usize) -> bool,
+) -> Expression<E> {
+    selected_fixed_sum::<E, CHIP>(config, |ordinal| i64::from(predicate(ordinal)))
+}
+
+fn selected_fixed_sum<E: ExtensionField, const CHIP: usize>(
+    config: &LlamaTinyCoreConfig,
+    value: impl Fn(usize) -> i64,
+) -> Expression<E> {
+    CHIP_STAGES[CHIP].iter().copied().enumerate().fold(
+        E::BaseField::ZERO.expr(),
+        |sum, (index, stage)| {
+            sum + config.stage_selectors[index].expr()
+                * stage_constant::<E>(&config.local_index_bits, stage, &value)
+        },
+    )
 }
 
 fn signed_constant<E: ExtensionField>(value: i64) -> Expression<E> {
@@ -707,7 +812,516 @@ fn signed_constant<E: ExtensionField>(value: i64) -> Expression<E> {
     }
 }
 
-fn constrain_semantic_sources<E: ExtensionField>(
+fn require_stage_equal<E: ExtensionField>(
+    cb: &mut CircuitBuilder<E>,
+    stage: usize,
+    name: &str,
+    selector: Expression<E>,
+    left: Expression<E>,
+    right: Expression<E>,
+) -> Result<(), ZKVMError> {
+    Ok(cb.require_zero(
+        || format!("llama_tiny_stage_{stage}_{name}"),
+        selector * (left - right),
+    )?)
+}
+
+fn claim_role_and_row(ordinal: usize, port: usize) -> (u32, usize) {
+    match ordinal {
+        16..=17 => (tensor::TENSOR_HINT_ROLE_Q, (ordinal - 16) * 2 + port),
+        18..=19 => (tensor::TENSOR_HINT_ROLE_K, (ordinal - 18) * 2 + port),
+        20..=23 => (tensor::TENSOR_HINT_ROLE_V, ordinal - 20),
+        24..=27 => (tensor::TENSOR_HINT_ROLE_QK, ordinal - 24),
+        64..=67 => (tensor::TENSOR_HINT_ROLE_PV, ordinal - 64),
+        68..=71 => (tensor::TENSOR_HINT_ROLE_O, ordinal - 68),
+        92..=95 => (tensor::TENSOR_HINT_ROLE_GATE, ordinal - 92),
+        96..=99 => (tensor::TENSOR_HINT_ROLE_UP, ordinal - 96),
+        108..=111 => (tensor::TENSOR_HINT_ROLE_DOWN, ordinal - 108),
+        _ => unreachable!("claim-free ordinal"),
+    }
+}
+
+fn constrain_operation_stages<E: ExtensionField, const CHIP: usize>(
+    cb: &mut CircuitBuilder<E>,
+    config: &LlamaTinyCoreConfig,
+) -> Result<(), ZKVMError> {
+    let reads = [
+        (
+            config.tensor_read_enabled,
+            config.tensor_read_index,
+            config.tensor_read_value,
+            config.tensor_read_id_lo,
+            config.tensor_read_id_hi,
+            config.tensor_read_version,
+        ),
+        (
+            config.tensor_read2_enabled,
+            config.tensor_read2_index,
+            config.tensor_read2_value,
+            config.tensor_read2_id_lo,
+            config.tensor_read2_id_hi,
+            config.tensor_read2_version,
+        ),
+        (
+            config.tensor_read3_enabled,
+            config.tensor_read3_index,
+            config.tensor_read3_value,
+            config.tensor_read3_id_lo,
+            config.tensor_read3_id_hi,
+            config.tensor_read3_version,
+        ),
+    ];
+    let writes = [
+        (
+            config.tensor_write_enabled,
+            config.tensor_write_index,
+            config.tensor_write_value,
+        ),
+        (
+            config.tensor_write2_enabled,
+            config.tensor_write2_index,
+            config.tensor_write2_value,
+        ),
+        (
+            config.tensor_write3_enabled,
+            config.tensor_write3_index,
+            config.tensor_write3_value,
+        ),
+    ];
+    let rv = [reads[0].2, reads[1].2, reads[2].2];
+    let wv = [writes[0].2, writes[1].2, writes[2].2];
+    let zero = E::BaseField::ZERO.expr();
+    let one = E::BaseField::ONE.expr();
+    let x = config.local_index_bits[0].expr();
+    let y = config.local_index_bits[1].expr();
+    let operand = |lane: usize, index: usize| config.lanes[lane].operands[index].expr();
+    let result = |lane: usize| config.lanes[lane].result.expr();
+
+    for (stage_index, &stage) in CHIP_STAGES[CHIP].iter().enumerate() {
+        let (base, _, _) = stage;
+        let selector = config.stage_selectors[stage_index].expr();
+        let fixed = |value: &dyn Fn(usize) -> i64| {
+            stage_constant::<E>(&config.local_index_bits, stage, value)
+        };
+        let bind =
+            |cb: &mut CircuitBuilder<E>, name: &str, left: Expression<E>, right: Expression<E>| {
+                require_stage_equal(cb, stage_index, name, selector.clone(), left, right)
+            };
+
+        for port in 0..3 {
+            bind(
+                cb,
+                &format!("read_{port}_index"),
+                reads[port].1.expr(),
+                fixed(&|ordinal| {
+                    if semantic_read_enabled(ordinal, port) {
+                        semantic_read_index(ordinal, port) as i64
+                    } else {
+                        0
+                    }
+                }),
+            )?;
+            bind(
+                cb,
+                &format!("write_{port}_index"),
+                writes[port].1.expr(),
+                fixed(&|ordinal| {
+                    if semantic_write_enabled(ordinal, port) {
+                        semantic_write_index(ordinal, port) as i64
+                    } else {
+                        0
+                    }
+                }),
+            )?;
+        }
+        bind(
+            cb,
+            "state_value",
+            config.value.expr(),
+            fixed(&|ordinal| match ordinal {
+                0 => 8_697,
+                111 => 152,
+                _ => 0,
+            }),
+        )?;
+        if !matches!(base, 24..=30) {
+            for (limb, column) in config.limbs.iter().enumerate() {
+                bind(
+                    cb,
+                    &format!("zero_state_limb_{limb}"),
+                    column.expr(),
+                    zero.clone(),
+                )?;
+            }
+        }
+        for input in 0..5 {
+            let used = match CHIP {
+                CHIP_RMS_LOOKUP | CHIP_SWIGLU_LOOKUP => input == 0,
+                CHIP_SOFTMAX_LOW_DIGIT => input < 3,
+                CHIP_SOFTMAX_EXP3 => input == 3,
+                CHIP_SOFTMAX_EXP4 => input == 4,
+                _ => false,
+            };
+            if !used {
+                bind(
+                    cb,
+                    &format!("zero_lookup_input_{input}"),
+                    config.lookup_inputs[input].expr(),
+                    zero.clone(),
+                )?;
+            }
+        }
+        if !matches!(
+            CHIP,
+            CHIP_RMS_LOOKUP | CHIP_SOFTMAX_EXP3 | CHIP_SOFTMAX_EXP4 | CHIP_SWIGLU_LOOKUP
+        ) {
+            bind(
+                cb,
+                "zero_lookup_output",
+                config.lookup_output.expr(),
+                zero.clone(),
+            )?;
+        }
+
+        for port in 0..2 {
+            if semantic_claim_enabled(base, port) {
+                let claim = config.claims[port];
+                let read_port = if base <= 19 { port } else { 0 };
+                bind(
+                    cb,
+                    "claim_cycle",
+                    claim.cycle.expr(),
+                    config.call_cycle.expr(),
+                )?;
+                bind(
+                    cb,
+                    "claim_output_id_lo",
+                    claim.output_id_lo.expr(),
+                    reads[read_port].3.expr(),
+                )?;
+                bind(
+                    cb,
+                    "claim_output_id_hi",
+                    claim.output_id_hi.expr(),
+                    reads[read_port].4.expr(),
+                )?;
+                bind(
+                    cb,
+                    "claim_output_version",
+                    claim.output_version.expr(),
+                    reads[read_port].5.expr(),
+                )?;
+                bind(
+                    cb,
+                    "claim_role",
+                    claim.role.expr(),
+                    fixed(&|ordinal| i64::from(claim_role_and_row(ordinal, port).0)),
+                )?;
+                bind(
+                    cb,
+                    "claim_row",
+                    claim.row.expr(),
+                    fixed(&|ordinal| claim_role_and_row(ordinal, port).1 as i64),
+                )?;
+                bind(cb, "claim_value", claim.value.expr(), rv[read_port].expr())?;
+            }
+        }
+
+        match base {
+            0 => {
+                bind(cb, "fanout0", wv[0].expr(), rv[0].expr())?;
+                bind(cb, "fanout1", wv[1].expr(), rv[0].expr())?;
+                bind(cb, "square_a", operand(0, 0), rv[0].expr())?;
+                bind(cb, "square_b", operand(0, 1), rv[0].expr())?;
+                bind(cb, "square_c", operand(0, 2), zero.clone())?;
+                bind(cb, "square_d", operand(0, 3), zero.clone())?;
+                let input0 = i64::from(tensor::llama_tiny::INPUT[0][0]);
+                let input1 = i64::from(tensor::llama_tiny::INPUT[1][0]);
+                let first = signed_constant(input0) + y.clone() * signed_constant(input1 - input0);
+                bind(
+                    cb,
+                    "energy_first_a",
+                    operand(1, 0),
+                    x.clone() * first.clone(),
+                )?;
+                bind(cb, "energy_first_b", operand(1, 1), x.clone() * first)?;
+                bind(
+                    cb,
+                    "energy_second_a",
+                    operand(1, 2),
+                    x.clone() * rv[0].expr(),
+                )?;
+                bind(
+                    cb,
+                    "energy_second_b",
+                    operand(1, 3),
+                    x.clone() * rv[0].expr(),
+                )?;
+                bind(cb, "energy_write", wv[2].expr(), x.clone() * result(1))?;
+            }
+            4 | 80 => {
+                bind(
+                    cb,
+                    "lookup_input",
+                    config.lookup_inputs[0].expr(),
+                    rv[0].expr(),
+                )?;
+                bind(
+                    cb,
+                    "lookup_write",
+                    wv[0].expr(),
+                    config.lookup_output.expr(),
+                )?;
+            }
+            6 | 82 => {
+                bind(cb, "fanout0", wv[0].expr(), rv[0].expr())?;
+                bind(cb, "fanout1", wv[1].expr(), rv[0].expr())?;
+            }
+            8 | 84 => {
+                let weight = fixed(&|ordinal| {
+                    let col = ordinal % 2;
+                    i64::from(if ordinal <= 11 {
+                        tensor::llama_tiny::INPUT_NORM_WEIGHT[col]
+                    } else {
+                        tensor::llama_tiny::POST_NORM_WEIGHT[col]
+                    })
+                });
+                bind(cb, "norm_inv", operand(0, 0), rv[1].expr())?;
+                bind(cb, "norm_weight", operand(0, 1), weight)?;
+                bind(cb, "norm_zero_c", operand(0, 2), zero.clone())?;
+                bind(cb, "norm_zero_d", operand(0, 3), zero.clone())?;
+                bind(cb, "norm_value", operand(1, 0), result(0))?;
+                bind(cb, "norm_input", operand(1, 1), rv[0].expr())?;
+                bind(cb, "norm_zero2_c", operand(1, 2), zero.clone())?;
+                bind(cb, "norm_zero2_d", operand(1, 3), zero.clone())?;
+                bind(cb, "norm_write", wv[0].expr(), result(1))?;
+            }
+            12 => {
+                for value in &wv {
+                    bind(cb, "matrix_fanout", value.expr(), rv[0].expr())?;
+                }
+            }
+            16 => {
+                let cos0 =
+                    fixed(&|ordinal| i64::from(tensor::llama_tiny::ROPE_COS[ordinal % 2][0]));
+                let cos1 =
+                    fixed(&|ordinal| i64::from(tensor::llama_tiny::ROPE_COS[ordinal % 2][1]));
+                let sin0 =
+                    fixed(&|ordinal| i64::from(tensor::llama_tiny::ROPE_SIN[ordinal % 2][0]));
+                let sin1 =
+                    fixed(&|ordinal| i64::from(tensor::llama_tiny::ROPE_SIN[ordinal % 2][1]));
+                bind(cb, "rope0_a", operand(0, 0), rv[0].expr())?;
+                bind(cb, "rope0_b", operand(0, 1), cos0)?;
+                bind(cb, "rope0_c", operand(0, 2), -rv[1].expr())?;
+                bind(cb, "rope0_d", operand(0, 3), sin0)?;
+                bind(cb, "rope1_a", operand(1, 0), rv[1].expr())?;
+                bind(cb, "rope1_b", operand(1, 1), cos1)?;
+                bind(cb, "rope1_c", operand(1, 2), rv[0].expr())?;
+                bind(cb, "rope1_d", operand(1, 3), sin1)?;
+                bind(cb, "rope_write0", wv[0].expr(), result(0))?;
+                bind(cb, "rope_write1", wv[1].expr(), result(1))?;
+            }
+            20 | 64 | 68 | 92 | 96 => {
+                bind(cb, "rescale_a", operand(0, 0), rv[0].expr())?;
+                bind(cb, "rescale_b", operand(0, 1), one.clone())?;
+                bind(cb, "rescale_c", operand(0, 2), zero.clone())?;
+                bind(cb, "rescale_d", operand(0, 3), zero.clone())?;
+                bind(cb, "rescale_write", wv[0].expr(), result(0))?;
+            }
+            24 => {
+                let shift0 =
+                    E::BaseField::from_u64(tensor::llama_tiny::ATTENTION_SHIFTS[0] as u64).expr();
+                let shift1 =
+                    E::BaseField::from_u64(tensor::llama_tiny::ATTENTION_SHIFTS[1] as u64).expr();
+                let shift = shift0.clone() + y.clone() * (shift1 - shift0);
+                let mut magnitude = zero.clone();
+                let mut coefficient = E::BaseField::ONE.expr();
+                for limb in &config.limbs {
+                    magnitude = magnitude + limb.expr() * coefficient.clone();
+                    coefficient = coefficient * E::BaseField::from_u64(1 << 16).expr();
+                }
+                bind(cb, "score_minus_shift", shift - rv[0].expr(), magnitude)?;
+            }
+            28 | 29 | 30 => {
+                bind(cb, "digit0", wv[0].expr(), config.limbs[0].expr())?;
+                if base < 30 {
+                    bind(cb, "digit1", wv[1].expr(), config.limbs[1].expr())?;
+                    for limb in 0..3 {
+                        bind(
+                            cb,
+                            &format!("advance_{limb}"),
+                            config.next_limbs[limb].expr(),
+                            config.limbs[limb + 2].expr(),
+                        )?;
+                    }
+                    for limb in 3..5 {
+                        bind(
+                            cb,
+                            &format!("advance_{limb}"),
+                            config.next_limbs[limb].expr(),
+                            zero.clone(),
+                        )?;
+                    }
+                }
+            }
+            40 => {
+                for port in 0..3 {
+                    bind(
+                        cb,
+                        "low_digit_lookup",
+                        config.lookup_inputs[port].expr(),
+                        rv[port].expr(),
+                    )?;
+                }
+            }
+            44 => {
+                bind(
+                    cb,
+                    "exp3_input",
+                    config.lookup_inputs[3].expr(),
+                    rv[0].expr(),
+                )?;
+                bind(cb, "exp3_output", wv[0].expr(), config.lookup_output.expr())?;
+            }
+            48 => {
+                bind(
+                    cb,
+                    "exp4_input",
+                    config.lookup_inputs[4].expr(),
+                    rv[0].expr(),
+                )?;
+                bind(cb, "exp4_output", wv[0].expr(), config.lookup_output.expr())?;
+            }
+            52 => {
+                bind(
+                    cb,
+                    "five_digit_low",
+                    operand(0, 0),
+                    E::BaseField::from_u64(1024_u64.pow(3)).expr(),
+                )?;
+                bind(cb, "five_digit_exp3", operand(0, 1), rv[0].expr())?;
+                bind(cb, "five_digit_zero0", operand(0, 2), zero.clone())?;
+                bind(cb, "five_digit_zero1", operand(0, 3), zero.clone())?;
+                bind(cb, "five_digit_partial", operand(1, 0), result(0))?;
+                bind(cb, "five_digit_exp4", operand(1, 1), rv[1].expr())?;
+                bind(cb, "five_digit_zero2", operand(1, 2), zero.clone())?;
+                bind(cb, "five_digit_zero3", operand(1, 3), zero.clone())?;
+                bind(cb, "five_digit_product", wv[0].expr(), result(1))?;
+            }
+            56 => {
+                bind(cb, "mask_keep", wv[0].expr(), rv[0].expr())?;
+                bind(cb, "mask_causal", wv[1].expr(), x.clone() * rv[1].expr())?;
+                bind(cb, "mask_sum_a", operand(0, 0), wv[0].expr())?;
+                bind(cb, "mask_sum_b", operand(0, 1), one.clone())?;
+                bind(cb, "mask_sum_c", operand(0, 2), wv[1].expr())?;
+                bind(cb, "mask_sum_d", operand(0, 3), one.clone())?;
+                bind(cb, "mask_sum", wv[2].expr(), result(0))?;
+            }
+            58 => {
+                for lane in 0..2 {
+                    bind(cb, "normalize_numerator", operand(lane, 0), rv[lane].expr())?;
+                    bind(
+                        cb,
+                        "normalize_scale",
+                        operand(lane, 1),
+                        E::BaseField::from_u64(1 << tensor::llama_tiny::Q20_SHIFT).expr(),
+                    )?;
+                    bind(cb, "normalize_quotient", operand(lane, 2), -wv[lane].expr())?;
+                    bind(cb, "normalize_denominator", operand(lane, 3), rv[2].expr())?;
+                    bind(cb, "normalize_result", result(lane), zero.clone())?;
+                    bind(
+                        cb,
+                        "normalize_lane_quotient",
+                        config.lanes[lane].quotient.expr(),
+                        wv[lane].expr(),
+                    )?;
+                }
+                bind(
+                    cb,
+                    "normalization_sum",
+                    wv[0].expr() + wv[1].expr(),
+                    E::BaseField::from_u64(1 << tensor::llama_tiny::Q20_SHIFT).expr(),
+                )?;
+            }
+            60 => bind(cb, "probability_fanout", wv[0].expr(), rv[0].expr())?,
+            72 => {
+                bind(cb, "residual_a", operand(0, 0), rv[0].expr())?;
+                bind(cb, "residual_b", operand(0, 1), one.clone())?;
+                bind(cb, "residual_c", operand(0, 2), rv[1].expr())?;
+                bind(cb, "residual_d", operand(0, 3), one.clone())?;
+                bind(cb, "residual_write", wv[0].expr(), result(0))?;
+            }
+            76 => {
+                bind(cb, "post_fanout0", wv[0].expr(), rv[0].expr())?;
+                bind(cb, "post_fanout1", wv[1].expr(), rv[0].expr())?;
+                bind(cb, "post_square_a", operand(0, 0), rv[0].expr())?;
+                bind(cb, "post_square_b", operand(0, 1), rv[0].expr())?;
+                bind(cb, "post_square_c", operand(0, 2), zero.clone())?;
+                bind(cb, "post_square_d", operand(0, 3), zero.clone())?;
+                let first = signed_constant(199) + y.clone() * signed_constant(111 - 199);
+                bind(
+                    cb,
+                    "post_energy_first_a",
+                    operand(1, 0),
+                    x.clone() * first.clone(),
+                )?;
+                bind(cb, "post_energy_first_b", operand(1, 1), x.clone() * first)?;
+                bind(
+                    cb,
+                    "post_energy_second_a",
+                    operand(1, 2),
+                    x.clone() * rv[0].expr(),
+                )?;
+                bind(
+                    cb,
+                    "post_energy_second_b",
+                    operand(1, 3),
+                    x.clone() * rv[0].expr(),
+                )?;
+                bind(cb, "post_energy_write", wv[2].expr(), x.clone() * result(1))?;
+            }
+            88 => {
+                bind(cb, "ffn_fanout0", wv[0].expr(), rv[0].expr())?;
+                bind(cb, "ffn_fanout1", wv[1].expr(), rv[0].expr())?;
+            }
+            100 => {
+                let gate = fixed(&|ordinal| {
+                    i64::from([[19_i32, -14_i32], [16_i32, 7_i32]][ordinal / 2 - 50][ordinal % 2])
+                });
+                bind(cb, "swiglu_source", rv[0].expr(), gate.clone())?;
+                bind(cb, "swiglu_key", config.lookup_inputs[0].expr(), gate)?;
+                bind(
+                    cb,
+                    "swiglu_output",
+                    wv[0].expr(),
+                    config.lookup_output.expr(),
+                )?;
+            }
+            104 => {
+                bind(cb, "hadamard_a", operand(0, 0), rv[0].expr())?;
+                bind(cb, "hadamard_b", operand(0, 1), rv[1].expr())?;
+                bind(cb, "hadamard_zero_c", operand(0, 2), zero.clone())?;
+                bind(cb, "hadamard_zero_d", operand(0, 3), zero.clone())?;
+                bind(cb, "hadamard_write", wv[0].expr(), result(0))?;
+            }
+            108 => {
+                bind(cb, "down_a", operand(0, 0), rv[0].expr())?;
+                bind(cb, "down_b", operand(0, 1), one.clone())?;
+                bind(cb, "down_zero_c", operand(0, 2), zero.clone())?;
+                bind(cb, "down_zero_d", operand(0, 3), zero.clone())?;
+                bind(cb, "residual_a", operand(1, 0), result(0))?;
+                bind(cb, "residual_b", operand(1, 1), one.clone())?;
+                bind(cb, "residual_c", operand(1, 2), rv[1].expr())?;
+                bind(cb, "residual_d", operand(1, 3), one.clone())?;
+                bind(cb, "residual_write", wv[0].expr(), result(1))?;
+            }
+            _ => unreachable!("unrecognized operation stage {base}"),
+        }
+    }
+    Ok(())
+}
+
+fn constrain_semantic_sources<E: ExtensionField, const CHIP: usize>(
     cb: &mut CircuitBuilder<E>,
     config: &LlamaTinyCoreConfig,
 ) -> Result<(), ZKVMError> {
@@ -767,643 +1381,51 @@ fn constrain_semantic_sources<E: ExtensionField>(
         cb.require_equal(
             || format!("llama_tiny_read_{port}_schedule"),
             reads[port].0.expr(),
-            selected_sum(&config.ordinal_selectors, |ordinal| {
-                semantic_read_enabled(ordinal, port)
-            }),
+            selected_sum::<E, CHIP>(config, |ordinal| semantic_read_enabled(ordinal, port)),
         )?;
         cb.require_equal(
             || format!("llama_tiny_write_{port}_schedule"),
             writes[port].0.expr(),
-            selected_sum(&config.ordinal_selectors, |ordinal| {
-                semantic_write_enabled(ordinal, port)
-            }),
+            selected_sum::<E, CHIP>(config, |ordinal| semantic_write_enabled(ordinal, port)),
         )?;
     }
     for port in 0..2 {
         cb.require_equal(
             || format!("llama_tiny_claim_{port}_schedule"),
             config.claims[port].enabled.expr(),
-            selected_sum(&config.ordinal_selectors, |ordinal| {
-                semantic_claim_enabled(ordinal, port)
-            }),
+            selected_sum::<E, CHIP>(config, |ordinal| semantic_claim_enabled(ordinal, port)),
         )?;
         cb.require_equal(
             || format!("llama_tiny_lane_{port}_schedule"),
             config.lanes[port].enabled.expr(),
-            selected_sum(&config.ordinal_selectors, |ordinal| {
-                semantic_lane_enabled(ordinal, port)
-            }),
+            selected_sum::<E, CHIP>(config, |ordinal| semantic_lane_enabled(ordinal, port)),
         )?;
         cb.require_equal(
             || format!("llama_tiny_lane_{port}_rescale_schedule"),
             config.lanes[port].rescale.expr(),
-            selected_sum(&config.ordinal_selectors, |ordinal| {
+            selected_sum::<E, CHIP>(config, |ordinal| {
                 semantic_lane_shift(ordinal, port).is_some()
             }),
         )?;
         cb.require_equal(
             || format!("llama_tiny_lane_{port}_q20_schedule"),
             config.lanes[port].q20.expr(),
-            selected_sum(&config.ordinal_selectors, |ordinal| {
+            selected_sum::<E, CHIP>(config, |ordinal| {
                 semantic_lane_shift(ordinal, port) == Some(tensor::llama_tiny::Q20_SHIFT)
             }),
         )?;
         cb.require_equal(
             || format!("llama_tiny_lane_{port}_normalization_schedule"),
             config.lanes[port].normalize.expr(),
-            config.ordinal_selectors[58].expr() + config.ordinal_selectors[59].expr(),
+            selected_sum::<E, CHIP>(config, |ordinal| matches!(ordinal, 58..=59)),
         )?;
     }
 
-    let rv = [reads[0].5, reads[1].5, reads[2].5];
-    let wv = [writes[0].5, writes[1].5, writes[2].5];
-    let zero = E::BaseField::ZERO.expr();
-    let one = E::BaseField::ONE.expr();
-    let bind = |cb: &mut CircuitBuilder<E>,
-                ordinal: usize,
-                name: &str,
-                left: Expression<E>,
-                right: Expression<E>| {
-        require_selected_equal(
-            cb,
-            format!("llama_tiny_{ordinal}_{name}"),
-            config.ordinal_selectors[ordinal].expr(),
-            left,
-            right,
-        )
-    };
-    let operand = |lane: usize, index: usize| config.lanes[lane].operands[index].expr();
-    let result = |lane: usize| config.lanes[lane].result.expr();
-
-    for ordinal in 0..LLAMA_TINY_TOTAL_ROWS {
-        let row = ordinal / 2;
-        let col = ordinal % 2;
-        if !matches!(ordinal, 0 | 111) {
-            bind(
-                cb,
-                ordinal,
-                "zero_state_value",
-                config.value.expr(),
-                zero.clone(),
-            )?;
-        }
-        if !matches!(ordinal, 24..=39) {
-            for limb in &config.limbs {
-                bind(cb, ordinal, "zero_state_limb", limb.expr(), zero.clone())?;
-            }
-        }
-        for input in 0..5 {
-            let used = matches!(ordinal, 4..=5 | 80..=81 | 100..=103) && input == 0
-                || matches!(ordinal, 40..=43) && input < 3
-                || matches!(ordinal, 44..=47) && input == 3
-                || matches!(ordinal, 48..=51) && input == 4;
-            if !used {
-                bind(
-                    cb,
-                    ordinal,
-                    "zero_lookup_input",
-                    config.lookup_inputs[input].expr(),
-                    zero.clone(),
-                )?;
-            }
-        }
-        if !matches!(ordinal, 4..=5 | 44..=51 | 80..=81 | 100..=103) {
-            bind(
-                cb,
-                ordinal,
-                "zero_lookup_output",
-                config.lookup_output.expr(),
-                zero.clone(),
-            )?;
-        }
-        for port in 0..3 {
-            if semantic_read_enabled(ordinal, port) {
-                bind(
-                    cb,
-                    ordinal,
-                    "read_index",
-                    reads[port].4.expr(),
-                    E::BaseField::from_usize(semantic_read_index(ordinal, port)).expr(),
-                )?;
-            }
-            if semantic_write_enabled(ordinal, port) {
-                bind(
-                    cb,
-                    ordinal,
-                    "write_index",
-                    writes[port].4.expr(),
-                    E::BaseField::from_usize(semantic_write_index(ordinal, port)).expr(),
-                )?;
-            }
-        }
-        for port in 0..2 {
-            if semantic_claim_enabled(ordinal, port) {
-                let claim = config.claims[port];
-                let read_port = if ordinal <= 19 { port } else { 0 };
-                let (role, logical_row) = match ordinal {
-                    16..=17 => (tensor::TENSOR_HINT_ROLE_Q, (ordinal - 16) * 2 + port),
-                    18..=19 => (tensor::TENSOR_HINT_ROLE_K, (ordinal - 18) * 2 + port),
-                    20..=23 => (tensor::TENSOR_HINT_ROLE_V, ordinal - 20),
-                    24..=27 => (tensor::TENSOR_HINT_ROLE_QK, ordinal - 24),
-                    64..=67 => (tensor::TENSOR_HINT_ROLE_PV, ordinal - 64),
-                    68..=71 => (tensor::TENSOR_HINT_ROLE_O, ordinal - 68),
-                    92..=95 => (tensor::TENSOR_HINT_ROLE_GATE, ordinal - 92),
-                    96..=99 => (tensor::TENSOR_HINT_ROLE_UP, ordinal - 96),
-                    108..=111 => (tensor::TENSOR_HINT_ROLE_DOWN, ordinal - 108),
-                    _ => unreachable!(),
-                };
-                bind(
-                    cb,
-                    ordinal,
-                    "claim_cycle",
-                    claim.cycle.expr(),
-                    config.call_cycle.expr(),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "claim_output_id_lo",
-                    claim.output_id_lo.expr(),
-                    reads[read_port].1.expr(),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "claim_output_id_hi",
-                    claim.output_id_hi.expr(),
-                    reads[read_port].2.expr(),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "claim_output_version",
-                    claim.output_version.expr(),
-                    reads[read_port].3.expr(),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "claim_role",
-                    claim.role.expr(),
-                    E::BaseField::from_u32(role).expr(),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "claim_row",
-                    claim.row.expr(),
-                    E::BaseField::from_usize(logical_row).expr(),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "claim_value",
-                    claim.value.expr(),
-                    rv[read_port].expr(),
-                )?;
-            }
-        }
-
-        match ordinal {
-            0..=3 => {
-                if ordinal == 0 {
-                    bind(
-                        cb,
-                        ordinal,
-                        "attention_anchor",
-                        config.value.expr(),
-                        signed_constant(8_697),
-                    )?;
-                }
-                bind(cb, ordinal, "fanout0", wv[0].expr(), rv[0].expr())?;
-                bind(cb, ordinal, "fanout1", wv[1].expr(), rv[0].expr())?;
-                bind(cb, ordinal, "square_a", operand(0, 0), rv[0].expr())?;
-                bind(cb, ordinal, "square_b", operand(0, 1), rv[0].expr())?;
-                bind(cb, ordinal, "square_c", operand(0, 2), zero.clone())?;
-                bind(cb, ordinal, "square_d", operand(0, 3), zero.clone())?;
-                if col == 1 {
-                    bind(
-                        cb,
-                        ordinal,
-                        "energy_first_a",
-                        operand(1, 0),
-                        signed_constant(tensor::llama_tiny::INPUT[row][0].into()),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "energy_first_b",
-                        operand(1, 1),
-                        signed_constant(tensor::llama_tiny::INPUT[row][0].into()),
-                    )?;
-                    bind(cb, ordinal, "energy_second_a", operand(1, 2), rv[0].expr())?;
-                    bind(cb, ordinal, "energy_second_b", operand(1, 3), rv[0].expr())?;
-                    bind(cb, ordinal, "energy_write", wv[2].expr(), result(1))?;
-                }
-            }
-            4..=5 | 80..=81 => {
-                bind(
-                    cb,
-                    ordinal,
-                    "lookup_input",
-                    config.lookup_inputs[0].expr(),
-                    rv[0].expr(),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "lookup_write",
-                    wv[0].expr(),
-                    config.lookup_output.expr(),
-                )?;
-            }
-            6..=7 | 82..=83 => {
-                bind(cb, ordinal, "fanout0", wv[0].expr(), rv[0].expr())?;
-                bind(cb, ordinal, "fanout1", wv[1].expr(), rv[0].expr())?;
-            }
-            8..=11 | 84..=87 => {
-                let weight = if ordinal <= 11 {
-                    tensor::llama_tiny::INPUT_NORM_WEIGHT[col]
-                } else {
-                    tensor::llama_tiny::POST_NORM_WEIGHT[col]
-                };
-                bind(cb, ordinal, "norm_inv", operand(0, 0), rv[1].expr())?;
-                bind(
-                    cb,
-                    ordinal,
-                    "norm_weight",
-                    operand(0, 1),
-                    signed_constant(weight.into()),
-                )?;
-                bind(cb, ordinal, "norm_zero_c", operand(0, 2), zero.clone())?;
-                bind(cb, ordinal, "norm_zero_d", operand(0, 3), zero.clone())?;
-                bind(cb, ordinal, "norm_value", operand(1, 0), result(0))?;
-                bind(cb, ordinal, "norm_input", operand(1, 1), rv[0].expr())?;
-                bind(cb, ordinal, "norm_zero2_c", operand(1, 2), zero.clone())?;
-                bind(cb, ordinal, "norm_zero2_d", operand(1, 3), zero.clone())?;
-                bind(cb, ordinal, "norm_write", wv[0].expr(), result(1))?;
-            }
-            12..=15 => {
-                for port in 0..3 {
-                    bind(cb, ordinal, "matrix_fanout", wv[port].expr(), rv[0].expr())?;
-                }
-            }
-            16..=19 => {
-                let token = if ordinal <= 17 {
-                    ordinal - 16
-                } else {
-                    ordinal - 18
-                };
-                let cos = tensor::llama_tiny::ROPE_COS[token];
-                let sin = tensor::llama_tiny::ROPE_SIN[token];
-                bind(cb, ordinal, "rope0_a", operand(0, 0), rv[0].expr())?;
-                bind(
-                    cb,
-                    ordinal,
-                    "rope0_b",
-                    operand(0, 1),
-                    signed_constant(cos[0].into()),
-                )?;
-                bind(cb, ordinal, "rope0_c", operand(0, 2), -rv[1].expr())?;
-                bind(
-                    cb,
-                    ordinal,
-                    "rope0_d",
-                    operand(0, 3),
-                    signed_constant(sin[0].into()),
-                )?;
-                bind(cb, ordinal, "rope1_a", operand(1, 0), rv[1].expr())?;
-                bind(
-                    cb,
-                    ordinal,
-                    "rope1_b",
-                    operand(1, 1),
-                    signed_constant(cos[1].into()),
-                )?;
-                bind(cb, ordinal, "rope1_c", operand(1, 2), rv[0].expr())?;
-                bind(
-                    cb,
-                    ordinal,
-                    "rope1_d",
-                    operand(1, 3),
-                    signed_constant(sin[1].into()),
-                )?;
-                bind(cb, ordinal, "rope_write0", wv[0].expr(), result(0))?;
-                bind(cb, ordinal, "rope_write1", wv[1].expr(), result(1))?;
-            }
-            20..=23 | 64..=71 | 92..=99 => {
-                bind(cb, ordinal, "rescale_a", operand(0, 0), rv[0].expr())?;
-                bind(cb, ordinal, "rescale_b", operand(0, 1), one.clone())?;
-                bind(cb, ordinal, "rescale_c", operand(0, 2), zero.clone())?;
-                bind(cb, ordinal, "rescale_d", operand(0, 3), zero.clone())?;
-                bind(cb, ordinal, "rescale_write", wv[0].expr(), result(0))?;
-            }
-            24..=27 => {
-                let shift = tensor::llama_tiny::ATTENTION_SHIFTS[(ordinal - 24) / 2];
-                let mut magnitude = zero.clone();
-                let mut coefficient = E::BaseField::ONE.expr();
-                for limb in &config.limbs {
-                    magnitude = magnitude + limb.expr() * coefficient.clone();
-                    coefficient = coefficient * E::BaseField::from_u64(1 << 16).expr();
-                }
-                bind(
-                    cb,
-                    ordinal,
-                    "score_minus_shift",
-                    E::BaseField::from_u64(shift as u64).expr() - rv[0].expr(),
-                    magnitude,
-                )?;
-            }
-            28..=39 => {
-                let step = (ordinal - 28) % 3;
-                bind(cb, ordinal, "digit0", wv[0].expr(), config.limbs[0].expr())?;
-                if step < 2 {
-                    bind(cb, ordinal, "digit1", wv[1].expr(), config.limbs[1].expr())?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "advance0",
-                        config.next_limbs[0].expr(),
-                        config.limbs[2].expr(),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "advance1",
-                        config.next_limbs[1].expr(),
-                        config.limbs[3].expr(),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "advance2",
-                        config.next_limbs[2].expr(),
-                        config.limbs[4].expr(),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "advance3",
-                        config.next_limbs[3].expr(),
-                        zero.clone(),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "advance4",
-                        config.next_limbs[4].expr(),
-                        zero.clone(),
-                    )?;
-                }
-            }
-            40..=43 => {
-                for port in 0..3 {
-                    bind(
-                        cb,
-                        ordinal,
-                        "low_digit_lookup",
-                        config.lookup_inputs[port].expr(),
-                        rv[port].expr(),
-                    )?;
-                }
-            }
-            44..=47 => {
-                bind(
-                    cb,
-                    ordinal,
-                    "exp3_input",
-                    config.lookup_inputs[3].expr(),
-                    rv[0].expr(),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "exp3_output",
-                    wv[0].expr(),
-                    config.lookup_output.expr(),
-                )?;
-            }
-            48..=51 => {
-                bind(
-                    cb,
-                    ordinal,
-                    "exp4_input",
-                    config.lookup_inputs[4].expr(),
-                    rv[0].expr(),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "exp4_output",
-                    wv[0].expr(),
-                    config.lookup_output.expr(),
-                )?;
-            }
-            52..=55 => {
-                bind(
-                    cb,
-                    ordinal,
-                    "five_digit_low",
-                    operand(0, 0),
-                    E::BaseField::from_u64(1024_u64.pow(3)).expr(),
-                )?;
-                bind(cb, ordinal, "five_digit_exp3", operand(0, 1), rv[0].expr())?;
-                bind(cb, ordinal, "five_digit_zero0", operand(0, 2), zero.clone())?;
-                bind(cb, ordinal, "five_digit_zero1", operand(0, 3), zero.clone())?;
-                bind(cb, ordinal, "five_digit_partial", operand(1, 0), result(0))?;
-                bind(cb, ordinal, "five_digit_exp4", operand(1, 1), rv[1].expr())?;
-                bind(cb, ordinal, "five_digit_zero2", operand(1, 2), zero.clone())?;
-                bind(cb, ordinal, "five_digit_zero3", operand(1, 3), zero.clone())?;
-                bind(cb, ordinal, "five_digit_product", wv[0].expr(), result(1))?;
-            }
-            56..=57 => {
-                bind(cb, ordinal, "mask_keep", wv[0].expr(), rv[0].expr())?;
-                bind(
-                    cb,
-                    ordinal,
-                    "mask_causal",
-                    wv[1].expr(),
-                    if ordinal == 56 {
-                        zero.clone()
-                    } else {
-                        rv[1].expr()
-                    },
-                )?;
-                bind(cb, ordinal, "mask_sum_a", operand(0, 0), wv[0].expr())?;
-                bind(cb, ordinal, "mask_sum_b", operand(0, 1), one.clone())?;
-                bind(cb, ordinal, "mask_sum_c", operand(0, 2), wv[1].expr())?;
-                bind(cb, ordinal, "mask_sum_d", operand(0, 3), one.clone())?;
-                bind(cb, ordinal, "mask_sum", wv[2].expr(), result(0))?;
-            }
-            58..=59 => {
-                for lane in 0..2 {
-                    bind(
-                        cb,
-                        ordinal,
-                        "normalize_numerator",
-                        operand(lane, 0),
-                        rv[lane].expr(),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "normalize_scale",
-                        operand(lane, 1),
-                        E::BaseField::from_u64(1 << tensor::llama_tiny::Q20_SHIFT).expr(),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "normalize_quotient",
-                        operand(lane, 2),
-                        -wv[lane].expr(),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "normalize_denominator",
-                        operand(lane, 3),
-                        rv[2].expr(),
-                    )?;
-                    bind(cb, ordinal, "normalize_result", result(lane), zero.clone())?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "normalize_lane_quotient",
-                        config.lanes[lane].quotient.expr(),
-                        wv[lane].expr(),
-                    )?;
-                }
-                bind(
-                    cb,
-                    ordinal,
-                    "normalization_sum",
-                    wv[0].expr() + wv[1].expr(),
-                    E::BaseField::from_u64(1 << tensor::llama_tiny::Q20_SHIFT).expr(),
-                )?;
-            }
-            60..=63 | 88..=91 => {
-                if ordinal <= 63 {
-                    bind(
-                        cb,
-                        ordinal,
-                        "probability_fanout",
-                        wv[0].expr(),
-                        rv[0].expr(),
-                    )?;
-                } else {
-                    bind(cb, ordinal, "ffn_fanout0", wv[0].expr(), rv[0].expr())?;
-                    bind(cb, ordinal, "ffn_fanout1", wv[1].expr(), rv[0].expr())?;
-                }
-            }
-            72..=75 | 108..=111 => {
-                if ordinal >= 108 {
-                    if ordinal == 111 {
-                        bind(
-                            cb,
-                            ordinal,
-                            "ffn_anchor",
-                            config.value.expr(),
-                            signed_constant(152),
-                        )?;
-                    }
-                    bind(cb, ordinal, "down_a", operand(0, 0), rv[0].expr())?;
-                    bind(cb, ordinal, "down_b", operand(0, 1), one.clone())?;
-                    bind(cb, ordinal, "down_zero_c", operand(0, 2), zero.clone())?;
-                    bind(cb, ordinal, "down_zero_d", operand(0, 3), zero.clone())?;
-                    bind(cb, ordinal, "residual_a", operand(1, 0), result(0))?;
-                    bind(cb, ordinal, "residual_b", operand(1, 1), one.clone())?;
-                    bind(cb, ordinal, "residual_c", operand(1, 2), rv[1].expr())?;
-                    bind(cb, ordinal, "residual_d", operand(1, 3), one.clone())?;
-                    bind(cb, ordinal, "residual_write", wv[0].expr(), result(1))?;
-                } else {
-                    bind(cb, ordinal, "residual_a", operand(0, 0), rv[0].expr())?;
-                    bind(cb, ordinal, "residual_b", operand(0, 1), one.clone())?;
-                    bind(cb, ordinal, "residual_c", operand(0, 2), rv[1].expr())?;
-                    bind(cb, ordinal, "residual_d", operand(0, 3), one.clone())?;
-                    bind(cb, ordinal, "residual_write", wv[0].expr(), result(0))?;
-                }
-            }
-            76..=79 => {
-                bind(cb, ordinal, "post_fanout0", wv[0].expr(), rv[0].expr())?;
-                bind(cb, ordinal, "post_fanout1", wv[1].expr(), rv[0].expr())?;
-                bind(cb, ordinal, "post_square_a", operand(0, 0), rv[0].expr())?;
-                bind(cb, ordinal, "post_square_b", operand(0, 1), rv[0].expr())?;
-                bind(cb, ordinal, "post_square_c", operand(0, 2), zero.clone())?;
-                bind(cb, ordinal, "post_square_d", operand(0, 3), zero.clone())?;
-                if col == 1 {
-                    let first = [199_i64, 111_i64][row - 38];
-                    bind(
-                        cb,
-                        ordinal,
-                        "post_energy_first_a",
-                        operand(1, 0),
-                        signed_constant(first),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "post_energy_first_b",
-                        operand(1, 1),
-                        signed_constant(first),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "post_energy_second_a",
-                        operand(1, 2),
-                        rv[0].expr(),
-                    )?;
-                    bind(
-                        cb,
-                        ordinal,
-                        "post_energy_second_b",
-                        operand(1, 3),
-                        rv[0].expr(),
-                    )?;
-                    bind(cb, ordinal, "post_energy_write", wv[2].expr(), result(1))?;
-                }
-            }
-            100..=103 => {
-                let gate = [[19_i32, -14_i32], [16_i32, 7_i32]][ordinal / 2 - 50][ordinal % 2];
-                bind(
-                    cb,
-                    ordinal,
-                    "swiglu_source",
-                    rv[0].expr(),
-                    signed_constant(gate.into()),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "swiglu_key",
-                    config.lookup_inputs[0].expr(),
-                    signed_constant(gate.into()),
-                )?;
-                bind(
-                    cb,
-                    ordinal,
-                    "swiglu_output",
-                    wv[0].expr(),
-                    config.lookup_output.expr(),
-                )?;
-            }
-            104..=107 => {
-                bind(cb, ordinal, "hadamard_a", operand(0, 0), rv[0].expr())?;
-                bind(cb, ordinal, "hadamard_b", operand(0, 1), rv[1].expr())?;
-                bind(cb, ordinal, "hadamard_zero_c", operand(0, 2), zero.clone())?;
-                bind(cb, ordinal, "hadamard_zero_d", operand(0, 3), zero.clone())?;
-                bind(cb, ordinal, "hadamard_write", wv[0].expr(), result(0))?;
-            }
-            _ => {}
-        }
-    }
+    constrain_operation_stages::<E, CHIP>(cb, config)?;
     Ok(())
 }
 
-impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
-    for LlamaTinyCoreInstruction<E, FAMILY>
-{
+impl<E: ExtensionField, const CHIP: usize> Instruction<E> for LlamaTinyCoreInstruction<E, CHIP> {
     type InstructionConfig = LlamaTinyCoreConfig;
     type InsnType = InsnKind;
 
@@ -1411,7 +1433,7 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
         &[]
     }
     fn name() -> String {
-        FAMILY_NAMES[FAMILY].into()
+        CHIP_NAMES[CHIP].into()
     }
 
     fn construct_circuit(
@@ -1442,8 +1464,6 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
         let next_output_id_lo = new("llama_tiny_next_output_id_lo");
         let next_output_id_hi = new("llama_tiny_next_output_id_hi");
         let next_output_version = new("llama_tiny_next_output_version");
-        let ordinal = new("llama_tiny_ordinal");
-        let next_ordinal = new("llama_tiny_next_ordinal");
         let family = new("llama_tiny_family");
         let next_family = new("llama_tiny_next_family");
         let stage = new("llama_tiny_stage");
@@ -1451,14 +1471,18 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
         let op = new("llama_tiny_op");
         let next_op = new("llama_tiny_next_op");
         drop(new);
-        let ordinal_selectors = std::array::from_fn(|ordinal| {
-            cb.create_witin(|| format!("llama_tiny_ordinal_{ordinal}"))
+        let ordinal_bits =
+            std::array::from_fn(|bit| cb.create_witin(|| format!("llama_tiny_ordinal_bit_{bit}")));
+        let next_ordinal_bits = std::array::from_fn(|bit| {
+            cb.create_witin(|| format!("llama_tiny_next_ordinal_bit_{bit}"))
+        });
+        let local_index_bits = std::array::from_fn(|bit| {
+            cb.create_witin(|| format!("llama_tiny_local_index_bit_{bit}"))
+        });
+        let stage_selectors = std::array::from_fn(|stage| {
+            cb.create_witin(|| format!("llama_tiny_local_stage_{stage}"))
         });
         let mut new = |name: &'static str| cb.create_witin(|| name);
-        let coordinate_row = new("llama_tiny_coordinate_row");
-        let next_coordinate_row = new("llama_tiny_next_coordinate_row");
-        let coordinate_col = new("llama_tiny_coordinate_col");
-        let next_coordinate_col = new("llama_tiny_next_coordinate_col");
         let accumulator = new("llama_tiny_accumulator");
         let next_accumulator = new("llama_tiny_next_accumulator");
         let value = new("llama_tiny_value");
@@ -1633,44 +1657,80 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
                     * lane.remainder.expr(),
             )?;
         }
-        cb.require_equal(
-            || "llama_tiny_family",
-            family.expr(),
-            E::BaseField::from_usize(FAMILY).expr(),
-        )?;
-        cb.require_equal(|| "llama_tiny_stage", stage.expr(), family.expr())?;
-        cb.require_equal(|| "llama_tiny_operation_ordinal", op.expr(), ordinal.expr())?;
-        let mut ordinal_sum = E::BaseField::ZERO.expr();
-        let mut ordinal_weight = E::BaseField::ZERO.expr();
-        for (index, selector) in ordinal_selectors.iter().enumerate() {
+        let ordinal = binary_expression::<E>(&ordinal_bits);
+        let next_ordinal = binary_expression::<E>(&next_ordinal_bits);
+        let local_index = binary_expression::<E>(&local_index_bits);
+        for (bit, column) in ordinal_bits.iter().enumerate() {
+            cb.assert_bit(|| format!("llama_tiny_ordinal_bit_{bit}"), column.expr())?;
+        }
+        for (bit, column) in next_ordinal_bits.iter().enumerate() {
             cb.assert_bit(
-                || format!("llama_tiny_ordinal_{index}_bit"),
+                || format!("llama_tiny_next_ordinal_bit_{bit}"),
+                column.expr(),
+            )?;
+        }
+        for (bit, column) in local_index_bits.iter().enumerate() {
+            cb.assert_bit(
+                || format!("llama_tiny_local_index_bit_{bit}"),
+                column.expr(),
+            )?;
+        }
+        let mut stage_sum = E::BaseField::ZERO.expr();
+        let mut selected_base = E::BaseField::ZERO.expr();
+        let mut expected_family = E::BaseField::ZERO.expr();
+        let mut selected_stride = E::BaseField::ZERO.expr();
+        for (index, selector) in stage_selectors.iter().enumerate() {
+            cb.assert_bit(
+                || format!("llama_tiny_local_stage_{index}_bit"),
                 selector.expr(),
             )?;
-            ordinal_sum = ordinal_sum + selector.expr();
-            ordinal_weight = ordinal_weight + selector.expr() * index as u64;
-            if semantic_family(index) != FAMILY {
+            if let Some(&(base, stride, len)) = CHIP_STAGES[CHIP].get(index) {
+                stage_sum = stage_sum + selector.expr();
+                selected_base = selected_base + selector.expr() * base as u64;
+                selected_stride = selected_stride + selector.expr() * stride as u64;
+                expected_family = expected_family + selector.expr() * semantic_family(base) as u64;
+                match len {
+                    2 => {
+                        for bit in 1..LOCAL_INDEX_BITS {
+                            cb.require_zero(
+                                || format!("llama_tiny_stage_{index}_local_bit_{bit}"),
+                                selector.expr() * local_index_bits[bit].expr(),
+                            )?;
+                        }
+                    }
+                    4 => {
+                        for bit in 2..LOCAL_INDEX_BITS {
+                            cb.require_zero(
+                                || format!("llama_tiny_stage_{index}_local_bit_{bit}"),
+                                selector.expr() * local_index_bits[bit].expr(),
+                            )?;
+                        }
+                    }
+                    _ => unreachable!("all operation stages have two or four rows"),
+                }
+            } else {
                 cb.require_zero(
-                    || format!("llama_tiny_family_{FAMILY}_excludes_ordinal_{index}"),
+                    || format!("llama_tiny_unused_local_stage_{index}"),
                     selector.expr(),
                 )?;
             }
         }
         cb.require_equal(
-            || "llama_tiny_unique_ordinal",
-            ordinal_sum,
+            || "llama_tiny_unique_local_stage",
+            stage_sum,
             E::BaseField::ONE.expr(),
         )?;
         cb.require_equal(
-            || "llama_tiny_selected_ordinal",
-            ordinal.expr(),
-            ordinal_weight,
+            || "llama_tiny_stage_local_ordinal",
+            ordinal.clone(),
+            selected_base + selected_stride * local_index,
         )?;
-        cb.assert_bit(|| "llama_tiny_coordinate_col_bit", coordinate_col.expr())?;
+        cb.require_equal(|| "llama_tiny_family", family.expr(), expected_family)?;
+        cb.require_equal(|| "llama_tiny_stage", stage.expr(), family.expr())?;
         cb.require_equal(
-            || "llama_tiny_coordinates",
-            ordinal.expr(),
-            coordinate_row.expr() * 2 + coordinate_col.expr(),
+            || "llama_tiny_operation_ordinal",
+            op.expr(),
+            ordinal.clone(),
         )?;
         cb.require_equal(
             || "llama_tiny_state_value",
@@ -1684,8 +1744,8 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
         )?;
         cb.require_equal(
             || "llama_tiny_ordinal_step",
-            next_ordinal.expr(),
-            ordinal.expr() + 1,
+            next_ordinal.clone(),
+            ordinal.clone() + 1,
         )?;
 
         let state = llama_tiny_layer_state_record(
@@ -1697,12 +1757,12 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
             output_id_lo.expr(),
             output_id_hi.expr(),
             output_version.expr(),
-            ordinal.expr(),
+            ordinal.clone(),
             family.expr(),
             stage.expr(),
             op.expr(),
-            coordinate_row.expr(),
-            coordinate_col.expr(),
+            binary_expression::<E>(&ordinal_bits[1..]),
+            ordinal_bits[0].expr(),
             accumulator.expr(),
             value.expr(),
             std::array::from_fn(|index| limbs[index].expr()),
@@ -1722,12 +1782,12 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
             next_output_id_lo.expr(),
             next_output_id_hi.expr(),
             next_output_version.expr(),
-            next_ordinal.expr(),
+            next_ordinal.clone(),
             next_family.expr(),
             next_stage.expr(),
             next_op.expr(),
-            next_coordinate_row.expr(),
-            next_coordinate_col.expr(),
+            binary_expression::<E>(&next_ordinal_bits[1..]),
+            next_ordinal_bits[0].expr(),
             next_accumulator.expr(),
             next_value.expr(),
             std::array::from_fn(|index| next_limbs[index].expr()),
@@ -1739,12 +1799,13 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
             conditional_rlc(cb, active.expr(), &next_state),
         )?;
 
-        let limb_write_selector = (24..=27).fold(E::BaseField::ZERO.expr(), |sum, ordinal| {
-            sum + ordinal_selectors[ordinal].expr()
-        });
-        let limb_write_score = (24..=27).fold(E::BaseField::ZERO.expr(), |sum, ordinal| {
-            sum + ordinal_selectors[ordinal].expr() * (ordinal - 24) as u64
-        });
+        let local_index = binary_expression::<E>(&local_index_bits);
+        let limb_write_selector = if CHIP == CHIP_SOFTMAX_ARITHMETIC {
+            stage_selectors[0].expr()
+        } else {
+            E::BaseField::ZERO.expr()
+        };
+        let limb_write_score = limb_write_selector.clone() * local_index.clone();
         let limb_write = llama_tiny_softmax_limb_record(
             import_cycle.expr(),
             limb_write_score,
@@ -1756,17 +1817,12 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
             limb_write.clone(),
             conditional_rlc(cb, limb_write_selector, &limb_write),
         )?;
-        let limb_read_selector = [28, 31, 34, 37]
-            .into_iter()
-            .fold(E::BaseField::ZERO.expr(), |sum, ordinal| {
-                sum + ordinal_selectors[ordinal].expr()
-            });
-        let limb_read_score = [28, 31, 34, 37]
-            .into_iter()
-            .enumerate()
-            .fold(E::BaseField::ZERO.expr(), |sum, (score, ordinal)| {
-                sum + ordinal_selectors[ordinal].expr() * score as u64
-            });
+        let limb_read_selector = if CHIP == CHIP_SOFTMAX_ARITHMETIC {
+            stage_selectors[1].expr()
+        } else {
+            E::BaseField::ZERO.expr()
+        };
+        let limb_read_score = limb_read_selector.clone() * local_index;
         let limb_read = llama_tiny_softmax_limb_record(
             import_cycle.expr(),
             limb_read_score,
@@ -1887,13 +1943,13 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
             )?;
         }
 
-        match FAMILY {
-            FAMILY_ATTENTION_RMS | FAMILY_FFN_RMS => cb.lk_record(
+        match CHIP {
+            CHIP_RMS_LOOKUP => cb.lk_record(
                 || "llama_tiny_rms_lookup",
                 LookupTable::LlamaRmsInv,
                 vec![lookup_inputs[0].expr(), lookup_output.expr()],
             )?,
-            FAMILY_ATTENTION_LOW_DIGIT => {
+            CHIP_SOFTMAX_LOW_DIGIT => {
                 for digit in &lookup_inputs[..3] {
                     cb.lk_record(
                         || "llama_tiny_low_digit",
@@ -1902,17 +1958,17 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
                     )?;
                 }
             }
-            FAMILY_ATTENTION_EXP3 => cb.lk_record(
+            CHIP_SOFTMAX_EXP3 => cb.lk_record(
                 || "llama_tiny_exp3_lookup",
                 LookupTable::LlamaSoftmaxExp3,
                 vec![lookup_inputs[3].expr(), lookup_output.expr()],
             )?,
-            FAMILY_ATTENTION_EXP4 => cb.lk_record(
+            CHIP_SOFTMAX_EXP4 => cb.lk_record(
                 || "llama_tiny_exp4_lookup",
                 LookupTable::LlamaSoftmaxExp4,
                 vec![lookup_inputs[4].expr(), lookup_output.expr()],
             )?,
-            FAMILY_FFN_SWIGLU => cb.lk_record(
+            CHIP_SWIGLU_LOOKUP => cb.lk_record(
                 || "llama_tiny_swiglu_lookup",
                 LookupTable::LlamaSwiGlu,
                 vec![lookup_inputs[0].expr(), lookup_output.expr()],
@@ -1936,19 +1992,16 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
             next_output_id_lo,
             next_output_id_hi,
             next_output_version,
-            ordinal,
-            next_ordinal,
+            ordinal_bits,
+            next_ordinal_bits,
+            local_index_bits,
+            stage_selectors,
             family,
             next_family,
             stage,
             next_stage,
             op,
             next_op,
-            ordinal_selectors,
-            coordinate_row,
-            next_coordinate_row,
-            coordinate_col,
-            next_coordinate_col,
             accumulator,
             next_accumulator,
             value,
@@ -1997,7 +2050,7 @@ impl<E: ExtensionField, const FAMILY: usize> Instruction<E>
             lookup_inputs,
             lookup_output,
         };
-        constrain_semantic_sources(cb, &config)?;
+        constrain_semantic_sources::<E, CHIP>(cb, &config)?;
         Ok(config)
     }
 
@@ -2785,26 +2838,33 @@ fn set_id<F: PrimeCharacteristicRing>(row: &mut [F], lo: WitIn, hi: WitIn, id: u
 
 fn semantic_family(ordinal: usize) -> usize {
     match ordinal {
-        0..=3 | 6..=39 | 52..=75 => FAMILY_ATTENTION_LINEAR,
-        4..=5 => FAMILY_ATTENTION_RMS,
-        40..=43 => FAMILY_ATTENTION_LOW_DIGIT,
-        44..=47 => FAMILY_ATTENTION_EXP3,
-        48..=51 => FAMILY_ATTENTION_EXP4,
-        76..=79 | 82..=99 | 104..=111 => FAMILY_FFN_LINEAR,
-        80..=81 => FAMILY_FFN_RMS,
-        100..=103 => FAMILY_FFN_SWIGLU,
+        0..=3 | 6..=39 | 52..=75 => STATE_ATTENTION_LINEAR,
+        4..=5 => STATE_ATTENTION_RMS,
+        40..=43 => STATE_ATTENTION_LOW_DIGIT,
+        44..=47 => STATE_ATTENTION_EXP3,
+        48..=51 => STATE_ATTENTION_EXP4,
+        76..=79 | 82..=99 | 104..=111 => STATE_FFN_LINEAR,
+        80..=81 => STATE_FFN_RMS,
+        100..=103 => STATE_FFN_SWIGLU,
         _ => panic!("llama-tiny semantic ordinal out of range: {ordinal}"),
     }
 }
 
-impl<E: ExtensionField, const FAMILY: usize> LlamaTinyCoreInstruction<E, FAMILY> {
+fn semantic_chip(ordinal: usize) -> usize {
+    CHIP_ORDINALS
+        .iter()
+        .position(|ordinals| ordinals.contains(&ordinal))
+        .unwrap_or_else(|| panic!("llama-tiny semantic ordinal has no chip: {ordinal}"))
+}
+
+impl<E: ExtensionField, const CHIP: usize> LlamaTinyCoreInstruction<E, CHIP> {
     pub fn assign_layer_sections(
         config: &LlamaTinyCoreConfig,
         num_witin: usize,
         num_structural_witin: usize,
         sections: &[LlamaTinyLayerSection],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
-        let active_rows = FAMILY_ROWS[FAMILY];
+        let active_rows = CHIP_ROWS[CHIP];
         let rows = sections.len() * active_rows;
         let mut witness = RowMajorMatrix::new(rows, num_witin, InstancePaddingStrategy::Default);
         let mut structural =
@@ -2817,7 +2877,7 @@ impl<E: ExtensionField, const FAMILY: usize> LlamaTinyCoreInstruction<E, FAMILY>
             let section_index = physical / active_rows;
             let section = &sections[section_index];
             let schedule = &schedules[section_index];
-            let semantic = &schedule[FAMILY_ORDINALS[FAMILY][physical % active_rows]];
+            let semantic = &schedule[CHIP_ORDINALS[CHIP][physical % active_rows]];
             let ordinal = semantic.ordinal;
             if num_structural_witin > 0 {
                 *structural_row.last_mut().unwrap() = E::BaseField::ONE;
@@ -2887,49 +2947,52 @@ impl<E: ExtensionField, const FAMILY: usize> LlamaTinyCoreInstruction<E, FAMILY>
                 next_output.0,
             );
             set_val!(row, config.next_output_version, u64::from(next_output.1));
-            set_val!(row, config.ordinal, ordinal as u64);
             set_val!(row, config.family, semantic.family as u64);
             set_val!(row, config.stage, semantic.stage as u64);
             set_val!(row, config.op, semantic.op as u64);
-            for (index, selector) in config.ordinal_selectors.iter().enumerate() {
-                set_val!(row, *selector, u64::from(index == ordinal));
+            for (bit, column) in config.ordinal_bits.iter().enumerate() {
+                set_val!(row, *column, ((ordinal >> bit) & 1) as u64);
             }
-            set_val!(row, config.coordinate_row, semantic.coordinate_row as u64);
-            set_val!(row, config.coordinate_col, semantic.coordinate_col as u64);
+            let (local_stage, local_base, local_stride) = CHIP_STAGES[CHIP]
+                .iter()
+                .enumerate()
+                .find_map(|(stage, &(base, stride, len))| {
+                    (0..len)
+                        .find(|local| base + stride * local == ordinal)
+                        .map(|_| (stage, base, stride))
+                })
+                .expect("chip ordinal belongs to a local stage");
+            for (stage, selector) in config.stage_selectors.iter().enumerate() {
+                set_val!(row, *selector, u64::from(stage == local_stage));
+            }
+            for (bit, column) in config.local_index_bits.iter().enumerate() {
+                let local_index = (ordinal - local_base) / local_stride;
+                set_val!(row, *column, ((local_index >> bit) & 1) as u64);
+            }
             set_signed(row, config.accumulator, semantic.value);
             set_signed(row, config.value, semantic.value);
             for (column, limb) in config.limbs.iter().zip(semantic.limbs) {
                 set_val!(row, *column, u64::from(limb));
             }
 
-            let (next_family, next_stage, next_op, next_row, next_col, next_value, next_limbs) =
+            let (next_family, next_stage, next_op, next_value, next_limbs) =
                 if let Some(next) = schedule.get(ordinal + 1) {
-                    (
-                        next.family,
-                        next.stage,
-                        next.op,
-                        next.coordinate_row,
-                        next.coordinate_col,
-                        next.value,
-                        next.limbs,
-                    )
+                    (next.family, next.stage, next.op, next.value, next.limbs)
                 } else {
                     (
-                        FAMILY_FFN_SWIGLU,
-                        FAMILY_FFN_SWIGLU,
+                        STATE_FFN_SWIGLU,
+                        STATE_FFN_SWIGLU,
                         LLAMA_TINY_TOTAL_ROWS,
-                        LLAMA_TINY_TOTAL_ROWS / 2,
-                        0,
                         i64::from(section.trace.swiglu[0][0]),
                         [0; 5],
                     )
                 };
-            set_val!(row, config.next_ordinal, (ordinal + 1) as u64);
+            for (bit, column) in config.next_ordinal_bits.iter().enumerate() {
+                set_val!(row, *column, (((ordinal + 1) >> bit) & 1) as u64);
+            }
             set_val!(row, config.next_family, next_family as u64);
             set_val!(row, config.next_stage, next_stage as u64);
             set_val!(row, config.next_op, next_op as u64);
-            set_val!(row, config.next_coordinate_row, next_row as u64);
-            set_val!(row, config.next_coordinate_col, next_col as u64);
             set_signed(row, config.next_accumulator, next_value);
             set_signed(row, config.next_value, next_value);
             for (column, limb) in config.next_limbs.iter().zip(next_limbs) {
@@ -3069,29 +3132,29 @@ impl<E: ExtensionField, const FAMILY: usize> LlamaTinyCoreInstruction<E, FAMILY>
                 .zip(semantic.lookup_inputs)
                 .enumerate()
             {
-                if FAMILY == FAMILY_FFN_SWIGLU && index == 0 {
+                if CHIP == CHIP_SWIGLU_LOOKUP && index == 0 {
                     set_signed(row, *column, i64::from(input as u16 as i16));
                 } else {
                     set_val!(row, *column, input);
                 }
             }
             set_signed(row, config.lookup_output, semantic.lookup_output);
-            match FAMILY {
-                FAMILY_ATTENTION_RMS | FAMILY_FFN_RMS => {
+            match CHIP {
+                CHIP_RMS_LOOKUP => {
                     lkm.increment(LookupTable::LlamaRmsInv, semantic.lookup_inputs[0]);
                 }
-                FAMILY_ATTENTION_LOW_DIGIT => {
+                CHIP_SOFTMAX_LOW_DIGIT => {
                     for input in &semantic.lookup_inputs[..3] {
                         lkm.assert_dynamic_range(*input, 16);
                     }
                 }
-                FAMILY_ATTENTION_EXP3 => {
+                CHIP_SOFTMAX_EXP3 => {
                     lkm.increment(LookupTable::LlamaSoftmaxExp3, semantic.lookup_inputs[3]);
                 }
-                FAMILY_ATTENTION_EXP4 => {
+                CHIP_SOFTMAX_EXP4 => {
                     lkm.increment(LookupTable::LlamaSoftmaxExp4, semantic.lookup_inputs[4]);
                 }
-                FAMILY_FFN_SWIGLU => {
+                CHIP_SWIGLU_LOOKUP => {
                     lkm.increment(LookupTable::LlamaSwiGlu, semantic.lookup_inputs[0]);
                 }
                 _ => {}
@@ -3204,14 +3267,16 @@ pub fn audit_layer_graph(sections: &[LlamaTinyLayerSection]) -> Result<(), ZKVME
                 }
             }
         }
-        for family in 0..FAMILY_ROWS.len() {
+        for chip in 0..CHIP_ROWS.len() {
             let owned = schedule
                 .iter()
-                .filter(|row| row.family == family)
+                .filter(|row| semantic_chip(row.ordinal) == chip)
                 .map(|row| row.ordinal)
                 .collect::<Vec<_>>();
-            if owned != FAMILY_ORDINALS[family] || owned.len() != FAMILY_ROWS[family] {
-                return Err(invalid("llama-tiny family ordinal projection drift"));
+            if owned != CHIP_ORDINALS[chip] || owned.len() != CHIP_ROWS[chip] {
+                return Err(invalid(
+                    "llama-tiny operation-chip ordinal projection drift",
+                ));
             }
         }
         for score in 0..4 {
@@ -3316,8 +3381,8 @@ pub fn audit_layer_graph(sections: &[LlamaTinyLayerSection]) -> Result<(), ZKVME
                     )
                 } else {
                     (
-                        FAMILY_FFN_SWIGLU,
-                        FAMILY_FFN_SWIGLU,
+                        STATE_FFN_SWIGLU,
+                        STATE_FFN_SWIGLU,
                         LLAMA_TINY_TOTAL_ROWS,
                         LLAMA_TINY_TOTAL_ROWS / 2,
                         0,
@@ -3339,21 +3404,21 @@ pub fn audit_layer_graph(sections: &[LlamaTinyLayerSection]) -> Result<(), ZKVME
                 .or_default()[0] += 1;
 
             match row.family {
-                FAMILY_ATTENTION_RMS | FAMILY_FFN_RMS => {
+                STATE_ATTENTION_RMS | STATE_FFN_RMS => {
                     *rms.entry(row.lookup_inputs[0]).or_default() += 1;
                 }
-                FAMILY_ATTENTION_LOW_DIGIT => {
+                STATE_ATTENTION_LOW_DIGIT => {
                     for key in &row.lookup_inputs[..3] {
                         *dynamic.entry(65_536 + *key).or_default() += 1;
                     }
                 }
-                FAMILY_ATTENTION_EXP3 => {
+                STATE_ATTENTION_EXP3 => {
                     *exp3.entry(row.lookup_inputs[3]).or_default() += 1;
                 }
-                FAMILY_ATTENTION_EXP4 => {
+                STATE_ATTENTION_EXP4 => {
                     *exp4.entry(row.lookup_inputs[4]).or_default() += 1;
                 }
-                FAMILY_FFN_SWIGLU => {
+                STATE_FFN_SWIGLU => {
                     *swiglu.entry(row.lookup_inputs[0]).or_default() += 1;
                 }
                 _ => {}
@@ -3362,8 +3427,8 @@ pub fn audit_layer_graph(sections: &[LlamaTinyLayerSection]) -> Result<(), ZKVME
         private
             .entry((
                 0,
-                FAMILY_ATTENTION_LINEAR,
-                FAMILY_ATTENTION_LINEAR,
+                STATE_ATTENTION_LINEAR,
+                STATE_ATTENTION_LINEAR,
                 0,
                 0,
                 0,
@@ -3374,8 +3439,8 @@ pub fn audit_layer_graph(sections: &[LlamaTinyLayerSection]) -> Result<(), ZKVME
         private
             .entry((
                 LLAMA_TINY_TOTAL_ROWS,
-                FAMILY_FFN_SWIGLU,
-                FAMILY_FFN_SWIGLU,
+                STATE_FFN_SWIGLU,
+                STATE_FFN_SWIGLU,
                 LLAMA_TINY_TOTAL_ROWS,
                 LLAMA_TINY_TOTAL_ROWS / 2,
                 0,

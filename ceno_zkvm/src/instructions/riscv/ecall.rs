@@ -48,9 +48,10 @@ pub use tensor_bus::{
 };
 #[cfg(feature = "llama-tiny")]
 pub use tensor_llama_tiny::{
-    LlamaTinyAttentionExp3Core, LlamaTinyAttentionExp4Core, LlamaTinyAttentionLinearCore,
-    LlamaTinyAttentionLowDigitCore, LlamaTinyAttentionRmsCore, LlamaTinyFfnLinearCore,
-    LlamaTinyFfnRmsCore, LlamaTinyFfnSwiGluCore,
+    LlamaTinyMatMulBridgeCore, LlamaTinyResidualCore, LlamaTinyRmsArithmeticCore,
+    LlamaTinyRmsLookupCore, LlamaTinyRoPECore, LlamaTinySoftmaxArithmeticCore,
+    LlamaTinySoftmaxExp3Core, LlamaTinySoftmaxExp4Core, LlamaTinySoftmaxLowDigitCore,
+    LlamaTinySwiGluArithmeticCore, LlamaTinySwiGluLookupCore,
 };
 pub use tensor_production::{
     TensorMatMulGate5SmallHiddenEcallInstruction, TensorMatMulGate5SmallHiddenFinalizeInstruction,

@@ -103,15 +103,25 @@ fn run() {
         "seven logical role tiles must write 28 HintRef values",
     );
     let families = [
-        ("LlamaTinyAttentionLinearCore", 62_usize),
-        ("LlamaTinyAttentionRmsCore", 2),
-        ("LlamaTinyAttentionLowDigitCore", 4),
-        ("LlamaTinyAttentionExp3Core", 4),
-        ("LlamaTinyAttentionExp4Core", 4),
-        ("LlamaTinyFfnLinearCore", 30),
-        ("LlamaTinyFfnRmsCore", 2),
-        ("LlamaTinyFfnSwiGluCore", 4),
+        ("LlamaTinyRmsArithmeticCore", 20_usize),
+        ("LlamaTinyRmsLookupCore", 4),
+        ("LlamaTinyMatMulBridgeCore", 32),
+        ("LlamaTinyRoPECore", 4),
+        ("LlamaTinySoftmaxArithmeticCore", 24),
+        ("LlamaTinySoftmaxLowDigitCore", 4),
+        ("LlamaTinySoftmaxExp3Core", 4),
+        ("LlamaTinySoftmaxExp4Core", 4),
+        ("LlamaTinyResidualCore", 8),
+        ("LlamaTinySwiGluLookupCore", 4),
+        ("LlamaTinySwiGluArithmeticCore", 4),
     ];
+    let raw_operation_rows = families.iter().map(|(_, rows)| rows).sum::<usize>();
+    let padded_operation_rows = families
+        .iter()
+        .map(|(_, rows)| rows.next_power_of_two())
+        .sum::<usize>();
+    assert_eq!(raw_operation_rows, 112, "operation rows changed");
+    assert_eq!(padded_operation_rows, 132, "padded operation rows changed");
     let family_indices = families.map(|(name, rows)| {
         let index = circuit_index(&vk, name);
         assert_eq!(
@@ -123,6 +133,14 @@ fn run() {
             rows,
             "{name} row coverage changed",
         );
+        let width = vk
+            .circuit_vks
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} VK missing"))
+            .cs
+            .zkvm_v1_css
+            .num_witin;
+        assert_eq!(width, 186, "{name} must use the common operation width");
         index
     });
 
@@ -194,7 +212,7 @@ fn run() {
     let mut row_order_tamper = proofs[0].clone();
     row_order_tamper
         .chip_proofs
-        .get_mut(&family_indices[5])
+        .get_mut(&family_indices[2])
         .unwrap()
         .r_out_evals[0][0] += E::ONE;
     assert!(rejects(&verifier, row_order_tamper));
@@ -247,10 +265,10 @@ fn run() {
 
     for (category, family_index) in [
         ("rms", family_indices[1]),
-        ("low_digit", family_indices[2]),
-        ("exp3", family_indices[3]),
-        ("exp4", family_indices[4]),
-        ("swiglu", family_indices[7]),
+        ("low_digit", family_indices[5]),
+        ("exp3", family_indices[6]),
+        ("exp4", family_indices[7]),
+        ("swiglu", family_indices[9]),
     ] {
         let mut lookup_tamper = proofs[0].clone();
         lookup_tamper
@@ -281,7 +299,7 @@ fn run() {
         assert_eq!(resident.ffn_launches, resident.sessions);
     }
     println!(
-        "TensorBus v2 full-layer GPU E2E verified: output=[201,-48,111,157] sections=9 hint_refs=7 family_rows=[62,2,4,4,4,30,2,4] logical_h2d_bytes=16 logical_d2h_bytes=16 intermediate_transfers=0 mock_witness_d2h_bytes={} physical_replay_sessions={} matrix_specific_pcs_rounds=0 ordinary_witin_openings=1 hint_identity_tamper=reject hint_value_tamper=reject tensor_slot_tamper=reject tensor_version_tamper=reject row_coverage_tamper=reject row_order_tamper=reject product_tamper=reject quotient_tamper=reject remainder_tamper=reject causal_mask_tamper=reject rms_lookup_tamper=reject low_digit_lookup_tamper=reject exp3_lookup_tamper=reject exp4_lookup_tamper=reject swiglu_lookup_tamper=reject sigma_tamper=reject",
+        "TensorBus v2 full-layer GPU E2E verified: output=[201,-48,111,157] sections=9 hint_refs=7 operation_rows=[20,4,32,4,24,4,4,4,8,4,4] raw_operation_rows=112 padded_operation_rows=132 ordinal_bits=7 common_operation_width=186 logical_h2d_bytes=16 logical_d2h_bytes=16 intermediate_transfers=0 mock_witness_d2h_bytes={} physical_replay_sessions={} matrix_specific_pcs_rounds=0 ordinary_witin_openings=1 hint_identity_tamper=reject hint_value_tamper=reject tensor_slot_tamper=reject tensor_version_tamper=reject row_coverage_tamper=reject row_order_tamper=reject product_tamper=reject quotient_tamper=reject remainder_tamper=reject causal_mask_tamper=reject rms_lookup_tamper=reject low_digit_lookup_tamper=reject exp3_lookup_tamper=reject exp4_lookup_tamper=reject swiglu_lookup_tamper=reject sigma_tamper=reject",
         resident.mock_witness_d2h_bytes, resident.sessions,
     );
 }

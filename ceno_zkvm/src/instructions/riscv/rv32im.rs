@@ -94,10 +94,12 @@ use tracing::info_span;
 
 #[cfg(feature = "llama-tiny")]
 use crate::instructions::riscv::ecall::{
-    LlamaTinyAttentionExp3Core, LlamaTinyAttentionExp4Core, LlamaTinyAttentionLinearCore,
-    LlamaTinyAttentionLowDigitCore, LlamaTinyAttentionRmsCore, LlamaTinyFfnLinearCore,
-    LlamaTinyFfnRmsCore, LlamaTinyFfnSwiGluCore, TensorBatchedMatMul2x2EcallInstruction,
-    TensorBatchedMatMulCoreInstruction, TensorHintRefCoreInstruction,
+    LlamaTinyMatMulBridgeCore, LlamaTinyResidualCore, LlamaTinyRmsArithmeticCore,
+    LlamaTinyRmsLookupCore, LlamaTinyRoPECore, LlamaTinySoftmaxArithmeticCore,
+    LlamaTinySoftmaxExp3Core, LlamaTinySoftmaxExp4Core, LlamaTinySoftmaxLowDigitCore,
+    LlamaTinySwiGluArithmeticCore, LlamaTinySwiGluLookupCore,
+    TensorBatchedMatMul2x2EcallInstruction, TensorBatchedMatMulCoreInstruction,
+    TensorHintRefCoreInstruction,
     tensor_llama_tiny::{audit_layer_graph, collect_layer_sections},
 };
 #[cfg(feature = "llama-tiny")]
@@ -325,29 +327,37 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub tensor_hint_ref_core_config:
         <TensorHintRefCoreInstruction<E> as Instruction<E>>::InstructionConfig,
     #[cfg(feature = "llama-tiny")]
-    pub llama_tiny_attention_linear_config:
-        <LlamaTinyAttentionLinearCore<E> as Instruction<E>>::InstructionConfig,
+    pub llama_tiny_rms_arithmetic_config:
+        <LlamaTinyRmsArithmeticCore<E> as Instruction<E>>::InstructionConfig,
     #[cfg(feature = "llama-tiny")]
-    pub llama_tiny_attention_rms_config:
-        <LlamaTinyAttentionRmsCore<E> as Instruction<E>>::InstructionConfig,
+    pub llama_tiny_rms_lookup_config:
+        <LlamaTinyRmsLookupCore<E> as Instruction<E>>::InstructionConfig,
     #[cfg(feature = "llama-tiny")]
-    pub llama_tiny_attention_low_digit_config:
-        <LlamaTinyAttentionLowDigitCore<E> as Instruction<E>>::InstructionConfig,
+    pub llama_tiny_matmul_bridge_config:
+        <LlamaTinyMatMulBridgeCore<E> as Instruction<E>>::InstructionConfig,
     #[cfg(feature = "llama-tiny")]
-    pub llama_tiny_attention_exp3_config:
-        <LlamaTinyAttentionExp3Core<E> as Instruction<E>>::InstructionConfig,
+    pub llama_tiny_rope_config: <LlamaTinyRoPECore<E> as Instruction<E>>::InstructionConfig,
     #[cfg(feature = "llama-tiny")]
-    pub llama_tiny_attention_exp4_config:
-        <LlamaTinyAttentionExp4Core<E> as Instruction<E>>::InstructionConfig,
+    pub llama_tiny_softmax_arithmetic_config:
+        <LlamaTinySoftmaxArithmeticCore<E> as Instruction<E>>::InstructionConfig,
     #[cfg(feature = "llama-tiny")]
-    pub llama_tiny_ffn_linear_config:
-        <LlamaTinyFfnLinearCore<E> as Instruction<E>>::InstructionConfig,
+    pub llama_tiny_softmax_low_digit_config:
+        <LlamaTinySoftmaxLowDigitCore<E> as Instruction<E>>::InstructionConfig,
     #[cfg(feature = "llama-tiny")]
-    pub llama_tiny_ffn_rms_config:
-        <LlamaTinyFfnRmsCore<E> as Instruction<E>>::InstructionConfig,
+    pub llama_tiny_softmax_exp3_config:
+        <LlamaTinySoftmaxExp3Core<E> as Instruction<E>>::InstructionConfig,
     #[cfg(feature = "llama-tiny")]
-    pub llama_tiny_ffn_swiglu_config:
-        <LlamaTinyFfnSwiGluCore<E> as Instruction<E>>::InstructionConfig,
+    pub llama_tiny_softmax_exp4_config:
+        <LlamaTinySoftmaxExp4Core<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_residual_config:
+        <LlamaTinyResidualCore<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_swiglu_lookup_config:
+        <LlamaTinySwiGluLookupCore<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub llama_tiny_swiglu_arithmetic_config:
+        <LlamaTinySwiGluArithmeticCore<E> as Instruction<E>>::InstructionConfig,
     pub tensor_hidden_ecall_config:
         Option<<TensorMatMulHiddenEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
     /// The production K1024 tile circuit is deliberately absent from
@@ -904,28 +914,36 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let tensor_hint_ref_core_config =
             cs.register_opcode_circuit::<TensorHintRefCoreInstruction<E>>();
         #[cfg(feature = "llama-tiny")]
-        let llama_tiny_attention_linear_config =
-            cs.register_opcode_circuit::<LlamaTinyAttentionLinearCore<E>>();
+        let llama_tiny_rms_arithmetic_config =
+            cs.register_opcode_circuit::<LlamaTinyRmsArithmeticCore<E>>();
         #[cfg(feature = "llama-tiny")]
-        let llama_tiny_attention_rms_config =
-            cs.register_opcode_circuit::<LlamaTinyAttentionRmsCore<E>>();
+        let llama_tiny_rms_lookup_config =
+            cs.register_opcode_circuit::<LlamaTinyRmsLookupCore<E>>();
         #[cfg(feature = "llama-tiny")]
-        let llama_tiny_attention_low_digit_config =
-            cs.register_opcode_circuit::<LlamaTinyAttentionLowDigitCore<E>>();
+        let llama_tiny_matmul_bridge_config =
+            cs.register_opcode_circuit::<LlamaTinyMatMulBridgeCore<E>>();
         #[cfg(feature = "llama-tiny")]
-        let llama_tiny_attention_exp3_config =
-            cs.register_opcode_circuit::<LlamaTinyAttentionExp3Core<E>>();
+        let llama_tiny_rope_config = cs.register_opcode_circuit::<LlamaTinyRoPECore<E>>();
         #[cfg(feature = "llama-tiny")]
-        let llama_tiny_attention_exp4_config =
-            cs.register_opcode_circuit::<LlamaTinyAttentionExp4Core<E>>();
+        let llama_tiny_softmax_arithmetic_config =
+            cs.register_opcode_circuit::<LlamaTinySoftmaxArithmeticCore<E>>();
         #[cfg(feature = "llama-tiny")]
-        let llama_tiny_ffn_linear_config =
-            cs.register_opcode_circuit::<LlamaTinyFfnLinearCore<E>>();
+        let llama_tiny_softmax_low_digit_config =
+            cs.register_opcode_circuit::<LlamaTinySoftmaxLowDigitCore<E>>();
         #[cfg(feature = "llama-tiny")]
-        let llama_tiny_ffn_rms_config = cs.register_opcode_circuit::<LlamaTinyFfnRmsCore<E>>();
+        let llama_tiny_softmax_exp3_config =
+            cs.register_opcode_circuit::<LlamaTinySoftmaxExp3Core<E>>();
         #[cfg(feature = "llama-tiny")]
-        let llama_tiny_ffn_swiglu_config =
-            cs.register_opcode_circuit::<LlamaTinyFfnSwiGluCore<E>>();
+        let llama_tiny_softmax_exp4_config =
+            cs.register_opcode_circuit::<LlamaTinySoftmaxExp4Core<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_residual_config = cs.register_opcode_circuit::<LlamaTinyResidualCore<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_swiglu_lookup_config =
+            cs.register_opcode_circuit::<LlamaTinySwiGluLookupCore<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let llama_tiny_swiglu_arithmetic_config =
+            cs.register_opcode_circuit::<LlamaTinySwiGluArithmeticCore<E>>();
         if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_matmul {
             assert!(
                 ecall_cells_map
@@ -1037,16 +1055,19 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             }
 
             let attention_family_names = [
-                <LlamaTinyAttentionLinearCore<E>>::name(),
-                <LlamaTinyAttentionRmsCore<E>>::name(),
-                <LlamaTinyAttentionLowDigitCore<E>>::name(),
-                <LlamaTinyAttentionExp3Core<E>>::name(),
-                <LlamaTinyAttentionExp4Core<E>>::name(),
+                <LlamaTinyRmsArithmeticCore<E>>::name(),
+                <LlamaTinyRmsLookupCore<E>>::name(),
+                <LlamaTinyMatMulBridgeCore<E>>::name(),
+                <LlamaTinyRoPECore<E>>::name(),
+                <LlamaTinySoftmaxArithmeticCore<E>>::name(),
+                <LlamaTinySoftmaxLowDigitCore<E>>::name(),
+                <LlamaTinySoftmaxExp3Core<E>>::name(),
+                <LlamaTinySoftmaxExp4Core<E>>::name(),
+                <LlamaTinyResidualCore<E>>::name(),
             ];
             let ffn_family_names = [
-                <LlamaTinyFfnLinearCore<E>>::name(),
-                <LlamaTinyFfnRmsCore<E>>::name(),
-                <LlamaTinyFfnSwiGluCore<E>>::name(),
+                <LlamaTinySwiGluLookupCore<E>>::name(),
+                <LlamaTinySwiGluArithmeticCore<E>>::name(),
             ];
             for (handle_name, family_names) in [
                 (
@@ -1639,21 +1660,27 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             #[cfg(feature = "llama-tiny")]
             tensor_hint_ref_core_config,
             #[cfg(feature = "llama-tiny")]
-            llama_tiny_attention_linear_config,
+            llama_tiny_rms_arithmetic_config,
             #[cfg(feature = "llama-tiny")]
-            llama_tiny_attention_rms_config,
+            llama_tiny_rms_lookup_config,
             #[cfg(feature = "llama-tiny")]
-            llama_tiny_attention_low_digit_config,
+            llama_tiny_matmul_bridge_config,
             #[cfg(feature = "llama-tiny")]
-            llama_tiny_attention_exp3_config,
+            llama_tiny_rope_config,
             #[cfg(feature = "llama-tiny")]
-            llama_tiny_attention_exp4_config,
+            llama_tiny_softmax_arithmetic_config,
             #[cfg(feature = "llama-tiny")]
-            llama_tiny_ffn_linear_config,
+            llama_tiny_softmax_low_digit_config,
             #[cfg(feature = "llama-tiny")]
-            llama_tiny_ffn_rms_config,
+            llama_tiny_softmax_exp3_config,
             #[cfg(feature = "llama-tiny")]
-            llama_tiny_ffn_swiglu_config,
+            llama_tiny_softmax_exp4_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_residual_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_swiglu_lookup_config,
+            #[cfg(feature = "llama-tiny")]
+            llama_tiny_swiglu_arithmetic_config,
             tensor_hidden_ecall_config,
             tensor_production_tile_config,
             tensor_gate5_small_hidden_tile_config,
@@ -1815,42 +1842,56 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             &self.tensor_hint_ref_core_config,
         );
         #[cfg(feature = "llama-tiny")]
-        fixed.register_opcode_circuit::<LlamaTinyAttentionLinearCore<E>>(
+        fixed.register_opcode_circuit::<LlamaTinyRmsArithmeticCore<E>>(
             cs,
-            &self.llama_tiny_attention_linear_config,
+            &self.llama_tiny_rms_arithmetic_config,
         );
         #[cfg(feature = "llama-tiny")]
-        fixed.register_opcode_circuit::<LlamaTinyAttentionRmsCore<E>>(
+        fixed.register_opcode_circuit::<LlamaTinyRmsLookupCore<E>>(
             cs,
-            &self.llama_tiny_attention_rms_config,
+            &self.llama_tiny_rms_lookup_config,
         );
         #[cfg(feature = "llama-tiny")]
-        fixed.register_opcode_circuit::<LlamaTinyAttentionLowDigitCore<E>>(
+        fixed.register_opcode_circuit::<LlamaTinyMatMulBridgeCore<E>>(
             cs,
-            &self.llama_tiny_attention_low_digit_config,
+            &self.llama_tiny_matmul_bridge_config,
         );
         #[cfg(feature = "llama-tiny")]
-        fixed.register_opcode_circuit::<LlamaTinyAttentionExp3Core<E>>(
+        fixed.register_opcode_circuit::<LlamaTinyRoPECore<E>>(cs, &self.llama_tiny_rope_config);
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinySoftmaxArithmeticCore<E>>(
             cs,
-            &self.llama_tiny_attention_exp3_config,
+            &self.llama_tiny_softmax_arithmetic_config,
         );
         #[cfg(feature = "llama-tiny")]
-        fixed.register_opcode_circuit::<LlamaTinyAttentionExp4Core<E>>(
+        fixed.register_opcode_circuit::<LlamaTinySoftmaxLowDigitCore<E>>(
             cs,
-            &self.llama_tiny_attention_exp4_config,
+            &self.llama_tiny_softmax_low_digit_config,
         );
         #[cfg(feature = "llama-tiny")]
-        fixed.register_opcode_circuit::<LlamaTinyFfnLinearCore<E>>(
+        fixed.register_opcode_circuit::<LlamaTinySoftmaxExp3Core<E>>(
             cs,
-            &self.llama_tiny_ffn_linear_config,
+            &self.llama_tiny_softmax_exp3_config,
         );
         #[cfg(feature = "llama-tiny")]
-        fixed
-            .register_opcode_circuit::<LlamaTinyFfnRmsCore<E>>(cs, &self.llama_tiny_ffn_rms_config);
-        #[cfg(feature = "llama-tiny")]
-        fixed.register_opcode_circuit::<LlamaTinyFfnSwiGluCore<E>>(
+        fixed.register_opcode_circuit::<LlamaTinySoftmaxExp4Core<E>>(
             cs,
-            &self.llama_tiny_ffn_swiglu_config,
+            &self.llama_tiny_softmax_exp4_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinyResidualCore<E>>(
+            cs,
+            &self.llama_tiny_residual_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinySwiGluLookupCore<E>>(
+            cs,
+            &self.llama_tiny_swiglu_lookup_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<LlamaTinySwiGluArithmeticCore<E>>(
+            cs,
+            &self.llama_tiny_swiglu_arithmetic_config,
         );
         if let Some(config) = &self.tensor_hidden_ecall_config {
             fixed.register_opcode_circuit::<TensorMatMulHiddenEcallInstruction<E>>(cs, config);
@@ -2393,33 +2434,42 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     }};
                 }
                 assign_llama_family!(
-                    LlamaTinyAttentionLinearCore<E>,
-                    &self.llama_tiny_attention_linear_config
+                    LlamaTinyRmsArithmeticCore<E>,
+                    &self.llama_tiny_rms_arithmetic_config
                 );
                 assign_llama_family!(
-                    LlamaTinyAttentionRmsCore<E>,
-                    &self.llama_tiny_attention_rms_config
+                    LlamaTinyRmsLookupCore<E>,
+                    &self.llama_tiny_rms_lookup_config
                 );
                 assign_llama_family!(
-                    LlamaTinyAttentionLowDigitCore<E>,
-                    &self.llama_tiny_attention_low_digit_config
+                    LlamaTinyMatMulBridgeCore<E>,
+                    &self.llama_tiny_matmul_bridge_config
+                );
+                assign_llama_family!(LlamaTinyRoPECore<E>, &self.llama_tiny_rope_config);
+                assign_llama_family!(
+                    LlamaTinySoftmaxArithmeticCore<E>,
+                    &self.llama_tiny_softmax_arithmetic_config
                 );
                 assign_llama_family!(
-                    LlamaTinyAttentionExp3Core<E>,
-                    &self.llama_tiny_attention_exp3_config
+                    LlamaTinySoftmaxLowDigitCore<E>,
+                    &self.llama_tiny_softmax_low_digit_config
                 );
                 assign_llama_family!(
-                    LlamaTinyAttentionExp4Core<E>,
-                    &self.llama_tiny_attention_exp4_config
+                    LlamaTinySoftmaxExp3Core<E>,
+                    &self.llama_tiny_softmax_exp3_config
                 );
                 assign_llama_family!(
-                    LlamaTinyFfnLinearCore<E>,
-                    &self.llama_tiny_ffn_linear_config
+                    LlamaTinySoftmaxExp4Core<E>,
+                    &self.llama_tiny_softmax_exp4_config
                 );
-                assign_llama_family!(LlamaTinyFfnRmsCore<E>, &self.llama_tiny_ffn_rms_config);
+                assign_llama_family!(LlamaTinyResidualCore<E>, &self.llama_tiny_residual_config);
                 assign_llama_family!(
-                    LlamaTinyFfnSwiGluCore<E>,
-                    &self.llama_tiny_ffn_swiglu_config
+                    LlamaTinySwiGluLookupCore<E>,
+                    &self.llama_tiny_swiglu_lookup_config
+                );
+                assign_llama_family!(
+                    LlamaTinySwiGluArithmeticCore<E>,
+                    &self.llama_tiny_swiglu_arithmetic_config
                 );
             } else if !standalone_records.is_empty() {
                 witness.assign_opcode_circuit::<TensorBatchedMatMulCoreInstruction<E>>(
