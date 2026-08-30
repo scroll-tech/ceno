@@ -4,6 +4,7 @@ pub(crate) mod eval_absorb;
 pub(crate) mod final_claim;
 pub(crate) mod frontload;
 pub(crate) mod global_sumcheck;
+mod matrix_reduction;
 pub(crate) mod selector;
 pub(crate) mod tower_point;
 mod trace;
@@ -44,6 +45,11 @@ use self::{
         MainEccRtQuarkTraceGenerator, MainEccRtSumcheckAir, MainEccRtSumcheckTraceGenerator,
         MainEccRtTraceGenerator,
     },
+    matrix_reduction::{
+        MatrixOpeningAir, MatrixOpeningRecord, MatrixOpeningTraceGenerator, MatrixRoundAir,
+        MatrixRoundRecord, MatrixRoundTraceGenerator, MatrixValueAir, MatrixValueRecord,
+        MatrixValueTraceGenerator,
+    },
     selector::{
         MAX_SELECTOR_POINT_VARS, MAX_SELECTOR_SPARSE_INDICES, MainSelectorEvalAir,
         MainSelectorEvalTraceGenerator, MainSelectorFormulaAir, MainSelectorFormulaTraceGenerator,
@@ -58,15 +64,18 @@ use crate::{
         AirPresenceBus, EccRtBus, ForkedTranscriptBus, MainBus, MainEccRtChallengeBus,
         MainEccRtEquationTotalsBus, MainEccRtQuarkFinalBus, MainEccRtSumcheckFinalBus, MainEvalBus,
         MainExpressionClaimBus, MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus,
-        MainSelectorShapeBus, MainSelectorSparseIndexShapeBus, TowerMainPointBus, TranscriptBus,
+        MainSelectorShapeBus, MainSelectorSparseIndexShapeBus, MatrixReductionPresenceBus,
+        MatrixReductionValueBus, PcsOpeningPointBus, PcsSemanticOpeningEvalBus, TowerMainPointBus,
+        TranscriptBus,
     },
     system::{
         AirModule, BusIndexManager, BusInventory, EccReplayClaims, GlobalCtxCpu, MainEccRtRecord,
         MainEvalRecord, MainFinalClaimRecord, MainFrontloadTermRecord, MainSelectorEvalRecord,
         MainSelectorKind, MainSelectorPointDeriveKind, MainSelectorPointRecord,
-        MainSelectorPointSourceKind, MainTowerPointEqRecord, PcsOpeningClaimRecord,
-        PcsOpeningCommitKind, PcsOpeningEvalRecord, PcsOpeningPointRecord, Preflight,
-        RecursionField, RecursionProof, RecursionVk, RotationReplayClaims, TraceGenModule,
+        MainSelectorPointSourceKind, MainTowerPointEqRecord, MatrixReductionReplayClaims,
+        MatrixReductionRoundReplay, PcsOpeningClaimRecord, PcsOpeningCommitKind,
+        PcsOpeningEvalRecord, PcsOpeningPointRecord, Preflight, RecursionField, RecursionProof,
+        RecursionVk, RotationReplayClaims, TraceGenModule,
     },
     tower::{
         TowerInputRecord, TowerReplayResult, build_tower_input_records,
@@ -97,6 +106,10 @@ pub struct MainModule {
     main_ecc_rt_quark_final_bus: MainEccRtQuarkFinalBus,
     ecc_rt_bus: EccRtBus,
     tower_main_point_bus: TowerMainPointBus,
+    matrix_reduction_presence_bus: MatrixReductionPresenceBus,
+    matrix_reduction_value_bus: MatrixReductionValueBus,
+    pcs_opening_point_bus: PcsOpeningPointBus,
+    pcs_semantic_opening_eval_bus: PcsSemanticOpeningEvalBus,
 }
 
 impl MainModule {
@@ -120,6 +133,10 @@ impl MainModule {
         let main_ecc_rt_quark_final_bus = bus_inventory.main_ecc_rt_quark_final_bus;
         let ecc_rt_bus = bus_inventory.ecc_rt_bus;
         let tower_main_point_bus = bus_inventory.tower_main_point_bus;
+        let matrix_reduction_presence_bus = bus_inventory.matrix_reduction_presence_bus;
+        let matrix_reduction_value_bus = bus_inventory.matrix_reduction_value_bus;
+        let pcs_opening_point_bus = bus_inventory.pcs_opening_point_bus;
+        let pcs_semantic_opening_eval_bus = bus_inventory.pcs_semantic_opening_eval_bus;
         Self {
             main_bus,
             expression_claim_bus,
@@ -138,6 +155,10 @@ impl MainModule {
             main_ecc_rt_quark_final_bus,
             ecc_rt_bus,
             tower_main_point_bus,
+            matrix_reduction_presence_bus,
+            matrix_reduction_value_bus,
+            pcs_opening_point_bus,
+            pcs_semantic_opening_eval_bus,
         }
     }
 
@@ -270,19 +291,23 @@ impl MainModule {
         }
         for (proof_idx, preflight) in preflights.iter().enumerate() {
             for record in &preflight.pcs.opening_points {
-                *global_lookup_counts
-                    .entry((proof_idx, record.global_round_idx))
-                    .or_default() += 1;
+                if record.has_main_global {
+                    *global_lookup_counts
+                        .entry((proof_idx, record.global_round_idx))
+                        .or_default() += 1;
+                }
             }
             for record in &preflight.pcs.suffix_products {
-                if record.has_factor {
+                if record.has_factor && record.has_main_global {
                     *global_lookup_counts
                         .entry((proof_idx, record.coord_idx))
                         .or_default() += 1;
                 }
             }
             for record in &preflight.pcs.jagged_assist_h {
-                if record.has_z_row {
+                if record.has_z_row
+                    && (record.round_idx == 0 || record.commit_kind == PcsOpeningCommitKind::Fixed)
+                {
                     *global_lookup_counts
                         .entry((proof_idx, record.robp_idx))
                         .or_default() += 1;
@@ -310,9 +335,11 @@ impl MainModule {
         }
         for (proof_idx, preflight) in preflights.iter().enumerate() {
             for record in &preflight.pcs.opening_evals {
-                *eval_lookup_counts
-                    .entry((proof_idx, record.main_idx, record.main_eval_idx))
-                    .or_default() += 1;
+                if record.has_main_eval {
+                    *eval_lookup_counts
+                        .entry((proof_idx, record.main_idx, record.main_eval_idx))
+                        .or_default() += 1;
+                }
             }
         }
         for record in &mut eval_records {
@@ -409,6 +436,8 @@ impl MainModule {
                 });
             }
         }
+        let (matrix_value_records, matrix_round_records, matrix_opening_records) =
+            matrix_reduction::collect_records(proofs, preflights);
         let semantic_fork_tidxs = selector_point_records
             .iter()
             .filter(|record| {
@@ -432,6 +461,10 @@ impl MainModule {
                         (record.proof_idx, record.fork_id, record.alpha_tidx + offset),
                     ]
                 })
+            }))
+            .chain(matrix_value_records.iter().flat_map(|record| {
+                (0..D_EF)
+                    .map(move |offset| (record.proof_idx, record.fork_id, record.tidx + offset))
             }))
             .collect::<std::collections::BTreeSet<_>>();
         for input in tower_input_records
@@ -472,6 +505,9 @@ impl MainModule {
             selector_point_records,
             ecc_rt_records,
             transcript_records,
+            matrix_value_records,
+            matrix_round_records,
+            matrix_opening_records,
         })
     }
 
@@ -607,15 +643,18 @@ impl MainModule {
         }
         for (proof_idx, preflight) in preflights.iter().enumerate() {
             for record in &preflight.pcs.opening_points {
-                if let Some(count) = global_lookup_counts
-                    .get_mut(proof_idx)
-                    .and_then(|counts| counts.get_mut(record.global_round_idx))
-                {
-                    *count += 1;
+                if record.has_main_global {
+                    if let Some(count) = global_lookup_counts
+                        .get_mut(proof_idx)
+                        .and_then(|counts| counts.get_mut(record.global_round_idx))
+                    {
+                        *count += 1;
+                    }
                 }
             }
             for record in &preflight.pcs.suffix_products {
                 if record.has_factor
+                    && record.has_main_global
                     && let Some(count) = global_lookup_counts
                         .get_mut(proof_idx)
                         .and_then(|counts| counts.get_mut(record.coord_idx))
@@ -625,6 +664,7 @@ impl MainModule {
             }
             for record in &preflight.pcs.jagged_assist_h {
                 if record.has_z_row
+                    && (record.round_idx == 0 || record.commit_kind == PcsOpeningCommitKind::Fixed)
                     && let Some(count) = global_lookup_counts
                         .get_mut(proof_idx)
                         .and_then(|counts| counts.get_mut(record.robp_idx))
@@ -656,9 +696,11 @@ impl MainModule {
         }
         for (proof_idx, preflight) in preflights.iter().enumerate() {
             for record in &preflight.pcs.opening_evals {
-                *eval_lookup_counts
-                    .entry((proof_idx, record.main_idx, record.main_eval_idx))
-                    .or_default() += 1;
+                if record.has_main_eval {
+                    *eval_lookup_counts
+                        .entry((proof_idx, record.main_idx, record.main_eval_idx))
+                        .or_default() += 1;
+                }
             }
         }
         for record in &mut eval_records {
@@ -693,6 +735,9 @@ pub(crate) struct MainCollectedRecords {
     pub(crate) selector_point_records: Vec<MainSelectorPointRecord>,
     pub(crate) ecc_rt_records: Vec<MainEccRtRecord>,
     pub(crate) transcript_records: Vec<crate::system::MainTranscriptRecord>,
+    pub(crate) matrix_value_records: Vec<MatrixValueRecord>,
+    pub(crate) matrix_round_records: Vec<MatrixRoundRecord>,
+    pub(crate) matrix_opening_records: Vec<MatrixOpeningRecord>,
 }
 
 pub(crate) struct MainBatchConstraintRecords {
@@ -705,7 +750,7 @@ pub(crate) struct MainBatchConstraintRecords {
 
 impl AirModule for MainModule {
     fn num_airs(&self) -> usize {
-        10
+        13
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -762,6 +807,19 @@ impl AirModule for MainModule {
                 eval_bus: self.main_eval_bus,
                 selector_result_bus: self.main_selector_result_bus,
             }) as AirRef<_>,
+            Arc::new(MatrixValueAir {
+                forked_transcript_bus: self.forked_transcript_bus,
+                value_bus: self.matrix_reduction_value_bus,
+            }) as AirRef<_>,
+            Arc::new(MatrixRoundAir {
+                presence_bus: self.matrix_reduction_presence_bus,
+                value_bus: self.matrix_reduction_value_bus,
+            }) as AirRef<_>,
+            Arc::new(MatrixOpeningAir {
+                value_bus: self.matrix_reduction_value_bus,
+                point_bus: self.pcs_opening_point_bus,
+                eval_bus: self.pcs_semantic_opening_eval_bus,
+            }) as AirRef<_>,
         ]
     }
 }
@@ -808,6 +866,9 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             ref mut selector_point_records,
             ref mut ecc_rt_records,
             ref mut transcript_records,
+            ref mut matrix_value_records,
+            ref mut matrix_round_records,
+            ref mut matrix_opening_records,
         } = records;
         tracing::info!(
             elapsed_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
@@ -840,6 +901,19 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         ecc_rt_records
             .sort_by_key(|record| (record.proof_idx, record.idx, record.round_idx, record.tidx));
         transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
+        matrix_value_records
+            .sort_by_key(|record| (record.proof_idx, record.air_idx, record.kind, record.idx));
+        matrix_round_records
+            .sort_by_key(|record| (record.proof_idx, record.air_idx, record.round_idx));
+        matrix_opening_records.sort_by_key(|record| {
+            (
+                record.proof_idx,
+                record.air_idx,
+                record.is_point,
+                record.pcs_round_idx,
+                record.coord_or_eval_idx,
+            )
+        });
         tracing::info!(
             elapsed_ms = sort_start.elapsed().as_secs_f64() * 1000.0,
             main_count = main_records.len(),
@@ -855,6 +929,9 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             selector_point_records,
             ecc_rt_records,
             transcript_records,
+            matrix_value_records,
+            matrix_round_records,
+            matrix_opening_records,
         };
         let chips = [
             MainModuleChip::Main,
@@ -867,6 +944,9 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             MainModuleChip::SelectorPoint,
             MainModuleChip::SelectorFormula,
             MainModuleChip::SelectorEval,
+            MainModuleChip::MatrixValue,
+            MainModuleChip::MatrixRound,
+            MainModuleChip::MatrixOpening,
         ];
         let span = tracing::Span::current();
         let contexts = chips
@@ -891,6 +971,9 @@ struct MainTraceCtx<'a> {
     selector_point_records: &'a [MainSelectorPointRecord],
     ecc_rt_records: &'a [MainEccRtRecord],
     transcript_records: &'a [crate::system::MainTranscriptRecord],
+    matrix_value_records: &'a [MatrixValueRecord],
+    matrix_round_records: &'a [MatrixRoundRecord],
+    matrix_opening_records: &'a [MatrixOpeningRecord],
 }
 
 enum MainModuleChip {
@@ -904,6 +987,9 @@ enum MainModuleChip {
     SelectorPoint,
     SelectorFormula,
     SelectorEval,
+    MatrixValue,
+    MatrixRound,
+    MatrixOpening,
 }
 
 impl RowMajorChip<F> for MainModuleChip {
@@ -922,6 +1008,9 @@ impl RowMajorChip<F> for MainModuleChip {
             MainModuleChip::SelectorPoint => "MainSelectorPointAir",
             MainModuleChip::SelectorFormula => "MainSelectorFormulaAir",
             MainModuleChip::SelectorEval => "MainSelectorEvalAir",
+            MainModuleChip::MatrixValue => "MatrixValueAir",
+            MainModuleChip::MatrixRound => "MatrixRoundAir",
+            MainModuleChip::MatrixOpening => "MatrixOpeningAir",
         }
     }
 
@@ -956,6 +1045,14 @@ impl RowMajorChip<F> for MainModuleChip {
                 .generate_trace(&ctx.selector_eval_records, required_height),
             MainModuleChip::SelectorEval => MainSelectorEvalTraceGenerator
                 .generate_trace(&ctx.selector_eval_records, required_height),
+            MainModuleChip::MatrixValue => {
+                MatrixValueTraceGenerator.generate_trace(&ctx.matrix_value_records, required_height)
+            }
+            MainModuleChip::MatrixRound => {
+                MatrixRoundTraceGenerator.generate_trace(&ctx.matrix_round_records, required_height)
+            }
+            MainModuleChip::MatrixOpening => MatrixOpeningTraceGenerator
+                .generate_trace(&ctx.matrix_opening_records, required_height),
         }
     }
 }
@@ -993,6 +1090,9 @@ mod cuda_tracegen {
                 ref mut selector_point_records,
                 ref mut ecc_rt_records,
                 ref mut transcript_records,
+                ref mut matrix_value_records,
+                ref mut matrix_round_records,
+                ref mut matrix_opening_records,
             } = records;
             tracing::info!(
                 elapsed_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
@@ -1026,6 +1126,19 @@ mod cuda_tracegen {
                 (record.proof_idx, record.idx, record.round_idx, record.tidx)
             });
             transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
+            matrix_value_records
+                .sort_by_key(|record| (record.proof_idx, record.air_idx, record.kind, record.idx));
+            matrix_round_records
+                .sort_by_key(|record| (record.proof_idx, record.air_idx, record.round_idx));
+            matrix_opening_records.sort_by_key(|record| {
+                (
+                    record.proof_idx,
+                    record.air_idx,
+                    record.is_point,
+                    record.pcs_round_idx,
+                    record.coord_or_eval_idx,
+                )
+            });
             tracing::info!(
                 elapsed_ms = sort_start.elapsed().as_secs_f64() * 1000.0,
                 main_count = main_records.len(),
@@ -1041,6 +1154,9 @@ mod cuda_tracegen {
                 selector_point_records: &selector_point_records,
                 ecc_rt_records: &ecc_rt_records,
                 transcript_records: &transcript_records,
+                matrix_value_records: &matrix_value_records,
+                matrix_round_records: &matrix_round_records,
+                matrix_opening_records: &matrix_opening_records,
             };
             let chips = [
                 MainModuleChip::Main,
@@ -1053,6 +1169,9 @@ mod cuda_tracegen {
                 MainModuleChip::SelectorPoint,
                 MainModuleChip::SelectorFormula,
                 MainModuleChip::SelectorEval,
+                MainModuleChip::MatrixValue,
+                MainModuleChip::MatrixRound,
+                MainModuleChip::MatrixOpening,
             ];
             chips
                 .iter()
@@ -1098,7 +1217,13 @@ pub(crate) fn replay_chip_pre_main_tail_transcript<TS>(
     chip_proof: &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>,
     tower_replay: &TowerReplayResult,
     challenges: [RecursionField; 2],
-) -> Result<(Option<RotationReplayClaims>, Option<EccReplayClaims>)>
+    fork_id: usize,
+    witness_offset: usize,
+) -> Result<(
+    Option<RotationReplayClaims>,
+    Option<EccReplayClaims>,
+    Option<MatrixReductionReplayClaims>,
+)>
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>
         + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
@@ -1148,99 +1273,89 @@ where
         .layers
         .first()
         .ok_or_else(|| eyre!("{name} empty gkr circuit layers"))?;
-    if first_layer.rotation_exprs.1.is_empty() {
-        return Ok((None, ecc_replay));
-    }
-
-    let rotation_proof = chip_proof
-        .rotation_proof
-        .as_ref()
-        .ok_or_else(|| eyre!("{name} missing rotation proof"))?;
-    let num_rotations = first_layer.rotation_exprs.1.len();
-    if rotation_proof.evals.len() != num_rotations * 3 {
-        bail!(
-            "{name} rotation eval length mismatch: {} != {}",
-            rotation_proof.evals.len(),
-            num_rotations * 3
+    let mut rotation_replay = None;
+    if !first_layer.rotation_exprs.1.is_empty() {
+        let rotation_proof = chip_proof
+            .rotation_proof
+            .as_ref()
+            .ok_or_else(|| eyre!("{name} missing rotation proof"))?;
+        let num_rotations = first_layer.rotation_exprs.1.len();
+        if rotation_proof.evals.len() != num_rotations * 3 {
+            bail!("{name} rotation eval length mismatch");
+        }
+        let num_instances: usize = chip_proof.num_instances.iter().sum();
+        let mut log2_num_instances = ceil_log2(next_pow2_instance_padding(num_instances));
+        if composed_cs.has_ecc_ops() {
+            log2_num_instances += 1;
+        }
+        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+        let rt_main = rt_main_from_tower_replay(tower_replay, num_var_with_rotation)
+            .ok_or_else(|| eyre!("{name} missing tower main point for rotation replay"))?;
+        let (rotation_power_challenges, _) =
+            sample_challenge_pows_with_tidx(ts, num_rotations, b"combine subset evals");
+        let rotation_challenges = chain!(
+            challenges.iter().copied(),
+            rotation_power_challenges.iter().copied()
+        )
+        .collect_vec();
+        let (origin_point, expected_evaluation, origin_tidxs) = replay_main_sumcheck(
+            ts,
+            RecursionField::ZERO,
+            &rotation_proof.proof,
+            num_var_with_rotation,
+            2,
+        )?;
+        for eval in &rotation_proof.evals {
+            ts.observe_ext(*eval);
+        }
+        let rotation_sumcheck_expression = first_layer
+            .rotation_sumcheck_expression
+            .as_ref()
+            .ok_or_else(|| eyre!("{name} missing rotation sumcheck expression"))?;
+        let bh = gkr_iop::gkr::booleanhypercube::BooleanHypercube::new(
+            first_layer.rotation_cyclic_group_log2,
         );
-    }
-
-    let num_instances: usize = chip_proof.num_instances.iter().sum();
-    let mut log2_num_instances = ceil_log2(next_pow2_instance_padding(num_instances));
-    if composed_cs.has_ecc_ops() {
-        log2_num_instances += 1;
-    }
-    let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
-    let rt_main = rt_main_from_tower_replay(tower_replay, num_var_with_rotation)
-        .ok_or_else(|| eyre!("{name} missing tower main point for rotation replay"))?;
-
-    let (rotation_power_challenges, _) =
-        sample_challenge_pows_with_tidx(ts, num_rotations, b"combine subset evals");
-    let rotation_challenges = chain!(
-        challenges.iter().copied(),
-        rotation_power_challenges.iter().copied()
-    )
-    .collect_vec();
-    let (origin_point, expected_evaluation, origin_tidxs) = replay_main_sumcheck(
-        ts,
-        RecursionField::ZERO,
-        &rotation_proof.proof,
-        num_var_with_rotation,
-        2,
-    )?;
-    for eval in &rotation_proof.evals {
-        ts.observe_ext(*eval);
-    }
-
-    let rotation_sumcheck_expression = first_layer
-        .rotation_sumcheck_expression
-        .as_ref()
-        .ok_or_else(|| eyre!("{name} missing rotation sumcheck expression"))?;
-    let bh = gkr_iop::gkr::booleanhypercube::BooleanHypercube::new(
-        first_layer.rotation_cyclic_group_log2,
-    );
-    let selector_eval = gkr_iop::utils::rotation_selector_eval(
-        &bh,
-        &rt_main,
-        &origin_point,
-        first_layer.rotation_cyclic_subgroup_size,
-        first_layer.rotation_cyclic_group_log2,
-    );
-    let mut left_evals = Vec::with_capacity(num_rotations);
-    let mut right_evals = Vec::with_capacity(num_rotations);
-    let mut target_evals = Vec::with_capacity(num_rotations);
-    let got_claim = eval_by_expr(
-        &rotation_proof
-            .evals
-            .chunks_exact(3)
-            .flat_map(|evals| {
-                let [left_eval, right_eval, target_eval] = evals else {
-                    unreachable!()
-                };
-                left_evals.push(*left_eval);
-                right_evals.push(*right_eval);
-                target_evals.push(*target_eval);
-                [
-                    (RecursionField::ONE
-                        - origin_point[first_layer.rotation_cyclic_group_log2 - 1])
-                        * *left_eval
-                        + origin_point[first_layer.rotation_cyclic_group_log2 - 1] * *right_eval,
-                    *target_eval,
-                ]
-            })
-            .chain(std::iter::once(selector_eval))
-            .collect_vec(),
-        &[],
-        &rotation_challenges,
-        rotation_sumcheck_expression,
-    );
-    if got_claim != expected_evaluation {
-        bail!("{name} rotation verify failed: {expected_evaluation} != {got_claim}");
-    }
-    let (left_point, right_point) = bh.get_rotation_points(&origin_point);
-
-    Ok((
-        Some(RotationReplayClaims {
+        let selector_eval = gkr_iop::utils::rotation_selector_eval(
+            &bh,
+            &rt_main,
+            &origin_point,
+            first_layer.rotation_cyclic_subgroup_size,
+            first_layer.rotation_cyclic_group_log2,
+        );
+        let mut left_evals = Vec::with_capacity(num_rotations);
+        let mut right_evals = Vec::with_capacity(num_rotations);
+        let mut target_evals = Vec::with_capacity(num_rotations);
+        let got_claim = eval_by_expr(
+            &rotation_proof
+                .evals
+                .chunks_exact(3)
+                .flat_map(|evals| {
+                    let [left_eval, right_eval, target_eval] = evals else {
+                        unreachable!()
+                    };
+                    left_evals.push(*left_eval);
+                    right_evals.push(*right_eval);
+                    target_evals.push(*target_eval);
+                    [
+                        (RecursionField::ONE
+                            - origin_point[first_layer.rotation_cyclic_group_log2 - 1])
+                            * *left_eval
+                            + origin_point[first_layer.rotation_cyclic_group_log2 - 1]
+                                * *right_eval,
+                        *target_eval,
+                    ]
+                })
+                .chain(std::iter::once(selector_eval))
+                .collect_vec(),
+            &[],
+            &rotation_challenges,
+            rotation_sumcheck_expression,
+        );
+        if got_claim != expected_evaluation {
+            bail!("{name} rotation verify failed: {expected_evaluation} != {got_claim}");
+        }
+        let (left_point, right_point) = bh.get_rotation_points(&origin_point);
+        rotation_replay = Some(RotationReplayClaims {
             left_point,
             right_point,
             origin_point,
@@ -1248,9 +1363,125 @@ where
             left_evals,
             right_evals,
             target_evals,
-        }),
-        ecc_replay,
-    ))
+        });
+    }
+
+    let matrix_reduction_replay =
+        replay_matrix_reduction(ts, name, chip_idx, fork_id, witness_offset, chip_proof)?;
+    Ok((rotation_replay, ecc_replay, matrix_reduction_replay))
+}
+
+fn replay_matrix_reduction<TS>(
+    ts: &mut TS,
+    name: &str,
+    air_idx: usize,
+    fork_id: usize,
+    witness_offset: usize,
+    chip_proof: &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>,
+) -> Result<Option<MatrixReductionReplayClaims>>
+where
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config>
+        + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
+{
+    const CORE: &str = "TensorBatchedMatMulCore";
+    let Some(proof) = chip_proof.matrix_reduction.as_ref() else {
+        if name == CORE {
+            bail!("matrix Core chip is missing its reduction");
+        }
+        return Ok(None);
+    };
+    if name != CORE {
+        bail!("non-matrix circuit {name} carries a matrix reduction");
+    }
+    let num_instances: usize = chip_proof.num_instances.iter().sum();
+    if num_instances == 0 || num_instances % 4 != 0 {
+        bail!("invalid matrix Core row count");
+    }
+    let log_height = ceil_log2(next_pow2_instance_padding(num_instances));
+    let section_vars = log_height
+        .checked_sub(2)
+        .ok_or_else(|| eyre!("matrix Core height too small"))?;
+    let output_point_tidx;
+    transcript_observe_label(ts, b"tensor matrix output point");
+    output_point_tidx = ts.len();
+    let output_point = (0..2 + section_vars)
+        .map(|_| FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts))
+        .collect_vec();
+    let output_eval_tidx = ts.len();
+    ts.observe_ext(proof.output_evals[0]);
+    ts.observe_ext(proof.output_evals[1]);
+    let num_rounds = 1 + section_vars;
+    if proof.sumcheck_proof.len() != num_rounds {
+        bail!("matrix sumcheck round count mismatch");
+    }
+    transcript_observe_label(ts, &num_rounds.to_le_bytes());
+    transcript_observe_label(
+        ts,
+        &ceno_zkvm::scheme::matrix_reduction::MATRIX_REDUCTION_DEGREE.to_le_bytes(),
+    );
+    let mut claim = proof.output_evals[0]
+        * RecursionField::from_u64(ceno_zkvm::scheme::matrix_reduction::MATRIX_REDUCTION_SCALE)
+        + proof.output_evals[1];
+    let mut eq_acc = RecursionField::ONE;
+    let mut challenges = Vec::with_capacity(num_rounds);
+    let mut rounds = Vec::with_capacity(num_rounds);
+    for (round_idx, message) in proof.sumcheck_proof.iter().enumerate() {
+        let [ev1, ev2, ev3] = message.evaluations.as_slice() else {
+            bail!("matrix sumcheck degree mismatch");
+        };
+        let eval_tidx = ts.len();
+        ts.observe_ext(*ev1);
+        ts.observe_ext(*ev2);
+        ts.observe_ext(*ev3);
+        transcript_observe_label(ts, b"Internal round");
+        let challenge_tidx = ts.len();
+        let challenge = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+        let claim_out = extrapolate_uni_poly(claim - *ev1, &[*ev1, *ev2, *ev3], challenge);
+        let eq_in = eq_acc;
+        if round_idx > 0 {
+            let target = output_point[round_idx + 1];
+            eq_acc *= target * challenge
+                + (RecursionField::ONE - target) * (RecursionField::ONE - challenge);
+        }
+        rounds.push(MatrixReductionRoundReplay {
+            round_idx,
+            eval_tidx,
+            challenge_tidx,
+            evaluations: [*ev1, *ev2, *ev3],
+            challenge,
+            claim_in: claim,
+            claim_out,
+            eq_in,
+            eq_out: eq_acc,
+        });
+        claim = claim_out;
+        challenges.push(challenge);
+    }
+    let final_eval_tidx = ts.len();
+    ts.observe_ext(proof.final_evals[0]);
+    ts.observe_ext(proof.final_evals[1]);
+    if claim != proof.final_evals[0] * proof.final_evals[1] * eq_acc {
+        bail!("matrix sumcheck final evaluation mismatch");
+    }
+    let mut a_point = vec![challenges[0], output_point[1]];
+    a_point.extend_from_slice(&challenges[1..]);
+    let mut w_point = vec![output_point[0], challenges[0]];
+    w_point.extend_from_slice(&challenges[1..]);
+    Ok(Some(MatrixReductionReplayClaims {
+        air_idx,
+        fork_id,
+        log_height,
+        final_sample_tidx: ts.len(),
+        output_point_tidx,
+        output_eval_tidx,
+        final_eval_tidx,
+        output_point: output_point.clone(),
+        output_evals: proof.output_evals,
+        rounds,
+        final_evals: proof.final_evals,
+        opening_points: [a_point, w_point, output_point],
+        witness_offset,
+    }))
 }
 
 fn sample_vec_with_tidxs<TS>(
@@ -1641,9 +1872,13 @@ where
             global_point_lookup_counts[coord_idx] += 1;
             preflight.pcs.opening_points.push(PcsOpeningPointRecord {
                 proof_idx: 0,
+                pcs_round_idx: 0,
                 opening_idx,
                 coord_idx,
                 global_round_idx: coord_idx,
+                has_main_global: true,
+                has_matrix_point: false,
+                is_zero_tail: false,
                 value,
             });
         }
@@ -1666,11 +1901,14 @@ where
             eval_lookup_counts[global_eval_idx] += 1;
             preflight.pcs.opening_evals.push(PcsOpeningEvalRecord {
                 proof_idx: 0,
+                pcs_round_idx: 0,
                 opening_idx,
                 commit_kind: PcsOpeningCommitKind::Witin,
                 eval_idx,
                 main_idx: opening_idx,
                 main_eval_idx: eval_idx,
+                has_main_eval: true,
+                has_matrix_eval: false,
                 value: main_proof.proof.evals[global_eval_idx],
                 raw_value: main_proof.proof.evals[global_eval_idx],
             });
@@ -1681,11 +1919,14 @@ where
             eval_lookup_counts[global_eval_idx] += 1;
             preflight.pcs.opening_evals.push(PcsOpeningEvalRecord {
                 proof_idx: 0,
+                pcs_round_idx: 1 + proof.additional_witness_openings.len(),
                 opening_idx,
                 commit_kind: PcsOpeningCommitKind::Fixed,
                 eval_idx,
                 main_idx: opening_idx,
                 main_eval_idx,
+                has_main_eval: true,
+                has_matrix_eval: false,
                 value: main_proof.proof.evals[global_eval_idx],
                 raw_value: main_proof.proof.evals[global_eval_idx],
             });

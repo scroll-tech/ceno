@@ -353,6 +353,18 @@ where
         Ok(())
     }
 
+    /// Generate the complete app-proof replay trace and check every AIR and
+    /// LogUp interaction without producing a recursion proof.
+    #[cfg(debug_assertions)]
+    pub fn debug_app_proof_constraints<Eg: StarkEngine<SC = SC, PB = PB>>(
+        &self,
+        proofs: &[RecursionProof],
+    ) {
+        let ctx = self.generate_proving_ctx(proofs, ChildVkKind::App, ProofsType::Vm, None);
+        let engine = Eg::new(self.pk.params.clone());
+        debug_constraints(&self.circuit, &ctx, &engine);
+    }
+
     pub fn get_self_vk_pcs_data(&self) -> Option<CommittedTraceData<PB>>
     where
         CommittedTraceData<PB>: Clone,

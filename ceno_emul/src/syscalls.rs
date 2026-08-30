@@ -62,6 +62,8 @@ pub fn handle_syscall<T: Tracer>(
         UINT256_MUL => Ok(uint256::uint256_mul(vm)),
         PUB_IO_COMMIT => Ok(pubio_commit::pubio_commit(vm)),
         crate::tensor::TENSOR_MATMUL_V1 => tensor::tensor_matmul_v1(vm),
+        #[cfg(feature = "llama-tiny")]
+        crate::tensor::TENSOR_BATCHED_MATMUL_2X2_V1 => tensor::tensor_batched_matmul_2x2_v1(vm),
         crate::tensor::TENSOR_MATMUL_HIDDEN_V1 => tensor::tensor_matmul_hidden_v1(vm),
         crate::tensor::TENSOR_MATMUL_INTERMEDIATE_V1 => tensor::tensor_matmul_intermediate_v1(vm),
         crate::tensor::TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1 => {
@@ -104,6 +106,9 @@ pub struct SyscallWitness {
     /// Global cycle of `tensor_bus_event`.  Proof assignment normalizes this
     /// into the owning shard's local cycle before consuming the event.
     pub tensor_bus_event_cycle: Option<Cycle>,
+    /// Tiny-only complete matrix payload consumed by the batched Core replay.
+    #[cfg(feature = "llama-tiny")]
+    pub tensor_batched_matmul_2x2: Option<crate::tensor::TensorBatchedMatMul2x2Witness>,
 }
 
 impl SyscallWitness {
@@ -116,6 +121,8 @@ impl SyscallWitness {
             tensor_bus_records: Vec::new(),
             tensor_bus_event: None,
             tensor_bus_event_cycle: None,
+            #[cfg(feature = "llama-tiny")]
+            tensor_batched_matmul_2x2: None,
         }
     }
 }

@@ -273,6 +273,51 @@ blocks, lazy weights, and proof scratch inside the segment to remain below 16
 GiB, but it may not reduce the logical 32x2048x2048 workload or spill an
 intermediate activation across the Tensor-space boundary.
 
+### Stage-1 batched matrix proof milestone
+
+The `llama-tiny` stage-1 implementation replaces the scalar output-dot proof
+shape with one complete-matrix guest call per Core section. This distinction is
+material: extrapolating the old scalar path to one exact production layer would
+require 87,031,808 output-dot/finalize calls, 406,847,488 K1024 tile rows, and
+at least 4.547 TiB for only the `input_raw` and `input_neg_carry` witness
+fields. Those scalar counts are no longer the implementation plan; production
+dimensions still require later matrix/attention providers and are not claimed
+complete by this tiny gate.
+
+One tiny section commits a complete 2x2 A, W, quotient, and remainder relation
+in four logical rows, rather than one row per `(m,n,k)` multiplication. The Core
+has 26 witness columns independent of the section count. A, W, Q, and R occupy
+stable local columns 0, 3, 6, and 9; a verifier-known repeating structural
+column binds logical rows to physical MLE row order. Repeated guest calls append
+complete four-row sections to the same registered Core trace. The focused guest
+makes two calls, hence one eight-row Core with two sections.
+
+The matrix relation is a circuit-scoped auxiliary reduction analogous in
+placement to rotation proof replay. It batches all complete sections, leaves
+the existing tower and batched-main sumchecks unchanged, and derives exactly
+three additional A, W, and output opening points. The ordinary WitIn round and
+these three rounds all open every committed witness polynomial against the same
+shard `witin_commit`; native verification locates the four semantic columns by
+deterministic circuit order and rejects nonzero point tails. GPU Jagged opening
+streams evaluations trace-by-trace, so the extra rounds do not collect all
+witness MLE columns on the host.
+
+The real-guest focused GPU E2E passed with two sections, exactly three
+same-commitment rounds, independent native verification, and independent
+product, quotient, and remainder proof-tamper rejection. The final run reported
+a 553-MiB CUDA pool peak. Its GPU-produced proof and VK were then replayed by
+recursion-v2 with Basefold PoW validation intact; the focused constraint and
+LogUp check completed with:
+
+```text
+recursion-v2 app replay constraints verified: proofs=1 matrix_chips=1
+```
+
+This milestone proves the compact matrix-proof ownership, opening, native
+verification, and recursion path. It does not yet implement a complete tiny
+transformer layer, a production-width matrix provider, authenticated model
+weights, or the production attention schedule.
+
 The decode track, when implemented later, applies the same HintRef mechanism to
 external K/V cache tensors and reports one-token-at-context-2048 separately.
 The zkLLM-compatible prefill track has no input KV-cache hint: its K/V tensors

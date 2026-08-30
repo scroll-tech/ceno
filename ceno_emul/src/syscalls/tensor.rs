@@ -2,6 +2,10 @@
 
 use anyhow::{Result, ensure};
 
+#[cfg(feature = "llama-tiny")]
+use crate::tensor::{
+    TENSOR_BATCHED_MATMUL_2X2_V1, TensorBatchedMatMul2x2DescV1, TensorBatchedMatMul2x2Witness,
+};
 use crate::{
     ByteAddr, Change, EmuContext, Platform, Tracer, VMState, WriteOp,
     tensor::{TENSOR_ABI_V1, TensorMatMulDescV1, ZKLLM_FIXED_V1, execute_committed_matmul},
@@ -16,6 +20,10 @@ pub const TENSOR_OUTPUT_WORDS: usize = 4;
 pub const TENSOR_ROOT_WORDS: usize = 8;
 pub const TENSOR_SIGNATURE_2X3X2: u32 = 7;
 pub const TENSOR_RESCALE_SHIFT: u32 = 16;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_BATCHED_MATMUL_2X2_DESC_WORDS: usize = 8;
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_BATCHED_MATMUL_2X2_VALUES: usize = 4;
 
 const TENSOR_TRANSFER_DESC_WORDS: usize = 8;
 const TENSOR_META_WORDS: usize = 4;
@@ -448,6 +456,18 @@ impl SyscallSpec for TensorMatMulV1Spec {
     const CODE: u32 = crate::tensor::TENSOR_MATMUL_V1;
 }
 
+#[cfg(feature = "llama-tiny")]
+pub struct TensorBatchedMatMul2x2V1Spec;
+
+#[cfg(feature = "llama-tiny")]
+impl SyscallSpec for TensorBatchedMatMul2x2V1Spec {
+    const NAME: &'static str = "TENSOR_BATCHED_MATMUL_2X2_V1";
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize =
+        TENSOR_BATCHED_MATMUL_2X2_DESC_WORDS + 4 * TENSOR_BATCHED_MATMUL_2X2_VALUES;
+    const CODE: u32 = TENSOR_BATCHED_MATMUL_2X2_V1;
+}
+
 impl SyscallSpec for TensorImportBeginV1Spec {
     const NAME: &'static str = "TENSOR_IMPORT_BEGIN_V1";
     const REG_OPS_COUNT: usize = 1;
@@ -669,6 +689,99 @@ pub fn tensor_matmul_v1<T: Tracer>(vm: &VMState<T>) -> Result<SyscallEffects> {
         .collect();
     Ok(SyscallEffects {
         witness: SyscallWitness::new(mem_ops, reg_ops),
+        next_pc: None,
+    })
+}
+
+#[cfg(feature = "llama-tiny")]
+pub fn tensor_batched_matmul_2x2_v1<T: Tracer>(vm: &VMState<T>) -> Result<SyscallEffects> {
+    let desc_ptr = vm.peek_register(Platform::reg_arg0());
+    let reg_ops = vec![WriteOp::new_register_op(
+        Platform::reg_arg0(),
+        Change::new(desc_ptr, desc_ptr),
+        0,
+    )];
+    let desc_view = MemoryView::<_, TENSOR_BATCHED_MATMUL_2X2_DESC_WORDS>::new(vm, desc_ptr);
+    let words = desc_view.words();
+    let desc = TensorBatchedMatMul2x2DescV1 {
+        abi_version: words[0],
+        flags: words[1],
+        a_ptr: words[2],
+        w_ptr: words[3],
+        quotient_ptr: words[4],
+        remainder_ptr: words[5],
+        reserved: [words[6], words[7]],
+    };
+    ensure!(desc.abi_version == TENSOR_ABI_V1, "unsupported tensor ABI");
+    ensure!(desc.flags == 0, "unsupported tiny batched MatMul flags");
+    ensure!(
+        desc.reserved == [0; 2],
+        "nonzero tiny batched MatMul reserved words"
+    );
+
+    let a_view = MemoryView::<_, TENSOR_BATCHED_MATMUL_2X2_VALUES>::new(vm, desc.a_ptr);
+    let w_view = MemoryView::<_, TENSOR_BATCHED_MATMUL_2X2_VALUES>::new(vm, desc.w_ptr);
+    let a_flat = a_view
+        .words()
+        .map(|word| i8::try_from(word as i32))
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| anyhow::anyhow!("tiny batched MatMul A value is outside signed byte"))?;
+    let w_flat = w_view
+        .words()
+        .map(|word| i8::try_from(word as i32))
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| anyhow::anyhow!("tiny batched MatMul W value is outside signed byte"))?;
+    let a = [[a_flat[0], a_flat[1]], [a_flat[2], a_flat[3]]];
+    let w = [[w_flat[0], w_flat[1]], [w_flat[2], w_flat[3]]];
+    let mut quotient = [[0_i16; 2]; 2];
+    let mut remainder = [[0_u16; 2]; 2];
+    for m in 0..2 {
+        for n in 0..2 {
+            let product = (0..2)
+                .map(|k| i32::from(a[m][k]) * i32::from(w[k][n]))
+                .sum::<i32>();
+            quotient[m][n] = i16::try_from(product.div_euclid(1 << TENSOR_RESCALE_SHIFT))
+                .expect("signed-byte 2x2 quotient fits i16");
+            remainder[m][n] = product.rem_euclid(1 << TENSOR_RESCALE_SHIFT) as u16;
+        }
+    }
+    let mut quotient_view =
+        MemoryView::<_, TENSOR_BATCHED_MATMUL_2X2_VALUES>::new(vm, desc.quotient_ptr);
+    quotient_view.write([
+        quotient[0][0] as i32 as u32,
+        quotient[0][1] as i32 as u32,
+        quotient[1][0] as i32 as u32,
+        quotient[1][1] as i32 as u32,
+    ]);
+    let mut remainder_view =
+        MemoryView::<_, TENSOR_BATCHED_MATMUL_2X2_VALUES>::new(vm, desc.remainder_ptr);
+    remainder_view.write([
+        u32::from(remainder[0][0]),
+        u32::from(remainder[0][1]),
+        u32::from(remainder[1][0]),
+        u32::from(remainder[1][1]),
+    ]);
+    let mut witness = SyscallWitness::new(
+        desc_view
+            .mem_ops()
+            .into_iter()
+            .chain(a_view.mem_ops())
+            .chain(w_view.mem_ops())
+            .chain(quotient_view.mem_ops())
+            .chain(remainder_view.mem_ops())
+            .collect(),
+        reg_ops,
+    );
+    witness.tensor_batched_matmul_2x2 = Some(TensorBatchedMatMul2x2Witness {
+        a,
+        w,
+        quotient,
+        remainder,
+    });
+    Ok(SyscallEffects {
+        witness,
         next_pc: None,
     })
 }

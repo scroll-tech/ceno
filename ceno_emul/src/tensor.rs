@@ -25,6 +25,18 @@ pub use ceno_rt::tensor::{
     TensorAttentionReducedDescV1, TensorBlockReducedDescV1, TensorHandleOpDescV1,
     TensorMatMulDescV1, TensorProductionMatMulDescV1, TensorRmsLookupDescV1,
 };
+#[cfg(feature = "llama-tiny")]
+pub use ceno_rt::tensor::{TENSOR_BATCHED_MATMUL_2X2_V1, TensorBatchedMatMul2x2DescV1};
+
+/// Compact proof-side payload for one complete tiny 2x2 call.
+#[cfg(feature = "llama-tiny")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TensorBatchedMatMul2x2Witness {
+    pub a: [[i8; 2]; 2],
+    pub w: [[i8; 2]; 2],
+    pub quotient: [[i16; 2]; 2],
+    pub remainder: [[u16; 2]; 2],
+}
 
 pub const ZKLLM_FIXED_V1: u32 = 1;
 /// Gate-2 circuit-native commitment profile. This deliberately binds only the

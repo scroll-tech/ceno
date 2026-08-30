@@ -54,6 +54,8 @@ pub use elf::Program;
 pub mod disassemble;
 
 mod syscalls;
+#[cfg(feature = "llama-tiny")]
+pub use syscalls::tensor::TensorBatchedMatMul2x2V1Spec;
 pub use syscalls::{
     BLS12381_ADD, BLS12381_DECOMPRESS, BLS12381_DOUBLE, BN254_ADD, BN254_DOUBLE, BN254_FP_ADD,
     BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL, KECCAK_PERMUTE, KECCAK_XORIN, PubIoCommitSpec,

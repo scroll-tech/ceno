@@ -46,7 +46,7 @@ use gkr_iop::{
         GpuBackend, GpuBasefoldPcsData, GpuJaggedPcsData, GpuJaggedTraceLayout, GpuPcsData,
         GpuProver, gpu_prover::BB31Ext,
     },
-    hal::ProverBackend,
+    hal::{MultilinearPolynomial, ProverBackend},
 };
 use itertools::{Itertools, chain};
 use mpcs::{Basefold, BasefoldRSParams, PCSFriParam, Point, PolynomialCommitmentScheme};
@@ -3441,12 +3441,79 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
         witness_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData,
         fixed_data: Option<Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData>>,
         points: Vec<Point<E>>,
-        mut evals: Vec<Vec<Vec<E>>>, // where each inner Vec<E> = wit_evals + fixed_evals
+        evals: Vec<Vec<Vec<E>>>, // where each inner Vec<E> = wit_evals + fixed_evals
         transcript: &mut (impl Transcript<E> + 'static),
     ) -> PCS::Proof {
+        self.open_with_additional_witness_points(
+            witness_data,
+            fixed_data,
+            points,
+            evals,
+            Vec::new(),
+            transcript,
+        )
+        .0
+    }
+
+    fn open_with_additional_witness_points(
+        &self,
+        witness_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+        fixed_data: Option<Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData>>,
+        points: Vec<Point<E>>,
+        mut evals: Vec<Vec<Vec<E>>>,
+        additional_witness_points: Vec<Point<E>>,
+        transcript: &mut (impl Transcript<E> + 'static),
+    ) -> (PCS::Proof, Vec<crate::scheme::AdditionalWitnessOpening<E>>) {
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
             panic!("GPU backend only supports BabyBear base field");
         }
+
+        // Jagged commitments can contain production-width traces. Do not retain
+        // every extracted column merely to evaluate the three matrix points:
+        // the deferred iterator owns one trace group at a time, so consuming it
+        // directly keeps those device views bounded by the current group.
+        let retained_witness_mles = if matches!(&witness_data, GpuPcsData::Jagged(_)) {
+            None
+        } else {
+            let mut unused = Vec::new();
+            Some(
+                self.extract_witness_mles(&mut unused, &witness_data)
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let max_num_vars = match &witness_data {
+            GpuPcsData::Jagged(data) => data
+                .trace_layouts
+                .iter()
+                .map(|layout| layout.num_vars)
+                .max()
+                .unwrap_or(0),
+            GpuPcsData::Basefold(_) => retained_witness_mles
+                .as_ref()
+                .expect("basefold witness MLEs are retained")
+                .iter()
+                .map(|mle| mle.num_vars())
+                .max()
+                .unwrap_or(0),
+        };
+        let additional_witness_openings = additional_witness_points
+            .into_iter()
+            .map(|mut point| {
+                point.resize(max_num_vars, E::ZERO);
+                let evals = if let Some(witness_mles) = retained_witness_mles.as_ref() {
+                    witness_mles
+                        .iter()
+                        .map(|mle| mle.eval(point[..mle.num_vars()].to_vec()))
+                        .collect()
+                } else {
+                    let mut unused = Vec::new();
+                    self.extract_witness_mles(&mut unused, &witness_data)
+                        .map(|mle| mle.eval(point[..mle.num_vars()].to_vec()))
+                        .collect()
+                };
+                crate::scheme::AdditionalWitnessOpening { point, evals }
+            })
+            .collect::<Vec<_>>();
 
         // This log deliberately stays at the Ceno-to-PCS boundary.  It
         // records the main/tower-produced input before rounds are consumed.
@@ -3466,7 +3533,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
         }
 
         let mut rounds = vec![];
-        rounds.push((&witness_data, {
+        let witness_round = {
             evals
                 .iter_mut()
                 .zip(&points)
@@ -3479,6 +3546,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
                     }
                 })
                 .collect_vec()
+        };
+        let witness_trace_shapes = witness_round
+            .iter()
+            .map(|(point, trace_evals)| (point.len(), trace_evals.len()))
+            .collect_vec();
+        rounds.push((&witness_data, witness_round));
+        rounds.extend(additional_witness_openings.iter().map(|opening| {
+            let mut offset = 0usize;
+            let trace_openings = witness_trace_shapes
+                .iter()
+                .map(|(num_vars, width)| {
+                    let evals = opening.evals[offset..offset + width].to_vec();
+                    offset += width;
+                    (opening.point[..*num_vars].to_vec(), evals)
+                })
+                .collect_vec();
+            assert_eq!(
+                offset,
+                opening.evals.len(),
+                "additional witness evals do not match trace widths"
+            );
+            (&witness_data, trace_openings)
         }));
         if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
             rounds.push((fixed_data, {
@@ -3497,7 +3586,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
         }
 
         if matches!(&witness_data, GpuPcsData::Jagged(_)) {
-            return open_jagged_gpu::<E, PCS>(&self.backend.pp, rounds, transcript);
+            return (
+                open_jagged_gpu::<E, PCS>(&self.backend.pp, rounds, transcript),
+                additional_witness_openings,
+            );
         }
 
         // Type conversions using unsafe transmute
@@ -3553,7 +3645,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
 
             let gpu_proof: PCS::Proof = unsafe { std::mem::transmute_copy(&gpu_proof_basefold) };
             std::mem::forget(gpu_proof_basefold);
-            gpu_proof
+            (gpu_proof, additional_witness_openings)
         } else {
             panic!("GPU backend only supports BabyBear base field");
         }

@@ -15,6 +15,9 @@ pub const TENSOR_MATMUL_INTERMEDIATE_V1: u32 = 0x00ff_0007;
 /// raw-ecall -> ordered tile -> finalize shape as hidden MatMul, but a small
 /// K so GPU PCS iterations stay interactive.  It is not a stable ABI.
 pub const TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1: u32 = 0x00ff_0008;
+/// Tiny-only complete 2x2 matrix call used by the batched Tensor Core proof.
+#[cfg(feature = "llama-tiny")]
+pub const TENSOR_BATCHED_MATMUL_2X2_V1: u32 = 0x00ff_0009;
 /// Reserved legacy lifecycle opcodes.  Resident handles deliberately do not
 /// use separate begin/end calls: IMPORT_BEGIN and EXPORT_END are the bounds.
 pub const TENSOR_IMPORT_BEGIN_V1: u32 = 0x00ff_000b;
@@ -173,6 +176,48 @@ pub struct TensorMatMulDescV1 {
 
 const _: () = assert!(core::mem::size_of::<TensorMatMulDescV1>() == 64);
 const _: () = assert!(core::mem::align_of::<TensorMatMulDescV1>() == 64);
+
+/// Tiny-only descriptor for one complete signed-byte 2x2 matrix product.
+///
+/// The ecall writes the canonical Q16 quotient and remainder matrices. Shape,
+/// strides, and quantization are fixed by the dedicated ecall number.
+#[cfg(feature = "llama-tiny")]
+#[repr(C, align(32))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TensorBatchedMatMul2x2DescV1 {
+    pub abi_version: u32,
+    pub flags: u32,
+    pub a_ptr: u32,
+    pub w_ptr: u32,
+    pub quotient_ptr: u32,
+    pub remainder_ptr: u32,
+    pub reserved: [u32; 2],
+}
+
+#[cfg(feature = "llama-tiny")]
+const _: () = assert!(core::mem::size_of::<TensorBatchedMatMul2x2DescV1>() == 32);
+
+/// Invoke one complete tiny 2x2 matrix product.
+///
+/// # Safety
+/// All four pointers must address four suitably aligned guest words.
+#[cfg(feature = "llama-tiny")]
+#[inline(always)]
+pub unsafe fn tensor_batched_matmul_2x2_v1(desc: &TensorBatchedMatMul2x2DescV1) {
+    #[cfg(target_arch = "riscv32")]
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            in("a0") desc as *const TensorBatchedMatMul2x2DescV1 as u32,
+            in("t0") TENSOR_BATCHED_MATMUL_2X2_V1,
+        );
+    }
+    #[cfg(not(target_arch = "riscv32"))]
+    {
+        let _ = desc;
+        panic!("tiny batched tensor MatMul is only available in an RV32 guest");
+    }
+}
 
 /// Production-width, one-output-cell MatMul descriptor.
 ///

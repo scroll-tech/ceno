@@ -632,6 +632,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         // fork transcript to support chip concurrently proved
         let mut pending_main_constraints = Vec::with_capacity(num_proofs);
+        let mut matrix_opening_claims = None;
         let mut forked_transcripts = vec![BasicTranscript::new(b"fork"); num_proofs];
         for (index, ((circuit_index, proof), transcript)) in vm_proof
             .chip_proofs
@@ -804,6 +805,33 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 &point_eval,
                 &challenges,
             )?;
+            match (circuit_name.as_str(), proof.matrix_reduction.as_ref()) {
+                ("TensorBatchedMatMulCore", Some(matrix_proof)) => {
+                    if matrix_opening_claims.is_some() {
+                        return Err(ZKVMError::InvalidProof(
+                            "multiple matrix Core reductions in one shard".into(),
+                        ));
+                    }
+                    let claims = crate::scheme::matrix_reduction::verify(
+                        matrix_proof,
+                        num_instance,
+                        transcript,
+                    )?;
+                    matrix_opening_claims = Some((*circuit_index, claims));
+                }
+                ("TensorBatchedMatMulCore", None) => {
+                    return Err(ZKVMError::InvalidProof(
+                        "matrix Core chip is missing its circuit-scoped reduction".into(),
+                    ));
+                }
+                (_, Some(_)) => {
+                    return Err(ZKVMError::InvalidProof(
+                        format!("non-matrix circuit {circuit_name} carries a matrix reduction")
+                            .into(),
+                    ));
+                }
+                (_, None) => {}
+            }
             pending_main_constraints.push(pending_main_constraint);
             let chip_prod_w = proof.w_out_evals.iter().flatten().copied().product::<E>();
             let chip_prod_r = proof.r_out_evals.iter().flatten().copied().product::<E>();
@@ -876,8 +904,115 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             }
         }
 
-        // verify mpcs
+        let expected_additional = usize::from(matrix_opening_claims.is_some()) * 3;
+        if vm_proof.additional_witness_openings.len() != expected_additional {
+            return Err(ZKVMError::InvalidProof(
+                format!(
+                    "additional WitIn opening count {} != expected {expected_additional}",
+                    vm_proof.additional_witness_openings.len()
+                )
+                .into(),
+            ));
+        }
+
+        if let Some((matrix_circuit_idx, claims)) = matrix_opening_claims.as_ref() {
+            let mut total_witin = 0usize;
+            let mut matrix_offset = None;
+            for circuit_idx in vm_proof.chip_proofs.keys() {
+                let name = self
+                    .vk
+                    .circuit_index_to_name
+                    .get(circuit_idx)
+                    .ok_or_else(|| {
+                        ZKVMError::VKNotFound(
+                            format!("circuit index {circuit_idx} missing from vk index map").into(),
+                        )
+                    })?;
+                let circuit_vk = self.vk.circuit_vks.get(name).ok_or_else(|| {
+                    ZKVMError::VKNotFound(format!("circuit {name} missing from vk").into())
+                })?;
+                if circuit_idx == matrix_circuit_idx {
+                    matrix_offset = Some(total_witin);
+                }
+                total_witin += circuit_vk.get_cs().num_witin();
+            }
+            let matrix_offset = matrix_offset.ok_or_else(|| {
+                ZKVMError::InvalidProof("matrix Core witness offset is missing".into())
+            })?;
+            for (round_idx, (opening, logical_point)) in vm_proof
+                .additional_witness_openings
+                .iter()
+                .zip(claims.points.iter())
+                .enumerate()
+            {
+                if opening.evals.len() != total_witin {
+                    return Err(ZKVMError::InvalidProof(
+                        format!(
+                            "matrix WitIn round {round_idx} eval count {} != {total_witin}",
+                            opening.evals.len()
+                        )
+                        .into(),
+                    ));
+                }
+                if opening.point.len() < logical_point.len()
+                    || opening.point[..logical_point.len()] != logical_point[..]
+                    || opening.point[logical_point.len()..]
+                        .iter()
+                        .any(|value| *value != E::ZERO)
+                {
+                    return Err(ZKVMError::InvalidProof(
+                        format!("matrix WitIn round {round_idx} point/tail mismatch").into(),
+                    ));
+                }
+            }
+            let [a_eval, w_eval, q_eval, r_eval] = claims.expected_evals;
+            let expected_columns = [
+                (0usize, matrix_offset + 0, a_eval),
+                (1usize, matrix_offset + 3, w_eval),
+                (2usize, matrix_offset + 6, q_eval),
+                (2usize, matrix_offset + 9, r_eval),
+            ];
+            for (round_idx, eval_idx, expected) in expected_columns {
+                let got = vm_proof.additional_witness_openings[round_idx]
+                    .evals
+                    .get(eval_idx)
+                    .ok_or_else(|| {
+                        ZKVMError::InvalidProof(
+                            format!("matrix witness eval index {eval_idx} is missing").into(),
+                        )
+                    })?;
+                if *got != expected {
+                    return Err(ZKVMError::InvalidProof(
+                        format!("matrix witness opening mismatch at column {eval_idx}").into(),
+                    ));
+                }
+            }
+        }
+
+        // Verify the ordinary WitIn round, followed by exactly three optional
+        // matrix-derived rounds against the same shard commitment.
+        let witin_trace_shapes = witin_openings
+            .iter()
+            .map(|(num_vars, (_, trace_evals))| (*num_vars, trace_evals.len()))
+            .collect_vec();
         let mut rounds = vec![(vm_proof.witin_commit.clone(), witin_openings)];
+        rounds.extend(vm_proof.additional_witness_openings.iter().map(|opening| {
+            let mut offset = 0usize;
+            let trace_openings = witin_trace_shapes
+                .iter()
+                .map(|(num_vars, width)| {
+                    let evals = opening.evals[offset..offset + width].to_vec();
+                    offset += width;
+                    (*num_vars, (opening.point[..*num_vars].to_vec(), evals))
+                })
+                .collect_vec();
+            assert_eq!(
+                offset,
+                opening.evals.len(),
+                "matrix witness evals do not match verifier trace widths"
+            );
+            (vm_proof.witin_commit.clone(), trace_openings)
+        }));
 
         if let Some(fixed_commit) = self.vk.fixed_commit.as_ref()
             && shard_id == 0

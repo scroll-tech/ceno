@@ -1420,11 +1420,48 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
         witness_data: PCS::CommitmentWithWitness,
         fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
         points: Vec<Point<E>>,
-        mut evals: Vec<Vec<Vec<E>>>, // where each inner vec![wit_evals, fixed_evals]
-        transcript: &mut impl Transcript<E>,
+        evals: Vec<Vec<Vec<E>>>, // where each inner vec![wit_evals, fixed_evals]
+        transcript: &mut (impl Transcript<E> + 'static),
     ) -> PCS::Proof {
+        self.open_with_additional_witness_points(
+            witness_data,
+            fixed_data,
+            points,
+            evals,
+            Vec::new(),
+            transcript,
+        )
+        .0
+    }
+
+    fn open_with_additional_witness_points(
+        &self,
+        witness_data: PCS::CommitmentWithWitness,
+        fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
+        points: Vec<Point<E>>,
+        mut evals: Vec<Vec<Vec<E>>>,
+        additional_witness_points: Vec<Point<E>>,
+        transcript: &mut (impl Transcript<E> + 'static),
+    ) -> (PCS::Proof, Vec<crate::scheme::AdditionalWitnessOpening<E>>) {
+        let witness_mles = PCS::get_arc_mle_witness_from_commitment(&witness_data);
+        let max_num_vars = witness_mles
+            .iter()
+            .map(|mle| mle.num_vars())
+            .max()
+            .unwrap_or(0);
+        let additional_witness_openings = additional_witness_points
+            .into_iter()
+            .map(|mut point| {
+                point.resize(max_num_vars, E::ZERO);
+                let evals = witness_mles
+                    .iter()
+                    .map(|mle| mle.evaluate(&point[..mle.num_vars()]))
+                    .collect();
+                crate::scheme::AdditionalWitnessOpening { point, evals }
+            })
+            .collect::<Vec<_>>();
         let mut rounds = vec![];
-        rounds.push((&witness_data, {
+        let witness_round = {
             evals
                 .iter_mut()
                 .zip(&points)
@@ -1437,6 +1474,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
                     }
                 })
                 .collect_vec()
+        };
+        rounds.push((&witness_data, witness_round));
+        rounds.extend(additional_witness_openings.iter().map(|opening| {
+            (
+                &witness_data,
+                vec![(opening.point.clone(), opening.evals.clone())],
+            )
         }));
         if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
             rounds.push((fixed_data, {
@@ -1453,7 +1497,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
                     .collect_vec()
             }));
         }
-        PCS::batch_open(&self.backend.pp, rounds, transcript).unwrap()
+        (
+            PCS::batch_open(&self.backend.pp, rounds, transcript).unwrap(),
+            additional_witness_openings,
+        )
     }
 }
 

@@ -471,4 +471,12 @@ where
     pub fn verify_root_proof(&self, root_vk: &RootVk, root_proof: &RootProof) -> Result<()> {
         verify_root_proof(root_vk, root_proof)
     }
+
+    /// Check the complete leaf recursion replay, including semantic buses,
+    /// without creating a recursion proof.
+    #[cfg(debug_assertions)]
+    pub fn debug_app_proof_constraints(&self, shard_proofs: &[CenoProof]) {
+        self.leaf_prover
+            .debug_app_proof_constraints::<Eg>(shard_proofs);
+    }
 }

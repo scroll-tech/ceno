@@ -8,6 +8,10 @@ mod pubio_commit;
 mod sha_extend;
 mod tensor;
 mod tensor_attention;
+#[cfg(feature = "llama-tiny")]
+pub mod tensor_batched_matmul;
+#[cfg(feature = "llama-tiny")]
+mod tensor_batched_matmul_ecall;
 mod tensor_block;
 mod tensor_bus;
 mod tensor_production;
@@ -28,6 +32,10 @@ pub use tensor::{TensorMatMulCoreInstruction, TensorMatMulEcallInstruction};
 pub use tensor_attention::{
     TensorAttentionReducedCoreInstruction, TensorAttentionReducedEcallInstruction,
 };
+#[cfg(feature = "llama-tiny")]
+pub use tensor_batched_matmul::TensorBatchedMatMulCoreInstruction;
+#[cfg(feature = "llama-tiny")]
+pub use tensor_batched_matmul_ecall::TensorBatchedMatMul2x2EcallInstruction;
 pub use tensor_block::{
     TensorAttentionBlockReducedCoreInstruction, TensorAttentionBlockReducedEcallInstruction,
     TensorFfnBlockReducedCoreInstruction, TensorFfnBlockReducedEcallInstruction,

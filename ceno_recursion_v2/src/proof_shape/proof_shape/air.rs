@@ -22,7 +22,8 @@ use crate::{
         ForkFinalSampleMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
         LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage, MainSelectorShapeBus,
         MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
-        MainSelectorSparseIndexShapeMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
+        MainSelectorSparseIndexShapeMessage, MatrixReductionPresenceBus,
+        MatrixReductionPresenceMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
         TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
@@ -123,6 +124,8 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub fork_final_sample_bus: ForkFinalSampleBus,
     pub main_selector_shape_bus: MainSelectorShapeBus,
     pub main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
+    pub matrix_reduction_presence_bus: MatrixReductionPresenceBus,
+    pub matrix_reduction_air_idx: Option<usize>,
 }
 
 impl<F, const NUM_LIMBS: usize, const LIMB_BITS: usize> BaseAir<F>
@@ -238,6 +241,20 @@ where
             read_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.read_op_vars);
             write_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.write_op_vars);
             logup_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.logup_op_vars);
+
+            if self.matrix_reduction_air_idx == Some(i) {
+                self.matrix_reduction_presence_bus.send(
+                    builder,
+                    local.proof_idx,
+                    MatrixReductionPresenceMessage {
+                        air_idx: AB::Expr::from_usize(i),
+                        fork_id: local.fork_id.into(),
+                        log_height: local.log_height.into(),
+                        final_sample_tidx: local.after_forked_challenge_1_tidx.into(),
+                    },
+                    local.is_present * local.is_valid * is_current_air.clone(),
+                );
+            }
 
             let selector_enabled = local.is_present * local.is_valid * is_current_air.clone();
             for selector in &air_data.selectors {

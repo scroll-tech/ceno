@@ -78,6 +78,7 @@ enum SelectorContextMode {
 pub struct ProofShapeModule {
     // Verifying key fields
     per_air: Vec<AirMetadata>,
+    matrix_reduction_air_idx: Option<usize>,
 
     // Buses (inventory for external, others are internal)
     bus_inventory: BusInventory,
@@ -105,11 +106,16 @@ impl ProofShapeModule {
         let num_airs = child_vk.circuit_vks.len();
         let idx_encoder = Arc::new(Encoder::new(num_airs, 2, true));
         let per_air = extract_air_metadata_from_vk(child_vk);
+        let matrix_reduction_air_idx = child_vk
+            .circuit_index_to_name
+            .iter()
+            .find_map(|(idx, name)| (name == "TensorBatchedMatMulCore").then_some(*idx));
         let public_values_start_tidx = TranscriptLabel::Riscv.field_len() + VK_DIGEST_LEN * D_EF;
 
         let range_bus = bus_inventory.range_checker_bus;
         Self {
             per_air,
+            matrix_reduction_air_idx,
             bus_inventory,
             range_bus,
             permutation_bus: ProofShapePermutationBus::new(b.new_bus_idx()),
@@ -469,6 +475,8 @@ impl AirModule for ProofShapeModule {
             main_selector_sparse_index_shape_bus: self
                 .bus_inventory
                 .main_selector_sparse_index_shape_bus,
+            matrix_reduction_presence_bus: self.bus_inventory.matrix_reduction_presence_bus,
+            matrix_reduction_air_idx: self.matrix_reduction_air_idx,
         };
         let pvs_air = PublicValuesAir {
             public_values_bus: self.bus_inventory.public_values_bus,

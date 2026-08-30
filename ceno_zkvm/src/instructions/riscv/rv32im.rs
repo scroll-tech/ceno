@@ -92,6 +92,13 @@ use std::{
 use strum::{EnumCount, IntoEnumIterator};
 use tracing::info_span;
 
+#[cfg(feature = "llama-tiny")]
+use crate::instructions::riscv::ecall::{
+    TensorBatchedMatMul2x2EcallInstruction, TensorBatchedMatMulCoreInstruction,
+};
+#[cfg(feature = "llama-tiny")]
+use ceno_emul::TensorBatchedMatMul2x2V1Spec;
+
 #[cfg(feature = "gpu")]
 macro_rules! for_each_fused_opcode {
     ($m:ident) => {
@@ -300,6 +307,12 @@ pub struct Rv32imConfig<E: ExtensionField> {
         Option<<TensorMatMulEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
     pub tensor_matmul_core_config:
         Option<<TensorMatMulCoreInstruction<E> as Instruction<E>>::InstructionConfig>,
+    #[cfg(feature = "llama-tiny")]
+    pub tensor_batched_matmul_ecall_config:
+        <TensorBatchedMatMul2x2EcallInstruction<E> as Instruction<E>>::InstructionConfig,
+    #[cfg(feature = "llama-tiny")]
+    pub tensor_batched_matmul_core_config:
+        <TensorBatchedMatMulCoreInstruction<E> as Instruction<E>>::InstructionConfig,
     pub tensor_hidden_ecall_config:
         Option<<TensorMatMulHiddenEcallInstruction<E> as Instruction<E>>::InstructionConfig>,
     /// The production K1024 tile circuit is deliberately absent from
@@ -838,6 +851,12 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let tensor_matmul_core_config = (!minimal_tensor_e2e_registry
             || minimal_tensor_e2e_needs_matmul)
             .then(|| cs.register_opcode_circuit::<TensorMatMulCoreInstruction<E>>());
+        #[cfg(feature = "llama-tiny")]
+        let tensor_batched_matmul_ecall_config =
+            cs.register_opcode_circuit::<TensorBatchedMatMul2x2EcallInstruction<E>>();
+        #[cfg(feature = "llama-tiny")]
+        let tensor_batched_matmul_core_config =
+            cs.register_opcode_circuit::<TensorBatchedMatMulCoreInstruction<E>>();
         if !minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_matmul {
             assert!(
                 ecall_cells_map
@@ -874,6 +893,40 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 chip_specs.push(chip_cost_spec(circuit_cs));
             }
             ecall_name_to_chips.insert(<TensorMatMulCoreInstruction<E>>::name(), tensor_chips);
+        }
+        #[cfg(feature = "llama-tiny")]
+        {
+            let names = [
+                <TensorBatchedMatMul2x2EcallInstruction<E>>::name(),
+                <TensorBatchedMatMulCoreInstruction<E>>::name(),
+            ];
+            assert!(
+                ecall_cells_map
+                    .insert(
+                        <TensorBatchedMatMulCoreInstruction<E>>::name(),
+                        names
+                            .iter()
+                            .map(|name| {
+                                let c = cs.get_cs(name).expect("tiny batched MatMul circuit");
+                                (c.zkvm_v1_css.num_witin as u64
+                                    + c.zkvm_v1_css.num_structural_witin as u64
+                                    + c.zkvm_v1_css.num_fixed as u64)
+                                    * (1 << c.rotation_vars().unwrap_or(0))
+                            })
+                            .sum(),
+                    )
+                    .is_none()
+            );
+            let chips = names
+                .iter()
+                .map(|name| {
+                    let circuit_cs = cs.get_cs(name).expect("tiny batched MatMul circuit");
+                    let index = chip_specs.len();
+                    chip_specs.push(chip_cost_spec(circuit_cs));
+                    index
+                })
+                .collect();
+            ecall_name_to_chips.insert(<TensorBatchedMatMulCoreInstruction<E>>::name(), chips);
         }
         let tensor_hidden_ecall_config =
             (!minimal_tensor_e2e_registry || minimal_tensor_e2e_needs_hidden).then(|| {
@@ -1206,6 +1259,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 TensorMatMulCoreInstruction::<E>::name(),
             );
         }
+        #[cfg(feature = "llama-tiny")]
+        map_ecall(
+            TensorBatchedMatMul2x2V1Spec::CODE,
+            TensorBatchedMatMulCoreInstruction::<E>::name(),
+        );
         if !minimal_tensor_e2e_registry {
             map_ecall(
                 ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1,
@@ -1313,6 +1371,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             ShardCostModel::new(opcode_chips, ecall_chips, chip_specs, E::DEGREE)
                 .with_atomic_ecalls([
                     TensorMatMulV1Spec::CODE,
+                    #[cfg(feature = "llama-tiny")]
+                    TensorBatchedMatMul2x2V1Spec::CODE,
                     ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1,
                     ceno_emul::tensor::TENSOR_MATMUL_INTERMEDIATE_V1,
                     TensorRmsLookupV1Spec::CODE,
@@ -1398,6 +1458,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             tensor_bus_handle_ffn_config,
             tensor_matmul_ecall_config,
             tensor_matmul_core_config,
+            #[cfg(feature = "llama-tiny")]
+            tensor_batched_matmul_ecall_config,
+            #[cfg(feature = "llama-tiny")]
+            tensor_batched_matmul_core_config,
             tensor_hidden_ecall_config,
             tensor_production_tile_config,
             tensor_gate5_small_hidden_tile_config,
@@ -1535,6 +1599,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         if let Some(config) = &self.tensor_matmul_core_config {
             fixed.register_opcode_circuit::<TensorMatMulCoreInstruction<E>>(cs, config);
         }
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<TensorBatchedMatMul2x2EcallInstruction<E>>(
+            cs,
+            &self.tensor_batched_matmul_ecall_config,
+        );
+        #[cfg(feature = "llama-tiny")]
+        fixed.register_opcode_circuit::<TensorBatchedMatMulCoreInstruction<E>>(
+            cs,
+            &self.tensor_batched_matmul_core_config,
+        );
         if let Some(config) = &self.tensor_hidden_ecall_config {
             fixed.register_opcode_circuit::<TensorMatMulHiddenEcallInstruction<E>>(cs, config);
         }
@@ -1708,6 +1782,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         log_ecall!("STATE_CONTINUATION", STATE_CONTINUATION);
         log_ecall!("KECCAK", KeccakSpec::CODE);
         log_ecall!("TENSOR_MATMUL_V1", TensorMatMulV1Spec::CODE);
+        #[cfg(feature = "llama-tiny")]
+        log_ecall!(
+            "TENSOR_BATCHED_MATMUL_2X2_V1",
+            TensorBatchedMatMul2x2V1Spec::CODE
+        );
         log_ecall!("TENSOR_RMS_LOOKUP_V1", TensorRmsLookupV1Spec::CODE);
         log_ecall!(
             "TENSOR_ATTENTION_REDUCED_V1",
@@ -1938,6 +2017,41 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 tensor_matmul_core_config,
                 TensorMatMulV1Spec::CODE
             );
+        }
+        #[cfg(feature = "llama-tiny")]
+        {
+            let records = instrunction_dispatch_ctx
+                .records_for_ecall_code(TensorBatchedMatMul2x2V1Spec::CODE)
+                .unwrap_or(&[]);
+            let n = records.len();
+            info_span!(
+                "assign_chip",
+                chip = %<TensorBatchedMatMul2x2EcallInstruction<E>>::name(),
+                n
+            )
+            .in_scope(|| {
+                witness.assign_opcode_circuit::<TensorBatchedMatMul2x2EcallInstruction<E>>(
+                    cs,
+                    shard_ctx,
+                    &self.tensor_batched_matmul_ecall_config,
+                    shard_steps,
+                    records,
+                )
+            })?;
+            info_span!(
+                "assign_chip",
+                chip = %<TensorBatchedMatMulCoreInstruction<E>>::name(),
+                n
+            )
+            .in_scope(|| {
+                witness.assign_opcode_circuit::<TensorBatchedMatMulCoreInstruction<E>>(
+                    cs,
+                    shard_ctx,
+                    &self.tensor_batched_matmul_core_config,
+                    shard_steps,
+                    records,
+                )
+            })?;
         }
         if let Some(tensor_hidden_ecall_config) = &self.tensor_hidden_ecall_config {
             assign_ecall_with_config!(
@@ -2366,6 +2480,13 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                             tensor_matmul_ecall_config
                         );
                     }
+                    #[cfg(feature = "llama-tiny")]
+                    TensorBatchedMatMul2x2V1Spec::CODE => {
+                        collect_ecall!(
+                            TensorBatchedMatMul2x2EcallInstruction<E>,
+                            tensor_batched_matmul_ecall_config
+                        );
+                    }
                     ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1 => {
                         collect_optional_ecall!(
                             TensorMatMulHiddenEcallInstruction<E>,
@@ -2784,6 +2905,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .ecall_cells_map
                 .get(&TensorMatMulCoreInstruction::<E>::name())
                 .expect("unable to find name"),
+            #[cfg(feature = "llama-tiny")]
+            TensorBatchedMatMul2x2V1Spec::CODE => *self
+                .ecall_cells_map
+                .get(&TensorBatchedMatMulCoreInstruction::<E>::name())
+                .expect("unable to find tiny batched MatMul name"),
             ceno_emul::tensor::TENSOR_MATMUL_HIDDEN_V1 => *self
                 .ecall_cells_map
                 .get(&TensorMatMulHiddenFinalizeInstruction::<E>::name())
