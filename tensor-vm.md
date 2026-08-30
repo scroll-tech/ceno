@@ -254,10 +254,24 @@ addresses. The guest does not pass `hint_base`. A lazy deterministic fixture
 provider generates weight tiles on demand and supplies them as unauthenticated
 private witnesses. Each logical HintRef is product-bound once and reused by all
 consumers, so unauthenticated does not permit inconsistent per-read weights.
-Arithmetic and lookup relations remain proof-authoritative,
-but no model root, seed, or 25.10-GiB hint polynomial is authenticated. Thus
-lazy generation removes guest-hint materialization only; it must not be counted
-as model commitment, hint loading, or real weight-bandwidth performance.
+The resulting arbitrary weight polynomial is committed through the ordinary
+per-shard Ceno witness commitment, and every inner chip is bound to that same
+polynomial. Arithmetic and workload commitment are therefore valid relative to
+the committed witness, but no model root or public seed authenticates it as
+Llama weights. This deliberate model-identity unsoundness is acceptable for the
+compute benchmark and must be disclosed. Lazy generation removes 25.10-GiB
+guest-hint materialization only; it must not be counted as authenticated model
+loading or real weight-bandwidth performance.
+
+All inner relations remain ordinary deterministically registered Ceno Core
+chips. Their instances, columns, proofs, openings, transcript order, verifier,
+and recursion path stay inside each shard's existing `ZKVMWitnesses`,
+`chip_proofs`, and witness commitment. `IMPORT_BEGIN ... EXPORT_END` remains an
+atomic segment; multiple complete segments may batch into Core MLE sections and
+shards cut only between segments. Full attention may tile/stream heads, K/Q
+blocks, lazy weights, and proof scratch inside the segment to remain below 16
+GiB, but it may not reduce the logical 32x2048x2048 workload or spill an
+intermediate activation across the Tensor-space boundary.
 
 The decode track, when implemented later, applies the same HintRef mechanism to
 external K/V cache tensors and reports one-token-at-context-2048 separately.
