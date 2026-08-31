@@ -32,6 +32,7 @@ fn build_elfs() {
     let resident_block_1 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_1").is_some();
     let resident_block_2 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_2").is_some();
     let resident_block_4 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_4").is_some();
+    let resident_segments_2 = std::env::var_os("CARGO_FEATURE_RESIDENT_SEGMENTS_2").is_some();
     assert!(
         usize::from(resident_block_1)
             + usize::from(resident_block_2)
@@ -50,6 +51,9 @@ fn build_elfs() {
     }
     if resident_block_4 {
         args.extend(["--features", "resident-block-4"]);
+    }
+    if resident_segments_2 {
+        args.extend(["--features", "resident-segments-2"]);
     }
     if is_release {
         args.insert(1, "--release"); // insert --release after "build"
@@ -90,6 +94,9 @@ fn build_elfs() {
         }
         if resident_block_4 {
             ceno_args.extend(["--features", "resident-block-4"]);
+        }
+        if resident_segments_2 {
+            ceno_args.extend(["--features", "resident-segments-2"]);
         }
         if is_release {
             ceno_args.push("--release");
@@ -132,6 +139,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RESIDENT_BLOCK_1");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RESIDENT_BLOCK_2");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RESIDENT_BLOCK_4");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RESIDENT_SEGMENTS_2");
     println!("cargo:rerun-if-env-changed=CARGO_TARGET_DIR");
     build_elfs();
 }

@@ -36,8 +36,12 @@ const LAYERS: usize = 8;
 ))]
 compile_error!("resident block multiplier features are mutually exclusive");
 
-fn main() {
-    let input = std::array::from_fn::<_, WORDS, _>(|index| index as i32 - 2048);
+#[cfg(feature = "resident-segments-2")]
+const SEGMENTS: usize = 2;
+#[cfg(not(feature = "resident-segments-2"))]
+const SEGMENTS: usize = 1;
+
+fn run_segment(input: &[i32; WORDS]) -> [i32; WORDS] {
     let mut output = [0_i32; WORDS];
     let meta = [(WORDS * 4) as u32, WORDS as u32, 1, 0];
     let mut handles = [TensorHandleV1::default(); 2];
@@ -89,9 +93,17 @@ fn main() {
         };
         tensor_export_end_v1(&export);
     }
+    output
+}
+
+fn main() {
+    let mut output = std::array::from_fn::<_, WORDS, _>(|index| index as i32 - 2048);
+    for _ in 0..SEGMENTS {
+        output = run_segment(&output);
+    }
     let mut low = -2048i32;
     let mut high = (WORDS / 2) as i32 - 2048;
-    for _ in 0..LAYERS {
+    for _ in 0..LAYERS * SEGMENTS {
         high = high.wrapping_add(low).wrapping_mul(2).wrapping_add(1);
         low = low.wrapping_mul(2).wrapping_add(1);
     }

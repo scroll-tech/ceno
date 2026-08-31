@@ -94,6 +94,7 @@ llama-tiny = ["ceno_emul/llama-tiny", "ceno-examples/llama-tiny"]
 resident-block-1 = ["ceno-examples/resident-block-1"]
 resident-block-2 = ["ceno-examples/resident-block-2"]
 resident-block-4 = ["ceno-examples/resident-block-4"]
+resident-segments-2 = ["ceno-examples/resident-segments-2"]
 tensor-cuda = ["ceno_emul/tensor-cuda"]
 nightly-features = [
   "p3/nightly-features",
