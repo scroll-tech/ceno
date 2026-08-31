@@ -26,9 +26,7 @@ pub use ops::*;
 mod program;
 pub use program::{InsnRecord, ProgramTableCircuit, ProgramTableConfig};
 
-#[cfg(feature = "llama-tiny")]
 mod llama_tiny;
-#[cfg(feature = "llama-tiny")]
 pub use llama_tiny::*;
 
 mod ram;

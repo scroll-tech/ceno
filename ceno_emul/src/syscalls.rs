@@ -82,7 +82,9 @@ pub fn handle_syscall<T: Tracer>(
         crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2 => {
             tensor::tensor_production_import_begin_v2(vm)
         }
-        crate::tensor::TENSOR_PRODUCTION_ATTENTION_V2 => tensor::tensor_production_attention_v2(vm),
+        crate::tensor::TENSOR_PRODUCTION_FULL_LAYER_V2 => {
+            tensor::tensor_production_full_layer_v2(vm)
+        }
         crate::tensor::TENSOR_PRODUCTION_EXPORT_END_V2 => {
             tensor::tensor_production_export_end_v2(vm)
         }
@@ -128,7 +130,7 @@ pub struct SyscallWitness {
     #[cfg(feature = "llama-tiny")]
     pub tensor_resident_boundary: Option<crate::tensor::TensorResidentBoundaryWitness>,
     pub tensor_production_boundary: Option<crate::tensor::TensorProductionBoundaryWitness>,
-    pub tensor_production_attention: Option<crate::tensor::TensorProductionAttentionWitness>,
+    pub tensor_production_full_layer: Option<crate::tensor::TensorProductionFullLayerWitness>,
 }
 
 impl SyscallWitness {
@@ -150,7 +152,7 @@ impl SyscallWitness {
             #[cfg(feature = "llama-tiny")]
             tensor_resident_boundary: None,
             tensor_production_boundary: None,
-            tensor_production_attention: None,
+            tensor_production_full_layer: None,
         }
     }
 }

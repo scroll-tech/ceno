@@ -483,8 +483,13 @@ fn verify_production<E: ExtensionField>(
     transcript.append_field_element_ext(&proof.final_evals[0]);
     transcript.append_field_element_ext(&proof.final_evals[1]);
     let h = &reduction_point[11..13];
-    let expected_final =
-        proof.final_evals[0] * proof.final_evals[1] * eq_eval(&logical_output[22..24], h);
+    let mut selector_eval = eq_eval(&logical_output[22..24], h);
+    if descriptor.kind == MatrixReductionKind::ProductionPv {
+        // PV's final four reduction coordinates select the K128 tile.  The
+        // same four logical-output coordinates select the per-tile Q/R row.
+        selector_eval *= eq_eval(&logical_output[7..11], &reduction_point[7..11]);
+    }
+    let expected_final = proof.final_evals[0] * proof.final_evals[1] * selector_eval;
     if subclaim.expected_evaluation != expected_final {
         return Err(invalid(
             "production matrix sumcheck final evaluation mismatch",
@@ -549,9 +554,10 @@ fn production_terminal_points<E: ExtensionField>(
                 .chain(&k[7..11])
                 .copied()
                 .collect(),
-            k[..7]
+            n[..7]
                 .iter()
-                .chain(n)
+                .chain(&k[..7])
+                .chain(&n[7..11])
                 .chain(h)
                 .chain(&k[7..11])
                 .copied()

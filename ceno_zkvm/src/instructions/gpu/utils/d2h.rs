@@ -245,6 +245,14 @@ pub(crate) fn gpu_lk_counters_to_multiplicity(
             (LookupTable::Pow, &counters.pow_table),
             (LookupTable::LlamaSoftmaxExp3, &counters.llama_softmax_exp3),
             (LookupTable::LlamaSoftmaxExp4, &counters.llama_softmax_exp4),
+            (
+                LookupTable::LlamaProductionSoftmaxExpMiddle,
+                &counters.llama_production_softmax_middle,
+            ),
+            (
+                LookupTable::LlamaProductionSoftmaxExpHigh,
+                &counters.llama_production_softmax_high,
+            ),
         ];
         for &(table, ref buf_opt) in dense {
             if let Some(buf) = buf_opt {

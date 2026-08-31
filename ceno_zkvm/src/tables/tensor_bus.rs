@@ -29,10 +29,8 @@ const KEY_SHARD_ID: usize = 22;
 const KEY_LOCAL_SHARD_CYCLE: usize = 23;
 const KEY_ORDINAL: usize = 24;
 const TENSOR_BUS_SEGMENT_EVENTS: usize = 2;
-const TENSOR_LLAMA2_QKV_WORDS: u32 = 3 * 2048 * 4096;
-const TENSOR_LLAMA2_CONTEXT_WORDS: u32 = 2048 * 4096;
-const _: () = assert!(TENSOR_LLAMA2_QKV_WORDS == 25_165_824);
-const _: () = assert!(TENSOR_LLAMA2_CONTEXT_WORDS == 8_388_608);
+const TENSOR_LLAMA2_HIDDEN_WORDS: u32 = 2048 * 4096;
+const _: () = assert!(TENSOR_LLAMA2_HIDDEN_WORDS == 8_388_608);
 
 /// A canonical event is stored on the syscall witness at execution time and
 /// must exactly match the custom write record in TensorBusFixedEcall.
@@ -161,7 +159,7 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
                     }
                 }
                 code if code == TensorProductionImportBeginV2Spec::CODE => {
-                    if event[5] != TENSOR_LLAMA2_QKV_WORDS || event[10] != event[5] * 4 {
+                    if event[5] != TENSOR_LLAMA2_HIDDEN_WORDS || event[10] != event[5] * 4 {
                         return Err(tensor_bus_error(
                             "production TensorBus import metadata mismatch",
                         ));
@@ -174,7 +172,7 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
                     }
                 }
                 code if code == TensorProductionExportEndV2Spec::CODE => {
-                    if event[6] != TENSOR_LLAMA2_CONTEXT_WORDS || event[10] != event[6] * 4 {
+                    if event[6] != TENSOR_LLAMA2_HIDDEN_WORDS || event[10] != event[6] * 4 {
                         return Err(tensor_bus_error(
                             "production TensorBus export metadata mismatch",
                         ));

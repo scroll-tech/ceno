@@ -764,6 +764,12 @@ pub(crate) fn lookup_table_name(table_idx: usize) -> &'static str {
         x if x == LookupTable::Instruction as usize => "Instruction",
         x if x == LookupTable::LlamaSoftmaxExp3 as usize => "LlamaSoftmaxExp3",
         x if x == LookupTable::LlamaSoftmaxExp4 as usize => "LlamaSoftmaxExp4",
+        x if x == LookupTable::LlamaProductionSoftmaxExpMiddle as usize => {
+            "LlamaProductionSoftmaxExpMiddle"
+        }
+        x if x == LookupTable::LlamaProductionSoftmaxExpHigh as usize => {
+            "LlamaProductionSoftmaxExpHigh"
+        }
         x if x == LookupTable::LlamaRmsInv as usize => "LlamaRmsInv",
         x if x == LookupTable::LlamaSwiGlu as usize => "LlamaSwiGlu",
         _ => "Unknown",

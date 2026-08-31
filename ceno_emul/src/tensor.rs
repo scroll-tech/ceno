@@ -27,8 +27,8 @@ pub use ceno_rt::tensor::{
     TENSOR_EXPORT_END_V1, TENSOR_FFN_BLOCK_REDUCED_V1, TENSOR_HANDLE_ATTENTION_V1,
     TENSOR_HANDLE_FFN_V1, TENSOR_IMPORT_BEGIN_V1, TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1,
     TENSOR_MATMUL_HIDDEN_V1, TENSOR_MATMUL_INTERMEDIATE_V1, TENSOR_MATMUL_V1,
-    TENSOR_PRODUCTION_ATTENTION_V2, TENSOR_PRODUCTION_EXPORT_END_V2,
-    TENSOR_PRODUCTION_IMPORT_BEGIN_V2, TENSOR_PROFILE_LLAMA2_7B_ATTENTION, TENSOR_RMS_LOOKUP_V1,
+    TENSOR_PRODUCTION_EXPORT_END_V2, TENSOR_PRODUCTION_FULL_LAYER_V2,
+    TENSOR_PRODUCTION_IMPORT_BEGIN_V2, TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER, TENSOR_RMS_LOOKUP_V1,
     TensorAttentionReducedDescV1, TensorBlockReducedDescV1, TensorHandleOpDescV1,
     TensorHandleOpDescV2, TensorMatMulDescV1, TensorProductionMatMulDescV1, TensorRmsLookupDescV1,
 };
@@ -149,15 +149,20 @@ pub struct TensorProductionBoundaryWitness {
     pub word_count: usize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TensorProductionAttentionWitness {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TensorProductionFullLayerWitness {
     pub import_cycle: u64,
     pub input_tensor_id: u64,
     pub input_version: u32,
+    pub projected_qkv_tensor_id: u64,
+    pub projected_qkv_version: u32,
+    pub attention_output_tensor_id: u64,
+    pub attention_output_version: u32,
     pub output_tensor_id: u64,
     pub output_version: u32,
     pub profile: u32,
     pub layer: u32,
+    pub operation_records: Vec<production_attention::ProductionFullLayerOperationRecord>,
 }
 
 /// Complete provider-owned witness for one descriptor-v2 llama-tiny layer.

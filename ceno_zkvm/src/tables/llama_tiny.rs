@@ -57,6 +57,38 @@ impl LlamaTinyRom for SoftmaxExp4Rom {
     }
 }
 
+pub struct ProductionSoftmaxExpMiddleRom;
+impl LlamaTinyRom for ProductionSoftmaxExpMiddleRom {
+    const CATEGORY: LookupTable = LookupTable::LlamaProductionSoftmaxExpMiddle;
+    const NAME: &'static str = "LLAMA_PRODUCTION_SOFTMAX_EXP_MIDDLE";
+    const ROWS: usize = 1 << 20;
+
+    fn input(index: usize) -> i64 {
+        index as i64
+    }
+
+    fn output(index: usize) -> i64 {
+        // round(2^18 * exp(-digit * 2^8 / (2^32 * sqrt(128))))
+        (262_144.0 * (-(index as f64) / (16_777_216.0 * 128.0f64.sqrt())).exp() + 0.5) as i64
+    }
+}
+
+pub struct ProductionSoftmaxExpHighRom;
+impl LlamaTinyRom for ProductionSoftmaxExpHighRom {
+    const CATEGORY: LookupTable = LookupTable::LlamaProductionSoftmaxExpHigh;
+    const NAME: &'static str = "LLAMA_PRODUCTION_SOFTMAX_EXP_HIGH";
+    const ROWS: usize = 1 << 20;
+
+    fn input(index: usize) -> i64 {
+        index as i64
+    }
+
+    fn output(index: usize) -> i64 {
+        // round(2^22 * exp(-digit * 2^28 / (2^32 * sqrt(128))))
+        (4_194_304.0 * (-(index as f64) / (16.0 * 128.0f64.sqrt())).exp() + 0.5) as i64
+    }
+}
+
 pub struct RmsInvRom;
 impl LlamaTinyRom for RmsInvRom {
     const CATEGORY: LookupTable = LookupTable::LlamaRmsInv;
@@ -213,5 +245,9 @@ impl<E: ExtensionField, R: LlamaTinyRom> TableCircuit<E> for LlamaTinyRomCircuit
 
 pub type SoftmaxExp3TableCircuit<E> = LlamaTinyRomCircuit<E, SoftmaxExp3Rom>;
 pub type SoftmaxExp4TableCircuit<E> = LlamaTinyRomCircuit<E, SoftmaxExp4Rom>;
+pub type ProductionSoftmaxExpMiddleTableCircuit<E> =
+    LlamaTinyRomCircuit<E, ProductionSoftmaxExpMiddleRom>;
+pub type ProductionSoftmaxExpHighTableCircuit<E> =
+    LlamaTinyRomCircuit<E, ProductionSoftmaxExpHighRom>;
 pub type RmsInvTableCircuit<E> = LlamaTinyRomCircuit<E, RmsInvRom>;
 pub type SwiGluTableCircuit<E> = LlamaTinyRomCircuit<E, SwiGluRom>;

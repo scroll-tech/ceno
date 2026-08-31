@@ -8,7 +8,10 @@ pub const MAX_NUM_INSTANCE_BITS: usize = 29;
 /// Exclusive raw per-entry proof-data bound for proof-controlled instance counts.
 pub const MAX_NUM_INSTANCES: usize = 1usize << MAX_NUM_INSTANCE_BITS;
 
+#[cfg(feature = "llama-tiny")]
 pub const DYNAMIC_RANGE_MAX_BITS: usize = 18;
+#[cfg(not(feature = "llama-tiny"))]
+pub const DYNAMIC_RANGE_MAX_BITS: usize = 20;
 
 pub const SEPTIC_EXTENSION_DEGREE: usize = 7;
 pub const SEPTIC_JACOBIAN_NUM_MLES: usize = 3 * SEPTIC_EXTENSION_DEGREE;

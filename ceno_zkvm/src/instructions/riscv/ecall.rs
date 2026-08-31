@@ -63,16 +63,16 @@ pub use tensor_production::{
     TensorProductionTileInstruction, TensorProductionTileK64Instruction,
 };
 pub use tensor_production_attention::{
-    TensorProductionAttentionAnchorInstruction, TensorProductionBoundaryConfig,
-    TensorProductionBoundaryContextInstruction, TensorProductionBoundaryKInstruction,
-    TensorProductionBoundaryQInstruction, TensorProductionBoundaryReplayDescriptor,
-    TensorProductionBoundaryVInstruction, TensorProductionExportAnchorInstruction,
+    TensorProductionBoundaryConfig, TensorProductionBoundaryHiddenInputInstruction,
+    TensorProductionBoundaryHiddenOutputInstruction, TensorProductionBoundaryReplayDescriptor,
+    TensorProductionExportAnchorInstruction, TensorProductionFullLayerAnchorInstruction,
     TensorProductionImportAnchorInstruction, collect_production_boundary_replay_descriptors,
 };
 pub use tensor_production_attention_matrix::{
     TensorProductionPvCoreInstruction, TensorProductionQkCoreInstruction,
 };
 pub use tensor_production_attention_softmax::{
+    TensorProductionShiftCoreConfig, TensorProductionShiftCoreInstruction,
     TensorProductionSoftmaxCoreConfig, TensorProductionSoftmaxCoreInstruction,
 };
 pub use tensor_rms::{TensorRmsLookupCoreInstruction, TensorRmsLookupEcallInstruction};

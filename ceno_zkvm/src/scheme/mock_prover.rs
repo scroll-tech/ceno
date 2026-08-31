@@ -314,6 +314,12 @@ impl<E: ExtensionField, K: LkMultiplicityKey> MockProverError<E, K> {
                         ROMType::Instruction => format!("PC: {key}"),
                         ROMType::LlamaSoftmaxExp3 => format!("llama softmax exp3 digit: {key}"),
                         ROMType::LlamaSoftmaxExp4 => format!("llama softmax exp4 digit: {key}"),
+                        ROMType::LlamaProductionSoftmaxExpMiddle => {
+                            format!("production softmax middle digit: {key}")
+                        }
+                        ROMType::LlamaProductionSoftmaxExpHigh => {
+                            format!("production softmax high digit: {key}")
+                        }
                         ROMType::LlamaRmsInv => format!("llama RMS energy: {key}"),
                         ROMType::LlamaSwiGlu => format!("llama SwiGLU raw i16 key: {key}"),
                     };
@@ -818,6 +824,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                         ROMType::Instruction => lkm_from_cs.fetch(*arg0 as u32),
                         ROMType::LlamaSoftmaxExp3
                         | ROMType::LlamaSoftmaxExp4
+                        | ROMType::LlamaProductionSoftmaxExpMiddle
+                        | ROMType::LlamaProductionSoftmaxExpHigh
                         | ROMType::LlamaRmsInv => lkm_from_cs.increment(*rom_type, *arg0),
                         ROMType::LlamaSwiGlu => {
                             let modulus = E::BaseField::MODULUS_U64;

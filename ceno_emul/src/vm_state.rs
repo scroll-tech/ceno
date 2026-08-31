@@ -36,9 +36,9 @@ struct TensorBusResidentSession {
 }
 
 #[cfg(feature = "tensor-cuda")]
-struct TensorProductionAttentionSession {
-    provider: crate::tensor::production_attention_cuda::ProductionAttentionCudaProvider,
-    witness: crate::tensor::production_attention_cuda::ProductionAttentionDeviceWitness,
+struct TensorProductionFullLayerSession {
+    provider: crate::tensor::production_attention_cuda::ProductionFullLayerCudaProvider,
+    witness: crate::tensor::production_attention_cuda::ProductionFullLayerDeviceWitness,
     handle: TensorHandle,
     executed: bool,
 }
@@ -67,7 +67,7 @@ pub struct VMState<T: Tracer = FullTracer> {
     #[cfg(feature = "tensor-cuda")]
     tensor_bus_resident: Option<TensorBusResidentSession>,
     #[cfg(feature = "tensor-cuda")]
-    tensor_production_attention: Option<TensorProductionAttentionSession>,
+    tensor_production_full_layer: Option<TensorProductionFullLayerSession>,
     next_tensor_bus_segment_id: u64,
     completed_tensor_bus_records: Vec<TensorBusRecord>,
     tracer: T,
@@ -186,7 +186,7 @@ impl<T: Tracer> VMState<T> {
             #[cfg(feature = "tensor-cuda")]
             tensor_bus_resident: None,
             #[cfg(feature = "tensor-cuda")]
-            tensor_production_attention: None,
+            tensor_production_full_layer: None,
             next_tensor_bus_segment_id: 1,
             completed_tensor_bus_records: Vec::new(),
             halt_state: None,
@@ -504,19 +504,19 @@ impl<T: Tracer> VMState<T> {
     }
 
     #[cfg(feature = "tensor-cuda")]
-    pub(crate) fn tensor_production_attention_import(
+    pub(crate) fn tensor_production_full_layer_import(
         &mut self,
         handle: TensorHandle,
-        packed_qkv: &[i32],
+        hidden: &[i32],
     ) -> Result<()> {
         ensure!(
-            self.tensor_production_attention.is_none(),
-            "production attention CUDA segment is already active"
+            self.tensor_production_full_layer.is_none(),
+            "production full-layer CUDA segment is already active"
         );
         let provider =
-            crate::tensor::production_attention_cuda::ProductionAttentionCudaProvider::new(0)?;
-        let witness = provider.import(packed_qkv)?;
-        self.tensor_production_attention = Some(TensorProductionAttentionSession {
+            crate::tensor::production_attention_cuda::ProductionFullLayerCudaProvider::new(0)?;
+        let witness = provider.import(hidden)?;
+        self.tensor_production_full_layer = Some(TensorProductionFullLayerSession {
             provider,
             witness,
             handle,
@@ -526,42 +526,47 @@ impl<T: Tracer> VMState<T> {
     }
 
     #[cfg(feature = "tensor-cuda")]
-    pub(crate) fn tensor_production_attention_execute(
+    pub(crate) fn tensor_production_full_layer_execute(
         &mut self,
         input: TensorHandle,
         output: TensorHandle,
-    ) -> Result<()> {
+        import_cycle: u64,
+    ) -> Result<Vec<crate::tensor::production_attention::ProductionFullLayerOperationRecord>> {
         let session = self
-            .tensor_production_attention
+            .tensor_production_full_layer
             .as_mut()
-            .ok_or_else(|| anyhow!("production attention CUDA operator is outside a segment"))?;
+            .ok_or_else(|| anyhow!("production full-layer CUDA operator is outside a segment"))?;
         ensure!(
             session.handle == input,
-            "production attention handle mismatch"
+            "production full-layer handle mismatch"
         );
-        ensure!(!session.executed, "production attention executed twice");
+        ensure!(!session.executed, "production full-layer executed twice");
         session.provider.execute(&mut session.witness)?;
+        let mut records = session.witness.operation_records().to_vec();
+        for record in &mut records {
+            record.import_cycle = import_cycle;
+        }
         session.handle = output;
         session.executed = true;
-        Ok(())
+        Ok(records)
     }
 
     #[cfg(feature = "tensor-cuda")]
-    pub(crate) fn tensor_production_attention_export(
+    pub(crate) fn tensor_production_full_layer_export(
         &mut self,
         handle: TensorHandle,
     ) -> Result<Vec<i32>> {
         let mut session = self
-            .tensor_production_attention
+            .tensor_production_full_layer
             .take()
-            .ok_or_else(|| anyhow!("production attention CUDA export is outside a segment"))?;
+            .ok_or_else(|| anyhow!("production full-layer CUDA export is outside a segment"))?;
         ensure!(
             session.handle == handle,
-            "production attention export handle mismatch"
+            "production full-layer export handle mismatch"
         );
         ensure!(
             session.executed,
-            "production attention export precedes execution"
+            "production full-layer export precedes execution"
         );
         let output = session.provider.export(&mut session.witness)?;
         let metrics = session.witness.metrics();
@@ -574,10 +579,15 @@ impl<T: Tracer> VMState<T> {
             qk_launches = metrics.qk_launches,
             softmax_launches = metrics.softmax_launches,
             pv_launches = metrics.pv_launches,
+            rms_launches = metrics.rms_launches,
+            projection_tile_launches = metrics.projection_tile_launches,
+            rope_launches = metrics.rope_launches,
+            residual_launches = metrics.residual_launches,
+            swiglu_launches = metrics.swiglu_launches,
             allocated_bytes = metrics.allocated_bytes,
             high_water_bytes = metrics.high_water_bytes,
             minimum_free_bytes = metrics.minimum_free_bytes,
-            "production attention CUDA segment exported"
+            "production full-layer CUDA segment exported"
         );
         Ok(output)
     }
@@ -597,8 +607,8 @@ impl<T: Tracer> VMState<T> {
         );
         #[cfg(feature = "tensor-cuda")]
         ensure!(
-            self.tensor_production_attention.is_none(),
-            "production attention CUDA segment was not exported"
+            self.tensor_production_full_layer.is_none(),
+            "production full-layer CUDA segment was not exported"
         );
         Ok(())
     }

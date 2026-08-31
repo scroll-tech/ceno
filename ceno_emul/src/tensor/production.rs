@@ -103,7 +103,7 @@ pub mod mini_llama_10m {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TensorRole {
     TokenEmbedding = 1,
     InputNorm = 2,

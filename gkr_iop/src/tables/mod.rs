@@ -17,6 +17,8 @@ pub enum LookupTable {
     Instruction, // Decoded instruction from the fixed program.
     LlamaSoftmaxExp3,
     LlamaSoftmaxExp4,
+    LlamaProductionSoftmaxExpMiddle,
+    LlamaProductionSoftmaxExpHigh,
     LlamaRmsInv,
     LlamaSwiGlu,
 }
