@@ -455,6 +455,30 @@ Run 1, 4, 8, then 32 layers device-resident. Logical batching remains governed
 by Ceno shard cuts; physical device residency may stream layer weights and
 witness tiles without changing proof semantics.
 
+The guest-level topology for this phase is deliberately simple:
+
+```text
+for each outer block:
+    begin_segment()
+    repeat inner_layers times:
+        attention()
+        ffn()
+    end_segment()
+```
+
+For a 32-layer pass, `inner_layers = 4` gives eight atomic segments; the
+two-layer variant gives sixteen. `IMPORT_BEGIN`/`EXPORT_END` remain the only
+TensorBus boundaries for each segment, so intermediate activations stay in
+Tensor-space and the existing one-live-source replay/low-memory policy is
+unchanged. Shard cuts remain legal only between complete segments.
+
+This composition is not enabled in the current exact guests yet: the tiny v2
+profile still has a one-layer fixed oracle/session, and production v2 currently
+implements exact attention only. The old v1 topology example contains the
+four-pair loop but is synthetic. The loop becomes executable after the exact
+multi-layer/FFN v2 operations are available; adding repeated calls before then
+would violate their trace and session invariants.
+
 ## Acceptance criteria
 
 - CPU preflight does no dense tensor arithmetic for supported GPU syscalls.
