@@ -61,7 +61,7 @@ pub struct RmsInvRom;
 impl LlamaTinyRom for RmsInvRom {
     const CATEGORY: LookupTable = LookupTable::LlamaRmsInv;
     const NAME: &'static str = "LLAMA_TINY_RMS_INV";
-    const ROWS: usize = 1 << 17;
+    const ROWS: usize = 1 << 18;
 
     fn input(index: usize) -> i64 {
         index as i64
