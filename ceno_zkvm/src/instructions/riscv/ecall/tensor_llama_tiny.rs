@@ -202,6 +202,7 @@ fn internal_tensor_id(section: &LlamaTinyLayerIdentity, domain: u32) -> u64 {
 
 #[derive(Clone, Copy)]
 struct LlamaTinyLayerIdentity {
+    layer: u32,
     import_cycle: u64,
     attention_cycle: u64,
     ffn_cycle: u64,
@@ -258,7 +259,7 @@ fn make_matrix(
         rhs_tensor_version: rhs_domain.map(|_| 1),
         hint: tensor::TensorHintRef {
             profile: tensor::TENSOR_PROFILE_LLAMA_TINY,
-            layer: 0,
+            layer: identity.layer,
             role,
             tile_index: 0,
         },
@@ -332,8 +333,9 @@ pub fn collect_layer_sections(
                     None => return Err(invalid("llama-tiny tamper hook is not UTF-8")),
                 }
             }
-            let oracle =
-                tensor::llama_tiny::execute().map_err(|error| invalid(error.to_string()))?;
+            let layer = attention.hint.layer;
+            let oracle = tensor::llama_tiny::execute_layer(layer, provider.trace.input)
+                .map_err(|error| invalid(error.to_string()))?;
             if provider.trace != oracle {
                 return Err(invalid(
                     "llama-tiny provider snapshot disagrees with host oracle",
@@ -341,8 +343,7 @@ pub fn collect_layer_sections(
             }
             if attention.hint.profile != tensor::TENSOR_PROFILE_LLAMA_TINY
                 || ffn.hint.profile != tensor::TENSOR_PROFILE_LLAMA_TINY
-                || attention.hint.layer != 0
-                || ffn.hint.layer != 0
+                || ffn.hint.layer != layer
                 || attention.hint.role != tensor::TENSOR_HINT_ROLE_ATTENTION
                 || ffn.hint.role != tensor::TENSOR_HINT_ROLE_FFN
                 || attention.output_tensor_id != ffn.input_tensor_id
@@ -352,6 +353,7 @@ pub fn collect_layer_sections(
                 return Err(invalid("llama-tiny handle chain/profile/layer mismatch"));
             }
             let identity = LlamaTinyLayerIdentity {
+                layer,
                 import_cycle: shard_ctx.aligned_current_ts(attention.import_cycle),
                 attention_cycle: attention_step.cycle() - shard_ctx.current_shard_offset_cycle(),
                 ffn_cycle: ffn_step.cycle() - shard_ctx.current_shard_offset_cycle(),
@@ -378,7 +380,7 @@ pub fn collect_layer_sections(
                 let role = WEIGHT_ROLES[index];
                 let hint = tensor::TensorHintRef {
                     profile: tensor::TENSOR_PROFILE_LLAMA_TINY,
-                    layer: 0,
+                    layer,
                     role,
                     tile_index: 0,
                 };
@@ -492,6 +494,7 @@ struct ResidentClaimPortConfig {
 pub struct LlamaTinyCoreConfig {
     active: WitIn,
     import_cycle: WitIn,
+    layer: WitIn,
     call_cycle: WitIn,
     next_call_cycle: WitIn,
     input_id_lo: WitIn,
@@ -597,7 +600,7 @@ const fn semantic_read_enabled(ordinal: usize, port: usize) -> bool {
         0 => !matches!(ordinal, 28..=39),
         1 => matches!(
             ordinal,
-            8..=11 | 16..=19 | 40..=43 | 52..=59 | 72..=75 | 84..=87 | 104..=111
+            1 | 3 | 8..=11 | 16..=19 | 40..=43 | 52..=59 | 72..=75 | 84..=87 | 104..=111
         ),
         2 => matches!(ordinal, 40..=43 | 58..=59),
         _ => false,
@@ -608,12 +611,10 @@ const fn semantic_write_enabled(ordinal: usize, port: usize) -> bool {
     match port {
         0 => !matches!(ordinal, 24..=27 | 40..=43),
         1 => {
-            matches!(
-                ordinal,
-                0..=3 | 6..=7 | 12..=19 | 28..=38 | 56..=59 | 76..=79 | 82..=83 | 88..=91
-            ) && !matches!(ordinal, 30 | 33 | 36 | 39)
+            (matches!(ordinal, 0..=3 | 6..=7 | 12..=19 | 28..=38 | 56..=59 | 76..=79 | 82..=83 | 88..=91))
+                && !matches!(ordinal, 30 | 33 | 36 | 39)
         }
-        2 => matches!(ordinal, 1 | 3 | 12..=15 | 56..=57 | 77 | 79),
+        2 => matches!(ordinal, 0..=3 | 12..=15 | 56..=57 | 77 | 79),
         _ => false,
     }
 }
@@ -662,7 +663,13 @@ const fn semantic_lane_shift(ordinal: usize, lane: usize) -> Option<u32> {
 
 const fn semantic_read_index(ordinal: usize, port: usize) -> usize {
     match ordinal {
-        0..=3 => ordinal,
+        0..=3 => {
+            if port == 1 {
+                ordinal - 1
+            } else {
+                ordinal
+            }
+        }
         4..=7 => ordinal - if ordinal < 6 { 4 } else { 6 },
         8..=11 => ordinal - 8,
         12..=15 => ordinal - 12,
@@ -703,7 +710,11 @@ const fn semantic_write_index(ordinal: usize, port: usize) -> usize {
     match ordinal {
         0..=3 => {
             if port == 2 {
-                ordinal / 2
+                if ordinal.is_multiple_of(2) {
+                    ordinal
+                } else {
+                    ordinal / 2
+                }
             } else {
                 ordinal
             }
@@ -934,16 +945,6 @@ fn constrain_operation_stages<E: ExtensionField, const CHIP: usize>(
                 }),
             )?;
         }
-        bind(
-            cb,
-            "state_value",
-            config.value.expr(),
-            fixed(&|ordinal| match ordinal {
-                0 => 8_697,
-                111 => 152,
-                _ => 0,
-            }),
-        )?;
         if !matches!(base, 24..=30) {
             for (limb, column) in config.limbs.iter().enumerate() {
                 bind(
@@ -1030,21 +1031,28 @@ fn constrain_operation_stages<E: ExtensionField, const CHIP: usize>(
         match base {
             0 => {
                 bind(cb, "fanout0", wv[0].expr(), rv[0].expr())?;
-                bind(cb, "fanout1", wv[1].expr(), rv[0].expr())?;
+                bind(
+                    cb,
+                    "fanout1",
+                    wv[1].expr(),
+                    (one.clone() - x.clone()) * rv[0].expr(),
+                )?;
                 bind(cb, "square_a", operand(0, 0), rv[0].expr())?;
                 bind(cb, "square_b", operand(0, 1), rv[0].expr())?;
                 bind(cb, "square_c", operand(0, 2), zero.clone())?;
                 bind(cb, "square_d", operand(0, 3), zero.clone())?;
-                let input0 = i64::from(tensor::llama_tiny::INPUT[0][0]);
-                let input1 = i64::from(tensor::llama_tiny::INPUT[1][0]);
-                let first = signed_constant(input0) + y.clone() * signed_constant(input1 - input0);
                 bind(
                     cb,
                     "energy_first_a",
                     operand(1, 0),
-                    x.clone() * first.clone(),
+                    x.clone() * rv[1].expr(),
                 )?;
-                bind(cb, "energy_first_b", operand(1, 1), x.clone() * first)?;
+                bind(
+                    cb,
+                    "energy_first_b",
+                    operand(1, 1),
+                    x.clone() * rv[1].expr(),
+                )?;
                 bind(
                     cb,
                     "energy_second_a",
@@ -1450,6 +1458,7 @@ impl<E: ExtensionField, const CHIP: usize> Instruction<E> for LlamaTinyCoreInstr
             std::array::from_fn(|i| cb.create_witin(|| format!("llama_tiny_lookup_input_{i}")));
         let mut new = |name: &'static str| cb.create_witin(|| name);
         let import_cycle = new("llama_tiny_import_cycle");
+        let layer = new("llama_tiny_layer");
         let call_cycle = new("llama_tiny_call_cycle");
         let next_call_cycle = new("llama_tiny_next_call_cycle");
         let input_id_lo = new("llama_tiny_input_id_lo");
@@ -1930,7 +1939,7 @@ impl<E: ExtensionField, const CHIP: usize> Instruction<E> for LlamaTinyCoreInstr
                 claim.output_id_hi.expr(),
                 claim.output_version.expr(),
                 E::BaseField::from_u32(tensor::TENSOR_PROFILE_LLAMA_TINY).expr(),
-                E::BaseField::ZERO.expr(),
+                layer.expr(),
                 claim.role.expr(),
                 claim.row.expr(),
                 claim.value.expr(),
@@ -1978,6 +1987,7 @@ impl<E: ExtensionField, const CHIP: usize> Instruction<E> for LlamaTinyCoreInstr
         let config = LlamaTinyCoreConfig {
             active,
             import_cycle,
+            layer,
             call_cycle,
             next_call_cycle,
             input_id_lo,
@@ -2197,6 +2207,7 @@ impl LlamaTinySemanticRow {
 
 fn layer_identity(section: &LlamaTinyLayerSection) -> LlamaTinyLayerIdentity {
     LlamaTinyLayerIdentity {
+        layer: section.hints[0].0.layer,
         import_cycle: section.import_cycle,
         attention_cycle: section.attention_cycle,
         ffn_cycle: section.ffn_cycle,
@@ -2268,7 +2279,7 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
     for cell in 0..4 {
         let token = cell / 2;
         let col = cell % 2;
-        let input = tensor::llama_tiny::INPUT[token][col];
+        let input = trace.input[token][col];
         let row = &mut rows[cell];
         row.reads[0] = Some(TensorCell {
             id: section.input_tensor_id,
@@ -2278,8 +2289,17 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
         });
         row.writes[0] = Some(semantic_cell(&identity, 1, cell, input));
         row.writes[1] = Some(semantic_cell(&identity, 2, cell, input));
+        if col == 0 {
+            row.writes[2] = Some(semantic_cell(&identity, 27, cell, input));
+        }
         row.lanes[0] = ArithmeticLane::exact(i64::from(input), i64::from(input), 0, 0);
         if col == 1 {
+            row.reads[1] = Some(semantic_cell(
+                &identity,
+                27,
+                cell - 1,
+                trace.input[token][0],
+            ));
             row.writes[2] = Some(semantic_cell(
                 &identity,
                 3,
@@ -2287,8 +2307,8 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
                 trace.input_energy[token],
             ));
             row.lanes[1] = ArithmeticLane::exact(
-                i64::from(tensor::llama_tiny::INPUT[token][0]),
-                i64::from(tensor::llama_tiny::INPUT[token][0]),
+                i64::from(trace.input[token][0]),
+                i64::from(trace.input[token][0]),
                 i64::from(input),
                 i64::from(input),
             );
@@ -2306,13 +2326,13 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
             &identity,
             4,
             token,
-            tensor::llama_tiny::INPUT_INV_RMS[token],
+            trace.input_inv_rms[token],
         ));
         row.lookup_inputs[0] = trace.input_energy[token] as u64;
-        row.lookup_output = i64::from(tensor::llama_tiny::INPUT_INV_RMS[token]);
+        row.lookup_output = i64::from(trace.input_inv_rms[token]);
     }
     for token in 0..2 {
-        let inv = tensor::llama_tiny::INPUT_INV_RMS[token];
+        let inv = trace.input_inv_rms[token];
         let row = &mut rows[6 + token];
         row.reads[0] = Some(semantic_cell(&identity, 4, token, inv));
         row.writes[0] = Some(semantic_cell(&identity, 5, token * 2, inv));
@@ -2321,8 +2341,8 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
     for cell in 0..4 {
         let token = cell / 2;
         let col = cell % 2;
-        let inv = tensor::llama_tiny::INPUT_INV_RMS[token];
-        let input = tensor::llama_tiny::INPUT[token][col];
+        let inv = trace.input_inv_rms[token];
+        let input = trace.input[token][col];
         let weighted = ArithmeticLane::centered(
             i64::from(inv),
             i64::from(tensor::llama_tiny::INPUT_NORM_WEIGHT[col]),
@@ -2452,7 +2472,7 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
             logical_row: score as u32,
             value: resident.output[score],
         });
-        row.limbs = tensor::llama_tiny::SOFTMAX_DIGITS[score / 2][score % 2];
+        row.limbs = trace.softmax_digits[score / 2][score % 2];
         // The shifted magnitude can exceed i64::MAX.  It is represented only
         // by the five base-2^16 limbs and the AIR sign/decomposition equation.
         row.value = 0;
@@ -2460,7 +2480,7 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
     for score in 0..4 {
         for step in 0..3 {
             let ordinal = 28 + score * 3 + step;
-            let digits = tensor::llama_tiny::SOFTMAX_DIGITS[score / 2][score % 2];
+            let digits = trace.softmax_digits[score / 2][score % 2];
             rows[ordinal].limbs = match step {
                 0 => digits,
                 1 => [digits[2], digits[3], digits[4], 0, 0],
@@ -2475,14 +2495,14 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
                         &identity,
                         10 + digit as u32,
                         score,
-                        i32::from(tensor::llama_tiny::SOFTMAX_DIGITS[score / 2][score % 2][digit]),
+                        i32::from(trace.softmax_digits[score / 2][score % 2][digit]),
                     ));
                 }
             }
         }
     }
     for score in 0..4 {
-        let digits = tensor::llama_tiny::SOFTMAX_DIGITS[score / 2][score % 2];
+        let digits = trace.softmax_digits[score / 2][score % 2];
         for digit in 0..3 {
             rows[40 + score].reads[digit] = Some(semantic_cell(
                 &identity,
@@ -2494,7 +2514,7 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
         }
         rows[44 + score].reads[0] = Some(semantic_cell(&identity, 13, score, i32::from(digits[3])));
         rows[44 + score].lookup_inputs[3] = u64::from(digits[3]);
-        rows[44 + score].lookup_output = SoftmaxExp3Rom::output(digits[3]) as i64;
+        rows[44 + score].lookup_output = SoftmaxExp3Rom::output(digits[3] as usize);
         rows[44 + score].writes[0] = Some(semantic_cell(
             &identity,
             15,
@@ -2503,7 +2523,7 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
         ));
         rows[48 + score].reads[0] = Some(semantic_cell(&identity, 14, score, i32::from(digits[4])));
         rows[48 + score].lookup_inputs[4] = u64::from(digits[4]);
-        rows[48 + score].lookup_output = SoftmaxExp4Rom::output(digits[4]) as i64;
+        rows[48 + score].lookup_output = SoftmaxExp4Rom::output(digits[4] as usize);
         rows[48 + score].writes[0] = Some(semantic_cell(
             &identity,
             16,
@@ -2615,11 +2635,11 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
             &identity,
             2,
             cell,
-            tensor::llama_tiny::INPUT[cell / 2][cell % 2],
+            trace.input[cell / 2][cell % 2],
         ));
         rows[72 + cell].reads[1] = rows[68 + cell].writes[0];
         rows[72 + cell].lanes[0] = ArithmeticLane::exact(
-            i64::from(tensor::llama_tiny::INPUT[cell / 2][cell % 2]),
+            i64::from(trace.input[cell / 2][cell % 2]),
             1,
             i64::from(trace.attention_projection[cell / 2][cell % 2]),
             1,
@@ -2670,24 +2690,24 @@ fn semantic_schedule(section: &LlamaTinyLayerSection) -> Vec<LlamaTinySemanticRo
             &identity,
             25,
             token,
-            tensor::llama_tiny::POST_INV_RMS[token],
+            trace.post_inv_rms[token],
         ));
         rows[80 + token].lookup_inputs[0] = trace.post_energy[token] as u64;
-        rows[80 + token].lookup_output = i64::from(tensor::llama_tiny::POST_INV_RMS[token]);
+        rows[80 + token].lookup_output = i64::from(trace.post_inv_rms[token]);
         rows[82 + token].reads[0] = rows[80 + token].writes[0];
         for dim in 0..2 {
             rows[82 + token].writes[dim] = Some(semantic_cell(
                 &identity,
                 26,
                 token * 2 + dim,
-                tensor::llama_tiny::POST_INV_RMS[token],
+                trace.post_inv_rms[token],
             ));
         }
     }
     for cell in 0..4 {
         let token = cell / 2;
         let col = cell % 2;
-        let inv = tensor::llama_tiny::POST_INV_RMS[token];
+        let inv = trace.post_inv_rms[token];
         let value = trace.attention_residual[token][col];
         let weighted = ArithmeticLane::centered(
             i64::from(inv),
@@ -2884,6 +2904,7 @@ impl<E: ExtensionField, const CHIP: usize> LlamaTinyCoreInstruction<E, CHIP> {
             }
             set_val!(row, config.active, 1);
             set_val!(row, config.import_cycle, section.import_cycle);
+            set_val!(row, config.layer, u64::from(section.hints[0].0.layer));
             let attention = ordinal < LLAMA_TINY_ATTENTION_ROWS;
             let next_attention = ordinal + 1 < LLAMA_TINY_ATTENTION_ROWS;
             set_val!(
@@ -3171,6 +3192,17 @@ pub fn audit_layer_graph(sections: &[LlamaTinyLayerSection]) -> Result<(), ZKVME
     type HintKey = (u32, u32, u32, u32, u32, i32);
     type PrivateKey = (usize, usize, usize, usize, usize, usize, i64, [u16; 5]);
 
+    for pair in sections.windows(2) {
+        let (left, right) = (&pair[0], &pair[1]);
+        if left.hints[0].0.layer + 1 != right.hints[0].0.layer
+            || left.output_tensor_id != right.input_tensor_id
+            || left.output_version != right.input_version
+            || left.trace.output != right.trace.input
+            || left.ffn_cycle >= right.attention_cycle
+        {
+            return Err(invalid("llama-tiny ordered layer chain mismatch"));
+        }
+    }
     for section in sections {
         if section.matrices.len() != 9 || section.hints.len() != 7 {
             return Err(invalid("llama-tiny matrix/HintRef cardinality drift"));
@@ -3328,12 +3360,7 @@ pub fn audit_layer_graph(sections: &[LlamaTinyLayerSection]) -> Result<(), ZKVME
                     .or_default()[0] += 1;
             }
         }
-        for (index, value) in tensor::llama_tiny::INPUT
-            .iter()
-            .flatten()
-            .copied()
-            .enumerate()
-        {
+        for (index, value) in section.trace.input.iter().flatten().copied().enumerate() {
             traffic(
                 TensorCell {
                     id: section.input_tensor_id,
@@ -3531,8 +3558,10 @@ pub fn audit_layer_graph(sections: &[LlamaTinyLayerSection]) -> Result<(), ZKVME
             );
         }
 
-        if tensor_ledger.values().any(|count| *count != [1, 1]) {
-            return Err(invalid("llama-tiny emitted Tensor ledger drift"));
+        if let Some((key, count)) = tensor_ledger.iter().find(|(_, count)| **count != [1, 1]) {
+            return Err(invalid(format!(
+                "llama-tiny emitted Tensor ledger drift key={key:?} count={count:?}"
+            )));
         }
         if tensor_ordinals.values().any(
             |ordinals| matches!(ordinals, [Some(producer), Some(consumer)] if producer >= consumer),
@@ -3545,18 +3574,11 @@ pub fn audit_layer_graph(sections: &[LlamaTinyLayerSection]) -> Result<(), ZKVME
         if hints.len() != 28 || hints.values().any(|count| *count != [1, 1]) {
             return Err(invalid("llama-tiny exact emitted HintRef W/R ledger drift"));
         }
-        if dynamic
-            != BTreeMap::from([
-                (65_536, 8),
-                (116_192, 1),
-                (66_923, 1),
-                (66_493, 1),
-                (69_262, 1),
-            ])
-            || rms != BTreeMap::from([(20_480, 2), (41_905, 1), (36_970, 1)])
-            || exp3 != BTreeMap::from([(0, 2), (64_254, 2)])
-            || exp4 != BTreeMap::from([(0, 4)])
-            || swiglu != BTreeMap::from([(19, 1), (65_522, 1), (16, 1), (7, 1)])
+        if dynamic.values().sum::<usize>() != 12
+            || rms.values().sum::<usize>() != 4
+            || exp3.values().sum::<usize>() != 4
+            || exp4.values().sum::<usize>() != 4
+            || swiglu.values().sum::<usize>() != 4
         {
             return Err(invalid("llama-tiny emitted lookup multiplicity drift"));
         }

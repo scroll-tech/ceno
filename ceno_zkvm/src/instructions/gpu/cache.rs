@@ -472,7 +472,9 @@ fn ensure_shard_metadata_cached_inner(
                 | LK_DENSE_OR
                 | LK_DENSE_XOR
                 | LK_DENSE_LTU
-                | LK_DENSE_POW;
+                | LK_DENSE_POW
+                | ceno_gpu::common::witgen::LK_DENSE_LLAMA_SOFTMAX_EXP3
+                | ceno_gpu::common::witgen::LK_DENSE_LLAMA_SOFTMAX_EXP4;
             Some(
                 hal.witgen
                     .alloc_lk_counters_with_fetch(fetch_base_pc, fetch_num_slots, dense_flags, None)
@@ -501,6 +503,10 @@ fn ensure_shard_metadata_cached_inner(
                 xor_table: counters.xor_table.as_ref().unwrap().device_ptr() as u64,
                 ltu_table: counters.ltu_table.as_ref().unwrap().device_ptr() as u64,
                 pow_table: counters.pow_table.as_ref().unwrap().device_ptr() as u64,
+                llama_softmax_exp3: counters.llama_softmax_exp3.as_ref().unwrap().device_ptr()
+                    as u64,
+                llama_softmax_exp4: counters.llama_softmax_exp4.as_ref().unwrap().device_ptr()
+                    as u64,
                 fetch: counters.fetch.as_ref().unwrap().device_ptr() as u64,
                 fetch_base_pc: counters.fetch_base_pc,
             });

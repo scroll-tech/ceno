@@ -268,7 +268,6 @@ impl<E: ExtensionField> Instruction<E> for TensorHintRefCoreInstruction<E> {
             profile.expr(),
             E::BaseField::from_u32(ceno_emul::tensor::TENSOR_PROFILE_LLAMA_TINY).expr(),
         )?;
-        cb.require_zero(|| "tensor_hint_layer_zero", layer.expr())?;
         cb.require_zero(|| "tensor_hint_tile_zero", tile.expr())?;
         cb.write_record(
             || "tensor_hint_ref_write",
@@ -689,7 +688,6 @@ impl<E: ExtensionField> Instruction<E> for TensorBatchedMatMulCoreInstruction<E>
             is_resident.expr()
                 * E::BaseField::from_u32(ceno_emul::tensor::TENSOR_PROFILE_LLAMA_TINY).expr(),
         )?;
-        cb.require_zero(|| "tensor_batched_layer_zero", layer.expr())?;
         cb.require_zero(|| "tensor_batched_tile_zero", tile.expr())?;
         for (i, bit) in remainder_bits.iter().enumerate() {
             cb.assert_bit(|| format!("tensor_batched_r_bit_{i}_boolean"), bit.expr())?;

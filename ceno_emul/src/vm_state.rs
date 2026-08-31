@@ -35,6 +35,14 @@ struct TensorBusResidentSession {
     phase: TensorBusResidentPhase,
 }
 
+#[cfg(feature = "tensor-cuda")]
+struct TensorProductionAttentionSession {
+    provider: crate::tensor::production_attention_cuda::ProductionAttentionCudaProvider,
+    witness: crate::tensor::production_attention_cuda::ProductionAttentionDeviceWitness,
+    handle: TensorHandle,
+    executed: bool,
+}
+
 /// An implementation of the machine state and of the side-effects of operations.
 pub const VM_REG_COUNT: usize = 32 + 1;
 
@@ -58,6 +66,8 @@ pub struct VMState<T: Tracer = FullTracer> {
     tensor_bus_import_cycle: Option<Cycle>,
     #[cfg(feature = "tensor-cuda")]
     tensor_bus_resident: Option<TensorBusResidentSession>,
+    #[cfg(feature = "tensor-cuda")]
+    tensor_production_attention: Option<TensorProductionAttentionSession>,
     next_tensor_bus_segment_id: u64,
     completed_tensor_bus_records: Vec<TensorBusRecord>,
     tracer: T,
@@ -175,6 +185,8 @@ impl<T: Tracer> VMState<T> {
             tensor_bus_import_cycle: None,
             #[cfg(feature = "tensor-cuda")]
             tensor_bus_resident: None,
+            #[cfg(feature = "tensor-cuda")]
+            tensor_production_attention: None,
             next_tensor_bus_segment_id: 1,
             completed_tensor_bus_records: Vec::new(),
             halt_state: None,
@@ -314,6 +326,7 @@ impl<T: Tracer> VMState<T> {
         input: TensorHandle,
         output: TensorHandle,
         operator: u32,
+        layer: u32,
     ) -> Result<Option<crate::tensor::TensorLlamaTinyLayerWitness>> {
         let session = self
             .tensor_bus_resident
@@ -325,14 +338,26 @@ impl<T: Tracer> VMState<T> {
         );
         match (session.phase, operator) {
             (TensorBusResidentPhase::Imported, crate::tensor::TENSOR_HANDLE_ATTENTION_V1) => {
-                let snapshot = session.provider.matmul_2x2(&mut session.witness, true)?;
+                let snapshot = session
+                    .provider
+                    .matmul_2x2(&mut session.witness, true, layer)?;
                 session.phase = TensorBusResidentPhase::Attention;
                 session.handle = output;
                 return Ok(snapshot);
             }
             (TensorBusResidentPhase::Attention, crate::tensor::TENSOR_HANDLE_FFN_V1) => {
-                let snapshot = session.provider.matmul_2x2(&mut session.witness, false)?;
+                let snapshot = session
+                    .provider
+                    .matmul_2x2(&mut session.witness, false, layer)?;
                 session.phase = TensorBusResidentPhase::Ffn;
+                session.handle = output;
+                return Ok(snapshot);
+            }
+            (TensorBusResidentPhase::Ffn, crate::tensor::TENSOR_HANDLE_ATTENTION_V1) => {
+                let snapshot = session
+                    .provider
+                    .matmul_2x2(&mut session.witness, true, layer)?;
+                session.phase = TensorBusResidentPhase::Attention;
                 session.handle = output;
                 return Ok(snapshot);
             }
@@ -407,7 +432,6 @@ impl<T: Tracer> VMState<T> {
         Ok((words, records))
     }
 
-    #[cfg(feature = "llama-tiny")]
     pub(crate) fn tensor_bus_current_import_cycle(&self) -> Result<Cycle> {
         self.tensor_bus_import_cycle
             .ok_or_else(|| anyhow!("TensorBus segment import cycle is unavailable"))
@@ -444,7 +468,6 @@ impl<T: Tracer> VMState<T> {
         Ok((handle, segment.records()[start..].to_vec()))
     }
 
-    #[cfg(feature = "llama-tiny")]
     pub(crate) fn tensor_bus_apply_v2<F>(
         &mut self,
         input: TensorHandle,
@@ -480,6 +503,85 @@ impl<T: Tracer> VMState<T> {
         ))
     }
 
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_production_attention_import(
+        &mut self,
+        handle: TensorHandle,
+        packed_qkv: &[i32],
+    ) -> Result<()> {
+        ensure!(
+            self.tensor_production_attention.is_none(),
+            "production attention CUDA segment is already active"
+        );
+        let provider =
+            crate::tensor::production_attention_cuda::ProductionAttentionCudaProvider::new(0)?;
+        let witness = provider.import(packed_qkv)?;
+        self.tensor_production_attention = Some(TensorProductionAttentionSession {
+            provider,
+            witness,
+            handle,
+            executed: false,
+        });
+        Ok(())
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_production_attention_execute(
+        &mut self,
+        input: TensorHandle,
+        output: TensorHandle,
+    ) -> Result<()> {
+        let session = self
+            .tensor_production_attention
+            .as_mut()
+            .ok_or_else(|| anyhow!("production attention CUDA operator is outside a segment"))?;
+        ensure!(
+            session.handle == input,
+            "production attention handle mismatch"
+        );
+        ensure!(!session.executed, "production attention executed twice");
+        session.provider.execute(&mut session.witness)?;
+        session.handle = output;
+        session.executed = true;
+        Ok(())
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_production_attention_export(
+        &mut self,
+        handle: TensorHandle,
+    ) -> Result<Vec<i32>> {
+        let mut session = self
+            .tensor_production_attention
+            .take()
+            .ok_or_else(|| anyhow!("production attention CUDA export is outside a segment"))?;
+        ensure!(
+            session.handle == handle,
+            "production attention export handle mismatch"
+        );
+        ensure!(
+            session.executed,
+            "production attention export precedes execution"
+        );
+        let output = session.provider.export(&mut session.witness)?;
+        let metrics = session.witness.metrics();
+        tracing::info!(
+            setup_h2d_bytes = metrics.setup_h2d_bytes,
+            activation_h2d_bytes = metrics.activation_h2d_bytes,
+            activation_d2h_bytes = metrics.activation_d2h_bytes,
+            intermediate_h2d_bytes = metrics.intermediate_h2d_bytes,
+            intermediate_d2h_bytes = metrics.intermediate_d2h_bytes,
+            qk_launches = metrics.qk_launches,
+            softmax_launches = metrics.softmax_launches,
+            pv_launches = metrics.pv_launches,
+            allocated_bytes = metrics.allocated_bytes,
+            high_water_bytes = metrics.high_water_bytes,
+            minimum_free_bytes = metrics.minimum_free_bytes,
+            "production attention CUDA segment exported"
+        );
+        Ok(output)
+    }
+
     pub(crate) fn tensor_bus_end(&mut self) -> Result<()> {
         let segment = self
             .tensor_bus_segment
@@ -492,6 +594,11 @@ impl<T: Tracer> VMState<T> {
         ensure!(
             self.tensor_bus_resident.is_none(),
             "TensorBus CUDA segment was not exported"
+        );
+        #[cfg(feature = "tensor-cuda")]
+        ensure!(
+            self.tensor_production_attention.is_none(),
+            "production attention CUDA segment was not exported"
         );
         Ok(())
     }

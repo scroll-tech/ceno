@@ -7,11 +7,82 @@ use multilinear_extensions::{
 use sumcheck::structs::{IOPProof, IOPProverMessage, IOPVerifierState};
 use transcript::Transcript;
 
+#[cfg(feature = "gpu")]
+use {
+    ceno_gpu::bb31::{GpuFieldType, GpuPolynomial},
+    ff_ext::BabyBearExt4,
+    gkr_iop::gpu::{HasUtils, MultilinearExtensionGpu, gpu_prover::BB31Ext},
+    p3::field::PrimeCharacteristicRing,
+    transcript::BasicTranscript,
+};
+
 use crate::{error::ZKVMError, scheme::MatrixReductionProof};
 
 pub const MATRIX_REDUCTION_DEGREE: usize = 3;
 pub const MATRIX_REDUCTION_SCALE: u64 = 1 << 16;
 pub const MATRIX_REDUCTION_COLUMNS: [usize; 4] = [0, 3, 6, 9];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MatrixReductionKind {
+    Tiny,
+    ProductionQk,
+    ProductionPv,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MatrixReductionDescriptor {
+    pub kind: MatrixReductionKind,
+    pub columns: [usize; 4],
+    pub output_vars: usize,
+    pub sumcheck_vars: usize,
+    pub shift: u32,
+}
+
+impl MatrixReductionDescriptor {
+    const fn tiny() -> Self {
+        Self {
+            kind: MatrixReductionKind::Tiny,
+            columns: MATRIX_REDUCTION_COLUMNS,
+            output_vars: 0,
+            sumcheck_vars: 0,
+            shift: 16,
+        }
+    }
+
+    const fn production(kind: MatrixReductionKind, shift: u32) -> Self {
+        Self {
+            kind,
+            columns: [0, 1, 2, 3],
+            output_vars: 24,
+            sumcheck_vars: 13,
+            shift,
+        }
+    }
+}
+
+pub fn descriptor(circuit_name: &str) -> Option<MatrixReductionDescriptor> {
+    if circuit_name == "TensorBatchedMatMulCore" {
+        return Some(MatrixReductionDescriptor::tiny());
+    }
+    let production_group = |prefix: &str| {
+        (0..8).any(|group| {
+            circuit_name == format!("{prefix}Heads{:02}_{:02}", group * 4, group * 4 + 3)
+        })
+    };
+    if production_group("TensorAttentionQK") {
+        Some(MatrixReductionDescriptor::production(
+            MatrixReductionKind::ProductionQk,
+            16,
+        ))
+    } else if production_group("TensorAttentionPV") {
+        Some(MatrixReductionDescriptor::production(
+            MatrixReductionKind::ProductionPv,
+            20,
+        ))
+    } else {
+        None
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct MatrixOpeningClaims<E: ExtensionField> {
@@ -168,11 +239,127 @@ pub fn prove<E: ExtensionField, P: MultilinearPolynomial<E>>(
     ))
 }
 
+#[cfg(feature = "gpu")]
+pub fn prove_production(
+    witness: &[std::sync::Arc<MultilinearExtensionGpu<'static, BabyBearExt4>>],
+    descriptor: MatrixReductionDescriptor,
+    transcript: &mut BasicTranscript<BB31Ext>,
+) -> Result<
+    (
+        MatrixReductionProof<BabyBearExt4>,
+        MatrixOpeningClaims<BabyBearExt4>,
+    ),
+    ZKVMError,
+> {
+    if !matches!(
+        descriptor.kind,
+        MatrixReductionKind::ProductionQk | MatrixReductionKind::ProductionPv
+    ) || descriptor.output_vars != 24
+        || descriptor.sumcheck_vars != 13
+    {
+        return Err(ZKVMError::InvalidWitness(
+            "invalid production matrix reduction descriptor".into(),
+        ));
+    }
+    let columns = descriptor.columns.map(|column| {
+        let mle = witness.get(column).ok_or_else(|| {
+            ZKVMError::InvalidWitness(
+                format!("production matrix witness column {column} is missing").into(),
+            )
+        })?;
+        match &mle.mle {
+            GpuFieldType::Base(poly) if poly.num_vars() == descriptor.output_vars => Ok(poly),
+            _ => Err(ZKVMError::InvalidWitness(
+                "production matrix reduction requires resident base-field columns".into(),
+            )),
+        }
+    });
+    let [a, w, q, r] = columns;
+    let columns: [&GpuPolynomial<'static>; 4] = [a?, w?, q?, r?];
+    let output_point =
+        transcript.sample_and_append_vec(b"tensor matrix output point", descriptor.output_vars);
+    let hal = gkr_iop::gpu::get_cuda_hal().map_err(|error| {
+        ZKVMError::InvalidWitness(
+            format!("production matrix reduction CUDA unavailable: {error:?}").into(),
+        )
+    })?;
+    let projection = hal
+        .project_production_matrix(
+            columns,
+            &output_point,
+            descriptor.kind == MatrixReductionKind::ProductionPv,
+        )
+        .map_err(|error| {
+            ZKVMError::InvalidWitness(
+                format!("production matrix projection failed: {error:?}").into(),
+            )
+        })?;
+    let [q_eval, r_eval] = projection.output_evals;
+    transcript.append_field_element_ext(&q_eval);
+    transcript.append_field_element_ext(&r_eval);
+
+    let projected = [
+        GpuFieldType::Ext(projection.a),
+        GpuFieldType::Ext(projection.w),
+        GpuFieldType::Ext(projection.eq_head),
+    ];
+    let (sumcheck_proof, terminal_evals, challenges) = hal
+        .prove_generic_sumcheck_gpu(
+            projected.iter().collect(),
+            &[(descriptor.sumcheck_vars, descriptor.sumcheck_vars)],
+            &[BabyBearExt4::ONE],
+            &[vec![0, 1, 2]],
+            descriptor.sumcheck_vars,
+            MATRIX_REDUCTION_DEGREE,
+            None,
+            transcript,
+            gkr_iop::gpu::get_thread_stream().as_ref(),
+        )
+        .map_err(|error| {
+            ZKVMError::InvalidWitness(
+                format!("production matrix sumcheck failed: {error:?}").into(),
+            )
+        })?;
+    let terminal_evals = terminal_evals.into_iter().flatten().collect::<Vec<_>>();
+    if terminal_evals.len() != 3 || challenges.len() != descriptor.sumcheck_vars {
+        return Err(ZKVMError::InvalidWitness(
+            "production matrix sumcheck terminal shape mismatch".into(),
+        ));
+    }
+    let a_eval = terminal_evals[0];
+    let w_eval = terminal_evals[1];
+    transcript.append_field_element_ext(&a_eval);
+    transcript.append_field_element_ext(&w_eval);
+
+    let reduction_point = challenges
+        .into_iter()
+        .map(|challenge| challenge.elements)
+        .collect::<Vec<_>>();
+    let physical_output = production_output_point(descriptor.kind, &output_point)?;
+    let (a_point, w_point) =
+        production_terminal_points(descriptor.kind, &output_point, &reduction_point)?;
+    Ok((
+        MatrixReductionProof {
+            output_evals: [q_eval, r_eval],
+            sumcheck_proof: sumcheck_proof.proofs,
+            final_evals: [a_eval, w_eval],
+        },
+        MatrixOpeningClaims {
+            points: [a_point, w_point, physical_output],
+            expected_evals: [a_eval, w_eval, q_eval, r_eval],
+        },
+    ))
+}
+
 pub fn verify<E: ExtensionField>(
     proof: &MatrixReductionProof<E>,
     num_instances: usize,
+    descriptor: MatrixReductionDescriptor,
     transcript: &mut impl Transcript<E>,
 ) -> Result<MatrixOpeningClaims<E>, ZKVMError> {
+    if descriptor.kind != MatrixReductionKind::Tiny {
+        return verify_production(proof, num_instances, descriptor, transcript);
+    }
     if num_instances == 0 || num_instances % 4 != 0 {
         return Err(invalid(format!(
             "matrix Core row count {num_instances} is not complete 4-row sections"
@@ -246,4 +433,130 @@ pub fn verify<E: ExtensionField>(
             proof.output_evals[1],
         ],
     })
+}
+
+fn verify_production<E: ExtensionField>(
+    proof: &MatrixReductionProof<E>,
+    num_instances: usize,
+    descriptor: MatrixReductionDescriptor,
+    transcript: &mut impl Transcript<E>,
+) -> Result<MatrixOpeningClaims<E>, ZKVMError> {
+    if num_instances != 1 << descriptor.output_vars
+        || descriptor.output_vars != 24
+        || descriptor.sumcheck_vars != 13
+    {
+        return Err(invalid("production matrix reduction shape mismatch"));
+    }
+    let logical_output =
+        transcript.sample_and_append_vec(b"tensor matrix output point", descriptor.output_vars);
+    let physical_output = production_output_point(descriptor.kind, &logical_output)?;
+    transcript.append_field_element_ext(&proof.output_evals[0]);
+    transcript.append_field_element_ext(&proof.output_evals[1]);
+
+    if proof.sumcheck_proof.len() != descriptor.sumcheck_vars
+        || proof
+            .sumcheck_proof
+            .iter()
+            .any(|message| message.evaluations.len() != MATRIX_REDUCTION_DEGREE)
+    {
+        return Err(invalid("production matrix sumcheck shape mismatch"));
+    }
+    let claimed_sum =
+        proof.output_evals[0] * E::from_u64(1u64 << descriptor.shift) + proof.output_evals[1];
+    let subclaim = IOPVerifierState::verify(
+        claimed_sum,
+        &IOPProof {
+            proofs: proof.sumcheck_proof.clone(),
+        },
+        &VPAuxInfo {
+            max_degree: MATRIX_REDUCTION_DEGREE,
+            max_num_variables: descriptor.sumcheck_vars,
+            phantom: std::marker::PhantomData,
+        },
+        transcript,
+    );
+    let reduction_point = subclaim
+        .point
+        .iter()
+        .map(|challenge| challenge.elements)
+        .collect::<Vec<_>>();
+    transcript.append_field_element_ext(&proof.final_evals[0]);
+    transcript.append_field_element_ext(&proof.final_evals[1]);
+    let h = &reduction_point[11..13];
+    let expected_final =
+        proof.final_evals[0] * proof.final_evals[1] * eq_eval(&logical_output[22..24], h);
+    if subclaim.expected_evaluation != expected_final {
+        return Err(invalid(
+            "production matrix sumcheck final evaluation mismatch",
+        ));
+    }
+
+    let (a_point, w_point) =
+        production_terminal_points(descriptor.kind, &logical_output, &reduction_point)?;
+    Ok(MatrixOpeningClaims {
+        points: [a_point, w_point, physical_output],
+        expected_evals: [
+            proof.final_evals[0],
+            proof.final_evals[1],
+            proof.output_evals[0],
+            proof.output_evals[1],
+        ],
+    })
+}
+
+fn production_output_point<E: ExtensionField>(
+    kind: MatrixReductionKind,
+    logical: &[E],
+) -> Result<Point<E>, ZKVMError> {
+    if logical.len() != 24 {
+        return Err(invalid("production matrix output point width mismatch"));
+    }
+    match kind {
+        MatrixReductionKind::ProductionQk => Ok(logical.to_vec()),
+        MatrixReductionKind::ProductionPv => Ok(logical[..7]
+            .iter()
+            .chain(&logical[11..22])
+            .chain(&logical[22..24])
+            .chain(&logical[7..11])
+            .copied()
+            .collect()),
+        MatrixReductionKind::Tiny => Err(invalid("tiny matrix has no production point map")),
+    }
+}
+
+fn production_terminal_points<E: ExtensionField>(
+    kind: MatrixReductionKind,
+    output: &[E],
+    reduction: &[E],
+) -> Result<(Point<E>, Point<E>), ZKVMError> {
+    if output.len() != 24 || reduction.len() != 13 {
+        return Err(invalid("production matrix terminal point width mismatch"));
+    }
+    let k = &reduction[..11];
+    let h = &reduction[11..13];
+    let n = &output[..11];
+    let m = &output[11..22];
+    match kind {
+        MatrixReductionKind::ProductionQk => Ok((
+            k.iter().chain(m).chain(h).copied().collect(),
+            n.iter().chain(k).chain(h).copied().collect(),
+        )),
+        MatrixReductionKind::ProductionPv => Ok((
+            k[..7]
+                .iter()
+                .chain(m)
+                .chain(h)
+                .chain(&k[7..11])
+                .copied()
+                .collect(),
+            k[..7]
+                .iter()
+                .chain(n)
+                .chain(h)
+                .chain(&k[7..11])
+                .copied()
+                .collect(),
+        )),
+        MatrixReductionKind::Tiny => Err(invalid("tiny matrix has no production terminal map")),
+    }
 }

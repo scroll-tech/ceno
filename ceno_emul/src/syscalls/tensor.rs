@@ -310,7 +310,7 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
     #[cfg(feature = "llama-tiny")]
     if abi_v2 {
         ensure!(
-            words[6] == crate::tensor::TENSOR_PROFILE_LLAMA_TINY && words[7] == 0,
+            words[6] == crate::tensor::TENSOR_PROFILE_LLAMA_TINY,
             "unsupported llama-tiny logical profile/layer"
         );
     }
@@ -369,20 +369,17 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
         let w = generate_tensor_hint_tile(hint)?;
         let transform = move |values: &[i32]| -> Result<Vec<i32>> {
             ensure!(values.len() == 4, "llama-tiny layer input length mismatch");
-            let trace = crate::tensor::llama_tiny::execute()?;
+            let layer_input = crate::tensor::llama_tiny::layer_input(words[7])?;
+            let trace = crate::tensor::llama_tiny::execute_layer(words[7], layer_input)?;
             let expected = if code == crate::tensor::TENSOR_HANDLE_ATTENTION_V1 {
-                crate::tensor::llama_tiny::INPUT
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
+                trace.input
             } else {
-                trace
-                    .attention_residual
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>()
+                trace.attention_residual
             };
-            ensure!(values == expected, "llama-tiny layer handle input mismatch");
+            ensure!(
+                values == expected.into_iter().flatten().collect::<Vec<_>>(),
+                "llama-tiny layer handle input mismatch"
+            );
             Ok(if code == crate::tensor::TENSOR_HANDLE_ATTENTION_V1 {
                 trace.attention_residual.into_iter().flatten().collect()
             } else {
@@ -435,7 +432,7 @@ fn tensor_handle_op_v1<T: Tracer>(vm: &mut VMState<T>, code: u32) -> Result<Sysc
     let (output, records) = vm.tensor_bus_apply(input, meta, code, words[6], v1_transform)?;
     #[cfg(all(feature = "tensor-cuda", feature = "llama-tiny"))]
     let resident_layer = if resident_payload.is_some() {
-        vm.tensor_bus_resident_apply_v2(input, output, code)?
+        vm.tensor_bus_resident_apply_v2(input, output, code, words[7])?
     } else {
         vm.tensor_bus_resident_apply(input, output, code)?;
         None
@@ -484,6 +481,246 @@ pub fn tensor_handle_ffn_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEff
     tensor_handle_op_v1(vm, crate::tensor::TENSOR_HANDLE_FFN_V1)
 }
 
+pub fn tensor_production_import_begin_v2<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
+    use crate::tensor::{TensorProductionBoundaryKind, TensorProductionBoundaryWitness};
+
+    let desc_ptr = vm.peek_register(Platform::reg_arg0());
+    let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
+    let words = desc.words();
+    let desc_ops = desc.mem_ops();
+    ensure!(
+        words[0] == ceno_rt::tensor::TENSOR_ABI_V2 && words[1] == 0 && words[7] == 0,
+        "invalid production attention import descriptor"
+    );
+    ensure!(
+        words[3] == ceno_rt::tensor::TENSOR_LLAMA2_QKV_WORDS
+            && words[5] == TENSOR_META_WORDS as u32,
+        "production attention import shape mismatch"
+    );
+    let meta_view = MemoryView::<_, TENSOR_META_WORDS>::new(vm, words[4]);
+    let meta_words = meta_view.words();
+    let meta = tensor_bus_meta(meta_words)?;
+    let meta_ops = meta_view.mem_ops();
+    ensure!(
+        meta.byte_len == crate::tensor::production_attention::QKV_BYTES as usize
+            && meta.shape == [ceno_rt::tensor::TENSOR_LLAMA2_QKV_WORDS],
+        "production packed Q/K/V metadata mismatch"
+    );
+    let (input, input_ops) = tensor_bus_words(vm, words[2], words[3] as usize)?;
+    let input = input
+        .into_iter()
+        .map(|word| word as i32)
+        .collect::<Vec<_>>();
+    let import_cycle = vm.tracer().cycle();
+    let (handle, records) = vm.tensor_bus_import_begin(meta, input.clone(), import_cycle)?;
+    #[cfg(feature = "tensor-cuda")]
+    vm.tensor_production_attention_import(handle, &input)?;
+    let mut handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[6]);
+    handle_view.write([
+        handle.tensor_id as u32,
+        (handle.tensor_id >> 32) as u32,
+        handle.version,
+        0,
+    ]);
+    let mut witness = SyscallWitness::new(
+        desc_ops
+            .into_iter()
+            .chain(meta_ops)
+            .chain(input_ops)
+            .chain(handle_view.mem_ops())
+            .collect(),
+        tensor_bus_reg_ops(desc_ptr),
+    );
+    witness.tensor_bus_records = records;
+    witness.tensor_bus_event = Some(tensor_bus_event(
+        TensorProductionImportBeginV2Spec::CODE,
+        words
+            .into_iter()
+            .chain(meta_words)
+            .chain([
+                handle.tensor_id as u32,
+                (handle.tensor_id >> 32) as u32,
+                handle.version,
+                0,
+            ])
+            .chain(std::iter::repeat_n(0, 4)),
+    ));
+    witness.tensor_bus_event_cycle = Some(import_cycle);
+    witness.tensor_production_boundary = Some(TensorProductionBoundaryWitness {
+        kind: TensorProductionBoundaryKind::Import,
+        import_cycle,
+        tensor_id: handle.tensor_id,
+        version: handle.version,
+        value_ops_start: TENSOR_TRANSFER_DESC_WORDS + TENSOR_META_WORDS,
+        word_count: crate::tensor::production_attention::QKV_WORDS,
+    });
+    Ok(SyscallEffects {
+        witness,
+        next_pc: None,
+    })
+}
+
+pub fn tensor_production_attention_v2<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
+    let desc_ptr = vm.peek_register(Platform::reg_arg0());
+    let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
+    let words = desc.words();
+    let desc_ops = desc.mem_ops();
+    ensure!(
+        words[0] == ceno_rt::tensor::TENSOR_ABI_V2
+            && words[1] == 0
+            && words[5] == TENSOR_META_WORDS as u32
+            && words[6] == ceno_rt::tensor::TENSOR_PROFILE_LLAMA2_7B_ATTENTION
+            && words[7] == 0,
+        "invalid production attention descriptor"
+    );
+    let input_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[2]);
+    let input = tensor_bus_handle(input_view.words())?;
+    let input_ops = input_view.mem_ops();
+    let meta_view = MemoryView::<_, TENSOR_META_WORDS>::new(vm, words[4]);
+    let meta_words = meta_view.words();
+    let meta = tensor_bus_meta(meta_words)?;
+    let meta_ops = meta_view.mem_ops();
+    ensure!(
+        meta.byte_len == crate::tensor::production_attention::CONTEXT_BYTES as usize
+            && meta.shape == [ceno_rt::tensor::TENSOR_LLAMA2_CONTEXT_WORDS],
+        "production attention context metadata mismatch"
+    );
+    let transform = |packed_qkv: &[i32]| -> Result<Vec<i32>> {
+        ensure!(
+            packed_qkv.len() == crate::tensor::production_attention::QKV_WORDS,
+            "production attention Tensor-space input mismatch"
+        );
+        let mut output = vec![0_i32; crate::tensor::production_attention::CONTEXT_WORDS];
+        for head in 0..crate::tensor::production_attention::HEADS {
+            for query in 0..crate::tensor::production_attention::SEQUENCE {
+                for dim in 0..crate::tensor::production_attention::HEAD_DIM {
+                    let index =
+                        crate::tensor::production_attention::context_index(head, query, dim)?;
+                    output[index] = crate::tensor::production_attention::fixture_context_value(
+                        head, query, dim,
+                    )?;
+                }
+            }
+        }
+        Ok(output)
+    };
+    let (output, records, _, _, import_cycle) = vm.tensor_bus_apply_v2(
+        input,
+        meta,
+        TensorProductionAttentionV2Spec::CODE,
+        transform,
+    )?;
+    #[cfg(feature = "tensor-cuda")]
+    vm.tensor_production_attention_execute(input, output)?;
+    let mut output_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[3]);
+    output_view.write([
+        output.tensor_id as u32,
+        (output.tensor_id >> 32) as u32,
+        output.version,
+        0,
+    ]);
+    let mut witness = SyscallWitness::new(
+        desc_ops
+            .into_iter()
+            .chain(input_ops)
+            .chain(meta_ops)
+            .chain(output_view.mem_ops())
+            .collect(),
+        tensor_bus_reg_ops(desc_ptr),
+    );
+    witness.tensor_bus_records = records;
+    witness.tensor_production_attention = Some(crate::tensor::TensorProductionAttentionWitness {
+        import_cycle,
+        input_tensor_id: input.tensor_id,
+        input_version: input.version,
+        output_tensor_id: output.tensor_id,
+        output_version: output.version,
+        profile: words[6],
+        layer: words[7],
+    });
+    Ok(SyscallEffects {
+        witness,
+        next_pc: None,
+    })
+}
+
+pub fn tensor_production_export_end_v2<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
+    use crate::tensor::{TensorProductionBoundaryKind, TensorProductionBoundaryWitness};
+
+    let desc_ptr = vm.peek_register(Platform::reg_arg0());
+    let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
+    let words = desc.words();
+    let desc_ops = desc.mem_ops();
+    ensure!(
+        words[0] == ceno_rt::tensor::TENSOR_ABI_V2
+            && words[1] == 0
+            && words[4] == ceno_rt::tensor::TENSOR_LLAMA2_CONTEXT_WORDS
+            && words[6] == TENSOR_META_WORDS as u32
+            && words[7] == 0,
+        "invalid production attention export descriptor"
+    );
+    let handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[2]);
+    let handle_words = handle_view.words();
+    let handle = tensor_bus_handle(handle_words)?;
+    let handle_ops = handle_view.mem_ops();
+    let meta_view = MemoryView::<_, TENSOR_META_WORDS>::new(vm, words[5]);
+    let meta_words = meta_view.words();
+    let meta = tensor_bus_meta(meta_words)?;
+    let meta_ops = meta_view.mem_ops();
+    ensure!(
+        meta.byte_len == crate::tensor::production_attention::CONTEXT_BYTES as usize
+            && meta.shape == [ceno_rt::tensor::TENSOR_LLAMA2_CONTEXT_WORDS],
+        "production attention export metadata mismatch"
+    );
+    let import_cycle = vm.tensor_bus_current_import_cycle()?;
+    let (output, records) = vm.tensor_bus_export(handle)?;
+    #[cfg(feature = "tensor-cuda")]
+    {
+        let device = vm.tensor_production_attention_export(handle)?;
+        ensure!(
+            device == output,
+            "production attention CUDA output mismatch"
+        );
+    }
+    vm.tensor_bus_end()?;
+    let (_, mut output_ops) = tensor_bus_words(vm, words[3], output.len())?;
+    for (op, value) in output_ops.iter_mut().zip(output) {
+        op.value.after = value as u32;
+    }
+    let value_ops_start = TENSOR_TRANSFER_DESC_WORDS + TENSOR_HANDLE_WORDS + TENSOR_META_WORDS;
+    let mut witness = SyscallWitness::new(
+        desc_ops
+            .into_iter()
+            .chain(handle_ops)
+            .chain(meta_ops)
+            .chain(output_ops)
+            .collect(),
+        tensor_bus_reg_ops(desc_ptr),
+    );
+    witness.tensor_bus_records = records;
+    witness.tensor_bus_event = Some(tensor_bus_event(
+        TensorProductionExportEndV2Spec::CODE,
+        words
+            .into_iter()
+            .chain(meta_words)
+            .chain(handle_words)
+            .chain(std::iter::repeat_n(0, 4)),
+    ));
+    witness.tensor_bus_event_cycle = Some(vm.tracer().cycle());
+    witness.tensor_production_boundary = Some(TensorProductionBoundaryWitness {
+        kind: TensorProductionBoundaryKind::Export,
+        import_cycle,
+        tensor_id: handle.tensor_id,
+        version: handle.version,
+        value_ops_start,
+        word_count: crate::tensor::production_attention::CONTEXT_WORDS,
+    });
+    Ok(SyscallEffects {
+        witness,
+        next_pc: None,
+    })
+}
+
 pub struct TensorMatMulV1Spec;
 pub struct TensorMatMulHiddenV1Spec;
 pub struct TensorMatMulIntermediateV1Spec;
@@ -495,6 +732,9 @@ pub struct TensorImportBeginV1Spec;
 pub struct TensorExportEndV1Spec;
 pub struct TensorHandleAttentionV1Spec;
 pub struct TensorHandleFfnV1Spec;
+pub struct TensorProductionImportBeginV2Spec;
+pub struct TensorProductionAttentionV2Spec;
+pub struct TensorProductionExportEndV2Spec;
 
 pub const ATTENTION_REDUCED_PROFILE_V1: u32 = 1;
 pub const ATTENTION_RESCALE_SHIFT_Q20_V1: u32 = 20;
@@ -639,6 +879,34 @@ impl SyscallSpec for TensorHandleFfnV1Spec {
     const MEM_OPS_COUNT: usize =
         TENSOR_TRANSFER_DESC_WORDS + TENSOR_HANDLE_WORDS + TENSOR_META_WORDS + TENSOR_HANDLE_WORDS;
     const CODE: u32 = crate::tensor::TENSOR_HANDLE_FFN_V1;
+}
+
+impl SyscallSpec for TensorProductionImportBeginV2Spec {
+    const NAME: &'static str = "TENSOR_PRODUCTION_IMPORT_BEGIN_V2";
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize = TENSOR_TRANSFER_DESC_WORDS
+        + TENSOR_META_WORDS
+        + ceno_rt::tensor::TENSOR_LLAMA2_QKV_WORDS as usize
+        + TENSOR_HANDLE_WORDS;
+    const CODE: u32 = ceno_rt::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2;
+}
+
+impl SyscallSpec for TensorProductionAttentionV2Spec {
+    const NAME: &'static str = "TENSOR_PRODUCTION_ATTENTION_V2";
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize =
+        TENSOR_TRANSFER_DESC_WORDS + TENSOR_HANDLE_WORDS + TENSOR_META_WORDS + TENSOR_HANDLE_WORDS;
+    const CODE: u32 = ceno_rt::tensor::TENSOR_PRODUCTION_ATTENTION_V2;
+}
+
+impl SyscallSpec for TensorProductionExportEndV2Spec {
+    const NAME: &'static str = "TENSOR_PRODUCTION_EXPORT_END_V2";
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize = TENSOR_TRANSFER_DESC_WORDS
+        + TENSOR_HANDLE_WORDS
+        + TENSOR_META_WORDS
+        + ceno_rt::tensor::TENSOR_LLAMA2_CONTEXT_WORDS as usize;
+    const CODE: u32 = ceno_rt::tensor::TENSOR_PRODUCTION_EXPORT_END_V2;
 }
 
 impl SyscallSpec for TensorMatMulHiddenV1Spec {

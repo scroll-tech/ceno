@@ -460,17 +460,21 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for TensorBusFixedEcall<E
                         set_val!(instance, config.boundary_signs[row], u64::from(value < 0));
                     }
                 } else {
-                    let _resident = syscall.tensor_resident_matmul.ok_or_else(|| {
+                    let resident = syscall.tensor_resident_matmul.ok_or_else(|| {
                         ZKVMError::InvalidWitness("TensorBus v2 resident operator missing".into())
                     })?;
+                    let layer_input =
+                        ceno_emul::tensor::llama_tiny::layer_input(resident.hint.layer)
+                            .map_err(|error| ZKVMError::InvalidWitness(error.to_string().into()))?;
+                    let trace = ceno_emul::tensor::llama_tiny::execute_layer(
+                        resident.hint.layer,
+                        layer_input,
+                    )
+                    .map_err(|error| ZKVMError::InvalidWitness(error.to_string().into()))?;
                     let anchor_value = if S::CODE == TensorHandleAttentionV1Spec::CODE {
-                        ceno_emul::tensor::llama_tiny::execute()
-                            .map_err(|error| ZKVMError::InvalidWitness(error.to_string().into()))?
-                            .input_norm[0][0]
+                        trace.input_norm[0][0]
                     } else {
-                        ceno_emul::tensor::llama_tiny::execute()
-                            .map_err(|error| ZKVMError::InvalidWitness(error.to_string().into()))?
-                            .swiglu[0][0]
+                        trace.swiglu[0][0]
                     };
                     instance[config.layer_anchor_value.id as usize] = if anchor_value < 0 {
                         -E::BaseField::from_u64(u64::from(anchor_value.unsigned_abs()))

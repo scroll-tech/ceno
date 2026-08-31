@@ -17,6 +17,9 @@ mod tensor_bus;
 #[cfg(feature = "llama-tiny")]
 pub mod tensor_llama_tiny;
 mod tensor_production;
+mod tensor_production_attention;
+mod tensor_production_attention_matrix;
+mod tensor_production_attention_softmax;
 mod tensor_rms;
 mod uint256;
 mod weierstrass_add;
@@ -58,6 +61,19 @@ pub use tensor_production::{
     TensorMatMulHiddenEcallInstruction, TensorMatMulHiddenFinalizeInstruction,
     TensorMatMulIntermediateEcallInstruction, TensorMatMulIntermediateFinalizeInstruction,
     TensorProductionTileInstruction, TensorProductionTileK64Instruction,
+};
+pub use tensor_production_attention::{
+    TensorProductionAttentionAnchorInstruction, TensorProductionBoundaryConfig,
+    TensorProductionBoundaryContextInstruction, TensorProductionBoundaryKInstruction,
+    TensorProductionBoundaryQInstruction, TensorProductionBoundaryReplayDescriptor,
+    TensorProductionBoundaryVInstruction, TensorProductionExportAnchorInstruction,
+    TensorProductionImportAnchorInstruction, collect_production_boundary_replay_descriptors,
+};
+pub use tensor_production_attention_matrix::{
+    TensorProductionPvCoreInstruction, TensorProductionQkCoreInstruction,
+};
+pub use tensor_production_attention_softmax::{
+    TensorProductionSoftmaxCoreConfig, TensorProductionSoftmaxCoreInstruction,
 };
 pub use tensor_rms::{TensorRmsLookupCoreInstruction, TensorRmsLookupEcallInstruction};
 pub use uint256::{Secp256k1InvInstruction, Secp256r1InvInstruction, Uint256MulInstruction};

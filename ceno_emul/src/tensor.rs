@@ -14,23 +14,27 @@ pub mod llama;
 pub mod llama_tiny;
 pub mod planner;
 pub mod production;
+pub mod production_attention;
+#[cfg(feature = "tensor-cuda")]
+pub mod production_attention_cuda;
 #[cfg(feature = "tensor-cuda")]
 pub mod production_cuda;
 #[cfg(feature = "tensor-cuda")]
 pub mod resident;
 
 pub use ceno_rt::tensor::{
-    TENSOR_ABI_V1, TENSOR_ATTENTION_BLOCK_REDUCED_V1, TENSOR_ATTENTION_REDUCED_V1,
+    TENSOR_ABI_V1, TENSOR_ABI_V2, TENSOR_ATTENTION_BLOCK_REDUCED_V1, TENSOR_ATTENTION_REDUCED_V1,
     TENSOR_EXPORT_END_V1, TENSOR_FFN_BLOCK_REDUCED_V1, TENSOR_HANDLE_ATTENTION_V1,
     TENSOR_HANDLE_FFN_V1, TENSOR_IMPORT_BEGIN_V1, TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1,
-    TENSOR_MATMUL_HIDDEN_V1, TENSOR_MATMUL_INTERMEDIATE_V1, TENSOR_MATMUL_V1, TENSOR_RMS_LOOKUP_V1,
+    TENSOR_MATMUL_HIDDEN_V1, TENSOR_MATMUL_INTERMEDIATE_V1, TENSOR_MATMUL_V1,
+    TENSOR_PRODUCTION_ATTENTION_V2, TENSOR_PRODUCTION_EXPORT_END_V2,
+    TENSOR_PRODUCTION_IMPORT_BEGIN_V2, TENSOR_PROFILE_LLAMA2_7B_ATTENTION, TENSOR_RMS_LOOKUP_V1,
     TensorAttentionReducedDescV1, TensorBlockReducedDescV1, TensorHandleOpDescV1,
-    TensorMatMulDescV1, TensorProductionMatMulDescV1, TensorRmsLookupDescV1,
+    TensorHandleOpDescV2, TensorMatMulDescV1, TensorProductionMatMulDescV1, TensorRmsLookupDescV1,
 };
 #[cfg(feature = "llama-tiny")]
 pub use ceno_rt::tensor::{
-    TENSOR_ABI_V2, TENSOR_BATCHED_MATMUL_2X2_V1, TENSOR_PROFILE_LLAMA_TINY,
-    TensorBatchedMatMul2x2DescV1, TensorHandleOpDescV2,
+    TENSOR_BATCHED_MATMUL_2X2_V1, TENSOR_PROFILE_LLAMA_TINY, TensorBatchedMatMul2x2DescV1,
 };
 
 /// Compact proof-side payload for one complete tiny 2x2 call.
@@ -84,7 +88,6 @@ pub fn generate_tensor_hint_tile(hint: TensorHintRef) -> Result<[[i32; 2]; 2]> {
         hint.profile == TENSOR_PROFILE_LLAMA_TINY,
         "unsupported logical tensor profile"
     );
-    ensure!(hint.layer == 0, "llama-tiny has exactly one layer");
     ensure!(hint.tile_index == 0, "llama-tiny has exactly one role tile");
     match hint.role {
         TENSOR_HINT_ROLE_ATTENTION => Ok([[1, 1], [0, 1]]),
@@ -126,6 +129,35 @@ pub struct TensorResidentBoundaryWitness {
     pub tensor_id: u64,
     pub version: u32,
     pub values: [i32; 4],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TensorProductionBoundaryKind {
+    Import,
+    Export,
+}
+
+/// Bulk boundary rows are retained in the syscall RAM journal but assigned by
+/// one row-oriented Core rather than materialized as ECALL columns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TensorProductionBoundaryWitness {
+    pub kind: TensorProductionBoundaryKind,
+    pub import_cycle: u64,
+    pub tensor_id: u64,
+    pub version: u32,
+    pub value_ops_start: usize,
+    pub word_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TensorProductionAttentionWitness {
+    pub import_cycle: u64,
+    pub input_tensor_id: u64,
+    pub input_version: u32,
+    pub output_tensor_id: u64,
+    pub output_version: u32,
+    pub profile: u32,
+    pub layer: u32,
 }
 
 /// Complete provider-owned witness for one descriptor-v2 llama-tiny layer.

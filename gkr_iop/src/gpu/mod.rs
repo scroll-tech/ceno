@@ -413,6 +413,14 @@ pub struct GpuJaggedTraceLayout {
     pub first_poly_idx: usize,
     pub num_polys: usize,
     pub num_vars: usize,
+    /// Canonical compact q' offset of this source's first column.
+    pub first_flat_elem: usize,
+    /// Physical entries contributed by each source column.
+    pub physical_rows: usize,
+    /// Canonical compact q' range occupied by this source.
+    pub flat_range: std::ops::Range<usize>,
+    /// Exact canonical compact q' range for every source column.
+    pub column_flat_ranges: Vec<std::ops::Range<usize>>,
 }
 
 pub struct GpuJaggedPcsData {

@@ -28,8 +28,10 @@ use ceno_gpu::{
     common::{
         CacheLevel, get_gpu_cache_level, get_mem_tracking_mode,
         jagged::{
-            JaggedSumcheckGpuCtx, batch_commit_gpu_grouped, eval_cols_at_point_gpu,
-            jagged_batch_open_gpu, jagged_sumcheck_prove_gpu,
+            JaggedSumcheckGpuCtx, add_col_eval_contribution, add_m_table_contribution,
+            batch_commit_gpu_grouped, bind_and_materialize_gpu_range, build_m_table_gpu_range,
+            eval_cols_at_point_gpu, eval_cols_at_point_gpu_range, jagged_batch_open_gpu,
+            jagged_sumcheck_prove_gpu, jagged_sumcheck_prove_gpu_ranges,
         },
         sumcheck::CommonTermPlan,
     },
@@ -123,18 +125,34 @@ fn expect_jagged_pcs_data(pcs_data: &GpuPcsData) -> &GpuJaggedPcsData {
 
 fn jagged_trace_layouts<T>(traces: &[witness::RowMajorMatrix<T>]) -> Vec<GpuJaggedTraceLayout>
 where
-    T: FieldAlgebra + Default + Sync + Clone + Send + Copy,
+    T: FieldAlgebra + Default + Sync + Clone + Send + Copy + 'static,
 {
     let mut first_poly_idx = 0usize;
+    let mut first_flat_elem = 0usize;
     traces
         .iter()
         .map(|trace| {
+            let physical_rows = jagged_trace_physical_rows(trace);
+            let flat_elems = physical_rows
+                .checked_mul(trace.width())
+                .expect("Jagged trace flat range overflow");
+            let column_flat_ranges = (0..trace.width())
+                .map(|column| {
+                    let start = first_flat_elem + column * physical_rows;
+                    start..start + physical_rows
+                })
+                .collect();
             let layout = GpuJaggedTraceLayout {
                 first_poly_idx,
                 num_polys: trace.width(),
                 num_vars: trace.num_vars(),
+                first_flat_elem,
+                physical_rows,
+                flat_range: first_flat_elem..first_flat_elem + flat_elems,
+                column_flat_ranges,
             };
             first_poly_idx += trace.width();
+            first_flat_elem += flat_elems;
             layout
         })
         .collect()
@@ -2095,7 +2113,7 @@ where
 }
 
 pub fn extract_witness_mles_for_trace_rmm<'a, E>(
-    witness_rmm: witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    witness_rmm: &witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
 ) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
 where
     E: ExtensionField,

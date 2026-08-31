@@ -1064,8 +1064,20 @@ impl ShardPlanBuilder {
             ecall_code,
             generic_cells,
         };
-        let import_begin = ecall_code == Some(crate::tensor::TENSOR_IMPORT_BEGIN_V1);
-        let export_end = ecall_code == Some(crate::tensor::TENSOR_EXPORT_END_V1);
+        let import_begin = matches!(
+            ecall_code,
+            Some(
+                crate::tensor::TENSOR_IMPORT_BEGIN_V1
+                    | crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2
+            )
+        );
+        let export_end = matches!(
+            ecall_code,
+            Some(
+                crate::tensor::TENSOR_EXPORT_END_V1
+                    | crate::tensor::TENSOR_PRODUCTION_EXPORT_END_V2
+            )
+        );
         if import_begin {
             assert!(
                 self.pending_tensor_segment.is_none(),
@@ -1152,12 +1164,15 @@ impl ShardPlanBuilder {
     }
 
     fn admit_tensor_segment(&mut self, pending: PendingTensorSegment) {
-        assert!(
-            pending
-                .steps
-                .last()
-                .is_some_and(|step| step.ecall_code == Some(crate::tensor::TENSOR_EXPORT_END_V1))
-        );
+        assert!(pending.steps.last().is_some_and(|step| {
+            matches!(
+                step.ecall_code,
+                Some(
+                    crate::tensor::TENSOR_EXPORT_END_V1
+                        | crate::tensor::TENSOR_PRODUCTION_EXPORT_END_V2
+                )
+            )
+        }));
         if let Some(repetitions) = self.tensor_segment_inner_repetitions {
             let attention = pending
                 .steps
@@ -3232,8 +3247,13 @@ impl PreflightTracer {
                 .unwrap_or(0)
         };
         let planner = self.planner.as_ref().expect("shard planner missing");
-        let should_split = if ecall_code == Some(crate::tensor::TENSOR_IMPORT_BEGIN_V1)
-            && self.config.tensor_segment_inner_repetitions.is_some()
+        let should_split = if matches!(
+            ecall_code,
+            Some(
+                crate::tensor::TENSOR_IMPORT_BEGIN_V1
+                    | crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2
+            )
+        ) && self.config.tensor_segment_inner_repetitions.is_some()
             && let Some(template) = planner.tensor_segment_template.as_deref()
         {
             planner.cur_step_count > 0 && planner.tensor_segment_would_exceed(template)

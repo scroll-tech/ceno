@@ -86,7 +86,8 @@ pub use syscalls::{
         TensorAttentionReducedV1Spec, TensorExportEndV1Spec, TensorFfnBlockReducedV1Spec,
         TensorHandleAttentionV1Spec, TensorHandleFfnV1Spec, TensorImportBeginV1Spec,
         TensorMatMulHiddenV1Spec, TensorMatMulIntermediateV1Spec, TensorMatMulV1Spec,
-        TensorRmsLookupV1Spec,
+        TensorProductionAttentionV2Spec, TensorProductionExportEndV2Spec,
+        TensorProductionImportBeginV2Spec, TensorRmsLookupV1Spec,
     },
     uint256::{UINT256_WORDS_FIELD_ELEMENT, Uint256MulSpec},
 };

@@ -1197,17 +1197,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             );
         }
 
-        match (_name, proof.matrix_reduction.as_ref()) {
-            ("TensorBatchedMatMulCore", Some(matrix_proof)) => {
+        let matrix_descriptor = crate::scheme::matrix_reduction::descriptor(_name);
+        match (matrix_descriptor, proof.matrix_reduction.as_ref()) {
+            (Some(descriptor), Some(matrix_proof)) => {
                 let claims = crate::scheme::matrix_reduction::verify(
                     matrix_proof,
                     proof.num_instances.iter().sum(),
+                    descriptor,
                     transcript,
                 )?;
                 assign_matrix_group_evals(first_layer, &mut out_evals, &claims)
                     .map_err(|message| ZKVMError::InvalidProof(message.into()))?;
             }
-            ("TensorBatchedMatMulCore", None) => {
+            (Some(_), None) => {
                 return Err(ZKVMError::InvalidProof(
                     "matrix Core chip is missing its circuit-scoped reduction".into(),
                 ));

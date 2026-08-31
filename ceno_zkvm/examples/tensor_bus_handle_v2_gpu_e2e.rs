@@ -47,6 +47,10 @@ fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
     let resident_before = ceno_emul::tensor::resident::resident_cuda_metrics();
+    let layer0 = ceno_emul::tensor::llama_tiny::execute().expect("layer-0 integer reference");
+    let layer1 = ceno_emul::tensor::llama_tiny::execute_layer(1, layer0.output)
+        .expect("layer-1 integer reference");
+    assert_eq!(layer1.output, [[284, -20], [110, 215]]);
     let program = ceno_emul::Program::load_elf(ceno_examples::tensor_bus_handle_v2, u32::MAX)
         .expect("load TensorBus v2 guest");
     let platform = setup_platform(Preset::Ceno, &program, 128 * 1024, 2 * 1024 * 1024);
@@ -88,7 +92,10 @@ fn run() {
         .chip_proofs
         .get(&matrix_index)
         .expect("v2 matrix Core proof missing");
-    assert_eq!(matrix.num_instances[0], 36, "expected nine matrix sections");
+    assert_eq!(
+        matrix.num_instances[0], 72,
+        "expected eighteen matrix sections"
+    );
     assert!(
         matrix.matrix_reduction.is_some(),
         "matrix reduction missing"
@@ -99,8 +106,8 @@ fn run() {
             .get(&hint_index)
             .expect("HintRef Core proof missing")
             .num_instances[0],
-        28,
-        "seven logical role tiles must write 28 HintRef values",
+        56,
+        "fourteen layer-qualified role tiles must write 56 HintRef values",
     );
     let families = [
         ("LlamaTinyRmsArithmeticCore", 20_usize),
@@ -115,13 +122,14 @@ fn run() {
         ("LlamaTinySwiGluLookupCore", 4),
         ("LlamaTinySwiGluArithmeticCore", 4),
     ];
+    let families = families.map(|(name, rows)| (name, rows * 2));
     let raw_operation_rows = families.iter().map(|(_, rows)| rows).sum::<usize>();
     let padded_operation_rows = families
         .iter()
         .map(|(_, rows)| rows.next_power_of_two())
         .sum::<usize>();
-    assert_eq!(raw_operation_rows, 112, "operation rows changed");
-    assert_eq!(padded_operation_rows, 132, "padded operation rows changed");
+    assert_eq!(raw_operation_rows, 224, "operation rows changed");
+    assert_eq!(padded_operation_rows, 264, "padded operation rows changed");
     let family_indices = families.map(|(name, rows)| {
         let index = circuit_index(&vk, name);
         assert_eq!(
@@ -140,7 +148,7 @@ fn run() {
             .cs
             .zkvm_v1_css
             .num_witin;
-        assert_eq!(width, 186, "{name} must use the common operation width");
+        assert_eq!(width, 187, "{name} must use the common operation width");
         index
     });
 
@@ -295,11 +303,11 @@ fn run() {
                 0
             }
         );
-        assert_eq!(resident.attention_launches, resident.sessions);
-        assert_eq!(resident.ffn_launches, resident.sessions);
+        assert_eq!(resident.attention_launches, resident.sessions * 2);
+        assert_eq!(resident.ffn_launches, resident.sessions * 2);
     }
     println!(
-        "TensorBus v2 full-layer GPU E2E verified: output=[201,-48,111,157] sections=9 hint_refs=7 operation_rows=[20,4,32,4,24,4,4,4,8,4,4] raw_operation_rows=112 padded_operation_rows=132 ordinal_bits=7 common_operation_width=186 logical_h2d_bytes=16 logical_d2h_bytes=16 intermediate_transfers=0 mock_witness_d2h_bytes={} physical_replay_sessions={} matrix_specific_pcs_rounds=0 ordinary_witin_openings=1 hint_identity_tamper=reject hint_value_tamper=reject tensor_slot_tamper=reject tensor_version_tamper=reject row_coverage_tamper=reject row_order_tamper=reject product_tamper=reject quotient_tamper=reject remainder_tamper=reject causal_mask_tamper=reject rms_lookup_tamper=reject low_digit_lookup_tamper=reject exp3_lookup_tamper=reject exp4_lookup_tamper=reject swiglu_lookup_tamper=reject sigma_tamper=reject",
+        "TensorBus v2 two-layer GPU E2E verified: output=[284,-20,110,215] sections=18 hint_refs=14 operation_rows=[40,8,64,8,48,8,8,8,16,8,8] raw_operation_rows=224 padded_operation_rows=264 ordinal_bits=7 common_operation_width=187 logical_h2d_bytes=16 logical_d2h_bytes=16 intermediate_transfers=0 mock_witness_d2h_bytes={} physical_replay_sessions={} matrix_specific_pcs_rounds=0 ordinary_witin_openings=1 hint_identity_tamper=reject hint_value_tamper=reject tensor_slot_tamper=reject tensor_version_tamper=reject row_coverage_tamper=reject row_order_tamper=reject product_tamper=reject quotient_tamper=reject remainder_tamper=reject causal_mask_tamper=reject rms_lookup_tamper=reject low_digit_lookup_tamper=reject exp3_lookup_tamper=reject exp4_lookup_tamper=reject swiglu_lookup_tamper=reject sigma_tamper=reject",
         resident.mock_witness_d2h_bytes, resident.sessions,
     );
 }

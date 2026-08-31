@@ -120,6 +120,53 @@ fn prepare_gpu_chip_input<E, PCS>(
 }
 
 #[cfg(feature = "gpu")]
+fn prove_production_matrix_reduction<E, PCS>(
+    input: &ProofInput<'_, gkr_iop::gpu::GpuBackend<E, PCS>>,
+    descriptor: crate::scheme::matrix_reduction::MatrixReductionDescriptor,
+    transcript: &mut impl Transcript<E>,
+) -> Result<
+    (
+        crate::scheme::MatrixReductionProof<E>,
+        crate::scheme::matrix_reduction::MatrixOpeningClaims<E>,
+    ),
+    ZKVMError,
+>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+{
+    type ProductionE = ff_ext::BabyBearExt4;
+    if std::any::TypeId::of::<E>() != std::any::TypeId::of::<ProductionE>() {
+        return Err(ZKVMError::InvalidWitness(
+            "production matrix reduction requires BabyBearExt4".into(),
+        ));
+    }
+    let witness = unsafe {
+        &*(&input.witness[..] as *const [Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>]
+            as *const [Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, ProductionE>>])
+    };
+    let production = crate::scheme::matrix_reduction::prove_production(
+        witness,
+        descriptor,
+        crate::scheme::gpu::expect_basic_transcript(transcript),
+    )?;
+    let production = std::mem::ManuallyDrop::new(production);
+    Ok(unsafe {
+        std::ptr::read(
+            (&*production
+                as *const (
+                    crate::scheme::MatrixReductionProof<ProductionE>,
+                    crate::scheme::matrix_reduction::MatrixOpeningClaims<ProductionE>,
+                ))
+                .cast::<(
+                    crate::scheme::MatrixReductionProof<E>,
+                    crate::scheme::matrix_reduction::MatrixOpeningClaims<E>,
+                )>(),
+        )
+    })
+}
+
+#[cfg(feature = "gpu")]
 fn create_gpu_chip_proof<'a, E, PCS>(
     task: &mut ChipTask<'a, gkr_iop::gpu::GpuBackend<E, PCS>>,
     transcript: &mut impl Transcript<E>,
@@ -242,16 +289,21 @@ where
             cs, input, &rt_main, challenges, transcript,
         )
     })?;
-    let matrix_reduction = if task.circuit_name == "TensorBatchedMatMulCore" {
-        let (matrix_proof, claims) = crate::scheme::matrix_reduction::prove(
-            &input.witness,
-            input_num_instances.iter().sum(),
-            crate::scheme::matrix_reduction::MATRIX_REDUCTION_COLUMNS,
-            transcript,
-        )?;
-        Some((matrix_proof, claims))
-    } else {
-        None
+    let matrix_reduction = match crate::scheme::matrix_reduction::descriptor(&task.circuit_name) {
+        Some(descriptor)
+            if descriptor.kind == crate::scheme::matrix_reduction::MatrixReductionKind::Tiny =>
+        {
+            Some(crate::scheme::matrix_reduction::prove(
+                &input.witness,
+                input_num_instances.iter().sum(),
+                descriptor.columns,
+                transcript,
+            )?)
+        }
+        Some(descriptor) => Some(prove_production_matrix_reduction::<E, PCS>(
+            input, descriptor, transcript,
+        )?),
+        None => None,
     };
     drop(_rotation_range);
     exit_span!(span);
@@ -868,16 +920,36 @@ impl<
                 .prove_rotation(cs, input, &rt_main, challenges, transcript)
         })?;
 
-        let matrix_reduction = if task.circuit_name == "TensorBatchedMatMulCore" {
-            let (matrix_proof, claims) = crate::scheme::matrix_reduction::prove(
-                &input.witness,
-                input_num_instances.iter().sum(),
-                crate::scheme::matrix_reduction::MATRIX_REDUCTION_COLUMNS,
-                transcript,
-            )?;
-            Some((matrix_proof, claims))
-        } else {
-            None
+        let matrix_reduction = match crate::scheme::matrix_reduction::descriptor(&task.circuit_name)
+        {
+            Some(descriptor)
+                if descriptor.kind
+                    == crate::scheme::matrix_reduction::MatrixReductionKind::Tiny =>
+            {
+                Some(crate::scheme::matrix_reduction::prove(
+                    &input.witness,
+                    input_num_instances.iter().sum(),
+                    descriptor.columns,
+                    transcript,
+                )?)
+            }
+            Some(descriptor) => {
+                if std::any::TypeId::of::<PB>()
+                    != std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+                {
+                    return Err(ZKVMError::InvalidWitness(
+                        "production matrix reduction has no CPU prover path".into(),
+                    ));
+                }
+                let gpu_input = unsafe {
+                    &*(input as *const ProofInput<'_, PB>
+                        as *const ProofInput<'_, gkr_iop::gpu::GpuBackend<E, PCS>>)
+                };
+                Some(prove_production_matrix_reduction::<E, PCS>(
+                    gpu_input, descriptor, transcript,
+                )?)
+            }
+            None => None,
         };
         exit_span!(span);
 

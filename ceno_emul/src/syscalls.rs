@@ -79,6 +79,13 @@ pub fn handle_syscall<T: Tracer>(
         crate::tensor::TENSOR_EXPORT_END_V1 => tensor::tensor_export_end_v1(vm),
         crate::tensor::TENSOR_HANDLE_ATTENTION_V1 => tensor::tensor_handle_attention_v1(vm),
         crate::tensor::TENSOR_HANDLE_FFN_V1 => tensor::tensor_handle_ffn_v1(vm),
+        crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2 => {
+            tensor::tensor_production_import_begin_v2(vm)
+        }
+        crate::tensor::TENSOR_PRODUCTION_ATTENTION_V2 => tensor::tensor_production_attention_v2(vm),
+        crate::tensor::TENSOR_PRODUCTION_EXPORT_END_V2 => {
+            tensor::tensor_production_export_end_v2(vm)
+        }
 
         // phantom syscall
         PHANTOM_LOG_PC_CYCLE => Ok(phantom::log_pc_cycle(vm)),
@@ -120,6 +127,8 @@ pub struct SyscallWitness {
     /// V2 import/export value boundary for the Tensor-space product relation.
     #[cfg(feature = "llama-tiny")]
     pub tensor_resident_boundary: Option<crate::tensor::TensorResidentBoundaryWitness>,
+    pub tensor_production_boundary: Option<crate::tensor::TensorProductionBoundaryWitness>,
+    pub tensor_production_attention: Option<crate::tensor::TensorProductionAttentionWitness>,
 }
 
 impl SyscallWitness {
@@ -140,6 +149,8 @@ impl SyscallWitness {
             tensor_llama_tiny_layer: None,
             #[cfg(feature = "llama-tiny")]
             tensor_resident_boundary: None,
+            tensor_production_boundary: None,
+            tensor_production_attention: None,
         }
     }
 }

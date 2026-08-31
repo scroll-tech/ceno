@@ -287,9 +287,13 @@ impl TinyResidentCudaProvider {
         &self,
         witness: &mut TinyResidentDeviceWitness,
         is_attention: bool,
+        layer: u32,
     ) -> Result<Option<crate::tensor::TensorLlamaTinyLayerWitness>> {
+        let trace = crate::tensor::llama_tiny::execute_layer(
+            layer,
+            crate::tensor::llama_tiny::layer_input(layer)?,
+        )?;
         if is_attention {
-            let trace = provider_trace();
             self.write_layer_value(&mut witness.layer[0], trace.input_norm)?;
             self.write_layer_value(&mut witness.layer[1], trace.q_rope)?;
             self.write_layer_value(
@@ -351,7 +355,6 @@ impl TinyResidentCudaProvider {
             witness.metrics.attention_launches += 1;
             Ok(None)
         } else {
-            let trace = provider_trace();
             self.write_layer_value(&mut witness.layer[13], trace.post_norm)?;
             self.write_layer_value(&mut witness.layer[14], trace.down_input)?;
             self.write_layer_value(&mut witness.layer[27], trace.gate)?;
@@ -663,36 +666,6 @@ WRITE_DONE: ret; }
 #[cfg(feature = "llama-tiny")]
 fn flatten_2x2(value: [[i32; 2]; 2]) -> [i32; 4] {
     [value[0][0], value[0][1], value[1][0], value[1][1]]
-}
-
-#[cfg(feature = "llama-tiny")]
-fn provider_trace() -> crate::tensor::llama_tiny::LlamaTinyLayerTrace {
-    crate::tensor::llama_tiny::LlamaTinyLayerTrace {
-        input_energy: [20_480, 20_480],
-        input_norm: [[8_697, -3_262], [4_349, 6_523]],
-        q_projection: [[11_959, 2_173], [-2_174, 17_395]],
-        k_projection: [[5_435, -11_959], [10_872, 2_174]],
-        v: [[142, -4], [55, 93]],
-        q_rope: [[11_053, 5_065], [-10_247, 14_222]],
-        k_rope: [[8_227, -10_245], [8_498, 7_120]],
-        qk_scores: [[39_042_106, 129_991_194], [-230_006_459, 14_181_634]],
-        shifted_magnitudes: [
-            [90_949_088, 0],
-            [18_085_893_153_810_678_717, 18_085_893_153_566_490_624],
-        ],
-        probabilities: [[1 << 20, 0], [1 << 19, 1 << 19]],
-        attention: [[142, -4], [99, 45]],
-        attention_projection: [[71, 16], [47, 29]],
-        attention_residual: [[199, -48], [111, 157]],
-        post_energy: [41_905, 36_970],
-        post_norm: [[10_260, -2_475], [6_025, 8_521]],
-        gate: [[19, -14], [16, 7]],
-        up: [[2_642, 177], [1_240, 1_974]],
-        swiglu: [[152, -112], [128, 56]],
-        down_input: [[6, 0], [2, 2]],
-        down: [[2, 0], [0, 0]],
-        output: [[201, -48], [111, 157]],
-    }
 }
 
 #[cfg(feature = "llama-tiny")]

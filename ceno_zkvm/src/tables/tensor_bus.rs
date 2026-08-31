@@ -29,6 +29,10 @@ const KEY_SHARD_ID: usize = 22;
 const KEY_LOCAL_SHARD_CYCLE: usize = 23;
 const KEY_ORDINAL: usize = 24;
 const TENSOR_BUS_SEGMENT_EVENTS: usize = 2;
+const TENSOR_LLAMA2_QKV_WORDS: u32 = 3 * 2048 * 4096;
+const TENSOR_LLAMA2_CONTEXT_WORDS: u32 = 2048 * 4096;
+const _: () = assert!(TENSOR_LLAMA2_QKV_WORDS == 25_165_824);
+const _: () = assert!(TENSOR_LLAMA2_CONTEXT_WORDS == 8_388_608);
 
 /// A canonical event is stored on the syscall witness at execution time and
 /// must exactly match the custom write record in TensorBusFixedEcall.
@@ -70,7 +74,10 @@ pub fn events_from_syscalls(
 /// custom read then binds these exact tuples to the ECALL AIR producers, so
 /// this offline check is not substitutable by normal RAM consistency.
 pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMError> {
-    use ceno_emul::{SyscallSpec, TensorExportEndV1Spec, TensorImportBeginV1Spec};
+    use ceno_emul::{
+        SyscallSpec, TensorExportEndV1Spec, TensorImportBeginV1Spec,
+        TensorProductionExportEndV2Spec, TensorProductionImportBeginV2Spec,
+    };
     if events.len() % TENSOR_BUS_SEGMENT_EVENTS != 0 {
         return Err(tensor_bus_error(
             "TensorBus events must contain complete import-begin/export-end boundary sections",
@@ -97,17 +104,28 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
         previous_key = Some(key);
     }
     for section in events.chunks_exact(TENSOR_BUS_SEGMENT_EVENTS) {
+        let production = section[0][1] == TensorProductionImportBeginV2Spec::CODE;
         if section[0][2] != section[1][2] {
             return Err(tensor_bus_error("TensorBus boundary ABI mismatch"));
         }
         for (record, event) in section.iter().enumerate() {
-            let abi_supported = event[2] == ceno_emul::tensor::TENSOR_ABI_V1
-                || cfg!(feature = "llama-tiny") && event[2] == 2;
+            let abi_supported = if production {
+                event[2] == ceno_emul::tensor::TENSOR_ABI_V2
+            } else {
+                event[2] == ceno_emul::tensor::TENSOR_ABI_V1
+                    || cfg!(feature = "llama-tiny") && event[2] == 2
+            };
             if !abi_supported {
                 return Err(tensor_bus_error("TensorBus ABI is unsupported"));
             }
-            let expected_code =
-                [TensorImportBeginV1Spec::CODE, TensorExportEndV1Spec::CODE][record];
+            let expected_code = if production {
+                [
+                    TensorProductionImportBeginV2Spec::CODE,
+                    TensorProductionExportEndV2Spec::CODE,
+                ][record]
+            } else {
+                [TensorImportBeginV1Spec::CODE, TensorExportEndV1Spec::CODE][record]
+            };
             if event[1] != expected_code {
                 return Err(tensor_bus_error("TensorBus section event order mismatch"));
             }
@@ -139,6 +157,32 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
                     if tensor_id == 0 || event[16] != 0 || event[17] != 0 {
                         return Err(tensor_bus_error(
                             "TensorBus export handle is invalid".to_string(),
+                        ));
+                    }
+                }
+                code if code == TensorProductionImportBeginV2Spec::CODE => {
+                    if event[5] != TENSOR_LLAMA2_QKV_WORDS || event[10] != event[5] * 4 {
+                        return Err(tensor_bus_error(
+                            "production TensorBus import metadata mismatch",
+                        ));
+                    }
+                    let tensor_id = u64::from(event[14]) | (u64::from(event[15]) << 32);
+                    if tensor_id == 0 || event[16] != 0 || event[17] != 0 {
+                        return Err(tensor_bus_error(
+                            "production TensorBus import handle/version invalid",
+                        ));
+                    }
+                }
+                code if code == TensorProductionExportEndV2Spec::CODE => {
+                    if event[6] != TENSOR_LLAMA2_CONTEXT_WORDS || event[10] != event[6] * 4 {
+                        return Err(tensor_bus_error(
+                            "production TensorBus export metadata mismatch",
+                        ));
+                    }
+                    let tensor_id = u64::from(event[14]) | (u64::from(event[15]) << 32);
+                    if tensor_id == 0 || event[16] != 0 || event[17] != 0 {
+                        return Err(tensor_bus_error(
+                            "production TensorBus export handle/version invalid",
                         ));
                     }
                 }
@@ -180,6 +224,7 @@ pub fn verify_atomic_tensor_bus_shard_for_preflight(
 
 pub struct TensorBusConfig<E: ExtensionField> {
     event: [[WitIn; TENSOR_BUS_EVENT_WORDS]; TENSOR_BUS_SEGMENT_EVENTS],
+    production: WitIn,
     _marker: std::marker::PhantomData<E>,
 }
 
@@ -204,9 +249,17 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
                     cb.create_witin(|| format!("tensor_bus_{record}_{word}"))
                 })
             });
-        for (record, expected_code) in [
-            ceno_emul::TensorImportBeginV1Spec::CODE,
-            ceno_emul::TensorExportEndV1Spec::CODE,
+        let production = cb.create_witin(|| "tensor_bus_production");
+        cb.assert_bit(|| "tensor_bus_production_bit", production.expr())?;
+        for (record, (legacy_code, production_code)) in [
+            (
+                ceno_emul::TensorImportBeginV1Spec::CODE,
+                ceno_emul::TensorProductionImportBeginV2Spec::CODE,
+            ),
+            (
+                ceno_emul::TensorExportEndV1Spec::CODE,
+                ceno_emul::TensorProductionExportEndV2Spec::CODE,
+            ),
         ]
         .into_iter()
         .enumerate()
@@ -219,7 +272,9 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
             cb.require_equal(
                 || format!("tensor_bus_event_{record}_code"),
                 event[record][1].expr(),
-                E::BaseField::from_u32(expected_code).expr(),
+                E::BaseField::from_u32(legacy_code).expr()
+                    + production.expr()
+                        * E::BaseField::from_u32(production_code - legacy_code).expr(),
             )?;
             cb.read_record(
                 || format!("tensor_bus_event_{record}_consume"),
@@ -233,27 +288,43 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
                 event[record][KEY_ORDINAL].expr(),
                 E::BaseField::ZERO.expr(),
             )?;
+            cb.require_zero(
+                || format!("tensor_bus_production_abi_{record}"),
+                production.expr()
+                    * (event[record][2].expr()
+                        - E::BaseField::from_u32(ceno_emul::tensor::TENSOR_ABI_V2).expr()),
+            )?;
         }
         // TensorBus owns just the resident boundary.  Inner attention/FFN
         // operations are constrained by their own ECALL/RAM witnesses.
-        for record in [1] {
-            for word in 10..14 {
-                cb.require_equal(
-                    || format!("tensor_bus_meta_{record}_{word}"),
-                    event[0][word].expr(),
-                    event[record][word].expr(),
-                )?;
-            }
+        for word in 12..14 {
+            cb.require_equal(
+                || format!("tensor_bus_meta_1_{word}"),
+                event[0][word].expr(),
+                event[1][word].expr(),
+            )?;
+        }
+        for word in 10..12 {
+            cb.require_zero(
+                || format!("tensor_bus_legacy_meta_1_{word}"),
+                (E::BaseField::ONE.expr() - production.expr())
+                    * (event[0][word].expr() - event[1][word].expr()),
+            )?;
         }
         // Import and export deliberately name different opaque handles.  The
         // intervening attention/FFN ECALLs, including their RAM read/write
         // witnesses, constrain the handle chain. TensorBus itself owns only
         // the host/device boundary and therefore binds both endpoint handles
         // without inventing a false equality between them.
-        cb.require_equal(
-            || "tensor_bus_transfer_words",
-            event[0][5].expr(),
-            event[1][6].expr(),
+        cb.require_zero(
+            || "tensor_bus_legacy_transfer_words",
+            (E::BaseField::ONE.expr() - production.expr())
+                * (event[0][5].expr() - event[1][6].expr()),
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_transfer_words",
+            production.expr()
+                * (event[0][5].expr() - E::BaseField::from_u32(3).expr() * event[1][6].expr()),
         )?;
         let four = E::BaseField::from_u32(4).expr();
         cb.require_equal(
@@ -275,6 +346,7 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
         // binds every event word, including the shard/local-cycle/ordinal key.
         Ok(TensorBusConfig {
             event,
+            production,
             _marker: std::marker::PhantomData,
         })
     }
@@ -341,7 +413,7 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
         verify_atomic_tensor_bus_shard(events)?;
         assert_eq!(
             num_witin,
-            TENSOR_BUS_SEGMENT_EVENTS * TENSOR_BUS_EVENT_WORDS
+            TENSOR_BUS_SEGMENT_EVENTS * TENSOR_BUS_EVENT_WORDS + 1
         );
         // The default TableCircuit builder adds exactly one prefix selector.
         assert_eq!(num_structural_witin, 1);
@@ -351,6 +423,10 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
         let structural = P3RowMajorMatrix::new(vec![E::BaseField::ONE; sections], 1);
         for (section, section_events) in events.chunks_exact(TENSOR_BUS_SEGMENT_EVENTS).enumerate()
         {
+            values.values[section * num_witin + config.production.id as usize] =
+                E::BaseField::from_u32(u32::from(
+                    section_events[0][1] == ceno_emul::TensorProductionImportBeginV2Spec::CODE,
+                ));
             for (record, event) in section_events.iter().enumerate() {
                 for (word, value) in config.event[record].iter().zip(event) {
                     values.values[section * num_witin + word.id as usize] =

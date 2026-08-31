@@ -23,7 +23,7 @@ pub const K_WEIGHT: [[i32; HIDDEN]; HIDDEN] = [[1, -1], [1, 1]];
 pub const V_WEIGHT: [[i32; HIDDEN]; HIDDEN] = [[1024, 256], [-128, 768]];
 pub const ROPE_COS: [[i32; HEAD_DIM]; SEQUENCE] = [[63_516, 63_516], [57_510, 57_510]];
 pub const ROPE_SIN: [[i32; HEAD_DIM]; SEQUENCE] = [[16_217, 16_217], [31_420, 31_420]];
-pub const ATTENTION_SHIFTS: [i128; SEQUENCE] = [129_991_194, 18_085_893_153_580_672_258];
+pub const ATTENTION_SHIFTS: [i128; SEQUENCE] = [18_085_893_153_580_672_258; SEQUENCE];
 pub const SOFTMAX_DIGITS: [[[u16; SOFTMAX_SEGMENTS]; SEQUENCE]; SEQUENCE] = [
     [[50_656, 1_387, 0, 0, 0], [0, 0, 0, 0, 0]],
     [[957, 3_726, 0, 64_254, 0], [0, 0, 0, 64_254, 0]],
@@ -42,6 +42,9 @@ pub const DOWN_WEIGHT: [[i32; HIDDEN]; INTERMEDIATE] = [[16_384, 2_048], [-4_096
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LlamaTinyLayerTrace {
+    pub layer: u32,
+    pub input: [[i32; HIDDEN]; SEQUENCE],
+    pub input_inv_rms: [i32; SEQUENCE],
     pub input_energy: [i32; SEQUENCE],
     pub input_norm: [[i32; HIDDEN]; SEQUENCE],
     pub q_projection: [[i32; HIDDEN]; SEQUENCE],
@@ -51,11 +54,13 @@ pub struct LlamaTinyLayerTrace {
     pub k_rope: [[i32; HIDDEN]; SEQUENCE],
     pub qk_scores: [[i64; SEQUENCE]; SEQUENCE],
     pub shifted_magnitudes: [[u128; SEQUENCE]; SEQUENCE],
+    pub softmax_digits: [[[u16; SOFTMAX_SEGMENTS]; SEQUENCE]; SEQUENCE],
     pub probabilities: [[i32; SEQUENCE]; SEQUENCE],
     pub attention: [[i32; HIDDEN]; SEQUENCE],
     pub attention_projection: [[i32; HIDDEN]; SEQUENCE],
     pub attention_residual: [[i32; HIDDEN]; SEQUENCE],
     pub post_energy: [i32; SEQUENCE],
+    pub post_inv_rms: [i32; SEQUENCE],
     pub post_norm: [[i32; HIDDEN]; SEQUENCE],
     pub gate: [[i32; INTERMEDIATE]; SEQUENCE],
     pub up: [[i32; INTERMEDIATE]; SEQUENCE],
@@ -158,8 +163,35 @@ fn add(
 }
 
 pub fn execute() -> Result<LlamaTinyLayerTrace> {
-    let input_energy = energy(&INPUT)?;
-    let input_norm = rms_norm(&INPUT, &INPUT_INV_RMS, &INPUT_NORM_WEIGHT)?;
+    execute_layer(0, INPUT)
+}
+
+pub fn layer_input(layer: u32) -> Result<[[i32; HIDDEN]; SEQUENCE]> {
+    let mut input = INPUT;
+    for ordinal in 0..layer {
+        input = execute_layer(ordinal, input)?.output;
+    }
+    Ok(input)
+}
+
+fn rms_inv(energy: i32) -> i32 {
+    ((Q16_SHIFT as f64).exp2().powi(2)
+        / (f64::from(energy) / 2.0 + 1.0e-6 * (Q16_SHIFT as f64).exp2().powi(2)).sqrt()
+        + 0.5) as i32
+}
+
+fn softmax_product(magnitude: u128) -> i64 {
+    let digit3 = ((magnitude >> 48) & 0xffff) as f64;
+    let digit4 = ((magnitude >> 64) & 0xffff) as f64;
+    let exp3 = (1024.0 * (-digit3 / (65_536.0 * 2.0f64.sqrt())).exp() + 0.5) as i64;
+    let exp4 = (1024.0 * (-digit4 / 2.0f64.sqrt()).exp() + 0.5) as i64;
+    1024_i64.pow(3) * exp3 * exp4
+}
+
+pub fn execute_layer(layer: u32, input: [[i32; HIDDEN]; SEQUENCE]) -> Result<LlamaTinyLayerTrace> {
+    let input_energy = energy(&input)?;
+    let input_inv_rms = input_energy.map(rms_inv);
+    let input_norm = rms_norm(&input, &input_inv_rms, &INPUT_NORM_WEIGHT)?;
     let q_projection = matmul(&input_norm, &Q_WEIGHT, None)?;
     let k_projection = matmul(&input_norm, &K_WEIGHT, None)?;
     let v = matmul(&input_norm, &V_WEIGHT, Some(Q16_SHIFT))?;
@@ -167,6 +199,7 @@ pub fn execute() -> Result<LlamaTinyLayerTrace> {
     let k_rope = rope(&k_projection)?;
     let mut qk_scores = [[0i64; SEQUENCE]; SEQUENCE];
     let mut shifted_magnitudes = [[0u128; SEQUENCE]; SEQUENCE];
+    let mut softmax_digits = [[[0u16; SOFTMAX_SEGMENTS]; SEQUENCE]; SEQUENCE];
     for query in 0..SEQUENCE {
         for key in 0..SEQUENCE {
             qk_scores[query][key] = (0..HEAD_DIM)
@@ -176,18 +209,32 @@ pub fn execute() -> Result<LlamaTinyLayerTrace> {
             ensure!(shifted <= 0, "attention shift does not upper-bound score");
             shifted_magnitudes[query][key] = shifted.unsigned_abs();
             let mut magnitude = shifted_magnitudes[query][key];
-            for expected in SOFTMAX_DIGITS[query][key] {
-                ensure!(
-                    magnitude & 0xffff == u128::from(expected),
-                    "softmax digit mismatch"
-                );
+            for digit in &mut softmax_digits[query][key] {
+                *digit = (magnitude & 0xffff) as u16;
                 magnitude >>= 16;
             }
             ensure!(magnitude == 0, "softmax magnitude exceeds five digits");
         }
     }
-    let probabilities = SOFTMAX_PROBABILITIES;
+    let mut probabilities = [[0; SEQUENCE]; SEQUENCE];
     for query in 0..SEQUENCE {
+        let products = std::array::from_fn::<_, SEQUENCE, _>(|key| {
+            if key <= query {
+                softmax_product(shifted_magnitudes[query][key])
+            } else {
+                0
+            }
+        });
+        let sum = products.iter().sum::<i64>();
+        for key in 0..SEQUENCE {
+            probabilities[query][key] = if key == query {
+                (1 << Q20_SHIFT) - probabilities[query][..key].iter().sum::<i32>()
+            } else if key < query {
+                ((products[key] * (1 << Q20_SHIFT) + sum / 2) / sum) as i32
+            } else {
+                0
+            };
+        }
         ensure!(
             probabilities[query]
                 .iter()
@@ -205,12 +252,17 @@ pub fn execute() -> Result<LlamaTinyLayerTrace> {
     }
     let attention = matmul(&probabilities, &v, Some(Q20_SHIFT))?;
     let attention_projection = matmul(&attention, &O_WEIGHT, Some(Q16_SHIFT))?;
-    let attention_residual = add(&INPUT, &attention_projection)?;
+    let attention_residual = add(&input, &attention_projection)?;
     let post_energy = energy(&attention_residual)?;
-    let post_norm = rms_norm(&attention_residual, &POST_INV_RMS, &POST_NORM_WEIGHT)?;
+    let post_inv_rms = post_energy.map(rms_inv);
+    let post_norm = rms_norm(&attention_residual, &post_inv_rms, &POST_NORM_WEIGHT)?;
     let gate = matmul(&post_norm, &GATE_WEIGHT, Some(Q20_SHIFT))?;
     let up = matmul(&post_norm, &UP_WEIGHT, Some(Q16_SHIFT))?;
-    let swiglu = SWIGLU_OUTPUT;
+    let swiglu = gate.map(|row| {
+        row.map(|value| {
+            (f64::from(value) * 16.0 / (1.0 + (-f64::from(value) / 4096.0).exp())).round() as i32
+        })
+    });
     let mut down_input = [[0; INTERMEDIATE]; SEQUENCE];
     for row in 0..SEQUENCE {
         for col in 0..INTERMEDIATE {
@@ -223,6 +275,9 @@ pub fn execute() -> Result<LlamaTinyLayerTrace> {
     let down = matmul(&down_input, &DOWN_WEIGHT, Some(Q16_SHIFT))?;
     let output = add(&attention_residual, &down)?;
     Ok(LlamaTinyLayerTrace {
+        layer,
+        input,
+        input_inv_rms,
         input_energy,
         input_norm,
         q_projection,
@@ -232,11 +287,13 @@ pub fn execute() -> Result<LlamaTinyLayerTrace> {
         k_rope,
         qk_scores,
         shifted_magnitudes,
+        softmax_digits,
         probabilities,
         attention,
         attention_projection,
         attention_residual,
         post_energy,
+        post_inv_rms,
         post_norm,
         gate,
         up,

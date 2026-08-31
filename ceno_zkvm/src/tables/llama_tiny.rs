@@ -23,9 +23,10 @@ const RMS_EPSILON: f64 = 1.0e-6;
 pub trait LlamaTinyRom: Send + Sync {
     const CATEGORY: LookupTable;
     const NAME: &'static str;
+    const ROWS: usize = LLAMA_TINY_ROM_ROWS;
 
-    fn input(index: u16) -> i64;
-    fn output(index: u16) -> i64;
+    fn input(index: usize) -> i64;
+    fn output(index: usize) -> i64;
 }
 
 pub struct SoftmaxExp3Rom;
@@ -33,12 +34,12 @@ impl LlamaTinyRom for SoftmaxExp3Rom {
     const CATEGORY: LookupTable = LookupTable::LlamaSoftmaxExp3;
     const NAME: &'static str = "LLAMA_TINY_SOFTMAX_EXP3";
 
-    fn input(index: u16) -> i64 {
-        i64::from(index)
+    fn input(index: usize) -> i64 {
+        index as i64
     }
 
-    fn output(index: u16) -> i64 {
-        (1024.0 * (-(f64::from(index)) / (Q16_SCALE_F64 * 2.0f64.sqrt())).exp() + 0.5) as i64
+    fn output(index: usize) -> i64 {
+        (1024.0 * (-(index as f64) / (Q16_SCALE_F64 * 2.0f64.sqrt())).exp() + 0.5) as i64
     }
 }
 
@@ -47,12 +48,12 @@ impl LlamaTinyRom for SoftmaxExp4Rom {
     const CATEGORY: LookupTable = LookupTable::LlamaSoftmaxExp4;
     const NAME: &'static str = "LLAMA_TINY_SOFTMAX_EXP4";
 
-    fn input(index: u16) -> i64 {
-        i64::from(index)
+    fn input(index: usize) -> i64 {
+        index as i64
     }
 
-    fn output(index: u16) -> i64 {
-        (1024.0 * (-(f64::from(index)) / 2.0f64.sqrt()).exp() + 0.5) as i64
+    fn output(index: usize) -> i64 {
+        (1024.0 * (-(index as f64) / 2.0f64.sqrt()).exp() + 0.5) as i64
     }
 }
 
@@ -60,15 +61,16 @@ pub struct RmsInvRom;
 impl LlamaTinyRom for RmsInvRom {
     const CATEGORY: LookupTable = LookupTable::LlamaRmsInv;
     const NAME: &'static str = "LLAMA_TINY_RMS_INV";
+    const ROWS: usize = 1 << 17;
 
-    fn input(index: u16) -> i64 {
-        i64::from(index)
+    fn input(index: usize) -> i64 {
+        index as i64
     }
 
-    fn output(index: u16) -> i64 {
+    fn output(index: usize) -> i64 {
         // The key is sum(x_i^2) for H=2. Inputs are Q16, so this is
         // round(2^16 / sqrt(mean((x/2^16)^2) + 1e-6)).
-        let denominator = (f64::from(index) / 2.0 + RMS_EPSILON * Q16_SCALE_F64.powi(2)).sqrt();
+        let denominator = (index as f64 / 2.0 + RMS_EPSILON * Q16_SCALE_F64.powi(2)).sqrt();
         (Q16_SCALE_F64.powi(2) / denominator + 0.5) as i64
     }
 }
@@ -78,12 +80,12 @@ impl LlamaTinyRom for SwiGluRom {
     const CATEGORY: LookupTable = LookupTable::LlamaSwiGlu;
     const NAME: &'static str = "LLAMA_TINY_SWIGLU";
 
-    fn input(index: u16) -> i64 {
-        i64::from(index as i16)
+    fn input(index: usize) -> i64 {
+        i64::from(index as u16 as i16)
     }
 
-    fn output(index: u16) -> i64 {
-        let input = f64::from(index as i16);
+    fn output(index: usize) -> i64 {
+        let input = f64::from(index as u16 as i16);
         // Q12 input to Q16 x*sigmoid(x): the scale ratio is 2^4.
         (input * 16.0 / (1.0 + (-input / 4096.0).exp())).round() as i64
     }
@@ -100,6 +102,7 @@ impl LlamaTinyRomConfig {
     fn construct<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
         category: LookupTable,
+        rows: usize,
     ) -> Result<Self, CircuitBuilderError> {
         let input = cb.create_fixed(|| "input");
         let output = cb.create_fixed(|| "output");
@@ -107,7 +110,7 @@ impl LlamaTinyRomConfig {
         cb.lk_table_record(
             || "llama_tiny_rom_record",
             SetTableSpec {
-                len: Some(LLAMA_TINY_ROM_ROWS),
+                len: Some(rows),
                 structural_witins: vec![],
             },
             category,
@@ -122,13 +125,8 @@ impl LlamaTinyRomConfig {
     }
 
     fn fixed_trace<F: SmallField, R: LlamaTinyRom>(&self, num_fixed: usize) -> RowMajorMatrix<F> {
-        let mut fixed = RowMajorMatrix::new(
-            LLAMA_TINY_ROM_ROWS,
-            num_fixed,
-            InstancePaddingStrategy::Default,
-        );
+        let mut fixed = RowMajorMatrix::new(R::ROWS, num_fixed, InstancePaddingStrategy::Default);
         fixed.par_rows_mut().enumerate().for_each(|(index, row)| {
-            let index = index as u16;
             set_fixed_val!(row, self.input, F::from_i64(R::input(index)));
             set_fixed_val!(row, self.output, F::from_i64(R::output(index)));
         });
@@ -140,15 +138,12 @@ impl LlamaTinyRomConfig {
         num_witin: usize,
         num_structural_witin: usize,
         multiplicity: &FxHashMap<u64, usize>,
+        rows: usize,
     ) -> RMMCollections<F> {
         assert_eq!(num_structural_witin, 1);
-        let mut witness = RowMajorMatrix::new(
-            LLAMA_TINY_ROM_ROWS,
-            num_witin,
-            InstancePaddingStrategy::Default,
-        );
+        let mut witness = RowMajorMatrix::new(rows, num_witin, InstancePaddingStrategy::Default);
         let mut structural = RowMajorMatrix::new(
-            LLAMA_TINY_ROM_ROWS,
+            rows,
             num_structural_witin.max(1),
             InstancePaddingStrategy::Default,
         );
@@ -188,7 +183,7 @@ impl<E: ExtensionField, R: LlamaTinyRom> TableCircuit<E> for LlamaTinyRomCircuit
     ) -> Result<Self::TableConfig, ZKVMError> {
         Ok(cb.namespace(
             || R::NAME,
-            |cb| LlamaTinyRomConfig::construct(cb, R::CATEGORY),
+            |cb| LlamaTinyRomConfig::construct(cb, R::CATEGORY, R::ROWS),
         )?)
     }
 
@@ -211,6 +206,7 @@ impl<E: ExtensionField, R: LlamaTinyRom> TableCircuit<E> for LlamaTinyRomCircuit
             num_witin,
             num_structural_witin,
             &multiplicities[R::CATEGORY as usize],
+            R::ROWS,
         ))
     }
 }

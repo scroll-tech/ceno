@@ -26,11 +26,24 @@ pub const TENSOR_EXPORT_END_V1: u32 = 0x00ff_000c;
 /// from the pointer ABI: all activation bytes remain in TensorBus.
 pub const TENSOR_HANDLE_ATTENTION_V1: u32 = 0x00ff_000d;
 pub const TENSOR_HANDLE_FFN_V1: u32 = 0x00ff_000e;
+/// Production row-boundary ABI. These distinct opcodes preserve the legacy
+/// fixed-width v1/tiny ECALL circuits while sharing their descriptor layouts.
+pub const TENSOR_PRODUCTION_IMPORT_BEGIN_V2: u32 = 0x00ff_000f;
+pub const TENSOR_PRODUCTION_ATTENTION_V2: u32 = 0x00ff_0010;
+pub const TENSOR_PRODUCTION_EXPORT_END_V2: u32 = 0x00ff_0011;
 pub const TENSOR_ABI_V1: u32 = 1;
-#[cfg(feature = "llama-tiny")]
+/// Tensor-space resident operators. Unlike v1, weight identity is logical and
+/// no guest weight or hint address is accepted.
 pub const TENSOR_ABI_V2: u32 = 2;
 #[cfg(feature = "llama-tiny")]
 pub const TENSOR_PROFILE_LLAMA_TINY: u32 = 1;
+pub const TENSOR_PROFILE_LLAMA2_7B_ATTENTION: u32 = 2;
+pub const TENSOR_LLAMA2_SEQUENCE: u32 = 2048;
+pub const TENSOR_LLAMA2_HIDDEN: u32 = 4096;
+pub const TENSOR_LLAMA2_HEADS: u32 = 32;
+pub const TENSOR_LLAMA2_HEAD_DIM: u32 = 128;
+pub const TENSOR_LLAMA2_QKV_WORDS: u32 = 3 * TENSOR_LLAMA2_SEQUENCE * TENSOR_LLAMA2_HIDDEN;
+pub const TENSOR_LLAMA2_CONTEXT_WORDS: u32 = TENSOR_LLAMA2_SEQUENCE * TENSOR_LLAMA2_HIDDEN;
 
 /// Opaque TensorBus value identity. Device pointers never enter the guest ABI.
 #[repr(C, align(8))]
@@ -98,7 +111,6 @@ const _: () = assert!(core::mem::size_of::<TensorHandleOpDescV1>() == 32);
 /// words and uses the same attention/FFN ecall numbers as v1. Weight addresses
 /// never enter the guest ABI: `(profile, layer, operator role)` selects the
 /// proof-side HintRef instead.
-#[cfg(feature = "llama-tiny")]
 #[repr(C, align(32))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TensorHandleOpDescV2 {
@@ -112,7 +124,6 @@ pub struct TensorHandleOpDescV2 {
     pub layer: u32,
 }
 
-#[cfg(feature = "llama-tiny")]
 const _: () = assert!(core::mem::size_of::<TensorHandleOpDescV2>() == 32);
 
 const _: () = assert!(core::mem::size_of::<TensorImportBeginDescV1>() == 32);
@@ -175,7 +186,6 @@ pub unsafe fn tensor_handle_ffn_v1(desc: &TensorHandleOpDescV1) {
     }
 }
 
-#[cfg(feature = "llama-tiny")]
 #[inline(always)]
 pub unsafe fn tensor_handle_attention_v2(desc: &TensorHandleOpDescV2) {
     unsafe {
@@ -186,13 +196,46 @@ pub unsafe fn tensor_handle_attention_v2(desc: &TensorHandleOpDescV2) {
     }
 }
 
-#[cfg(feature = "llama-tiny")]
 #[inline(always)]
 pub unsafe fn tensor_handle_ffn_v2(desc: &TensorHandleOpDescV2) {
     unsafe {
         tensor_segment_ecall_v1(
             desc as *const TensorHandleOpDescV2 as *const u8,
             TENSOR_HANDLE_FFN_V1,
+        )
+    }
+}
+
+/// Import packed `[Q,K,V][32,2048,128]` into one atomic attention segment.
+#[inline(always)]
+pub unsafe fn tensor_production_import_begin_v2(desc: &TensorImportBeginDescV1) {
+    unsafe {
+        tensor_segment_ecall_v1(
+            desc as *const TensorImportBeginDescV1 as *const u8,
+            TENSOR_PRODUCTION_IMPORT_BEGIN_V2,
+        )
+    }
+}
+
+/// Exact causal S2048 attention. All operands and outputs are Tensor-space;
+/// this anchor touches only its descriptor and opaque handles in guest RAM.
+#[inline(always)]
+pub unsafe fn tensor_production_attention_v2(desc: &TensorHandleOpDescV2) {
+    unsafe {
+        tensor_segment_ecall_v1(
+            desc as *const TensorHandleOpDescV2 as *const u8,
+            TENSOR_PRODUCTION_ATTENTION_V2,
+        )
+    }
+}
+
+/// Export `[32,2048,128]` context and close the atomic attention segment.
+#[inline(always)]
+pub unsafe fn tensor_production_export_end_v2(desc: &TensorExportEndDescV1) {
+    unsafe {
+        tensor_segment_ecall_v1(
+            desc as *const TensorExportEndDescV1 as *const u8,
+            TENSOR_PRODUCTION_EXPORT_END_V2,
         )
     }
 }

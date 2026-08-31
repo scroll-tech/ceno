@@ -24,6 +24,10 @@ pub mod lui;
 pub mod lw;
 #[cfg(feature = "u16limb_circuit")]
 pub mod mul;
+#[cfg(not(feature = "llama-tiny"))]
+pub mod production_attention_boundary;
+pub mod production_attention_matrix;
+pub mod production_attention_softmax;
 #[cfg(feature = "u16limb_circuit")]
 pub mod sb;
 pub mod secp256k1;
