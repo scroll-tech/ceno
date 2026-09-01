@@ -189,6 +189,7 @@ pub struct TensorProductionPvCoreConfig {
     q_limbs: [WitIn; 4],
     remainder_low16: WitIn,
     remainder_high4: WitIn,
+    remainder_high4_bits: [WitIn; 4],
     row_high_is_zero: WitIn,
     row_high_inverse: WitIn,
     row_high_is_last: WitIn,
@@ -205,11 +206,13 @@ pub struct TensorProductionPvCoreConfig {
     accumulator_r_after: WitIn,
     accumulator_r_after_low16: WitIn,
     accumulator_r_after_high4: WitIn,
+    accumulator_r_after_high4_bits: [WitIn; 4],
     carry: WitIn,
     final_q: WitIn,
     final_remainder: WitIn,
     final_remainder_low16: WitIn,
     final_remainder_high4: WitIn,
+    final_remainder_high4_bits: [WitIn; 4],
     import_cycle: WitIn,
     input_id_lo: WitIn,
     input_id_hi: WitIn,
@@ -259,6 +262,10 @@ impl TensorProductionPvCoreConfig {
                 id(self.q_limbs[3]),
                 id(self.remainder_low16),
                 id(self.remainder_high4),
+                id(self.remainder_high4_bits[0]),
+                id(self.remainder_high4_bits[1]),
+                id(self.remainder_high4_bits[2]),
+                id(self.remainder_high4_bits[3]),
                 id(self.row_high_is_zero),
                 id(self.row_high_inverse),
                 id(self.row_high_is_last),
@@ -278,11 +285,19 @@ impl TensorProductionPvCoreConfig {
                 id(self.accumulator_r_after),
                 id(self.accumulator_r_after_low16),
                 id(self.accumulator_r_after_high4),
+                id(self.accumulator_r_after_high4_bits[0]),
+                id(self.accumulator_r_after_high4_bits[1]),
+                id(self.accumulator_r_after_high4_bits[2]),
+                id(self.accumulator_r_after_high4_bits[3]),
                 id(self.carry),
                 id(self.final_q),
                 id(self.final_remainder),
                 id(self.final_remainder_low16),
                 id(self.final_remainder_high4),
+                id(self.final_remainder_high4_bits[0]),
+                id(self.final_remainder_high4_bits[1]),
+                id(self.final_remainder_high4_bits[2]),
+                id(self.final_remainder_high4_bits[3]),
                 id(self.import_cycle),
                 id(self.input_id_lo),
                 id(self.input_id_hi),
@@ -310,7 +325,7 @@ impl TensorProductionPvCoreConfig {
                 ZKVMError::InvalidWitness("production PV structural width overflow".into())
             })?,
         };
-        if num_witin != 48
+        if num_witin != 60
             || num_structural_witin != 10
             || map.witness != core::array::from_fn(|index| index as u32)
             || map.structural != [5, 0, 1, 2, 3, 4, 6, 7, 8, 9]
@@ -336,33 +351,36 @@ fn dynamic_range<E: ExtensionField>(
     )?)
 }
 
-fn algebraic_u4_range<E: ExtensionField>(
+fn boolean_u4_range<E: ExtensionField>(
     cb: &mut CircuitBuilder<E>,
     name: &'static str,
     value: WitIn,
-) -> Result<(), ZKVMError> {
+) -> Result<[WitIn; 4], ZKVMError> {
     for sample_u32 in 0..=16_u32 {
-        let sample = E::BaseField::from_u32(sample_u32);
-        let product = (0..16_u32).fold(E::BaseField::ONE, |product, root| {
-            product * (sample - E::BaseField::from_u32(root))
+        let reconstructed = (0..4).fold(0_u32, |value, bit| {
+            value | (((sample_u32 >> bit) & 1) << bit)
         });
         assert_eq!(
-            product == E::BaseField::ZERO,
+            reconstructed == sample_u32 && sample_u32 >> 4 == 0,
             sample_u32 < 16,
-            "production PV algebraic u4 membership changed"
+            "production PV boolean u4 membership changed"
         );
     }
 
-    let mut level = (0..16_u32)
-        .map(|root| value.expr() - E::BaseField::from_u32(root).expr())
-        .collect::<Vec<_>>();
-    while level.len() > 1 {
-        level = level
-            .chunks(2)
-            .map(|pair| pair[0].clone() * pair[1].clone())
-            .collect();
+    let bits = core::array::from_fn(|bit| cb.create_witin(|| format!("{name}_bit_{bit}")));
+    for bit in bits {
+        cb.assert_bit(|| format!("{name}_bit"), bit.expr())?;
     }
-    Ok(cb.require_zero(|| name, level.pop().unwrap())?)
+    cb.require_equal(
+        || name,
+        value.expr(),
+        bits.iter()
+            .enumerate()
+            .fold(Expression::ZERO, |sum, (bit, cell)| {
+                sum + cell.expr() * (1_u64 << bit)
+            }),
+    )?;
+    Ok(bits)
 }
 
 fn bit<E: ExtensionField>(
@@ -876,7 +894,8 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             remainder_low16,
             16,
         )?;
-        algebraic_u4_range(cb, "production_pv_remainder_high4_range", remainder_high4)?;
+        let remainder_high4_bits =
+            boolean_u4_range(cb, "production_pv_remainder_high4_range", remainder_high4)?;
         cb.require_equal(
             || "production_pv_centered_remainder",
             remainder.expr() + Q20_HALF,
@@ -1000,7 +1019,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             accumulator_r_after_low16,
             16,
         )?;
-        algebraic_u4_range(
+        let accumulator_r_after_high4_bits = boolean_u4_range(
             cb,
             "production_pv_accumulator_r_after",
             accumulator_r_after_high4,
@@ -1045,7 +1064,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             final_remainder_low16,
             16,
         )?;
-        algebraic_u4_range(
+        let final_remainder_high4_bits = boolean_u4_range(
             cb,
             "production_pv_final_remainder_high4_range",
             final_remainder_high4,
@@ -1207,6 +1226,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             q_limbs,
             remainder_low16,
             remainder_high4,
+            remainder_high4_bits,
             row_high_is_zero,
             row_high_inverse,
             row_high_is_last,
@@ -1223,11 +1243,13 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             accumulator_r_after,
             accumulator_r_after_low16,
             accumulator_r_after_high4,
+            accumulator_r_after_high4_bits,
             carry,
             final_q,
             final_remainder,
             final_remainder_low16,
             final_remainder_high4,
+            final_remainder_high4_bits,
             import_cycle,
             input_id_lo,
             input_id_hi,
@@ -1254,7 +1276,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
         let config = Self::construct_circuit(cb, params)?;
         assert_eq!(
-            cb.cs.num_witin as usize, 48,
+            cb.cs.num_witin as usize, 60,
             "production PV witness width changed"
         );
         assert_eq!(

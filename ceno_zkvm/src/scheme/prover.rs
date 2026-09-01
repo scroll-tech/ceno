@@ -5,7 +5,11 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     hal::ProverBackend,
 };
-use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    marker::PhantomData,
+    sync::{Arc, Mutex},
+};
 
 #[cfg(feature = "gpu")]
 use std::collections::HashMap;
@@ -480,14 +484,34 @@ where
 pub type ZkVMCpuProver<E, PCS> =
     ZKVMProver<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>;
 
+struct DevicePkLifecycle<PB: ProverBackend> {
+    first: Option<DeviceProvingKey<'static, PB>>,
+    non_first: Option<DeviceProvingKey<'static, PB>>,
+    entered_non_first: bool,
+}
+
+fn clone_device_pk<PB: ProverBackend>(
+    key: &DeviceProvingKey<'static, PB>,
+) -> DeviceProvingKey<'static, PB> {
+    DeviceProvingKey {
+        fixed_mles: key.fixed_mles.clone(),
+        pcs_data: key.pcs_data.clone(),
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn gpu_pool_used_bytes() -> Option<u64> {
+    let hal = gkr_iop::gpu::get_cuda_hal().ok()?;
+    hal.inner.mem_pool().get_used_size().ok()
+}
+
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, PD>
 {
     pub pk: Arc<ZKVMProvingKey<E, PCS>>,
     vk_digest: [E; VK_DIGEST_LEN],
     device: PD,
     // device_pk might be none if there is no fixed commitment
-    device_first_shard_pk: Option<DeviceProvingKey<'static, PB>>,
-    device_non_first_shard_pk: Option<DeviceProvingKey<'static, PB>>,
+    device_pk_lifecycle: Mutex<DevicePkLifecycle<PB>>,
     _marker: PhantomData<PB>,
 }
 
@@ -511,42 +535,96 @@ impl<
             pk,
             vk_digest,
             device,
-            device_first_shard_pk,
-            device_non_first_shard_pk: None,
+            device_pk_lifecycle: Mutex::new(DevicePkLifecycle {
+                first: device_first_shard_pk,
+                non_first: None,
+                entered_non_first: false,
+            }),
             _marker: PhantomData,
         }
     }
 
     pub fn new(pk: Arc<ZKVMProvingKey<E, PCS>>, device: PD) -> Self {
         let vk_digest = pk.compute_vk_digest::<RV32imMemStateConfig>();
-        let (device_first_shard_pk, device_non_first_shard_pk) =
-            if pk.as_ref().has_fixed_commitment() {
-                (
-                    Some(device.transport_proving_key(true, pk.clone())),
-                    Some(device.transport_proving_key(false, pk.clone())),
-                )
-            } else {
-                (None, None)
-            };
+        #[cfg(feature = "gpu")]
+        let pool_before = gpu_pool_used_bytes();
+        let device_first_shard_pk = pk
+            .as_ref()
+            .has_fixed_commitment()
+            .then(|| device.transport_proving_key(true, pk.clone()));
+        #[cfg(feature = "gpu")]
+        if let (Some(before), Some(after)) = (pool_before, gpu_pool_used_bytes()) {
+            tracing::info!(
+                target: "ceno_pipeline",
+                key = "first",
+                before_bytes = before,
+                after_bytes = after,
+                constructed_bytes = after.saturating_sub(before),
+                "constructed one fixed device proving key"
+            );
+        }
 
         ZKVMProver {
             pk,
             vk_digest,
             device,
-            device_first_shard_pk,
-            device_non_first_shard_pk,
+            device_pk_lifecycle: Mutex::new(DevicePkLifecycle {
+                first: device_first_shard_pk,
+                non_first: None,
+                entered_non_first: false,
+            }),
             _marker: PhantomData,
         }
     }
 
-    pub fn get_device_proving_key(
+    fn device_proving_key_for_shard(
         &self,
         shard_ctx: &ShardContext,
-    ) -> Option<&DeviceProvingKey<'static, PB>> {
+    ) -> Option<DeviceProvingKey<'static, PB>> {
+        if !self.pk.as_ref().has_fixed_commitment() {
+            return None;
+        }
+        let mut lifecycle = self.device_pk_lifecycle.lock().unwrap();
         if shard_ctx.is_first_shard() {
-            self.device_first_shard_pk.as_ref()
+            assert!(
+                !lifecycle.entered_non_first,
+                "first-shard fixed key requested after entering non-first shards"
+            );
+            Some(clone_device_pk(lifecycle.first.as_ref().expect(
+                "first shard is missing its fixed device proving key",
+            )))
         } else {
-            self.device_non_first_shard_pk.as_ref()
+            if !lifecycle.entered_non_first {
+                let first = lifecycle
+                    .first
+                    .take()
+                    .expect("non-first transition is missing the first-shard fixed key");
+                drop(first);
+                #[cfg(feature = "gpu")]
+                let pool_before = gpu_pool_used_bytes();
+                let non_first = self.device.transport_proving_key(false, self.pk.clone());
+                #[cfg(feature = "gpu")]
+                if let (Some(before), Some(after)) = (pool_before, gpu_pool_used_bytes()) {
+                    tracing::info!(
+                        target: "ceno_pipeline",
+                        key = "non_first",
+                        shard_id = shard_ctx.shard_id,
+                        before_bytes = before,
+                        after_bytes = after,
+                        constructed_bytes = after.saturating_sub(before),
+                        "released first fixed key and constructed non-first fixed key"
+                    );
+                }
+                lifecycle.non_first = Some(non_first);
+                lifecycle.entered_non_first = true;
+            }
+            assert!(
+                lifecycle.first.is_none(),
+                "first-shard fixed key survived the non-first transition"
+            );
+            Some(clone_device_pk(lifecycle.non_first.as_ref().expect(
+                "non-first shard is missing its fixed device proving key",
+            )))
         }
     }
 
@@ -589,8 +667,9 @@ impl<
         }
 
         // Pre-extract fixed_mles before entering the tracing scope to avoid lifetime issues with std::thread::scope
-        let fixed_mles_preload = self
-            .get_device_proving_key(shard_ctx)
+        let device_pk = self.device_proving_key_for_shard(shard_ctx);
+        let fixed_mles_preload = device_pk
+            .as_ref()
             .map(|dpk| dpk.fixed_mles.clone())
             .unwrap_or_default();
 
@@ -877,8 +956,7 @@ impl<
             let mpcs_opening_proof = info_span!("[ceno] pcs_opening").in_scope(|| {
                 self.device.open(
                     witness_data,
-                    self.get_device_proving_key(shard_ctx)
-                        .map(|dpk| dpk.pcs_data.clone()),
+                    device_pk.as_ref().map(|dpk| dpk.pcs_data.clone()),
                     points,
                     evaluations,
                     &mut transcript,
