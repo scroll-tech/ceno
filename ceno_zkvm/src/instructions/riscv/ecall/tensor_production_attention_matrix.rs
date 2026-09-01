@@ -336,6 +336,35 @@ fn dynamic_range<E: ExtensionField>(
     )?)
 }
 
+fn algebraic_u4_range<E: ExtensionField>(
+    cb: &mut CircuitBuilder<E>,
+    name: &'static str,
+    value: WitIn,
+) -> Result<(), ZKVMError> {
+    for sample_u32 in 0..=16_u32 {
+        let sample = E::BaseField::from_u32(sample_u32);
+        let product = (0..16_u32).fold(E::BaseField::ONE, |product, root| {
+            product * (sample - E::BaseField::from_u32(root))
+        });
+        assert_eq!(
+            product == E::BaseField::ZERO,
+            sample_u32 < 16,
+            "production PV algebraic u4 membership changed"
+        );
+    }
+
+    let mut level = (0..16_u32)
+        .map(|root| value.expr() - E::BaseField::from_u32(root).expr())
+        .collect::<Vec<_>>();
+    while level.len() > 1 {
+        level = level
+            .chunks(2)
+            .map(|pair| pair[0].clone() * pair[1].clone())
+            .collect();
+    }
+    Ok(cb.require_zero(|| name, level.pop().unwrap())?)
+}
+
 fn bit<E: ExtensionField>(
     cb: &mut CircuitBuilder<E>,
     name: &'static str,
@@ -847,12 +876,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             remainder_low16,
             16,
         )?;
-        dynamic_range(
-            cb,
-            "production_pv_remainder_high4_range",
-            remainder_high4,
-            4,
-        )?;
+        algebraic_u4_range(cb, "production_pv_remainder_high4_range", remainder_high4)?;
         cb.require_equal(
             || "production_pv_centered_remainder",
             remainder.expr() + Q20_HALF,
@@ -976,11 +1000,10 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             accumulator_r_after_low16,
             16,
         )?;
-        dynamic_range(
+        algebraic_u4_range(
             cb,
             "production_pv_accumulator_r_after",
             accumulator_r_after_high4,
-            4,
         )?;
         cb.require_equal(
             || "production_pv_accumulator_r_after",
@@ -1022,11 +1045,10 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             final_remainder_low16,
             16,
         )?;
-        dynamic_range(
+        algebraic_u4_range(
             cb,
             "production_pv_final_remainder_high4_range",
             final_remainder_high4,
-            4,
         )?;
         cb.require_equal(
             || "production_pv_final_centered_remainder",
@@ -1248,7 +1270,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             "production PV TensorBus/state write count changed"
         );
         assert_eq!(
-            lookups, 19,
+            lookups, 16,
             "production PV Dynamic-range record count changed"
         );
         for expected in [
@@ -1281,7 +1303,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         let lookup_virtual_rows = (ROWS / 2) * lookups.next_power_of_two();
         assert_eq!(
             lookup_virtual_rows,
-            (HEADS_PER_CORE as usize) << 26,
+            (HEADS_PER_CORE as usize) << 25,
             "production PV lookup virtual group changed"
         );
         let columns = [config.a, config.w, config.q, config.remainder];
