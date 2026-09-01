@@ -18,7 +18,7 @@ pub const SEQUENCE: usize = 2048;
 pub const HIDDEN: usize = 4096;
 pub const HEADS: usize = 32;
 pub const HEAD_DIM: usize = 128;
-pub const HEADS_PER_CIRCUIT: usize = 4;
+pub const HEADS_PER_CIRCUIT: usize = ceno_rt::tensor::TENSOR_PRODUCTION_HEADS_PER_STAGE as usize;
 pub const CIRCUITS: usize = HEADS / HEADS_PER_CIRCUIT;
 pub const Q20_SHIFT: u32 = 20;
 pub const Q20_SCALE: i64 = 1 << Q20_SHIFT;
@@ -29,7 +29,7 @@ pub const CONTEXT_WORDS: usize = HEADS * SEQUENCE * HEAD_DIM;
 pub const SCORE_ROWS: usize = HEADS * SEQUENCE * SEQUENCE;
 pub const GROUP_SCORE_ROWS: usize = HEADS_PER_CIRCUIT * SEQUENCE * SEQUENCE;
 pub const MATRIX_AXIS_BITS: usize = 11;
-pub const MATRIX_GROUP_BITS: usize = 2;
+pub const MATRIX_GROUP_BITS: usize = HEADS_PER_CIRCUIT.trailing_zeros() as usize;
 pub const MATRIX_REDUCTION_BITS: usize = MATRIX_AXIS_BITS + MATRIX_GROUP_BITS;
 pub const QK_MULTIPLICATIONS: u64 =
     HEADS as u64 * SEQUENCE as u64 * SEQUENCE as u64 * HEAD_DIM as u64;
@@ -53,7 +53,7 @@ pub const REQUIRED_FREE_MARGIN_BYTES: u64 = 1536 * 1024 * 1024;
 const _: () = assert!(QKV_WORDS == 25_165_824);
 const _: () = assert!(HIDDEN_WORDS == 8_388_608);
 const _: () = assert!(CONTEXT_WORDS == 8_388_608);
-const _: () = assert!(GROUP_SCORE_ROWS == 1 << 24);
+const _: () = assert!(GROUP_SCORE_ROWS == 1 << (22 + MATRIX_GROUP_BITS));
 const _: () = assert!(SEQUENCE == 1 << MATRIX_AXIS_BITS);
 const _: () = assert!(HEADS_PER_CIRCUIT == 1 << MATRIX_GROUP_BITS);
 const _: () = assert!(SCORE_ROWS == 1 << 27);
@@ -62,27 +62,90 @@ const _: () = assert!(HIDDEN_BYTES == 32 * 1024 * 1024);
 const _: () = assert!(CONTEXT_BYTES == 32 * 1024 * 1024);
 const _: () = assert!(TOTAL_MULTIPLICATIONS == 34_359_738_368);
 
-pub const QK_CIRCUIT_IDS: [&str; CIRCUITS] = [
-    "TensorAttentionQKHeads00_03",
-    "TensorAttentionQKHeads04_07",
-    "TensorAttentionQKHeads08_11",
-    "TensorAttentionQKHeads12_15",
-    "TensorAttentionQKHeads16_19",
-    "TensorAttentionQKHeads20_23",
-    "TensorAttentionQKHeads24_27",
-    "TensorAttentionQKHeads28_31",
-];
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProductionStage {
+    Projection,
+    Attention,
+    PostFfn,
+}
 
-pub const PV_CIRCUIT_IDS: [&str; CIRCUITS] = [
-    "TensorAttentionPVHeads00_03",
-    "TensorAttentionPVHeads04_07",
-    "TensorAttentionPVHeads08_11",
-    "TensorAttentionPVHeads12_15",
-    "TensorAttentionPVHeads16_19",
-    "TensorAttentionPVHeads20_23",
-    "TensorAttentionPVHeads24_27",
-    "TensorAttentionPVHeads28_31",
-];
+impl ProductionStage {
+    pub fn from_raw(stage: u32) -> Result<Self> {
+        Ok(match stage {
+            ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION => Self::Projection,
+            ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_ATTENTION => Self::Attention,
+            ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_POST_FFN => Self::PostFfn,
+            _ => anyhow::bail!("unknown production stage"),
+        })
+    }
+
+    pub const fn as_raw(self) -> u32 {
+        match self {
+            Self::Projection => ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION,
+            Self::Attention => ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_ATTENTION,
+            Self::PostFfn => ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_POST_FFN,
+        }
+    }
+
+    pub fn validate_range(self, head_start: u32, head_count: u32) -> Result<()> {
+        ensure!(
+            head_start
+                .checked_add(head_count)
+                .is_some_and(|end| end <= HEADS as u32),
+            "production head range overflow"
+        );
+        match self {
+            Self::PostFfn => ensure!(
+                head_start == 0 && head_count == HEADS as u32,
+                "whole-layer stage requires heads 0..31"
+            ),
+            Self::Projection | Self::Attention => {
+                ensure!(
+                    matches!(head_count, 1 | 2 | 4)
+                        && head_count == HEADS_PER_CIRCUIT as u32
+                        && head_start % head_count == 0,
+                    "attention stage range is not aligned to the target head count"
+                )
+            }
+        }
+        Ok(())
+    }
+
+    pub fn input_words(self, head_count: u32) -> Result<usize> {
+        Ok(match self {
+            Self::Projection => HIDDEN_WORDS,
+            Self::Attention => 3 * usize::try_from(head_count)? * SEQUENCE * HEAD_DIM,
+            Self::PostFfn => 2 * HIDDEN_WORDS,
+        })
+    }
+
+    pub fn output_words(self, head_count: u32) -> Result<usize> {
+        Ok(match self {
+            Self::Projection => 3 * usize::try_from(head_count)? * SEQUENCE * HEAD_DIM,
+            Self::Attention => usize::try_from(head_count)? * SEQUENCE * HEAD_DIM,
+            Self::PostFfn => HIDDEN_WORDS,
+        })
+    }
+
+    pub const fn input_parts(self) -> usize {
+        match self {
+            Self::Projection => 1,
+            Self::Attention => 3,
+            Self::PostFfn => 2,
+        }
+    }
+
+    pub const fn output_parts(self) -> usize {
+        match self {
+            Self::Projection => 3,
+            Self::Attention | Self::PostFfn => 1,
+        }
+    }
+}
+
+pub fn decode_head_range(packed: u32) -> (u32, u32) {
+    (packed & 0xffff, packed >> 16)
+}
 
 pub const PRODUCTION_PROFILE: u32 = ceno_rt::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER;
 pub const WEIGHT_TILE_WORDS: usize = 1024;
@@ -190,8 +253,19 @@ impl ProductionFullLayerOperationRecord {
                 ProductionFullLayerOperationKind::DenseK11008
             });
         }
+        let valid_pointwise_range = if matches!(self.role, TensorRole::Query | TensorRole::Key) {
+            matches!(self.output_column_count, 128 | 256 | 512)
+                && self.output_column.is_multiple_of(self.output_column_count)
+                && self
+                    .output_column
+                    .checked_add(self.output_column_count)
+                    .is_some_and(|end| end <= full_columns)
+                && self.tile == 0
+        } else {
+            self.output_column == 0 && self.output_column_count == full_columns && self.tile == 0
+        };
         ensure!(
-            self.output_column == 0 && self.output_column_count == full_columns && self.tile == 0,
+            valid_pointwise_range,
             "production pointwise operation range changed"
         );
         Ok(match self.role {
@@ -583,17 +657,6 @@ impl TensorWitnessProvider for ProductionLazyHintProvider {
     }
 }
 
-pub const SOFTMAX_CIRCUIT_IDS: [&str; CIRCUITS] = [
-    "TensorAttentionSoftmaxHeads00_03",
-    "TensorAttentionSoftmaxHeads04_07",
-    "TensorAttentionSoftmaxHeads08_11",
-    "TensorAttentionSoftmaxHeads12_15",
-    "TensorAttentionSoftmaxHeads16_19",
-    "TensorAttentionSoftmaxHeads20_23",
-    "TensorAttentionSoftmaxHeads24_27",
-    "TensorAttentionSoftmaxHeads28_31",
-];
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PackedQkv {
     Query,
@@ -617,13 +680,6 @@ impl AttentionMatrixKind {
         match self {
             Self::Qk => 16,
             Self::Pv => Q20_SHIFT,
-        }
-    }
-
-    pub const fn circuit_ids(self) -> &'static [&'static str; CIRCUITS] {
-        match self {
-            Self::Qk => &QK_CIRCUIT_IDS,
-            Self::Pv => &PV_CIRCUIT_IDS,
         }
     }
 }

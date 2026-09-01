@@ -29,7 +29,7 @@ pub const TENSOR_HANDLE_FFN_V1: u32 = 0x00ff_000e;
 /// Production row-boundary ABI. These distinct opcodes preserve the legacy
 /// fixed-width v1/tiny ECALL circuits while sharing their descriptor layouts.
 pub const TENSOR_PRODUCTION_IMPORT_BEGIN_V2: u32 = 0x00ff_000f;
-pub const TENSOR_PRODUCTION_FULL_LAYER_V2: u32 = 0x00ff_0010;
+pub const TENSOR_PRODUCTION_STAGE_V2: u32 = 0x00ff_0010;
 pub const TENSOR_PRODUCTION_EXPORT_END_V2: u32 = 0x00ff_0011;
 pub const TENSOR_ABI_V1: u32 = 1;
 /// Tensor-space resident operators. Unlike v1, weight identity is logical and
@@ -43,6 +43,36 @@ pub const TENSOR_LLAMA2_HIDDEN: u32 = 4096;
 pub const TENSOR_LLAMA2_HEADS: u32 = 32;
 pub const TENSOR_LLAMA2_HEAD_DIM: u32 = 128;
 pub const TENSOR_LLAMA2_HIDDEN_WORDS: u32 = TENSOR_LLAMA2_SEQUENCE * TENSOR_LLAMA2_HIDDEN;
+pub const TENSOR_LLAMA2_HEAD_WORDS: u32 = TENSOR_LLAMA2_SEQUENCE * TENSOR_LLAMA2_HEAD_DIM;
+
+/// Canonical logical-slot addresses for production-v2 intermediates. They are
+/// descriptor identities, not guest memory: ordinary loads/stores must fail.
+/// Only the initial layer input is materialized in guest RAM.
+pub const TENSOR_PRODUCTION_Q_SLOT: u32 = 0x5000_0000;
+pub const TENSOR_PRODUCTION_K_SLOT: u32 = 0x5200_0000;
+pub const TENSOR_PRODUCTION_V_SLOT: u32 = 0x5400_0000;
+pub const TENSOR_PRODUCTION_CONTEXT_SLOT: u32 = 0x5600_0000;
+pub const TENSOR_PRODUCTION_OUTPUT_SLOT: u32 = 0x5800_0000;
+pub const TENSOR_PRODUCTION_HIDDEN_SLOT: u32 = 0x5a00_0000;
+
+#[inline(always)]
+pub const fn tensor_production_slot_offset(base: u32, word_offset: u32) -> u32 {
+    base + word_offset * 4
+}
+
+pub const TENSOR_PRODUCTION_STAGE_PROJECTION: u32 = 0;
+pub const TENSOR_PRODUCTION_STAGE_ATTENTION: u32 = 1;
+pub const TENSOR_PRODUCTION_STAGE_POST_FFN: u32 = 2;
+
+#[cfg(all(feature = "production-heads-1", feature = "production-heads-2"))]
+compile_error!("production-heads-1 and production-heads-2 are mutually exclusive");
+
+#[cfg(feature = "production-heads-1")]
+pub const TENSOR_PRODUCTION_HEADS_PER_STAGE: u32 = 1;
+#[cfg(all(not(feature = "production-heads-1"), feature = "production-heads-2"))]
+pub const TENSOR_PRODUCTION_HEADS_PER_STAGE: u32 = 2;
+#[cfg(not(any(feature = "production-heads-1", feature = "production-heads-2")))]
+pub const TENSOR_PRODUCTION_HEADS_PER_STAGE: u32 = 4;
 
 /// Opaque TensorBus value identity. Device pointers never enter the guest ABI.
 #[repr(C, align(8))]
@@ -124,6 +154,61 @@ pub struct TensorHandleOpDescV2 {
 }
 
 const _: () = assert!(core::mem::size_of::<TensorHandleOpDescV2>() == 32);
+
+/// Production stage import. Input pointers are interpreted by `stage`:
+/// projection uses `input0`, attention uses Q/K/V, and post-FFN uses hidden
+/// plus context. Lengths and metadata are fixed by the stage and head range.
+#[repr(C, align(32))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TensorProductionImportDescV2 {
+    pub abi_version: u32,
+    pub layer: u32,
+    pub input0_ptr: u32,
+    pub input1_ptr: u32,
+    pub input2_ptr: u32,
+    pub output_handle_ptr: u32,
+    pub stage: u32,
+    /// Low 16 bits are `head_start`; high 16 bits are `head_count`.
+    pub head_range: u32,
+}
+
+/// Tensor-space production operator. The profile is fixed by the opcode.
+#[repr(C, align(32))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TensorProductionStageDescV2 {
+    pub abi_version: u32,
+    pub layer: u32,
+    pub input_handle_ptr: u32,
+    pub output_handle_ptr: u32,
+    pub stage: u32,
+    pub head_start: u32,
+    pub head_count: u32,
+    pub reserved: u32,
+}
+
+/// Production stage export. Output length is fixed and redundantly checked.
+#[repr(C, align(32))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TensorProductionExportDescV2 {
+    pub abi_version: u32,
+    pub layer: u32,
+    pub input_handle_ptr: u32,
+    pub output_ptr: u32,
+    pub output_len: u32,
+    pub stage: u32,
+    /// Low 16 bits are `head_start`; high 16 bits are `head_count`.
+    pub head_range: u32,
+    pub reserved: u32,
+}
+
+const _: () = assert!(core::mem::size_of::<TensorProductionImportDescV2>() == 32);
+const _: () = assert!(core::mem::size_of::<TensorProductionStageDescV2>() == 32);
+const _: () = assert!(core::mem::size_of::<TensorProductionExportDescV2>() == 32);
+
+#[inline(always)]
+pub const fn tensor_production_head_range(head_start: u32, head_count: u32) -> u32 {
+    head_start | (head_count << 16)
+}
 
 const _: () = assert!(core::mem::size_of::<TensorImportBeginDescV1>() == 32);
 const _: () = assert!(core::mem::size_of::<TensorExportEndDescV1>() == 32);
@@ -207,33 +292,33 @@ pub unsafe fn tensor_handle_ffn_v2(desc: &TensorHandleOpDescV2) {
 
 /// Import hidden `[2048,4096]` into one atomic attention segment.
 #[inline(always)]
-pub unsafe fn tensor_production_import_begin_v2(desc: &TensorImportBeginDescV1) {
+pub unsafe fn tensor_production_import_begin_v2(desc: &TensorProductionImportDescV2) {
     unsafe {
         tensor_segment_ecall_v1(
-            desc as *const TensorImportBeginDescV1 as *const u8,
+            desc as *const TensorProductionImportDescV2 as *const u8,
             TENSOR_PRODUCTION_IMPORT_BEGIN_V2,
         )
     }
 }
 
-/// Exact Llama-2-7B S2048 full layer. All operands and outputs are Tensor-space;
-/// this anchor touches only its descriptor and opaque handles in guest RAM.
+/// One exact production stage. All operands and outputs are Tensor-space; this
+/// anchor touches only its descriptor and opaque handles in guest RAM.
 #[inline(always)]
-pub unsafe fn tensor_production_full_layer_v2(desc: &TensorHandleOpDescV2) {
+pub unsafe fn tensor_production_stage_v2(desc: &TensorProductionStageDescV2) {
     unsafe {
         tensor_segment_ecall_v1(
-            desc as *const TensorHandleOpDescV2 as *const u8,
-            TENSOR_PRODUCTION_FULL_LAYER_V2,
+            desc as *const TensorProductionStageDescV2 as *const u8,
+            TENSOR_PRODUCTION_STAGE_V2,
         )
     }
 }
 
 /// Export hidden `[2048,4096]` and close the atomic full-layer segment.
 #[inline(always)]
-pub unsafe fn tensor_production_export_end_v2(desc: &TensorExportEndDescV1) {
+pub unsafe fn tensor_production_export_end_v2(desc: &TensorProductionExportDescV2) {
     unsafe {
         tensor_segment_ecall_v1(
-            desc as *const TensorExportEndDescV1 as *const u8,
+            desc as *const TensorProductionExportDescV2 as *const u8,
             TENSOR_PRODUCTION_EXPORT_END_V2,
         )
     }

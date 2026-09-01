@@ -28,10 +28,8 @@ use ceno_gpu::{
     common::{
         CacheLevel, get_gpu_cache_level, get_mem_tracking_mode,
         jagged::{
-            JaggedSumcheckGpuCtx, add_col_eval_contribution, add_m_table_contribution,
-            batch_commit_gpu_grouped, bind_and_materialize_gpu_range, build_m_table_gpu_range,
-            eval_cols_at_point_gpu, eval_cols_at_point_gpu_range, jagged_batch_open_gpu,
-            jagged_sumcheck_prove_gpu, jagged_sumcheck_prove_gpu_ranges,
+            JaggedSumcheckGpuCtx, batch_commit_gpu_grouped, eval_cols_at_point_gpu,
+            jagged_batch_open_gpu, jagged_sumcheck_prove_gpu,
         },
         sumcheck::CommonTermPlan,
     },
@@ -256,7 +254,7 @@ pub fn log_gpu_pool_usage(label: &str) {
         mb(used_bytes as usize),
         mb(reserved_bytes as usize),
     );
-    tracing::info!("{}", message);
+    tracing::info!(target: "ceno_pipeline", "{}", message);
 }
 
 pub fn log_gpu_device_state(label: &str) {
@@ -282,7 +280,7 @@ pub fn log_gpu_device_state(label: &str) {
         mb(booked_bytes as usize),
         mb(max_bytes as usize),
     );
-    tracing::info!("{}", message);
+    tracing::info!(target: "ceno_pipeline", "{}", message);
 }
 use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};
 use gkr_iop::{
@@ -1449,10 +1447,34 @@ where
         preprocessed.cumulative_heights.clone(),
         preprocessed.reshape_log_height,
     );
+    let q_bytes = preprocessed
+        .q_device_evals
+        .as_ref()
+        .map(Buffer::len)
+        .unwrap_or(preprocessed.q_host_evals.len())
+        * std::mem::size_of::<BB31Base>();
     let (q_evals, q_host_evals) = jagged_q_storage(
         cuda_hal,
         preprocessed.q_host_evals,
         preprocessed.q_device_evals,
+    );
+    match get_gpu_cache_level() {
+        CacheLevel::None => {
+            assert!(q_evals.is_none(), "cache-none Jagged retained device q'");
+            assert!(q_host_evals.is_some(), "cache-none Jagged lost host q'");
+        }
+        CacheLevel::Trace | CacheLevel::Full => {
+            assert!(q_evals.is_some(), "cache-full Jagged lost flat device q'");
+            assert!(q_host_evals.is_none(), "cache-full Jagged retained host q'");
+        }
+    }
+    tracing::info!(
+        target: "ceno_pipeline",
+        q_bytes,
+        device_owner = q_evals.is_some(),
+        host_owner = q_host_evals.is_some(),
+        segmented_owners = 0usize,
+        "Jagged flat q' ownership retained"
     );
     (
         GpuPcsData::Jagged(GpuJaggedPcsData {
@@ -1492,7 +1514,11 @@ where
         .map(|rmm| ceil_log2(rmm.height()))
         .max()
         .unwrap();
-    if max_poly_size_log2 > prover.backend.max_poly_size_log2 {
+    let is_jagged_pcs = is_babybear_jagged_pcs::<E, PCS>();
+    // Jagged commits one flat q' after reshaping it to the inner PCS message
+    // height. Individual source polynomials may therefore be taller than the
+    // trimmed inner PCS, while direct Basefold polynomials may not.
+    if !is_jagged_pcs && max_poly_size_log2 > prover.backend.max_poly_size_log2 {
         panic!(
             "max_poly_size_log2 {} > max_poly_size_log2 backend {}",
             max_poly_size_log2, prover.backend.max_poly_size_log2
@@ -1501,7 +1527,6 @@ where
 
     let is_basefold_pcs = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()
         == std::mem::size_of::<PCS::CommitmentWithWitness>();
-    let is_jagged_pcs = is_babybear_jagged_pcs::<E, PCS>();
     if !is_basefold_pcs && !is_jagged_pcs {
         panic!("GPU commitment data is not compatible with the PCS");
     }
@@ -1571,9 +1596,55 @@ where
             .min(ceil_log2(total_size.max(1)));
         let (preprocessed, inner_pcs_data) =
             jagged_batch_commit_from_host(&cuda_hal, &traces_bb31, reshape_log_height, true);
+        cuda_hal
+            .inner
+            .synchronize()
+            .expect("synchronize flat Jagged commitment construction");
+        let transient_used_bytes = cuda_hal
+            .inner
+            .mem_pool()
+            .get_used_size()
+            .expect("query flat Jagged commitment transient bytes");
+        let flat_q_bytes = preprocessed
+            .q_device_evals
+            .as_ref()
+            .map(Buffer::len)
+            .unwrap_or(preprocessed.q_host_evals.len())
+            * std::mem::size_of::<BB31Base>();
+        let source_bytes = total_size * std::mem::size_of::<BB31Base>();
+        tracing::info!(
+            target: "ceno_pipeline",
+            flat_q_bytes,
+            source_bytes,
+            transient_used_bytes,
+            "Jagged flat q' commitment constructed"
+        );
         for trace in &mut traces_bb31 {
             trace.clear_device_backing();
         }
+        assert!(
+            traces_bb31.iter().all(|trace| !trace.has_device_backing()),
+            "Jagged source trace backing survived flat commitment construction"
+        );
+        cuda_hal
+            .inner
+            .synchronize()
+            .expect("synchronize Jagged source trace release");
+        let retained_used_bytes = cuda_hal
+            .inner
+            .mem_pool()
+            .get_used_size()
+            .expect("query retained flat Jagged bytes");
+        tracing::info!(
+            target: "ceno_pipeline",
+            flat_q_bytes,
+            source_bytes,
+            transient_used_bytes,
+            retained_used_bytes,
+            source_backings = 0usize,
+            segmented_owners = 0usize,
+            "Jagged source traces released after flat commitment"
+        );
         let (pcs_data, commit) =
             finish_jagged_commit::<E, PCS>(&cuda_hal, preprocessed, inner_pcs_data, trace_layouts);
         return (vec![], pcs_data, commit);
@@ -1891,6 +1962,12 @@ where
     let num_vars = num_vars.unwrap_or(layout.num_vars);
     let elem_size = std::mem::size_of::<BB31Base>();
     let logical_len = 1usize << num_vars;
+    if !matches!(get_gpu_cache_level(), CacheLevel::None) {
+        assert!(
+            pcs_data.q_evals.is_some() && pcs_data.q_host_evals.is_none(),
+            "cache-full Jagged witness extraction requires the sole retained flat q' device owner"
+        );
+    }
 
     (0..layout.num_polys)
         .map(|col_idx| {
@@ -1904,6 +1981,19 @@ where
             let gpu_buffer = if let Some(q_evals) = &pcs_data.q_evals {
                 let start = start_elem * elem_size;
                 let end = start + len * elem_size;
+                assert!(
+                    end <= q_evals.len() * elem_size,
+                    "Jagged witness flat q' subrange exceeds committed ordering"
+                );
+                tracing::debug!(
+                    target: "ceno_pipeline",
+                    trace_idx,
+                    col_idx,
+                    start_elem,
+                    len,
+                    num_vars,
+                    "Jagged witness MLE is an exact flat q' subrange view"
+                );
                 q_evals.owned_subrange(start..end)
             } else if let Some(q_host) = pcs_data.q_host_evals.as_ref() {
                 let cuda_hal = get_cuda_hal().unwrap();
@@ -2722,6 +2812,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                             )
                         });
                 }
+            } else if job.circuit_name.starts_with("TensorProductionBoundary") {
+                assert!(
+                    job.structural_rmm.is_none(),
+                    "boundary main retained structural RMM"
+                );
+                let expected = [
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX_23,
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO,
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO,
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO,
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_ONE,
+                ];
+                assert!(
+                    job.input
+                        .structural_witness
+                        .iter()
+                        .zip(expected)
+                        .all(|(mle, kind)| mle.virtual_formula_kind() == Some(kind))
+                );
             }
         }
         let mut selector_eqs_by_chip = Vec::with_capacity(jobs.len());
@@ -3472,6 +3581,10 @@ where
                         .q_host_evals
                         .as_ref()
                         .expect("Jagged q' host backing missing");
+                    assert!(
+                        start + group_elems <= q_host.len(),
+                        "Jagged host q' opening group exceeds padded host backing"
+                    );
                     cuda_hal
                         .alloc_elems_from_host(&q_host[start..start + group_elems], None)
                         .map_err(|e| {
@@ -3788,29 +3901,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         task: &mut crate::scheme::scheduler::ChipTask<'_, GpuBackend<E, PCS>>,
         pcs_data: &<GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
     ) {
-        let num_vars =
-            task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
-
-        // Deferred witness extraction: extract from committed pcs_data just-in-time
-        if let Some(trace_idx) = task.witness_trace_idx {
-            task.input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
-                extract_witness_mles_for_trace::<E, PCS>(
-                    pcs_data,
-                    trace_idx,
-                    task.num_witin,
-                    num_vars,
-                )
-            });
-        }
-
-        // Deferred structural witness transport: CPU -> GPU just-in-time
-        if let Some(rmm) = task.structural_rmm.as_ref() {
-            let num_structural_witin = task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize;
-            task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
-                .in_scope(|| {
-                    transport_structural_witness_to_gpu::<E>(rmm, num_structural_witin, num_vars)
-                });
-        }
+        crate::scheme::prover::prepare_gpu_chip_input(task, pcs_data);
     }
 }
 

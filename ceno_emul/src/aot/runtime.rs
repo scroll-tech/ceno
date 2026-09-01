@@ -42,6 +42,18 @@ pub(super) unsafe extern "C" fn aot_exec_one<T: Tracer>(
     if reason != AOT_FALLBACK_DYNAMIC_PC {
         context.fallback_recovery_reason = reason;
     }
+    let ecall_code =
+        (reason == AOT_FALLBACK_ECALL).then(|| vm.peek_register(Platform::reg_ecall()));
+    if context.trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT && ecall_code.is_some() {
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "aot_replay_callback_entry",
+            pc,
+            ecall_code,
+            fallback_steps = context.fallback_steps,
+            "AOT replay ECALL callback entered"
+        );
+    }
     match reason {
         AOT_FALLBACK_DYNAMIC_PC => context.fallback_dynamic_pc += 1,
         AOT_FALLBACK_MEMORY_GUARD => context.fallback_memory_guard += 1,
@@ -148,6 +160,18 @@ pub(super) unsafe extern "C" fn aot_exec_one<T: Tracer>(
         context.gpu_replay_events_len = state.next_access_len;
         context.gpu_replay_event_cursor = state.next_access_cursor;
         context.gpu_replay_error = state.error;
+    }
+    if context.trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT && ecall_code.is_some() {
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "aot_replay_callback_return",
+            pc = pc.0,
+            ecall_code,
+            status,
+            next_pc = unsafe { *next_pc },
+            elapsed_ms = fallback_started.elapsed().as_millis(),
+            "AOT replay ECALL callback returned"
+        );
     }
     context.fallback_time_ns = context
         .fallback_time_ns

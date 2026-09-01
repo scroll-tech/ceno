@@ -19,9 +19,8 @@ use super::{
     llama::LLAMA2_7B_INTERMEDIATE,
     production::TensorRole,
     production_attention::{
-        self, HEADS, HIDDEN_WORDS, ProductionFullLayerOperationKind,
-        ProductionFullLayerOperationRecord, ProductionHintRef, REQUIRED_FREE_MARGIN_BYTES,
-        SEQUENCE, WEIGHT_TILE_WORDS,
+        self, HIDDEN_WORDS, ProductionFullLayerOperationRecord, ProductionHintRef, ProductionStage,
+        REQUIRED_FREE_MARGIN_BYTES, SEQUENCE, WEIGHT_TILE_WORDS,
     },
 };
 
@@ -75,7 +74,12 @@ pub struct ProductionFullLayerDeviceWitness {
     pub(crate) limbs: CudaSlice<u32>,
     metrics: ProductionFullLayerCudaMetrics,
     operation_records: Vec<ProductionFullLayerOperationRecord>,
+    stage: ProductionStage,
+    head_start: u32,
+    head_count: u32,
 }
+
+pub type ProductionStageDeviceWitness = ProductionFullLayerDeviceWitness;
 
 impl ProductionFullLayerDeviceWitness {
     pub fn metrics(&self) -> ProductionFullLayerCudaMetrics {
@@ -123,44 +127,84 @@ impl ProductionFullLayerCudaProvider {
         })
     }
 
-    pub fn import(&self, hidden: &[i32]) -> Result<ProductionFullLayerDeviceWitness> {
+    fn import_hidden_full(
+        &self,
+        hidden: &[i32],
+        stage: ProductionStage,
+        head_count: u32,
+    ) -> Result<ProductionFullLayerDeviceWitness> {
         ensure!(
             hidden.len() == HIDDEN_WORDS,
             "production hidden shape mismatch"
         );
         let (_, total) = result::mem_get_info()?;
-        let hidden = self.stream.memcpy_stod(hidden)?;
-        let input_norm = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
-        let rope_projection = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
-        let query = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
-        let key = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
-        let value = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
-        let context = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
-        let attention_projection = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
-        let attention_residual = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
-        let post_norm = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
-        let gate = self
-            .stream
-            .alloc_zeros::<i32>(SEQUENCE * LLAMA2_7B_INTERMEDIATE)?;
-        let up = self
-            .stream
-            .alloc_zeros::<i32>(SEQUENCE * LLAMA2_7B_INTERMEDIATE)?;
-        let swiglu = self
-            .stream
-            .alloc_zeros::<i32>(SEQUENCE * LLAMA2_7B_INTERMEDIATE)?;
-        let down = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
-        let output = self.stream.alloc_zeros::<i32>(HIDDEN_WORDS)?;
+        let hidden = if stage == ProductionStage::Attention {
+            self.stream.alloc_zeros::<i32>(1)?
+        } else {
+            self.stream.memcpy_stod(hidden)?
+        };
+        let active = |for_stage| for_stage == stage;
+        let alloc_i32 = |len: usize, enabled: bool| {
+            self.stream
+                .alloc_zeros::<i32>(if enabled { len } else { 1 })
+        };
+        let group_words = usize::try_from(head_count)? * SEQUENCE * production_attention::HEAD_DIM;
+        let fused_attention =
+            active(ProductionStage::Projection) || active(ProductionStage::Attention);
+        let input_norm = alloc_i32(
+            HIDDEN_WORDS,
+            active(ProductionStage::Projection) || active(ProductionStage::PostFfn),
+        )?;
+        let rope_projection = alloc_i32(group_words, active(ProductionStage::Projection))?;
+        let query = alloc_i32(group_words, fused_attention)?;
+        let key = alloc_i32(group_words, fused_attention)?;
+        let value = alloc_i32(group_words, fused_attention)?;
+        let context = if fused_attention {
+            alloc_i32(group_words, true)?
+        } else {
+            alloc_i32(HIDDEN_WORDS, active(ProductionStage::PostFfn))?
+        };
+        let attention_projection = alloc_i32(HIDDEN_WORDS, active(ProductionStage::PostFfn))?;
+        let attention_residual = alloc_i32(HIDDEN_WORDS, active(ProductionStage::PostFfn))?;
+        let post_norm = alloc_i32(HIDDEN_WORDS, active(ProductionStage::PostFfn))?;
+        let gate = alloc_i32(
+            SEQUENCE * LLAMA2_7B_INTERMEDIATE,
+            active(ProductionStage::PostFfn),
+        )?;
+        let up = alloc_i32(
+            SEQUENCE * LLAMA2_7B_INTERMEDIATE,
+            active(ProductionStage::PostFfn),
+        )?;
+        let swiglu = alloc_i32(
+            SEQUENCE * LLAMA2_7B_INTERMEDIATE,
+            active(ProductionStage::PostFfn),
+        )?;
+        let down = alloc_i32(HIDDEN_WORDS, active(ProductionStage::PostFfn))?;
+        let output = alloc_i32(HIDDEN_WORDS, active(ProductionStage::PostFfn))?;
         let hint_tile = self.stream.alloc_zeros::<i32>(WEIGHT_TILE_WORDS)?;
         let dense_hint_panel = self.stream.alloc_zeros::<i32>(DENSE_PANEL_WORDS)?;
-        let dense_accumulator = self
-            .stream
-            .alloc_zeros::<i64>(SEQUENCE * LLAMA2_7B_INTERMEDIATE)?;
-        let scores = self.stream.alloc_zeros::<i64>(TILE_CELLS)?;
-        let shifts = self.stream.alloc_zeros::<i64>(QUERY_TILE)?;
-        let probabilities = self.stream.alloc_zeros::<i64>(TILE_CELLS)?;
-        let limbs = self
-            .stream
-            .alloc_zeros::<u32>(production_attention::SOFTMAX_LIMBS * TILE_CELLS)?;
+        let dense_accumulator_words = if active(ProductionStage::Projection) {
+            group_words
+        } else if active(ProductionStage::PostFfn) {
+            SEQUENCE * LLAMA2_7B_INTERMEDIATE
+        } else {
+            1
+        };
+        let dense_accumulator = self.stream.alloc_zeros::<i64>(dense_accumulator_words)?;
+        let scores =
+            self.stream
+                .alloc_zeros::<i64>(if fused_attention { TILE_CELLS } else { 1 })?;
+        let shifts =
+            self.stream
+                .alloc_zeros::<i64>(if fused_attention { QUERY_TILE } else { 1 })?;
+        let probabilities =
+            self.stream
+                .alloc_zeros::<i64>(if fused_attention { TILE_CELLS } else { 1 })?;
+        let limbs = self.stream.alloc_zeros::<u32>(if fused_attention {
+            production_attention::SOFTMAX_LIMBS * TILE_CELLS
+        } else {
+            1
+        })?;
         let allocated_bytes = (hidden.len() * size_of::<i32>()
             + input_norm.len() * size_of::<i32>()
             + rope_projection.len() * size_of::<i32>()
@@ -220,125 +264,190 @@ impl ProductionFullLayerCudaProvider {
                 ..Default::default()
             },
             operation_records: Vec::new(),
+            stage: ProductionStage::Projection,
+            head_start: 0,
+            head_count,
         })
     }
 
-    pub fn execute(&self, witness: &mut ProductionFullLayerDeviceWitness) -> Result<()> {
-        const LAYER: u32 = 0;
-        self.launch_rms(witness, LAYER, TensorRole::InputNorm, true)?;
-        self.launch_dense(
-            witness,
-            LAYER,
-            TensorRole::Query,
-            HIDDEN_WORDS / SEQUENCE,
-            HIDDEN_WORDS / SEQUENCE,
-            16,
-        )?;
-        self.launch_rope(witness, TensorRole::Query)?;
-        self.launch_dense(
-            witness,
-            LAYER,
-            TensorRole::Key,
-            HIDDEN_WORDS / SEQUENCE,
-            HIDDEN_WORDS / SEQUENCE,
-            16,
-        )?;
-        self.launch_rope(witness, TensorRole::Key)?;
-        self.launch_dense(
-            witness,
-            LAYER,
-            TensorRole::Value,
-            HIDDEN_WORDS / SEQUENCE,
-            HIDDEN_WORDS / SEQUENCE,
-            16,
-        )?;
-        for head in 0..HEADS {
-            for query_start in (0..SEQUENCE).step_by(QUERY_TILE) {
-                self.launch_qk(witness, head, query_start)?;
-                self.launch_shift(witness, query_start)?;
-                self.launch_softmax(witness, query_start)?;
-                self.launch_pv(witness, head, query_start)?;
-                witness.metrics.qk_launches += 1;
-                witness.metrics.softmax_launches += 1;
-                witness.metrics.pv_launches += 1;
-                let (free, total) = result::mem_get_info()?;
-                witness.metrics.minimum_free_bytes =
-                    witness.metrics.minimum_free_bytes.min(free as u64);
-                witness.metrics.high_water_bytes = witness
-                    .metrics
-                    .high_water_bytes
-                    .max(total as u64 - free as u64);
-                ensure!(
-                    free as u64 >= REQUIRED_FREE_MARGIN_BYTES,
-                    "production attention runtime breached the 1.5-GiB VRAM margin"
-                );
+    pub fn import_stage(
+        &self,
+        stage: ProductionStage,
+        head_start: u32,
+        head_count: u32,
+        input: &[i32],
+    ) -> Result<ProductionStageDeviceWitness> {
+        stage.validate_range(head_start, head_count)?;
+        ensure!(
+            input.len() == stage.input_words(head_count)?,
+            "production stage input shape changed"
+        );
+        let zero_hidden = vec![0; HIDDEN_WORDS];
+        let hidden = match stage {
+            ProductionStage::Projection => input,
+            ProductionStage::Attention => &zero_hidden,
+            ProductionStage::PostFfn => &input[..HIDDEN_WORDS],
+        };
+        let mut witness = self.import_hidden_full(hidden, stage, head_count)?;
+        witness.stage = stage;
+        witness.head_start = head_start;
+        witness.head_count = head_count;
+        match stage {
+            ProductionStage::Projection => {}
+            ProductionStage::Attention => {
+                let group_words = usize::try_from(head_count)?
+                    * production_attention::SEQUENCE
+                    * production_attention::HEAD_DIM;
+                self.stream
+                    .memcpy_htod(&input[..group_words], &mut witness.query)?;
+                self.stream
+                    .memcpy_htod(&input[group_words..2 * group_words], &mut witness.key)?;
+                self.stream
+                    .memcpy_htod(&input[2 * group_words..], &mut witness.value)?;
+                witness.metrics.activation_h2d_bytes = (input.len() * size_of::<i32>()) as u64;
+                witness.metrics.intermediate_h2d_bytes = witness.metrics.activation_h2d_bytes;
+            }
+            ProductionStage::PostFfn => {
+                self.stream
+                    .memcpy_htod(&input[HIDDEN_WORDS..], &mut witness.context)?;
+                witness.metrics.activation_h2d_bytes = (input.len() * size_of::<i32>()) as u64;
+                witness.metrics.intermediate_h2d_bytes = production_attention::CONTEXT_BYTES;
             }
         }
-        self.launch_dense(
-            witness,
-            LAYER,
-            TensorRole::AttentionOutput,
-            HIDDEN_WORDS / SEQUENCE,
-            HIDDEN_WORDS / SEQUENCE,
-            16,
-        )?;
-        self.launch_residual(witness, TensorRole::AttentionOutput)?;
-        self.launch_rms(witness, LAYER, TensorRole::PostAttentionNorm, false)?;
-        self.launch_dense(
-            witness,
-            LAYER,
-            TensorRole::FfnGate,
-            HIDDEN_WORDS / SEQUENCE,
-            LLAMA2_7B_INTERMEDIATE,
-            20,
-        )?;
-        self.launch_dense(
-            witness,
-            LAYER,
-            TensorRole::FfnUp,
-            HIDDEN_WORDS / SEQUENCE,
-            LLAMA2_7B_INTERMEDIATE,
-            16,
-        )?;
-        self.launch_swiglu(witness)?;
-        self.launch_dense(
-            witness,
-            LAYER,
-            TensorRole::FfnDown,
-            LLAMA2_7B_INTERMEDIATE,
-            HIDDEN_WORDS / SEQUENCE,
-            16,
-        )?;
-        self.launch_residual(witness, TensorRole::FfnDown)?;
-        production_attention::validate_full_layer_operation_records(&witness.operation_records)?;
-        let mut counts = [0usize; 6];
-        for record in &witness.operation_records {
-            let kind = record.validate()?;
-            counts[match kind {
-                ProductionFullLayerOperationKind::Rms => 0,
-                ProductionFullLayerOperationKind::DenseK4096 => 1,
-                ProductionFullLayerOperationKind::DenseK11008 => 2,
-                ProductionFullLayerOperationKind::Rope => 3,
-                ProductionFullLayerOperationKind::Residual => 4,
-                ProductionFullLayerOperationKind::SwiGlu => 5,
-            }] += 1;
+        Ok(witness)
+    }
+
+    pub fn execute_stage(
+        &self,
+        witness: &mut ProductionStageDeviceWitness,
+        layer: u32,
+    ) -> Result<()> {
+        match witness.stage {
+            ProductionStage::Projection => {
+                let substage_started = std::time::Instant::now();
+                self.launch_rms(witness, layer, TensorRole::InputNorm, true)?;
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    phase = "production_execute_substage",
+                    stage = ?witness.stage,
+                    role = ?TensorRole::InputNorm,
+                    elapsed_ms = substage_started.elapsed().as_millis(),
+                    "production execute RMS substage complete"
+                );
+                for role in [TensorRole::Query, TensorRole::Key, TensorRole::Value] {
+                    let substage_started = std::time::Instant::now();
+                    self.launch_dense_range(
+                        witness,
+                        layer,
+                        role,
+                        HIDDEN_WORDS / SEQUENCE,
+                        usize::try_from(witness.head_start)? * production_attention::HEAD_DIM,
+                        usize::try_from(witness.head_count)? * production_attention::HEAD_DIM,
+                        16,
+                    )?;
+                    tracing::info!(
+                        target: "ceno_pipeline",
+                        phase = "production_execute_substage",
+                        stage = ?witness.stage,
+                        ?role,
+                        elapsed_ms = substage_started.elapsed().as_millis(),
+                        "production execute dense substage complete"
+                    );
+                    if role != TensorRole::Value {
+                        let rope_started = std::time::Instant::now();
+                        self.launch_rope(witness, role)?;
+                        tracing::info!(
+                            target: "ceno_pipeline",
+                            phase = "production_execute_substage",
+                            stage = ?witness.stage,
+                            ?role,
+                            elapsed_ms = rope_started.elapsed().as_millis(),
+                            "production execute rope substage complete"
+                        );
+                    }
+                }
+            }
+            ProductionStage::Attention => {
+                for head in 0..usize::try_from(witness.head_count)? {
+                    for query_start in (0..SEQUENCE).step_by(QUERY_TILE) {
+                        self.launch_qk(witness, head, query_start)?;
+                        self.launch_shift(witness, query_start)?;
+                        self.launch_softmax(witness, query_start)?;
+                        self.launch_pv(witness, head, query_start)?;
+                        witness.metrics.qk_launches += 1;
+                        witness.metrics.softmax_launches += 1;
+                        witness.metrics.pv_launches += 1;
+                    }
+                }
+            }
+            ProductionStage::PostFfn => {
+                self.launch_dense(
+                    witness,
+                    layer,
+                    TensorRole::AttentionOutput,
+                    HIDDEN_WORDS / SEQUENCE,
+                    HIDDEN_WORDS / SEQUENCE,
+                    16,
+                )?;
+                self.launch_residual(witness, TensorRole::AttentionOutput)?;
+                self.launch_rms(witness, layer, TensorRole::PostAttentionNorm, false)?;
+                self.launch_dense(
+                    witness,
+                    layer,
+                    TensorRole::FfnGate,
+                    HIDDEN_WORDS / SEQUENCE,
+                    LLAMA2_7B_INTERMEDIATE,
+                    20,
+                )?;
+                self.launch_dense(
+                    witness,
+                    layer,
+                    TensorRole::FfnUp,
+                    HIDDEN_WORDS / SEQUENCE,
+                    LLAMA2_7B_INTERMEDIATE,
+                    16,
+                )?;
+                self.launch_swiglu(witness)?;
+                self.launch_dense(
+                    witness,
+                    layer,
+                    TensorRole::FfnDown,
+                    LLAMA2_7B_INTERMEDIATE,
+                    HIDDEN_WORDS / SEQUENCE,
+                    16,
+                )?;
+                self.launch_residual(witness, TensorRole::FfnDown)?;
+            }
         }
+        for record in &witness.operation_records {
+            record.validate()?;
+        }
+        let (free, total) = result::mem_get_info()?;
+        witness.metrics.minimum_free_bytes = witness.metrics.minimum_free_bytes.min(free as u64);
+        witness.metrics.high_water_bytes = witness
+            .metrics
+            .high_water_bytes
+            .max(total as u64 - free as u64);
         ensure!(
-            counts
-                == [
-                    8,
-                    4 * HIDDEN_WORDS / SEQUENCE * 4 + 2 * LLAMA2_7B_INTERMEDIATE * 4,
-                    HIDDEN_WORDS / SEQUENCE * 11,
-                    2,
-                    2,
-                    1,
-                ],
-            "production full-layer operation inventory changed"
+            free as u64 >= REQUIRED_FREE_MARGIN_BYTES,
+            "production stage runtime breached the 1.5-GiB VRAM margin"
         );
+        Ok(())
+    }
+
+    pub fn transition_to_attention(
+        &self,
+        witness: &mut ProductionStageDeviceWitness,
+        head_start: u32,
+        head_count: u32,
+    ) -> Result<()> {
         ensure!(
-            witness.metrics.projection_tile_launches == 1_552,
-            "production dense panel launch inventory changed"
+            witness.stage == ProductionStage::Projection
+                && witness.head_start == head_start
+                && witness.head_count == head_count,
+            "production fused projection/attention range changed"
         );
+        witness.stage = ProductionStage::Attention;
         Ok(())
     }
 
@@ -399,6 +508,19 @@ impl ProductionFullLayerCudaProvider {
         n: usize,
         shift: u32,
     ) -> Result<()> {
+        self.launch_dense_range(witness, layer, role, k, 0, n, shift)
+    }
+
+    fn launch_dense_range(
+        &self,
+        witness: &mut ProductionFullLayerDeviceWitness,
+        layer: u32,
+        role: TensorRole,
+        k: usize,
+        logical_column_start: usize,
+        n: usize,
+        shift: u32,
+    ) -> Result<()> {
         let tiles = k.div_ceil(WEIGHT_TILE_WORDS);
         for column in 0..n {
             for position in 0..tiles {
@@ -410,7 +532,7 @@ impl ProductionFullLayerCudaProvider {
                         role,
                         token: 0,
                         token_count: SEQUENCE as u32,
-                        output_column: column as u32,
+                        output_column: u32::try_from(logical_column_start + column)?,
                         output_column_count: 1,
                         tile: position as u32,
                     });
@@ -422,7 +544,7 @@ impl ProductionFullLayerCudaProvider {
                 let mut panel = vec![0; DENSE_PANEL_WORDS];
                 let mut logical_words = 0usize;
                 for local_column in 0..column_count {
-                    let column = column_start + local_column;
+                    let column = logical_column_start + column_start + local_column;
                     let logical_tile = column * tiles + position;
                     let tile = production_attention::generate_hint_tile(ProductionHintRef::new(
                         layer,
@@ -491,6 +613,7 @@ impl ProductionFullLayerCudaProvider {
         witness: &mut ProductionFullLayerDeviceWitness,
         role: TensorRole,
     ) -> Result<()> {
+        let pairs = witness.query.len() / 2;
         let output = match role {
             TensorRole::Query => &mut witness.query,
             TensorRole::Key => &mut witness.key,
@@ -501,7 +624,8 @@ impl ProductionFullLayerCudaProvider {
                 .launch_builder(&self.rope)
                 .arg(&witness.rope_projection)
                 .arg(output)
-                .launch(LaunchConfig::for_num_elems((HIDDEN_WORDS / 2) as u32))?;
+                .arg(&(witness.head_count * production_attention::HEAD_DIM as u32))
+                .launch(LaunchConfig::for_num_elems(pairs as u32))?;
         }
         witness
             .operation_records
@@ -511,8 +635,8 @@ impl ProductionFullLayerCudaProvider {
                 role,
                 token: 0,
                 token_count: SEQUENCE as u32,
-                output_column: 0,
-                output_column_count: (HIDDEN_WORDS / SEQUENCE) as u32,
+                output_column: witness.head_start * production_attention::HEAD_DIM as u32,
+                output_column_count: witness.head_count * production_attention::HEAD_DIM as u32,
                 tile: 0,
             });
         witness.metrics.rope_launches += 1;
@@ -621,6 +745,7 @@ impl ProductionFullLayerCudaProvider {
                 .arg(&witness.key)
                 .arg(&mut witness.scores)
                 .arg(&(head as u32))
+                .arg(&witness.head_count)
                 .arg(&(query_start as u32))
                 .launch(LaunchConfig::for_num_elems(TILE_CELLS as u32))?;
         }
@@ -674,6 +799,7 @@ impl ProductionFullLayerCudaProvider {
                 .arg(&witness.probabilities)
                 .arg(&mut witness.context)
                 .arg(&(head as u32))
+                .arg(&witness.head_count)
                 .arg(&(query_start as u32))
                 .launch(LaunchConfig::for_num_elems(
                     (QUERY_TILE * production_attention::HEAD_DIM) as u32,
@@ -682,14 +808,23 @@ impl ProductionFullLayerCudaProvider {
         Ok(())
     }
 
-    pub fn export(&self, witness: &mut ProductionFullLayerDeviceWitness) -> Result<Vec<i32>> {
+    pub fn export_stage(&self, witness: &mut ProductionStageDeviceWitness) -> Result<Vec<i32>> {
         self.stream.synchronize()?;
-        let output = self.stream.memcpy_dtov(&witness.output)?;
-        ensure!(
-            output.len() == HIDDEN_WORDS,
-            "production hidden output shape changed"
-        );
-        witness.metrics.activation_d2h_bytes = production_attention::HIDDEN_BYTES;
+        let output = match witness.stage {
+            ProductionStage::Projection => {
+                let mut output = self.stream.memcpy_dtov(&witness.query)?;
+                output.extend(self.stream.memcpy_dtov(&witness.key)?);
+                output.extend(self.stream.memcpy_dtov(&witness.value)?);
+                output
+            }
+            ProductionStage::Attention => self.stream.memcpy_dtov(&witness.context)?,
+            ProductionStage::PostFfn => self.stream.memcpy_dtov(&witness.output)?,
+        };
+        let bytes = (output.len() * size_of::<i32>()) as u64;
+        witness.metrics.activation_d2h_bytes = bytes;
+        if witness.stage != ProductionStage::PostFfn {
+            witness.metrics.intermediate_d2h_bytes = bytes;
+        }
         Ok(output)
     }
 }
@@ -731,8 +866,8 @@ extern "C" __global__ void production_full_layer_dense_tile(
     if (cell >= 2048u * column_count) return;
     unsigned token = cell / column_count;
     unsigned local_column = cell % column_count;
-    unsigned column = column_start + local_column;
-    unsigned output_index = token * n + column;
+    unsigned local_output_column = column_start + local_column;
+    unsigned output_index = token * n + local_output_column;
     long long sum = first ? 0ll : accumulator[output_index];
     const int *row = input + token * k + k_start;
     const int *weight_column = weight + local_column * 1024u;
@@ -742,14 +877,16 @@ extern "C" __global__ void production_full_layer_dense_tile(
     if (last) output[output_index] = (int)centered_rescale(sum, shift);
 }
 
-extern "C" __global__ void production_full_layer_rope(const int *input, int *output) {
+extern "C" __global__ void production_full_layer_rope(
+    const int *input, int *output, unsigned stride) {
     unsigned pair = blockIdx.x * blockDim.x + threadIdx.x;
-    if (pair >= 2048u * 4096u / 2u) return;
-    unsigned token = pair / 2048u;
-    unsigned within_token = pair % 2048u;
+    unsigned pairs_per_token = stride / 2u;
+    if (pair >= 2048u * pairs_per_token) return;
+    unsigned token = pair / pairs_per_token;
+    unsigned within_token = pair % pairs_per_token;
     unsigned head = within_token / 64u;
     unsigned dim = within_token % 64u;
-    unsigned left = token * 4096u + head * 128u + dim;
+    unsigned left = token * stride + head * 128u + dim;
     unsigned right = left + 64u;
     int cos_left = 65536 - (int)((token + dim) % 17u);
     int sin_left = (int)((token * (dim + 1u)) % 31u) - 15;
@@ -785,14 +922,16 @@ extern "C" __device__ __forceinline__ long long centered_q20(long long value) {
 }
 
 extern "C" __global__ void production_attention_qk(
-    const int *q, const int *k, long long *scores, unsigned head, unsigned query_start) {
+    const int *q, const int *k, long long *scores, unsigned head,
+    unsigned head_count, unsigned query_start) {
     unsigned cell = blockIdx.x * blockDim.x + threadIdx.x;
     if (cell >= 128u * 2048u) return;
     unsigned local_query = cell / 2048u;
     unsigned key = cell % 2048u;
     unsigned query = query_start + local_query;
-    unsigned q_base = query * 4096u + head * 128u;
-    unsigned k_base = key * 4096u + head * 128u;
+    unsigned stride = head_count * 128u;
+    unsigned q_base = query * stride + head * 128u;
+    unsigned k_base = key * stride + head * 128u;
     long long score = 0;
     #pragma unroll 4
     for (unsigned dim = 0; dim < 128u; ++dim)
@@ -835,19 +974,20 @@ extern "C" __global__ void production_attention_shift(
 
 extern "C" __global__ void production_attention_pv(
     const int *v, const long long *probabilities, int *context,
-    unsigned head, unsigned query_start) {
+    unsigned head, unsigned head_count, unsigned query_start) {
     unsigned output_cell = blockIdx.x * blockDim.x + threadIdx.x;
     if (output_cell >= 128u * 128u) return;
     unsigned local_query = output_cell / 128u;
     unsigned dim = output_cell % 128u;
     unsigned query = query_start + local_query;
+    unsigned stride = head_count * 128u;
     unsigned v_base = head * 128u + dim;
     unsigned p_base = local_query * 2048u;
     long long accumulator = 0;
     for (unsigned key = 0; key < 2048u; ++key)
-        accumulator += probabilities[p_base + key] * (long long)v[v_base + key * 4096u];
+        accumulator += probabilities[p_base + key] * (long long)v[v_base + key * stride];
     long long once = centered_q20(accumulator);
     long long twice = centered_q20(once);
-    context[query * 4096u + head * 128u + dim] = (int)twice;
+    context[query * stride + head * 128u + dim] = (int)twice;
 }
 "#;

@@ -1,7 +1,8 @@
 use ceno_emul::{StepRecord, WriteOp};
-use ceno_gpu::common::witgen::ProductionAttentionBoundaryRamOp;
+use ceno_gpu::{Buffer, common::witgen::ProductionAttentionBoundaryInputOp};
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
+use p3::field::PrimeCharacteristicRing;
 use witness::{DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
@@ -32,9 +33,13 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
         ));
     }
     config.validate_device_layout(num_structural_witin)?;
-    if journal.len() != descriptor.rows {
+    let expected_width = if descriptor.is_memory { 15 } else { 9 };
+    if num_witin != expected_width
+        || (descriptor.is_memory && journal.len() != descriptor.rows)
+        || (!descriptor.is_memory && !journal.is_empty())
+    {
         return Err(ZKVMError::InvalidWitness(
-            "production boundary journal length changed".into(),
+            "production boundary width or journal length changed".into(),
         ));
     }
     let hal = get_cuda_hal().map_err(|error| {
@@ -54,51 +59,64 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
             "production boundary requires shard-owned GPU lookup counters".into(),
         ));
     }
-    let rhs = descriptor.syscall_cycle.checked_add(3).ok_or_else(|| {
-        ZKVMError::InvalidWitness("production boundary timestamp overflow".into())
+    let allocation_elems = descriptor.rows.checked_mul(num_witin).ok_or_else(|| {
+        ZKVMError::InvalidWitness("production boundary allocation overflow".into())
     })?;
-    if rhs >= 1 << 32 {
-        return Err(ZKVMError::InvalidWitness(
-            "production boundary timestamp exceeds device field input".into(),
-        ));
-    }
-    let packed = journal
-        .iter()
-        .enumerate()
-        .map(|(row, op)| {
-            let previous_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
-            let expected_address = descriptor
-                .base_byte_address
-                .checked_add(u32::try_from(row * 4).map_err(|_| {
-                    ZKVMError::InvalidWitness(
-                        "production boundary row address offset overflow".into(),
-                    )
-                })?)
-                .ok_or_else(|| {
-                    ZKVMError::InvalidWitness("production boundary row address overflow".into())
-                })?;
-            if op.addr.baddr().0 != expected_address
-                || previous_cycle >= rhs
-                || rhs - previous_cycle > (1 << 29)
-            {
-                return Err(ZKVMError::InvalidWitness(
-                    "production boundary RAM address/timestamp is noncanonical".into(),
-                ));
-            }
-            Ok(ProductionAttentionBoundaryRamOp {
-                addr: op.addr.baddr().0,
-                before: op.value.before,
-                after: op.value.after,
-                previous_cycle_lo: previous_cycle as u32,
-                previous_cycle_hi: (previous_cycle >> 32) as u32,
-                reserved: 0,
+    let allocation_bytes = allocation_elems
+        .checked_mul(std::mem::size_of::<E::BaseField>())
+        .ok_or_else(|| {
+            ZKVMError::InvalidWitness("production boundary byte size overflow".into())
+        })?;
+    super::log_production_allocation("boundary_before", allocation_bytes, 0);
+    let values = &descriptor.values
+        [descriptor.tensor_index_start..descriptor.tensor_index_start + descriptor.rows];
+    let use_virtual_structural = descriptor.log_rows == 23;
+    let result = if descriptor.is_memory {
+        let rhs = descriptor.syscall_cycle.checked_add(3).ok_or_else(|| {
+            ZKVMError::InvalidWitness("production boundary timestamp overflow".into())
+        })?;
+        if rhs >= 1 << 32 {
+            return Err(ZKVMError::InvalidWitness(
+                "production boundary timestamp exceeds device field input".into(),
+            ));
+        }
+        let packed = journal
+            .iter()
+            .zip(values)
+            .enumerate()
+            .map(|(row, (op, &value))| {
+                let previous_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+                let expected_address = descriptor
+                    .base_byte_address
+                    .checked_add(u32::try_from(row * 4).map_err(|_| {
+                        ZKVMError::InvalidWitness(
+                            "production boundary row address offset overflow".into(),
+                        )
+                    })?)
+                    .ok_or_else(|| {
+                        ZKVMError::InvalidWitness("production boundary row address overflow".into())
+                    })?;
+                let value = value as u32;
+                if op.addr.baddr().0 != expected_address
+                    || op.value.after != value
+                    || (descriptor.direction == 0 && op.value.before != value)
+                    || previous_cycle >= rhs
+                    || rhs - previous_cycle > (1 << 29)
+                {
+                    return Err(ZKVMError::InvalidWitness(
+                        "production boundary RAM operation is noncanonical".into(),
+                    ));
+                }
+                Ok(ProductionAttentionBoundaryInputOp {
+                    before_value: op.value.before,
+                    after_value: op.value.after,
+                    previous_cycle_lo: previous_cycle as u32,
+                    previous_cycle_hi: (previous_cycle >> 32) as u32,
+                })
             })
-        })
-        .collect::<Result<Vec<_>, ZKVMError>>()?;
-    let columns = config.device_column_map(num_witin, num_structural_witin)?;
-    let result = hal
-        .witgen
-        .witgen_production_attention_boundary(
+            .collect::<Result<Vec<_>, ZKVMError>>()?;
+        let columns = config.device_input_column_map(num_witin, num_structural_witin)?;
+        hal.witgen.witgen_production_attention_boundary_input(
             columns,
             &packed,
             descriptor.import_cycle,
@@ -106,29 +124,77 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
             descriptor.tensor_id,
             descriptor.tensor_version,
             descriptor.base_byte_address,
+            descriptor.layer,
             dynamic_lk_ptr,
+            false,
         )
-        .map_err(|error| {
-            ZKVMError::InvalidWitness(
-                format!("production boundary GPU assignment failed: {error}").into(),
-            )
-        })?;
+    } else {
+        let columns = config.device_output_column_map(num_witin, num_structural_witin)?;
+        hal.witgen.witgen_production_attention_boundary_output(
+            columns,
+            values,
+            descriptor.import_cycle,
+            descriptor.tensor_id,
+            descriptor.tensor_version,
+            descriptor.base_byte_address,
+            descriptor.layer,
+            dynamic_lk_ptr,
+            false,
+        )
+    }
+    .map_err(|error| {
+        ZKVMError::InvalidWitness(
+            format!("production boundary GPU assignment failed: {error}").into(),
+        )
+    })?;
+    if result.witness.len() != allocation_elems {
+        return Err(ZKVMError::InvalidWitness(
+            "production boundary device allocation length changed".into(),
+        ));
+    }
+    super::log_production_allocation("boundary_after", allocation_bytes, 0);
     let witness = RowMajorMatrix::<E::BaseField>::new_by_rotation_device_backing(
         1,
-        23,
+        descriptor.log_rows,
         num_witin,
         InstancePaddingStrategy::Default,
         result.witness,
         DeviceMatrixLayout::ColMajor,
     );
-    let structural = RowMajorMatrix::<E::BaseField>::new_by_rotation_device_backing(
-        1,
-        23,
-        num_structural_witin,
-        InstancePaddingStrategy::Default,
-        result.structural,
-        DeviceMatrixLayout::ColMajor,
-    );
+    // Full-range boundaries use the specialized low-23-bit virtual formula.
+    // Smaller rotating boundaries need a low-log_rows index repeated across
+    // the padded rotation half, which the specialized formula cannot express.
+    // Materialize that small structural matrix on the host instead of applying
+    // the projection-only formula to a different domain.
+    drop(result.structural);
+    let structural = if use_virtual_structural {
+        RowMajorMatrix::<E::BaseField>::empty()
+    } else {
+        let mut structural = RowMajorMatrix::<E::BaseField>::new_by_rotation(
+            1,
+            descriptor.log_rows,
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        );
+        let padded_rows = 1usize << (descriptor.log_rows + 1);
+        assert_eq!(structural.height(), padded_rows);
+        assert_eq!(structural.width(), 5);
+        assert_eq!(structural.values.len(), padded_rows * 5);
+        for row in 0..padded_rows {
+            let offset = row * 5;
+            structural.values[offset] = E::BaseField::from_usize(row & (descriptor.rows - 1));
+            structural.values[offset + 4] = E::BaseField::ONE;
+        }
+        tracing::info!(
+            target: "ceno_pipeline",
+            log_rows = descriptor.log_rows,
+            logical_rows = descriptor.rows,
+            padded_rows,
+            structural_bytes = structural.values.len() * std::mem::size_of::<E::BaseField>(),
+            "production rotating boundary structural matrix materialized"
+        );
+        structural
+    };
     hal.inner.synchronize().map_err(|error| {
         ZKVMError::InvalidWitness(
             format!("production boundary assignment synchronize failed: {error}").into(),

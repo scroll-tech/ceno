@@ -19,3 +19,5 @@ tiny-keccak.workspace = true
 
 [features]
 llama-tiny = []
+production-heads-1 = []
+production-heads-2 = []

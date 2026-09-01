@@ -99,12 +99,13 @@ fn tensor_bus_words<T: Tracer>(
     ptr: u32,
     words: usize,
 ) -> Result<(Vec<u32>, Vec<WriteOp>)> {
+    let started = std::time::Instant::now();
     ensure!(
         ptr.is_multiple_of(4),
         "TensorBus pointer is not word aligned"
     );
     let start = ByteAddr(ptr).waddr();
-    Ok((0..words)
+    let result = (0..words)
         .map(|index| {
             let addr = start + index;
             let value = vm.peek_memory(addr);
@@ -117,7 +118,48 @@ fn tensor_bus_words<T: Tracer>(
                 },
             )
         })
-        .unzip())
+        .unzip();
+    tracing::info!(
+        target: "ceno_pipeline",
+        phase = "tensor_bus_words",
+        words,
+        elapsed_ms = started.elapsed().as_millis(),
+        "TensorBus word extraction complete"
+    );
+    Ok(result)
+}
+
+fn tensor_bus_write_words<T: Tracer>(
+    vm: &VMState<T>,
+    ptr: u32,
+    values: &[i32],
+) -> Result<Vec<WriteOp>> {
+    ensure!(
+        ptr.is_multiple_of(4),
+        "TensorBus pointer is not word aligned"
+    );
+    let start = ByteAddr(ptr).waddr();
+    Ok(values
+        .iter()
+        .enumerate()
+        .map(|(index, &value)| {
+            let addr = start + index;
+            WriteOp {
+                addr,
+                value: Change::new(vm.peek_memory(addr), value as u32),
+                previous_cycle: 0,
+            }
+        })
+        .collect())
+}
+
+fn tensor_bus_word_range(ptr: u32, words: usize) -> Result<std::ops::Range<crate::WordAddr>> {
+    ensure!(
+        ptr.is_multiple_of(4),
+        "TensorBus pointer is not word aligned"
+    );
+    let start = ByteAddr(ptr).waddr();
+    Ok(start..start + words)
 }
 
 pub fn tensor_import_begin_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
@@ -150,7 +192,17 @@ pub fn tensor_import_begin_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallE
     let import_cycle = vm.tracer().cycle();
     let (handle, records) = vm.tensor_bus_import_begin(meta, input.clone(), import_cycle)?;
     #[cfg(feature = "tensor-cuda")]
-    vm.tensor_bus_resident_import(handle, &input)?;
+    {
+        let started = std::time::Instant::now();
+        vm.tensor_bus_resident_import(handle, &input)?;
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "tensor_bus_resident_import_return",
+            words = input.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "TensorBus resident import returned"
+        );
+    }
     let mut handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[6]);
     handle_view.write([
         handle.tensor_id as u32,
@@ -158,14 +210,22 @@ pub fn tensor_import_begin_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallE
         handle.version,
         0,
     ]);
-    let mut witness = SyscallWitness::new(
-        desc_ops
-            .into_iter()
-            .chain(meta_ops)
-            .chain(input_ops)
-            .chain(handle_view.mem_ops())
-            .collect(),
-        tensor_bus_reg_ops(desc_ptr),
+    let witness_started = std::time::Instant::now();
+    let witness_mem_ops = desc_ops
+        .into_iter()
+        .chain(meta_ops)
+        .chain(input_ops)
+        .chain(handle_view.mem_ops())
+        .collect::<Vec<_>>();
+    let witness_mem_op_count = witness_mem_ops.len();
+    let witness_reg_ops = tensor_bus_reg_ops(desc_ptr);
+    let mut witness = SyscallWitness::new(witness_mem_ops, witness_reg_ops);
+    tracing::info!(
+        target: "ceno_pipeline",
+        phase = "tensor_import_witness_construct",
+        mem_ops = witness_mem_op_count,
+        elapsed_ms = witness_started.elapsed().as_millis(),
+        "TensorBus import witness constructed"
     );
     witness.tensor_bus_records = records;
     witness.tensor_bus_event = Some(tensor_bus_event(
@@ -482,54 +542,134 @@ pub fn tensor_handle_ffn_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEff
 }
 
 pub fn tensor_production_import_begin_v2<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
-    use crate::tensor::{TensorProductionBoundaryKind, TensorProductionBoundaryWitness};
+    use crate::tensor::{
+        TensorProductionBoundaryKind, TensorProductionBoundaryPartWitness,
+        TensorProductionBoundaryWitness,
+        production_attention::{ProductionStage, decode_head_range},
+    };
 
     let desc_ptr = vm.peek_register(Platform::reg_arg0());
     let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
     let words = desc.words();
     let desc_ops = desc.mem_ops();
     ensure!(
-        words[0] == ceno_rt::tensor::TENSOR_ABI_V2 && words[1] == 0 && words[7] == 0,
-        "invalid production full-layer import descriptor"
+        words[0] == ceno_rt::tensor::TENSOR_ABI_V2 && words[1] < 32,
+        "invalid production stage import descriptor"
     );
-    ensure!(
-        words[3] == ceno_rt::tensor::TENSOR_LLAMA2_HIDDEN_WORDS
-            && words[5] == TENSOR_META_WORDS as u32,
-        "production full-layer import shape mismatch"
-    );
-    let meta_view = MemoryView::<_, TENSOR_META_WORDS>::new(vm, words[4]);
-    let meta_words = meta_view.words();
+    let stage = ProductionStage::from_raw(words[6])?;
+    let (head_start, head_count) = decode_head_range(words[7]);
+    stage.validate_range(head_start, head_count)?;
+    let group_words = usize::try_from(head_count)?
+        * crate::tensor::production_attention::SEQUENCE
+        * crate::tensor::production_attention::HEAD_DIM;
+    let part_words = match stage {
+        ProductionStage::Projection => [crate::tensor::production_attention::HIDDEN_WORDS, 0, 0],
+        ProductionStage::Attention => [group_words, group_words, group_words],
+        ProductionStage::PostFfn => [
+            crate::tensor::production_attention::HIDDEN_WORDS,
+            crate::tensor::production_attention::CONTEXT_WORDS,
+            0,
+        ],
+    };
+    let mut input = Vec::with_capacity(stage.input_words(head_count)?);
+    let mut input_ops = Vec::new();
+    let mut parts = Vec::with_capacity(stage.input_parts());
+    match stage {
+        ProductionStage::Projection => {
+            ensure!(
+                words[3] == 0 && words[4] == 0,
+                "unused projection input pointer is nonzero"
+            );
+            let (values, ops) = tensor_bus_words(vm, words[2], part_words[0])?;
+            input.extend(values.into_iter().map(|word| word as i32));
+            input_ops.extend(ops);
+            parts.push(TensorProductionBoundaryPartWitness {
+                part: 0,
+                base_byte_address: words[2],
+                tensor_index_start: 0,
+                value_ops_start: TENSOR_TRANSFER_DESC_WORDS,
+                word_count: part_words[0],
+            });
+        }
+        ProductionStage::Attention => {
+            anyhow::bail!("attention must consume fused projection output inside TensorBus")
+        }
+        ProductionStage::PostFfn => {
+            ensure!(
+                words[2] != 0 && words[3] != 0 && words[4] == 0,
+                "post input RAM pointers are invalid"
+            );
+            let (hidden, hidden_ops) = tensor_bus_words(vm, words[2], part_words[0])?;
+            let (context, context_ops) = tensor_bus_words(vm, words[3], part_words[1])?;
+            input.extend(hidden.into_iter().map(|word| word as i32));
+            input.extend(context.into_iter().map(|word| word as i32));
+            input_ops.extend(hidden_ops);
+            input_ops.extend(context_ops);
+            parts.push(TensorProductionBoundaryPartWitness {
+                part: 0,
+                base_byte_address: words[2],
+                tensor_index_start: 0,
+                value_ops_start: TENSOR_TRANSFER_DESC_WORDS,
+                word_count: part_words[0],
+            });
+            parts.push(TensorProductionBoundaryPartWitness {
+                part: 1,
+                base_byte_address: words[3],
+                tensor_index_start: part_words[0],
+                value_ops_start: TENSOR_TRANSFER_DESC_WORDS + part_words[0],
+                word_count: part_words[1],
+            });
+        }
+    }
+    let meta_words = [
+        u32::try_from(input.len() * size_of::<i32>())?,
+        u32::try_from(input.len())?,
+        1,
+        0,
+    ];
     let meta = tensor_bus_meta(meta_words)?;
-    let meta_ops = meta_view.mem_ops();
-    ensure!(
-        meta.byte_len == crate::tensor::production_attention::HIDDEN_BYTES as usize
-            && meta.shape == [ceno_rt::tensor::TENSOR_LLAMA2_HIDDEN_WORDS],
-        "production hidden-input metadata mismatch"
-    );
-    let (input, input_ops) = tensor_bus_words(vm, words[2], words[3] as usize)?;
-    let input = input
-        .into_iter()
-        .map(|word| word as i32)
-        .collect::<Vec<_>>();
     let import_cycle = vm.tracer().cycle();
     let (handle, records) = vm.tensor_bus_import_begin(meta, input.clone(), import_cycle)?;
     #[cfg(feature = "tensor-cuda")]
-    vm.tensor_production_full_layer_import(handle, &input)?;
-    let mut handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[6]);
+    {
+        let started = std::time::Instant::now();
+        vm.tensor_production_stage_import(handle, words[1], stage, head_start, head_count, &input)?;
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "production_import_provider_return",
+            ?stage,
+            head_start,
+            head_count,
+            input_words = input.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "Production import provider returned"
+        );
+    }
+    let mut handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[5]);
     handle_view.write([
         handle.tensor_id as u32,
         (handle.tensor_id >> 32) as u32,
         handle.version,
         0,
     ]);
-    let mut witness = SyscallWitness::new(
-        desc_ops
-            .into_iter()
-            .chain(meta_ops)
-            .chain(input_ops)
-            .chain(handle_view.mem_ops())
-            .collect(),
-        tensor_bus_reg_ops(desc_ptr),
+    let witness_started = std::time::Instant::now();
+    let witness_mem_ops = desc_ops
+        .into_iter()
+        .chain(input_ops)
+        .chain(handle_view.mem_ops())
+        .collect::<Vec<_>>();
+    let witness_mem_op_count = witness_mem_ops.len();
+    let witness_reg_ops = tensor_bus_reg_ops(desc_ptr);
+    let mut witness = SyscallWitness::new(witness_mem_ops, witness_reg_ops);
+    tracing::info!(
+        target: "ceno_pipeline",
+        phase = "production_import_witness_construct",
+        ?stage,
+        head_start,
+        head_count,
+        mem_ops = witness_mem_op_count,
+        elapsed_ms = witness_started.elapsed().as_millis(),
+        "Production import witness constructed"
     );
     witness.tensor_bus_records = records;
     witness.tensor_bus_event = Some(tensor_bus_event(
@@ -548,11 +688,15 @@ pub fn tensor_production_import_begin_v2<T: Tracer>(vm: &mut VMState<T>) -> Resu
     witness.tensor_bus_event_cycle = Some(import_cycle);
     witness.tensor_production_boundary = Some(TensorProductionBoundaryWitness {
         kind: TensorProductionBoundaryKind::Import,
+        layer: words[1],
         import_cycle,
         tensor_id: handle.tensor_id,
         version: handle.version,
-        value_ops_start: TENSOR_TRANSFER_DESC_WORDS + TENSOR_META_WORDS,
-        word_count: crate::tensor::production_attention::HIDDEN_WORDS,
+        stage: stage.as_raw(),
+        head_start,
+        head_count,
+        values: input.into(),
+        parts,
     });
     Ok(SyscallEffects {
         witness,
@@ -560,48 +704,133 @@ pub fn tensor_production_import_begin_v2<T: Tracer>(vm: &mut VMState<T>) -> Resu
     })
 }
 
-pub fn tensor_production_full_layer_v2<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
+fn prepass_tensor_handle(
+    layer: u32,
+    stage: u32,
+    head_start: u32,
+    version: u32,
+) -> crate::tensor::bus::TensorHandle {
+    let segment_stage = if stage == ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_ATTENTION {
+        ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION
+    } else {
+        stage
+    };
+    crate::tensor::bus::TensorHandle {
+        tensor_id: 0xa07_0000_0000_0000u64
+            | (u64::from(layer) << 24)
+            | (u64::from(segment_stage) << 16)
+            | u64::from(head_start),
+        version,
+    }
+}
+
+pub(super) fn prepass_production_import_begin_v2<T: Tracer>(
+    vm: &mut VMState<T>,
+) -> Result<SyscallEffects> {
+    use crate::tensor::{
+        TensorProductionBoundaryKind, TensorProductionBoundaryWitness,
+        production_attention::{ProductionStage, decode_head_range},
+    };
     let desc_ptr = vm.peek_register(Platform::reg_arg0());
     let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
     let words = desc.words();
     let desc_ops = desc.mem_ops();
     ensure!(
-        words[0] == ceno_rt::tensor::TENSOR_ABI_V2
-            && words[1] == 0
-            && words[5] == TENSOR_META_WORDS as u32
-            && words[6] == ceno_rt::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER
-            && words[7] == 0,
-        "invalid production full-layer descriptor"
+        words[0] == ceno_rt::tensor::TENSOR_ABI_V2 && words[1] < 32,
+        "invalid production stage import descriptor"
     );
+    let stage = ProductionStage::from_raw(words[6])?;
+    let (head_start, head_count) = decode_head_range(words[7]);
+    stage.validate_range(head_start, head_count)?;
+    ensure!(
+        stage != ProductionStage::Attention,
+        "attention import is obsolete; projection and attention must be fused"
+    );
+    let handle = prepass_tensor_handle(words[1], words[6], head_start, 0);
+    let mut handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[5]);
+    handle_view.write([
+        handle.tensor_id as u32,
+        (handle.tensor_id >> 32) as u32,
+        handle.version,
+        0,
+    ]);
+    let import_cycle = vm.tracer().cycle();
+    let witness = SyscallWitness::new(
+        desc_ops.into_iter().chain(handle_view.mem_ops()).collect(),
+        tensor_bus_reg_ops(desc_ptr),
+    );
+    let mut effects = SyscallEffects {
+        witness,
+        next_pc: None,
+        ..Default::default()
+    };
+    if vm.tracer().prepass_tracks_memory_ranges() {
+        match stage {
+            ProductionStage::Projection => {}
+            ProductionStage::Attention => unreachable!(),
+            ProductionStage::PostFfn => {
+                effects.push_mem_access_range(tensor_bus_word_range(
+                    words[3],
+                    crate::tensor::production_attention::CONTEXT_WORDS,
+                )?);
+            }
+        }
+    }
+    effects.witness.tensor_production_boundary = Some(TensorProductionBoundaryWitness {
+        kind: TensorProductionBoundaryKind::Import,
+        layer: words[1],
+        import_cycle,
+        tensor_id: handle.tensor_id,
+        version: handle.version,
+        stage: words[6],
+        head_start,
+        head_count,
+        values: Vec::new().into(),
+        parts: Vec::new(),
+    });
+    Ok(effects)
+}
+
+pub fn tensor_production_stage_v2<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
+    use crate::tensor::production_attention::ProductionStage;
+    let desc_ptr = vm.peek_register(Platform::reg_arg0());
+    let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
+    let words = desc.words();
+    let desc_ops = desc.mem_ops();
+    ensure!(
+        words[0] == ceno_rt::tensor::TENSOR_ABI_V2 && words[1] < 32 && words[7] == 0,
+        "invalid production stage descriptor"
+    );
+    let stage = ProductionStage::from_raw(words[4])?;
+    let (head_start, head_count) = (words[5], words[6]);
+    stage.validate_range(head_start, head_count)?;
     let input_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[2]);
     let input = tensor_bus_handle(input_view.words())?;
     let input_ops = input_view.mem_ops();
-    let meta_view = MemoryView::<_, TENSOR_META_WORDS>::new(vm, words[4]);
-    let meta_words = meta_view.words();
+    let output_words = stage.output_words(head_count)?;
+    let meta_words = [
+        u32::try_from(output_words * size_of::<i32>())?,
+        u32::try_from(output_words)?,
+        1,
+        0,
+    ];
     let meta = tensor_bus_meta(meta_words)?;
-    let meta_ops = meta_view.mem_ops();
-    ensure!(
-        meta.byte_len == crate::tensor::production_attention::HIDDEN_BYTES as usize
-            && meta.shape == [ceno_rt::tensor::TENSOR_LLAMA2_HIDDEN_WORDS],
-        "production full-layer hidden metadata mismatch"
-    );
-    let transform = |hidden: &[i32]| -> Result<Vec<i32>> {
-        ensure!(
-            hidden.len() == crate::tensor::production_attention::HIDDEN_WORDS,
-            "production full-layer Tensor-space input mismatch"
-        );
-        Ok(hidden.to_vec())
-    };
-    let (output, records, _, _, import_cycle) = vm.tensor_bus_apply_v2(
-        input,
-        meta,
-        TensorProductionFullLayerV2Spec::CODE,
-        transform,
-    )?;
     #[cfg(feature = "tensor-cuda")]
-    let operation_records = vm.tensor_production_full_layer_execute(input, output, import_cycle)?;
+    let (provider_output, operation_records) = vm.tensor_production_stage_execute(
+        input,
+        vm.tensor_bus_current_import_cycle()?,
+        words[1],
+        stage,
+        head_start,
+        head_count,
+    )?;
     #[cfg(not(feature = "tensor-cuda"))]
-    let operation_records = Vec::new();
+    let (provider_output, operation_records) = (vec![0; output_words], Vec::new());
+    let transform = move |_: &[i32]| -> Result<Vec<i32>> { Ok(provider_output) };
+    let (output, records, _, _, import_cycle) =
+        vm.tensor_bus_apply_v2(input, meta, TensorProductionStageV2Spec::CODE, transform)?;
+    #[cfg(feature = "tensor-cuda")]
+    vm.tensor_production_stage_bind_output(output)?;
     let mut output_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[3]);
     output_view.write([
         output.tensor_id as u32,
@@ -613,7 +842,6 @@ pub fn tensor_production_full_layer_v2<T: Tracer>(vm: &mut VMState<T>) -> Result
         desc_ops
             .into_iter()
             .chain(input_ops)
-            .chain(meta_ops)
             .chain(output_view.mem_ops())
             .collect(),
         tensor_bus_reg_ops(desc_ptr),
@@ -623,26 +851,25 @@ pub fn tensor_production_full_layer_v2<T: Tracer>(vm: &mut VMState<T>) -> Result
         import_cycle,
         input_tensor_id: input.tensor_id,
         input_version: input.version,
-        projected_qkv_tensor_id:
-            crate::tensor::production_attention::production_internal_tensor_id(
-                import_cycle,
-                words[7],
-                input.tensor_id,
-                false,
-            )?,
-        projected_qkv_version: input.version,
-        attention_output_tensor_id:
-            crate::tensor::production_attention::production_internal_tensor_id(
-                import_cycle,
-                words[7],
-                input.tensor_id,
-                true,
-            )?,
-        attention_output_version: input.version,
+        projected_qkv_tensor_id: if stage == ProductionStage::Projection {
+            output.tensor_id
+        } else {
+            input.tensor_id
+        },
+        projected_qkv_version: if stage == ProductionStage::Projection {
+            output.version
+        } else {
+            input.version
+        },
+        attention_output_tensor_id: output.tensor_id,
+        attention_output_version: output.version,
         output_tensor_id: output.tensor_id,
         output_version: output.version,
-        profile: words[6],
-        layer: words[7],
+        profile: ceno_rt::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER,
+        layer: words[1],
+        stage: stage.as_raw(),
+        head_start,
+        head_count,
         operation_records,
     });
     Ok(SyscallEffects {
@@ -651,55 +878,141 @@ pub fn tensor_production_full_layer_v2<T: Tracer>(vm: &mut VMState<T>) -> Result
     })
 }
 
+pub(super) fn prepass_production_stage_v2<T: Tracer>(
+    vm: &mut VMState<T>,
+) -> Result<SyscallEffects> {
+    use crate::tensor::production_attention::ProductionStage;
+    let desc_ptr = vm.peek_register(Platform::reg_arg0());
+    let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
+    let words = desc.words();
+    let desc_ops = desc.mem_ops();
+    ensure!(
+        words[0] == ceno_rt::tensor::TENSOR_ABI_V2 && words[1] < 32 && words[7] == 0,
+        "invalid production stage descriptor"
+    );
+    let stage = ProductionStage::from_raw(words[4])?;
+    let (head_start, head_count) = (words[5], words[6]);
+    stage.validate_range(head_start, head_count)?;
+    let input_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[2]);
+    let input = tensor_bus_handle(input_view.words())?;
+    let input_ops = input_view.mem_ops();
+    let input_version = u32::from(stage == ProductionStage::Attention);
+    ensure!(
+        input == prepass_tensor_handle(words[1], words[4], head_start, input_version),
+        "PureAotPrepass production stage input handle drift"
+    );
+    let output = prepass_tensor_handle(words[1], words[4], head_start, input.version + 1);
+    let mut output_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[3]);
+    output_view.write([
+        output.tensor_id as u32,
+        (output.tensor_id >> 32) as u32,
+        output.version,
+        0,
+    ]);
+    let mut witness = SyscallWitness::new(
+        desc_ops
+            .into_iter()
+            .chain(input_ops)
+            .chain(output_view.mem_ops())
+            .collect(),
+        tensor_bus_reg_ops(desc_ptr),
+    );
+    witness.tensor_production_full_layer = Some(crate::tensor::TensorProductionFullLayerWitness {
+        import_cycle: vm.tracer().cycle(),
+        input_tensor_id: input.tensor_id,
+        input_version: input.version,
+        projected_qkv_tensor_id: if stage == ProductionStage::Projection {
+            output.tensor_id
+        } else {
+            input.tensor_id
+        },
+        projected_qkv_version: if stage == ProductionStage::Projection {
+            output.version
+        } else {
+            input.version
+        },
+        attention_output_tensor_id: output.tensor_id,
+        attention_output_version: output.version,
+        output_tensor_id: output.tensor_id,
+        output_version: output.version,
+        profile: ceno_rt::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER,
+        layer: words[1],
+        stage: words[4],
+        head_start,
+        head_count,
+        operation_records: Vec::new(),
+    });
+    Ok(SyscallEffects {
+        witness,
+        next_pc: None,
+    })
+}
+
 pub fn tensor_production_export_end_v2<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
-    use crate::tensor::{TensorProductionBoundaryKind, TensorProductionBoundaryWitness};
+    use crate::tensor::{
+        TensorProductionBoundaryKind, TensorProductionBoundaryPartWitness,
+        TensorProductionBoundaryWitness,
+        production_attention::{ProductionStage, decode_head_range},
+    };
 
     let desc_ptr = vm.peek_register(Platform::reg_arg0());
     let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
     let words = desc.words();
     let desc_ops = desc.mem_ops();
     ensure!(
-        words[0] == ceno_rt::tensor::TENSOR_ABI_V2
-            && words[1] == 0
-            && words[4] == ceno_rt::tensor::TENSOR_LLAMA2_HIDDEN_WORDS
-            && words[6] == TENSOR_META_WORDS as u32
-            && words[7] == 0,
-        "invalid production full-layer export descriptor"
+        words[0] == ceno_rt::tensor::TENSOR_ABI_V2 && words[1] < 32 && words[7] == 0,
+        "invalid production stage export descriptor"
+    );
+    let stage = ProductionStage::from_raw(words[5])?;
+    let (head_start, head_count) = decode_head_range(words[6]);
+    stage.validate_range(head_start, head_count)?;
+    ensure!(
+        stage != ProductionStage::Projection,
+        "projection export is obsolete; projection and attention must be fused"
+    );
+    let output_words = stage.output_words(head_count)?;
+    ensure!(
+        words[4] as usize == output_words,
+        "production stage export length mismatch"
     );
     let handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[2]);
     let handle_words = handle_view.words();
     let handle = tensor_bus_handle(handle_words)?;
     let handle_ops = handle_view.mem_ops();
-    let meta_view = MemoryView::<_, TENSOR_META_WORDS>::new(vm, words[5]);
-    let meta_words = meta_view.words();
-    let meta = tensor_bus_meta(meta_words)?;
-    let meta_ops = meta_view.mem_ops();
-    ensure!(
-        meta.byte_len == crate::tensor::production_attention::HIDDEN_BYTES as usize
-            && meta.shape == [ceno_rt::tensor::TENSOR_LLAMA2_HIDDEN_WORDS],
-        "production full-layer export metadata mismatch"
-    );
+    let meta_words = [
+        u32::try_from(output_words * size_of::<i32>())?,
+        u32::try_from(output_words)?,
+        1,
+        0,
+    ];
+    let _meta = tensor_bus_meta(meta_words)?;
     let import_cycle = vm.tensor_bus_current_import_cycle()?;
     let (output, records) = vm.tensor_bus_export(handle)?;
     #[cfg(feature = "tensor-cuda")]
     {
-        let device = vm.tensor_production_full_layer_export(handle)?;
+        let device = vm.tensor_production_stage_export(handle)?;
         ensure!(
             device == output,
             "production full-layer CUDA output mismatch"
         );
     }
     vm.tensor_bus_end()?;
-    let (_, mut output_ops) = tensor_bus_words(vm, words[3], output.len())?;
-    for (op, value) in output_ops.iter_mut().zip(output) {
-        op.value.after = value as u32;
+    let output_ops = tensor_bus_write_words(vm, words[3], &output)?;
+    match stage {
+        ProductionStage::Projection => {
+            anyhow::bail!("projection output must remain inside fused TensorBus segment")
+        }
+        ProductionStage::Attention => {
+            ensure!(words[3] != 0, "attention Context RAM pointer is null");
+        }
+        ProductionStage::PostFfn => {
+            ensure!(words[3] != 0, "post output RAM pointer is null");
+        }
     }
-    let value_ops_start = TENSOR_TRANSFER_DESC_WORDS + TENSOR_HANDLE_WORDS + TENSOR_META_WORDS;
     let mut witness = SyscallWitness::new(
         desc_ops
             .into_iter()
             .chain(handle_ops)
-            .chain(meta_ops)
             .chain(output_ops)
             .collect(),
         tensor_bus_reg_ops(desc_ptr),
@@ -716,16 +1029,99 @@ pub fn tensor_production_export_end_v2<T: Tracer>(vm: &mut VMState<T>) -> Result
     witness.tensor_bus_event_cycle = Some(vm.tracer().cycle());
     witness.tensor_production_boundary = Some(TensorProductionBoundaryWitness {
         kind: TensorProductionBoundaryKind::Export,
+        layer: words[1],
         import_cycle,
         tensor_id: handle.tensor_id,
         version: handle.version,
-        value_ops_start,
-        word_count: crate::tensor::production_attention::HIDDEN_WORDS,
+        stage: stage.as_raw(),
+        head_start,
+        head_count,
+        values: output.clone().into(),
+        parts: vec![TensorProductionBoundaryPartWitness {
+            part: 0,
+            base_byte_address: words[3],
+            tensor_index_start: 0,
+            value_ops_start: TENSOR_TRANSFER_DESC_WORDS + TENSOR_HANDLE_WORDS,
+            word_count: output_words,
+        }],
     });
     Ok(SyscallEffects {
         witness,
         next_pc: None,
     })
+}
+
+pub(super) fn prepass_production_export_end_v2<T: Tracer>(
+    vm: &mut VMState<T>,
+) -> Result<SyscallEffects> {
+    use crate::tensor::{
+        TensorProductionBoundaryKind, TensorProductionBoundaryWitness,
+        production_attention::{ProductionStage, decode_head_range},
+    };
+    let desc_ptr = vm.peek_register(Platform::reg_arg0());
+    let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
+    let words = desc.words();
+    let desc_ops = desc.mem_ops();
+    ensure!(
+        words[0] == ceno_rt::tensor::TENSOR_ABI_V2 && words[1] < 32 && words[7] == 0,
+        "invalid production stage export descriptor"
+    );
+    let stage = ProductionStage::from_raw(words[5])?;
+    let (head_start, head_count) = decode_head_range(words[6]);
+    stage.validate_range(head_start, head_count)?;
+    ensure!(
+        stage != ProductionStage::Projection,
+        "projection export is obsolete; projection and attention must be fused"
+    );
+    ensure!(
+        words[4] as usize == stage.output_words(head_count)?,
+        "production stage export length mismatch"
+    );
+    let handle_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[2]);
+    let handle = tensor_bus_handle(handle_view.words())?;
+    let handle_ops = handle_view.mem_ops();
+    ensure!(
+        handle
+            == prepass_tensor_handle(
+                words[1],
+                words[5],
+                head_start,
+                if stage == ProductionStage::Attention {
+                    2
+                } else {
+                    1
+                },
+            ),
+        "PureAotPrepass production export handle drift"
+    );
+    let witness = SyscallWitness::new(
+        desc_ops.into_iter().chain(handle_ops).collect(),
+        tensor_bus_reg_ops(desc_ptr),
+    );
+    let mut effects = SyscallEffects {
+        witness,
+        next_pc: None,
+        ..Default::default()
+    };
+    if vm.tracer().prepass_tracks_memory_ranges() && stage == ProductionStage::Attention {
+        effects.push_mem_access_range(tensor_bus_word_range(
+            words[3],
+            stage.output_words(head_count)?,
+        )?);
+    }
+    effects.witness.tensor_production_boundary = Some(TensorProductionBoundaryWitness {
+        kind: TensorProductionBoundaryKind::Export,
+        layer: words[1],
+        import_cycle: vm.tracer().cycle(),
+        tensor_id: handle.tensor_id,
+        version: handle.version,
+        stage: words[5],
+        head_start,
+        head_count,
+        values: Vec::new().into(),
+        parts: Vec::new(),
+    });
+    Ok(effects)
 }
 
 pub struct TensorMatMulV1Spec;
@@ -740,7 +1136,7 @@ pub struct TensorExportEndV1Spec;
 pub struct TensorHandleAttentionV1Spec;
 pub struct TensorHandleFfnV1Spec;
 pub struct TensorProductionImportBeginV2Spec;
-pub struct TensorProductionFullLayerV2Spec;
+pub struct TensorProductionStageV2Spec;
 pub struct TensorProductionExportEndV2Spec;
 
 pub const ATTENTION_REDUCED_PROFILE_V1: u32 = 1;
@@ -892,18 +1288,16 @@ impl SyscallSpec for TensorProductionImportBeginV2Spec {
     const NAME: &'static str = "TENSOR_PRODUCTION_IMPORT_BEGIN_V2";
     const REG_OPS_COUNT: usize = 1;
     const MEM_OPS_COUNT: usize = TENSOR_TRANSFER_DESC_WORDS
-        + TENSOR_META_WORDS
-        + ceno_rt::tensor::TENSOR_LLAMA2_HIDDEN_WORDS as usize
+        + 2 * ceno_rt::tensor::TENSOR_LLAMA2_HIDDEN_WORDS as usize
         + TENSOR_HANDLE_WORDS;
     const CODE: u32 = ceno_rt::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2;
 }
 
-impl SyscallSpec for TensorProductionFullLayerV2Spec {
-    const NAME: &'static str = "TENSOR_PRODUCTION_FULL_LAYER_V2";
+impl SyscallSpec for TensorProductionStageV2Spec {
+    const NAME: &'static str = "TENSOR_PRODUCTION_STAGE_V2";
     const REG_OPS_COUNT: usize = 1;
-    const MEM_OPS_COUNT: usize =
-        TENSOR_TRANSFER_DESC_WORDS + TENSOR_HANDLE_WORDS + TENSOR_META_WORDS + TENSOR_HANDLE_WORDS;
-    const CODE: u32 = ceno_rt::tensor::TENSOR_PRODUCTION_FULL_LAYER_V2;
+    const MEM_OPS_COUNT: usize = TENSOR_TRANSFER_DESC_WORDS + 2 * TENSOR_HANDLE_WORDS;
+    const CODE: u32 = ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_V2;
 }
 
 impl SyscallSpec for TensorProductionExportEndV2Spec {
@@ -911,8 +1305,7 @@ impl SyscallSpec for TensorProductionExportEndV2Spec {
     const REG_OPS_COUNT: usize = 1;
     const MEM_OPS_COUNT: usize = TENSOR_TRANSFER_DESC_WORDS
         + TENSOR_HANDLE_WORDS
-        + TENSOR_META_WORDS
-        + ceno_rt::tensor::TENSOR_LLAMA2_HIDDEN_WORDS as usize;
+        + 3 * ceno_rt::tensor::TENSOR_LLAMA2_HIDDEN_WORDS as usize;
     const CODE: u32 = ceno_rt::tensor::TENSOR_PRODUCTION_EXPORT_END_V2;
 }
 

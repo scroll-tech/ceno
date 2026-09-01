@@ -3,7 +3,10 @@
 //! These routines are deliberately integer-only. They are shared by emulator
 //! execution and circuit fixture generation so rounding cannot drift.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use anyhow::{Result, anyhow, bail, ensure};
 use tiny_keccak::{Hasher, Keccak};
@@ -27,10 +30,11 @@ pub use ceno_rt::tensor::{
     TENSOR_EXPORT_END_V1, TENSOR_FFN_BLOCK_REDUCED_V1, TENSOR_HANDLE_ATTENTION_V1,
     TENSOR_HANDLE_FFN_V1, TENSOR_IMPORT_BEGIN_V1, TENSOR_MATMUL_GATE5_SMALL_HIDDEN_V1,
     TENSOR_MATMUL_HIDDEN_V1, TENSOR_MATMUL_INTERMEDIATE_V1, TENSOR_MATMUL_V1,
-    TENSOR_PRODUCTION_EXPORT_END_V2, TENSOR_PRODUCTION_FULL_LAYER_V2,
-    TENSOR_PRODUCTION_IMPORT_BEGIN_V2, TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER, TENSOR_RMS_LOOKUP_V1,
-    TensorAttentionReducedDescV1, TensorBlockReducedDescV1, TensorHandleOpDescV1,
-    TensorHandleOpDescV2, TensorMatMulDescV1, TensorProductionMatMulDescV1, TensorRmsLookupDescV1,
+    TENSOR_PRODUCTION_EXPORT_END_V2, TENSOR_PRODUCTION_IMPORT_BEGIN_V2, TENSOR_PRODUCTION_STAGE_V2,
+    TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER, TENSOR_RMS_LOOKUP_V1, TensorAttentionReducedDescV1,
+    TensorBlockReducedDescV1, TensorHandleOpDescV1, TensorHandleOpDescV2, TensorMatMulDescV1,
+    TensorProductionExportDescV2, TensorProductionImportDescV2, TensorProductionMatMulDescV1,
+    TensorProductionStageDescV2, TensorRmsLookupDescV1,
 };
 #[cfg(feature = "llama-tiny")]
 pub use ceno_rt::tensor::{
@@ -139,14 +143,29 @@ pub enum TensorProductionBoundaryKind {
 
 /// Bulk boundary rows are retained in the syscall RAM journal but assigned by
 /// one row-oriented Core rather than materialized as ECALL columns.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TensorProductionBoundaryPartWitness {
+    pub part: u32,
+    pub base_byte_address: u32,
+    pub tensor_index_start: usize,
+    pub value_ops_start: usize,
+    pub word_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TensorProductionBoundaryWitness {
     pub kind: TensorProductionBoundaryKind,
+    pub layer: u32,
     pub import_cycle: u64,
     pub tensor_id: u64,
     pub version: u32,
-    pub value_ops_start: usize,
-    pub word_count: usize,
+    pub stage: u32,
+    pub head_start: u32,
+    pub head_count: u32,
+    /// Boundary values are shared by all parts. Logical slots deliberately
+    /// have no corresponding bulk RAM journal entries.
+    pub values: Arc<[i32]>,
+    pub parts: Vec<TensorProductionBoundaryPartWitness>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -162,6 +181,9 @@ pub struct TensorProductionFullLayerWitness {
     pub output_version: u32,
     pub profile: u32,
     pub layer: u32,
+    pub stage: u32,
+    pub head_start: u32,
+    pub head_count: u32,
     pub operation_records: Vec<production_attention::ProductionFullLayerOperationRecord>,
 }
 

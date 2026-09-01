@@ -63,10 +63,13 @@ pub use tensor_production::{
     TensorProductionTileInstruction, TensorProductionTileK64Instruction,
 };
 pub use tensor_production_attention::{
-    TensorProductionBoundaryConfig, TensorProductionBoundaryHiddenInputInstruction,
-    TensorProductionBoundaryHiddenOutputInstruction, TensorProductionBoundaryReplayDescriptor,
-    TensorProductionExportAnchorInstruction, TensorProductionFullLayerAnchorInstruction,
-    TensorProductionImportAnchorInstruction, collect_production_boundary_replay_descriptors,
+    TensorProductionBoundaryAttentionInputInstruction,
+    TensorProductionBoundaryAttentionOutputInstruction, TensorProductionBoundaryConfig,
+    TensorProductionBoundaryHiddenInputInstruction,
+    TensorProductionBoundaryHiddenOutputInstruction, TensorProductionBoundaryPostInputInstruction,
+    TensorProductionBoundaryProjectionOutputInstruction, TensorProductionBoundaryReplayDescriptor,
+    TensorProductionExportAnchorInstruction, TensorProductionImportAnchorInstruction,
+    TensorProductionStageAnchorInstruction, collect_production_boundary_replay_descriptors,
 };
 pub use tensor_production_attention_matrix::{
     TensorProductionPvCoreInstruction, TensorProductionQkCoreInstruction,

@@ -4,12 +4,8 @@ use crate::{
         DummyExtraConfig, InstructionDispatchBuilder, MemPadder, MmuConfig, Rv32imConfig,
     },
     scheme::{
-        PublicValues, ZKVMProof,
-        constants::SEPTIC_EXTENSION_DEGREE,
-        hal::ProverDevice,
-        mock_prover::{LkMultiplicityKey, MockProver},
-        prover::ZKVMProver,
-        septic_curve::SepticPoint,
+        PublicValues, ZKVMProof, constants::SEPTIC_EXTENSION_DEGREE, hal::ProverDevice,
+        mock_prover::LkMultiplicityKey, prover::ZKVMProver, septic_curve::SepticPoint,
         verifier::ZKVMVerifier,
     },
     structs::{
@@ -213,6 +209,10 @@ pub struct MultiProver {
     pub max_cell_per_shard: u64,
     pub max_cycle_per_shard: Cycle,
     pub tensor_segment_inner_repetitions: Option<usize>,
+    /// Explicit capacity available to the complete ShardRAM assignment.  When
+    /// set, post-preflight planning rejects impossible atomic cuts before GPU
+    /// witness allocation.
+    pub shard_ram_device_budget_bytes: Option<u64>,
 }
 
 impl MultiProver {
@@ -229,12 +229,19 @@ impl MultiProver {
             max_cell_per_shard,
             max_cycle_per_shard,
             tensor_segment_inner_repetitions: None,
+            shard_ram_device_budget_bytes: None,
         }
     }
 
     pub fn with_tensor_segment_inner_repetitions(mut self, repetitions: usize) -> Self {
         assert!(repetitions > 0);
         self.tensor_segment_inner_repetitions = Some(repetitions);
+        self
+    }
+
+    pub fn with_shard_ram_device_budget_bytes(mut self, bytes: u64) -> Self {
+        assert!(bytes > 0, "ShardRAM device budget must be nonzero");
+        self.shard_ram_device_budget_bytes = Some(bytes);
         self
     }
 }
@@ -247,6 +254,7 @@ impl Default for MultiProver {
             max_cell_per_shard: u64::MAX,
             max_cycle_per_shard: DEFAULT_MAX_CYCLE_PER_SHARDS,
             tensor_segment_inner_repetitions: None,
+            shard_ram_device_budget_bytes: None,
         }
     }
 }
@@ -1280,6 +1288,42 @@ fn recycle_compact_replay_owners(
     }
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn process_rss_bytes() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status.lines().find_map(|line| {
+                let kib = line.strip_prefix("VmRSS:")?.trim();
+                let kib = kib.strip_suffix("kB")?.trim().parse::<u64>().ok()?;
+                kib.checked_mul(1024)
+            })
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn process_rss_bytes() -> u64 {
+    0
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu", not(feature = "jemalloc")))]
+pub(crate) fn trim_process_allocator_pages() -> bool {
+    unsafe extern "C" {
+        fn malloc_trim(pad: usize) -> std::ffi::c_int;
+    }
+
+    // SAFETY: `malloc_trim` has no pointer arguments and is safe to call while
+    // other threads use glibc's allocator. A zero pad asks glibc to return all
+    // currently releasable free pages while preserving live allocations.
+    unsafe { malloc_trim(0) != 0 }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu", not(feature = "jemalloc"))))]
+pub(crate) fn trim_process_allocator_pages() -> bool {
+    false
+}
+
 #[cfg(feature = "gpu")]
 fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactReplayPipeline {
     // One prepared shard may wait while the current shard is proving. The
@@ -1320,18 +1364,28 @@ fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactRe
                 tracing::info!(
                     target: "ceno_pipeline",
                     shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
                     phase = "cpu_replay_start",
                     "compact replay pipeline event"
                 );
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "cpu_replay_start_shard_{shard_id}"
+                ));
                 let shard = replay
                     .next_shard(false, Some)
                     .expect("compact replay ended before its shard plan");
                 tracing::info!(
                     target: "ceno_pipeline",
                     shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
                     phase = "cpu_replay_ready",
                     "compact replay pipeline event"
                 );
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "cpu_replay_ready_shard_{shard_id}"
+                ));
                 if ready_tx.send(shard).is_err() {
                     return;
                 }
@@ -1482,6 +1536,7 @@ impl CompactStepReplay {
             ceno_emul::GpuReplayTypedRange,
         ) -> Option<ceno_emul::GpuReplayTypedRange>,
     ) -> Option<CompactReplayShard> {
+        let shard_started = std::time::Instant::now();
         let expected_steps = *self.shard_step_counts.get(self.shard_id)?;
         let expected_range_count = self.range_descriptors[self.next_range_descriptor..]
             .iter()
@@ -1518,8 +1573,29 @@ impl CompactStepReplay {
                         target_arch = "x86_64",
                         target_os = "linux"
                     ))]
+                    tracing::info!(
+                        target: "ceno_pipeline",
+                        phase = "compact_replay_aot_chunk_begin",
+                        shard_id = self.shard_id,
+                        executed,
+                        max_steps,
+                        pc = self.vm.get_pc().0,
+                        "compact replay AOT chunk begin"
+                    );
                     let ran = match self.aot.run_to_halt(&mut self.vm, max_steps) {
-                        Ok(result) => result.executed_steps,
+                        Ok(result) => {
+                            tracing::info!(
+                                target: "ceno_pipeline",
+                                phase = "compact_replay_aot_chunk_return",
+                                shard_id = self.shard_id,
+                                executed,
+                                max_steps,
+                                ran = result.executed_steps,
+                                pc = self.vm.get_pc().0,
+                                "compact replay AOT chunk returned"
+                            );
+                            result.executed_steps
+                        }
                         Err(err) => panic!(
                             "AOT compact replay failed at pc={:#010x}: {err:?}",
                             self.vm.get_pc().0
@@ -1678,12 +1754,50 @@ impl CompactStepReplay {
             last_hint_after: self.vm.tracer().max_hint_addr_access().0,
         };
         let syscall_witnesses = self.vm.tracer_mut().take_syscall_witnesses();
+        if std::env::var_os("CENO_TENSOR_CONTEXT_RAM_AUDIT").is_some() {
+            for (syscall_index, syscall) in syscall_witnesses.iter().enumerate() {
+                let Some(boundary) = syscall.tensor_production_boundary.as_ref() else {
+                    continue;
+                };
+                if boundary.kind == ceno_emul::tensor::TensorProductionBoundaryKind::Export
+                    && boundary.stage
+                        == ceno_emul::tensor::production_attention::ProductionStage::Attention
+                            .as_raw()
+                {
+                    let future = syscall
+                        .mem_future_access
+                        .iter()
+                        .filter(|&&flag| flag != 0)
+                        .count();
+                    tracing::info!(
+                        shard_id = self.shard_id,
+                        syscall_index,
+                        head_start = boundary.head_start,
+                        mem_ops = syscall.mem_ops.len(),
+                        future,
+                        "Context export future-access flags after compact replay"
+                    );
+                }
+            }
+        }
         let syscall_codes = compact_syscall_journal_codes(&fallback_steps, &syscall_witnesses);
         tracing::info!(
             shard_id = self.shard_id,
             syscall_witnesses = syscall_witnesses.len(),
             ?syscall_codes,
             "compact replay syscall journal retained"
+        );
+        tracing::info!(
+            target: "ceno_pipeline",
+            shard_id = self.shard_id,
+            thread_id = ?std::thread::current().id(),
+            phase = "cpu_replay_next_shard_complete",
+            expected_steps,
+            ordinary_rows,
+            fallback_steps = fallback_steps.len(),
+            typed_bytes,
+            elapsed_ms = shard_started.elapsed().as_millis(),
+            "compact replay next_shard complete"
         );
         self.shard_id += 1;
         Some(CompactReplayShard {
@@ -1703,6 +1817,258 @@ pub struct FullTraceReplayReport {
     pub syscall_witnesses: usize,
     pub exit_code: Option<u32>,
     pub committed_public_io: Option<[u32; 8]>,
+}
+
+/// Exact production TensorState balance observed during a FullTracer replay.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductionTensorStateAuditReport {
+    pub replayed_shards: usize,
+    pub boundary_variants: Vec<(u32, usize, usize, usize, usize)>,
+    pub attention_head_ranges: Vec<(u32, u32)>,
+    pub stable_writes: u64,
+    pub stable_reads: u64,
+    pub bulk_boundary_value_mem_ops: u64,
+    pub static_tensor_continuation_records: Vec<u64>,
+}
+
+#[derive(Clone)]
+struct ProductionBoundaryAuditSlice {
+    values: Arc<[i32]>,
+    start: usize,
+    rows: usize,
+}
+
+impl ProductionBoundaryAuditSlice {
+    fn words(&self) -> &[i32] {
+        &self.values[self.start..self.start + self.rows]
+    }
+}
+
+/// Replay a production layer and prove that every stable logical slot has one
+/// matching write/read, while only the initial Hidden boundary owns bulk RAM.
+pub fn audit_production_tensor_state_replay(
+    mut emul_result: EmulationResult<'_>,
+    program: Arc<Program>,
+    platform: &Platform,
+    init_mem_state: &InitMemState,
+) -> ProductionTensorStateAuditReport {
+    use crate::instructions::riscv::ecall::collect_production_boundary_replay_descriptors;
+
+    let expected_steps = emul_result.executed_steps;
+    let mut shard_ctx_builder = std::mem::take(&mut emul_result.shard_ctx_builder);
+    let expected_shards = shard_ctx_builder.total_shards();
+    let mut step_iter = StepReplay::new(
+        platform.clone(),
+        program,
+        init_mem_state,
+        expected_steps,
+        expected_shards,
+        emul_result.full_tracer_config,
+        shard_ctx_builder.next_accesses(),
+        emul_result.shard_cycle_boundaries,
+        shard_ctx_builder.tensor_proof_context(),
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        emul_result.replay_aot_program,
+    );
+    let mut replayed_steps = 0usize;
+    let mut replayed_shards = 0usize;
+    let mut variants = Vec::new();
+    let mut slices = BTreeMap::new();
+    let mut boundary_mem_ops = 0u64;
+    let mut initial_hidden_base = None;
+
+    while let Some((mut shard_ctx, summary)) =
+        shard_ctx_builder.position_next_shard(&mut step_iter, |_, _| {})
+    {
+        replayed_steps += summary.step_count;
+        replayed_shards += 1;
+        shard_ctx.syscall_witnesses = Arc::new(step_iter.take_syscall_witnesses());
+        let steps = step_iter.shard_steps();
+        let indices = steps
+            .iter()
+            .enumerate()
+            .filter_map(|(index, step)| {
+                step.syscall(&shard_ctx.syscall_witnesses)
+                    .and_then(|syscall| syscall.tensor_production_boundary.as_ref())
+                    .map(|_| index)
+            })
+            .collect::<Vec<_>>();
+        let descriptors =
+            collect_production_boundary_replay_descriptors(&shard_ctx, steps, &indices)
+                .expect("production boundary replay descriptors failed validation");
+        for descriptor in descriptors {
+            assert_eq!(descriptor.layer, 0, "oracle expects exactly layer zero");
+            let key = (
+                descriptor.stage as u32,
+                descriptor.direction,
+                descriptor.part,
+                descriptor.group,
+            );
+            assert!(
+                slices
+                    .insert(
+                        key,
+                        ProductionBoundaryAuditSlice {
+                            values: descriptor.values,
+                            start: descriptor.tensor_index_start,
+                            rows: descriptor.rows,
+                        },
+                    )
+                    .is_none(),
+                "duplicate production boundary variant {key:?}"
+            );
+            variants.push((
+                descriptor.layer,
+                descriptor.stage,
+                descriptor.direction,
+                descriptor.part,
+                descriptor.group,
+            ));
+            if descriptor.is_memory {
+                assert!(
+                    initial_hidden_base
+                        .replace(descriptor.base_byte_address)
+                        .is_none(),
+                    "multiple physical production tensor boundaries remain"
+                );
+                boundary_mem_ops += descriptor.rows as u64;
+            }
+        }
+        for syscall in shard_ctx
+            .syscall_witnesses
+            .iter()
+            .filter(|syscall| syscall.tensor_production_boundary.is_some())
+        {
+            let boundary = syscall.tensor_production_boundary.as_ref().unwrap();
+            let value_mem_ops = if boundary.stage == 0
+                && boundary.kind == ceno_emul::tensor::TensorProductionBoundaryKind::Import
+            {
+                ceno_emul::tensor::production_attention::HIDDEN_WORDS
+            } else {
+                0
+            };
+            assert_eq!(
+                syscall.mem_ops.len(),
+                8 + 4 + value_mem_ops,
+                "logical production boundary retained bulk RAM operations"
+            );
+        }
+    }
+    assert_eq!(
+        replayed_steps, expected_steps,
+        "oracle replay step mismatch"
+    );
+    assert_eq!(
+        replayed_shards, expected_shards,
+        "oracle replay shard mismatch"
+    );
+
+    let heads_per_group = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+    let groups = ceno_emul::tensor::production_attention::CIRCUITS;
+    let hidden_words = ceno_emul::tensor::production_attention::HIDDEN_WORDS;
+    let group_words = heads_per_group
+        * ceno_emul::tensor::production_attention::SEQUENCE
+        * ceno_emul::tensor::production_attention::HEAD_DIM;
+    let mut expected_variants = vec![
+        (0, 0, 0, 0, 0),
+        (0, 0, 1, 0, 0),
+        (0, 0, 1, 1, 0),
+        (0, 0, 1, 2, 0),
+    ];
+    for group in 0..groups {
+        expected_variants.extend([
+            (0, 1, 0, 0, group),
+            (0, 1, 0, 1, group),
+            (0, 1, 0, 2, group),
+            (0, 1, 1, 0, group),
+        ]);
+    }
+    expected_variants.extend([(0, 2, 0, 0, 0), (0, 2, 0, 1, 0), (0, 2, 1, 0, 0)]);
+    assert_eq!(
+        variants, expected_variants,
+        "production boundary variant sequence changed"
+    );
+
+    let hidden_write = slices.get(&(0, 0, 0, 0)).unwrap().words();
+    let hidden_read = slices.get(&(2, 0, 0, 0)).unwrap().words();
+    assert_eq!(
+        hidden_write, hidden_read,
+        "Hidden stable slots do not balance"
+    );
+    for part in 0..3 {
+        let projection = slices.get(&(0, 1, part, 0)).unwrap().words();
+        assert_eq!(projection.len(), hidden_words);
+        for group in 0..groups {
+            let attention = slices.get(&(1, 0, part, group)).unwrap().words();
+            let start = group * group_words;
+            assert_eq!(
+                attention,
+                &projection[start..start + group_words],
+                "Q/K/V stable slot mismatch for part {part}, group {group}"
+            );
+        }
+    }
+    let post_context = slices.get(&(2, 0, 1, 0)).unwrap().words();
+    assert_eq!(post_context.len(), hidden_words);
+    for group in 0..groups {
+        let attention = slices.get(&(1, 1, 0, group)).unwrap().words();
+        let start = group * group_words;
+        assert_eq!(
+            attention,
+            &post_context[start..start + group_words],
+            "Context stable slot mismatch for group {group}"
+        );
+    }
+    let attention_head_ranges = (0..groups)
+        .map(|group| ((group * heads_per_group) as u32, heads_per_group as u32))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        attention_head_ranges
+            .iter()
+            .flat_map(|&(start, count)| start..start + count)
+            .collect::<Vec<_>>(),
+        (0..32).collect::<Vec<_>>(),
+        "attention heads are not covered exactly once"
+    );
+    assert_eq!(
+        boundary_mem_ops, hidden_words as u64,
+        "only initial Hidden may own bulk boundary RAM operations"
+    );
+    let stable_records = 5 * hidden_words as u64;
+    let initial_hidden_base = initial_hidden_base.expect("initial Hidden boundary is missing");
+    let initial_hidden_end = initial_hidden_base
+        .checked_add((hidden_words * WORD_SIZE) as u32)
+        .expect("initial Hidden address range overflow");
+    let static_tensor_continuation_records = emul_result
+        .admitted_tensor_segments
+        .iter()
+        .map(|segment| {
+            emul_result
+                .final_mem_state
+                .mem
+                .iter()
+                .filter(|record| {
+                    (initial_hidden_base..initial_hidden_end).contains(&record.addr)
+                        && record.cycle >= segment.end_cycle
+                })
+                .count() as u64
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        static_tensor_continuation_records
+            .iter()
+            .all(|&records| records == 0),
+        "initial Hidden remains live at an atomic stage cut: {static_tensor_continuation_records:?}"
+    );
+    ProductionTensorStateAuditReport {
+        replayed_shards,
+        boundary_variants: variants,
+        attention_head_ranges,
+        stable_writes: stable_records,
+        stable_reads: stable_records,
+        bulk_boundary_value_mem_ops: boundary_mem_ops,
+        static_tensor_continuation_records,
+    }
 }
 
 /// Replay every preflight shard with FullTracer without assigning circuit witnesses.
@@ -1815,26 +2181,11 @@ pub fn emulate_program<'a>(
         multi_prover.max_cell_per_shard,
         multi_prover.max_cycle_per_shard,
     )
-    .with_step_cell_extractor(step_cell_extractor)
+    .with_step_cell_extractor(step_cell_extractor.clone())
     .with_replay_range_capacity(replay_range_capacity)
     .with_tensor_segment_inner_repetitions(multi_prover.tensor_segment_inner_repetitions);
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let aot_tracer_config = tracer_config.clone();
-    let preflight_program = program.clone();
-    let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
-        .in_scope(move || {
-            VMState::new_with_tracer_config(platform.clone(), preflight_program, tracer_config)
-        });
-    if let Some(context) = &tensor_proof_context {
-        vm.set_tensor_witness_provider(context.provider.clone());
-    }
-
-    info_span!("[ceno] emulator.init_mem").in_scope(|| {
-        for record in hints_init {
-            vm.init_memory(record.addr.into(), record.value);
-        }
-    });
-
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let aot_program = precompiled_aot.unwrap_or_else(|| {
         let aot = ceno_emul::aot::AotProgram::load_or_train_preflight_with_config(
@@ -1854,6 +2205,86 @@ pub fn emulate_program<'a>(
             report.reachable_instruction_count
         );
         Arc::new(aot)
+    });
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let tensor_state_annotations = {
+        let prepass_config = PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
+            .with_step_cell_extractor(step_cell_extractor)
+            .with_replay_range_capacity(replay_range_capacity)
+            .pure_aot_prepass();
+        let mut planning_vm = VMState::<PreflightTracer>::new_with_tracer_config(
+            platform.clone(),
+            program.clone(),
+            prepass_config,
+        );
+        for record in hints_init {
+            planning_vm.init_memory(record.addr.into(), record.value);
+        }
+        let report = aot_program
+            .run_to_halt(&mut planning_vm, max_steps)
+            .unwrap_or_else(|err| panic!("PureAotPrepass trapped before annotation: {err}"));
+        let tracer = planning_vm.take_tracer();
+        let (builder, _, _) = tracer.into_shard_plan();
+        let annotations = Arc::new(builder.tensor_state_annotations().to_vec());
+        for annotation in annotations.iter() {
+            tracing::info!(
+                target: "ceno_pipeline",
+                phase = "pure_aot_prepass_annotation",
+                layer = annotation.layer,
+                stage = annotation.stage,
+                head_start = annotation.head_start,
+                head_count = annotation.head_count,
+                start_cycle = annotation.start_cycle,
+                end_cycle = annotation.end_cycle,
+                annotation_steps = annotation.step_count(),
+                descriptor_events = annotation.event_count(),
+                descriptor_triples = annotation.event_count() / 3,
+                required_min_cells = annotation.total_cells,
+                "Pure AOT metadata prepass produced complete atomic annotation"
+            );
+        }
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "pure_aot_prepass",
+            executed_steps = report.executed_steps,
+            tensor_state_segments = annotations.len(),
+            required_min_cells = annotations.iter().map(|annotation| annotation.total_cells).max().unwrap_or(0),
+            "Pure AOT metadata prepass finalized immutable TensorState annotations"
+        );
+        annotations
+    };
+    #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
+    let tensor_state_annotations = Arc::new(Vec::new());
+
+    if let Some(annotation) = tensor_state_annotations
+        .iter()
+        .find(|annotation| annotation.total_cells > multi_prover.max_cell_per_shard)
+    {
+        panic!(
+            "production TensorState segment layer={} stage={} heads={}..{} requires minimum max_cell_per_shard={} cells, configured cap={}; refusing before witness/GPU execution",
+            annotation.layer,
+            annotation.stage,
+            annotation.head_start,
+            annotation.head_start.saturating_add(annotation.head_count),
+            annotation.total_cells,
+            multi_prover.max_cell_per_shard
+        );
+    }
+
+    let tracer_config = tracer_config.with_tensor_state_annotations(tensor_state_annotations);
+    let preflight_program = program.clone();
+    let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
+        .in_scope(move || {
+            VMState::new_with_tracer_config(platform.clone(), preflight_program, tracer_config)
+        });
+    if let Some(context) = &tensor_proof_context {
+        vm.set_tensor_witness_provider(context.provider.clone());
+    }
+    info_span!("[ceno] emulator.init_mem").in_scope(|| {
+        for record in hints_init {
+            vm.init_memory(record.addr.into(), record.value);
+        }
     });
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -2070,8 +2501,24 @@ pub fn emulate_program<'a>(
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let replay_aot_program = require_fulltracer_aot_program(precompiled_fulltracer_aot);
+    let final_mem_state = FinalMemState {
+        reg: reg_final,
+        io: io_final,
+        mem: mem_final,
+        hints: hints_final,
+        stack: stack_final,
+        heap: heap_final,
+    };
     let tracer = vm.take_tracer();
     let (plan_builder, next_accesses, replay_shard_previews) = tracer.into_shard_plan();
+    if let Some(device_budget_bytes) = multi_prover.shard_ram_device_budget_bytes {
+        validate_shard_ram_cut_capacity(
+            plan_builder.admitted_tensor_segments(),
+            &final_mem_state,
+            multi_prover.max_cell_per_shard,
+            device_budget_bytes,
+        );
+    }
     let full_tracer_config = FullTracerConfig {
         max_step_shard: plan_builder.max_step_shard(),
     };
@@ -2116,14 +2563,7 @@ pub fn emulate_program<'a>(
         full_tracer_config,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         replay_aot_program,
-        final_mem_state: FinalMemState {
-            reg: reg_final,
-            io: io_final,
-            mem: mem_final,
-            hints: hints_final,
-            stack: stack_final,
-            heap: heap_final,
-        },
+        final_mem_state,
         phantom: PhantomData,
     }
 }
@@ -2361,12 +2801,38 @@ pub fn generate_witness<'a, E: ExtensionField>(
         })
     });
     let mut current_compact_shard: Option<CompactReplayShard> = None;
+    #[cfg(feature = "gpu")]
+    let mut deferred_compact_replay_recycle = None;
     std::iter::from_fn(move || {
         info_span!(
             "[ceno] app_prove.generate_witness",
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
+            #[cfg(feature = "gpu")]
+            if let Some((completed_shard_id, recycled, is_last_shard)) =
+                deferred_compact_replay_recycle.take()
+            {
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = completed_shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
+                    phase = "compact_replay_recycle_release",
+                    "releasing compact replay owners after the preceding proof"
+                );
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "compact_replay_recycle_release_shard_{completed_shard_id}"
+                ));
+                recycle_compact_replay_owners(
+                    &compact_pipeline
+                        .as_ref()
+                        .expect("compact replay pipeline missing")
+                        .recycle,
+                    recycled,
+                    is_last_shard,
+                );
+            }
             next_witness_shard_entry(&shard_ctx_builder)?;
             if !{
                 #[cfg(all(
@@ -2390,9 +2856,10 @@ pub fn generate_witness<'a, E: ExtensionField>(
             }
             let (mut shard_ctx, shard_summary) = if use_compact_replay {
                 instrunction_dispatch_ctx.begin_compact_ingest();
-                // Replay and typed arena preparation are CPU-only and may run
-                // one shard ahead. All GPU setup and assignment below remain
-                // on this consumer thread, after the previous proof returned.
+                // Production ECALL replay may invoke its CUDA provider. The
+                // producer is released only when this iterator is advanced
+                // after the preceding proof, so replay, assignment, and proof
+                // never compete across shards.
                 let stream_owned_ranges = false;
                 #[cfg(feature = "gpu")]
                 if stream_owned_ranges
@@ -2508,10 +2975,12 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 let mut compact_shard = info_span!("position_compact_shard").in_scope(|| {
                     #[cfg(feature = "gpu")]
                     {
-                        tracing::info!(
-                            target: "ceno_pipeline",
-                            shard_id = shard_ctx_builder.cur_shard_id,
-                            phase = "gpu_assignment_wait",
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = shard_ctx_builder.cur_shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
+                    phase = "gpu_assignment_wait",
                             "compact replay pipeline event"
                         );
                         recv_compact_replay_shard(
@@ -2532,9 +3001,15 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 tracing::info!(
                     target: "ceno_pipeline",
                     shard_id = shard_ctx_builder.cur_shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
                     phase = "gpu_assignment_start",
                     "compact replay pipeline event"
                 );
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "gpu_assignment_start_shard_{}",
+                    shard_ctx_builder.cur_shard_id
+                ));
                 for range in &compact_shard.arenas.ranges {
                     for (kind, arena) in InsnKind::iter().zip(&range.typed) {
                         if let Some(arena) = arena {
@@ -2545,8 +3020,18 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 for (idx, record) in compact_shard.fallback_steps.iter().enumerate() {
                     instrunction_dispatch_ctx.ingest_step(idx, record);
                 }
+                let assembly_started = std::time::Instant::now();
                 instrunction_dispatch_ctx.finish_compact_ingest();
                 let positioned = shard_ctx_builder.position_compact_shard(compact_shard.summary);
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = shard_ctx_builder.cur_shard_id,
+                    phase = "tensor_witness_assembly",
+                    fallback_steps = compact_shard.fallback_steps.len(),
+                    range_count = compact_shard.arenas.ranges.len(),
+                    elapsed_ms = assembly_started.elapsed().as_millis(),
+                    "compact witness assembly complete"
+                );
                 #[cfg(feature = "gpu")]
                 if !stream_owned_ranges {
                     crate::instructions::gpu::dispatch::install_compact_replay_arenas(
@@ -2652,9 +3137,32 @@ pub fn generate_witness<'a, E: ExtensionField>(
             if let Some(target_shard_id) = target_shard_id {
                 if shard_ctx.shard_id < target_shard_id {
                     tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
+                    #[cfg(feature = "gpu")]
+                    if current_compact_shard.is_some() {
+                        let recycled = crate::instructions::gpu::dispatch::clear_compact_replay_arenas()
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>();
+                        assert!(
+                            deferred_compact_replay_recycle
+                                .replace((shard_ctx.shard_id, recycled, shard_ctx.is_last_shard()))
+                                .is_none(),
+                            "compact replay owners deferred twice while skipping a shard"
+                        );
+                        current_compact_shard.take();
+                    }
                     return Some((zkvm_witness, shard_ctx, pi, None));
                 } else if shard_ctx.shard_id > target_shard_id {
                     tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
+                    #[cfg(feature = "gpu")]
+                    if current_compact_shard.is_some() {
+                        let recycled = crate::instructions::gpu::dispatch::clear_compact_replay_arenas()
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>();
+                        drop(recycled);
+                        current_compact_shard.take();
+                    }
                     return None;
                 }
             }
@@ -2674,6 +3182,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 { None::<ShardContext<'static>> }
             };
 
+            let assignment_started = std::time::Instant::now();
             info_span!("assign_opcode_circuits", shard_id = shard_ctx.shard_id)
                 .in_scope(|| {
                     #[cfg(feature = "gpu")]
@@ -2693,6 +3202,20 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         })
                 })
                 .unwrap();
+            tracing::info!(
+                target: "ceno_pipeline",
+                shard_id = shard_ctx.shard_id,
+                thread_id = ?std::thread::current().id(),
+                rss_bytes = process_rss_bytes(),
+                phase = "gpu_assignment_end",
+                elapsed_ms = assignment_started.elapsed().as_millis(),
+                "GPU opcode assignment complete"
+            );
+            #[cfg(feature = "gpu")]
+            crate::scheme::gpu::log_gpu_device_state(&format!(
+                "gpu_assignment_end_shard_{}",
+                shard_ctx.shard_id
+            ));
 
             #[cfg(feature = "gpu")]
             if current_compact_shard.is_some() {
@@ -2700,13 +3223,20 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .in_scope(|| {
                         let recycled =
                             crate::instructions::gpu::dispatch::clear_compact_replay_arenas();
-                        recycle_compact_replay_owners(
-                            &compact_pipeline
-                                .as_ref()
-                                .expect("compact replay pipeline missing")
-                                .recycle,
-                            recycled.into_iter().flatten().collect(),
-                            shard_ctx.is_last_shard(),
+                        let recycled = recycled.into_iter().flatten().collect::<Vec<_>>();
+                        assert!(
+                            deferred_compact_replay_recycle
+                                .replace((shard_ctx.shard_id, recycled, shard_ctx.is_last_shard()))
+                                .is_none(),
+                            "compact replay owners deferred twice"
+                        );
+                        tracing::info!(
+                            target: "ceno_pipeline",
+                            shard_id = shard_ctx.shard_id,
+                            thread_id = ?std::thread::current().id(),
+                            rss_bytes = process_rss_bytes(),
+                            phase = "compact_replay_recycle_deferred",
+                            "deferred compact replay owner release until proof completion"
                         );
                     });
             }
@@ -2985,6 +3515,20 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     }
                 });
             }
+
+            tracing::info!(
+                target: "ceno_pipeline",
+                shard_id = shard_ctx.shard_id,
+                thread_id = ?std::thread::current().id(),
+                rss_bytes = process_rss_bytes(),
+                phase = "witness_ready",
+                "all witness and table assignments complete"
+            );
+            #[cfg(feature = "gpu")]
+            crate::scheme::gpu::log_gpu_device_state(&format!(
+                "witness_ready_shard_{}",
+                shard_ctx.shard_id
+            ));
 
             Some((zkvm_witness, shard_ctx, pi, None))
         })
@@ -3455,6 +3999,173 @@ fn mark_memcpy_destination_access_later(
             .filter(|addr| access_later_words.contains(addr))
             .count();
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ShardRamCutCapacity {
+    live_records: u64,
+    padded_rows: u64,
+    finalized_record_bytes: u64,
+    leaf_main_bytes: u64,
+    leaf_structural_bytes: u64,
+    ec_main_bytes: u64,
+    ec_structural_bytes: u64,
+    ec_workspace_bytes: u64,
+    assignment_peak_bytes: u64,
+}
+
+fn shard_ram_cut_capacity(live_records: u64) -> ShardRamCutCapacity {
+    let padded_rows = live_records.max(2).next_power_of_two();
+    let finalized_record_bytes = 120u64
+        .checked_mul(live_records)
+        .expect("ShardRAM finalized-record byte count overflow");
+    let leaf_main_bytes = 4u64
+        .checked_mul(371)
+        .and_then(|bytes| bytes.checked_mul(padded_rows))
+        .expect("ShardRAM leaf-main byte count overflow");
+    let leaf_structural_bytes = 4u64
+        .checked_mul(3)
+        .and_then(|bytes| bytes.checked_mul(padded_rows))
+        .expect("ShardRAM leaf-structural byte count overflow");
+    let ec_rows = padded_rows
+        .checked_mul(2)
+        .expect("ShardRAM EC row count overflow");
+    let ec_main_bytes = 4u64
+        .checked_mul(21)
+        .and_then(|bytes| bytes.checked_mul(ec_rows))
+        .expect("ShardRAM EC-main byte count overflow");
+    let ec_structural_bytes = 4u64
+        .checked_mul(7)
+        .and_then(|bytes| bytes.checked_mul(ec_rows))
+        .expect("ShardRAM EC-structural byte count overflow");
+    let ec_workspace_bytes = 2u64
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_mul(7))
+        .and_then(|bytes| bytes.checked_mul(padded_rows))
+        .expect("ShardRAM EC-workspace byte count overflow");
+    let assignment_peak_bytes = finalized_record_bytes
+        .checked_add(
+            4u64.checked_mul(444)
+                .and_then(|bytes| bytes.checked_mul(padded_rows))
+                .expect("ShardRAM witness peak byte count overflow"),
+        )
+        .expect("ShardRAM assignment peak byte count overflow");
+    ShardRamCutCapacity {
+        live_records,
+        padded_rows,
+        finalized_record_bytes,
+        leaf_main_bytes,
+        leaf_structural_bytes,
+        ec_main_bytes,
+        ec_structural_bytes,
+        ec_workspace_bytes,
+        assignment_peak_bytes,
+    }
+}
+
+fn final_mem_live_at_cut(
+    cut_cycle: Cycle,
+    final_mem_state: &FinalMemState,
+) -> (u64, BTreeMap<&'static str, u64>) {
+    let mut by_source = BTreeMap::new();
+    for (name, records) in [
+        ("reg", final_mem_state.reg.as_slice()),
+        ("mem", final_mem_state.mem.as_slice()),
+        ("hints", final_mem_state.hints.as_slice()),
+        ("stack", final_mem_state.stack.as_slice()),
+        ("heap", final_mem_state.heap.as_slice()),
+    ] {
+        let count = records
+            .iter()
+            .filter(|record| record.cycle >= cut_cycle)
+            .count() as u64;
+        if count != 0 {
+            by_source.insert(name, count);
+        }
+    }
+    // Static program memory is present before shard 0 and is materialized by
+    // the host continuation path when its final access lies after this cut.
+    // Registers/stack and dynamically introduced heap/hint records can instead
+    // be emitted by the current shard, so report them but do not double-count
+    // them in this allocation lower bound.
+    let static_continuation = by_source.get("mem").copied().unwrap_or_default();
+    (static_continuation, by_source)
+}
+
+fn validate_shard_ram_cut_capacity(
+    segments: &[ceno_emul::TensorSegmentPlan],
+    final_mem_state: &FinalMemState,
+    max_cell_per_shard: u64,
+    device_budget_bytes: u64,
+) {
+    assert!(
+        !segments.is_empty(),
+        "explicit ShardRAM capacity planning requires atomic TensorBus cuts"
+    );
+    let expected_projection_live_records = std::env::var("CENO_EXPECT_PROJECTION_LIVE_RECORDS")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .expect("CENO_EXPECT_PROJECTION_LIVE_RECORDS must be an integer")
+        });
+    let mut legal_first_cuts = Vec::new();
+    for (candidate, segment) in segments.iter().enumerate() {
+        let (live_records, by_source) = final_mem_live_at_cut(segment.end_cycle, final_mem_state);
+        let capacity = shard_ram_cut_capacity(live_records);
+        let core_legal = segment.prefix_core_cost <= max_cell_per_shard;
+        let capacity_legal = capacity.assignment_peak_bytes <= device_budget_bytes;
+        if core_legal && capacity_legal {
+            legal_first_cuts.push(candidate);
+        }
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "shard_ram_cut_capacity",
+            candidate,
+            cut_cycle = segment.end_cycle,
+            prefix_core_cells = segment.prefix_core_cost,
+            max_core_cells = max_cell_per_shard,
+            static_continuation_records = capacity.live_records,
+            padded_rows = capacity.padded_rows,
+            finalized_record_bytes = capacity.finalized_record_bytes,
+            leaf_main_bytes = capacity.leaf_main_bytes,
+            leaf_structural_bytes = capacity.leaf_structural_bytes,
+            ec_main_bytes = capacity.ec_main_bytes,
+            ec_structural_bytes = capacity.ec_structural_bytes,
+            ec_workspace_bytes = capacity.ec_workspace_bytes,
+            assignment_peak_bytes = capacity.assignment_peak_bytes,
+            device_budget_bytes,
+            core_legal,
+            capacity_legal,
+            live_by_source = ?by_source,
+            "costed atomic EXPORT_END candidate"
+        );
+        if candidate == 0
+            && let Some(expected) = expected_projection_live_records
+        {
+            assert_eq!(
+                live_records, expected,
+                "projection-cut ShardRAM liveness drift"
+            );
+            let measured_leaf_request = 94_976u64 << 20;
+            assert!(
+                capacity.leaf_main_bytes >= measured_leaf_request,
+                "projection-cut leaf request no longer explains measured 94,976 MiB"
+            );
+        }
+    }
+    assert!(
+        !legal_first_cuts.is_empty(),
+        "no legal atomic first-shard cut: every EXPORT_END candidate exceeds either the explicit ShardRAM device budget ({device_budget_bytes} bytes) or Core budget ({max_cell_per_shard} cells)"
+    );
+    tracing::info!(
+        target: "ceno_pipeline",
+        phase = "shard_ram_cut_plan",
+        ?legal_first_cuts,
+        device_budget_bytes,
+        max_cell_per_shard,
+        "found legal atomic first-shard cuts"
+    );
 }
 
 fn count_final_mem_access_later(
@@ -4155,6 +4866,16 @@ pub fn run_e2e_proof_with_precompiled_aot<
         precompiled_fulltracer_aot,
     );
     if pipeline_timing {
+        let segment_shards = emul_result
+            .admitted_tensor_segments
+            .iter()
+            .map(|segment| segment.shard_id)
+            .collect::<Vec<_>>();
+        assert!(
+            segment_shards.windows(2).all(|pair| pair[0] <= pair[1]),
+            "TensorBus segment shard plan is not ordered"
+        );
+        eprintln!("pipeline timing phase=preflight_segments segment_shards={segment_shards:?}");
         #[cfg(feature = "tensor-cuda")]
         {
             let resident =
@@ -4179,6 +4900,16 @@ pub fn run_e2e_proof_with_precompiled_aot<
             emul_result.predicted_shard_costs,
         );
     }
+    let rss_before_trim = process_rss_bytes();
+    let allocator_released = trim_process_allocator_pages();
+    tracing::info!(
+        target: "ceno_pipeline",
+        rss_before_bytes = rss_before_trim,
+        rss_after_bytes = process_rss_bytes(),
+        allocator_released,
+        phase = "preflight_allocator_trim",
+        "released free host allocator pages before witness generation"
+    );
     create_proofs_streaming(
         emul_result,
         prover,
@@ -4237,7 +4968,10 @@ fn create_proofs_streaming<
 
             let mut wit_iter: Box<dyn Iterator<Item = _>> =
                 if let Some(target_shard_id) = target_shard_id {
-                    Box::new(wit_iter.skip(target_shard_id))
+                    // Diagnostic shard selection must remain a single-shard
+                    // operation. Advancing past the selected proof would run
+                    // later replay/assignment work and defeat isolation.
+                    Box::new(wit_iter.skip(target_shard_id).take(1))
                 } else {
                     Box::new(wit_iter)
                 };
@@ -4258,29 +4992,31 @@ fn create_proofs_streaming<
                 let resident = ceno_emul::tensor::resident::resident_cuda_metrics()
                     .delta_since(resident_before);
                 let shard_id = shard_ctx.shard_id;
-                if is_mock_proving {
-                    MockProver::assert_satisfied_full(
-                        &shard_ctx,
-                        &ctx.system_config.zkvm_cs,
-                        ctx.zkvm_fixed_traces.clone(),
-                        &zkvm_witness,
-                        &pi,
-                        &ctx.program,
-                    );
-                    tracing::info!("Mock proving passed");
-                }
-
                 let transcript = Transcript::new(b"riscv");
                 let start = std::time::Instant::now();
                 tracing::info!(
                     target: "ceno_pipeline",
                     shard_id = shard_ctx.shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
                     phase = "proof_start",
                     "compact replay pipeline event"
                 );
+                #[cfg(feature = "gpu")]
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "proof_start_shard_{}",
+                    shard_ctx.shard_id
+                ));
                 let zkvm_proof =
                     match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
                         Ok(proof) => proof,
+                        Err(ZKVMError::MockProvingComplete) if is_mock_proving => {
+                            tracing::info!(
+                                shard_id = shard_ctx.shard_id,
+                                "exact GPU MLE MockProver completed before proof construction"
+                            );
+                            break;
+                        }
                         Err(err) => {
                             eprintln!(
                                 "create_proof failed for shard {}: {err:?}",
@@ -4295,10 +5031,17 @@ fn create_proofs_streaming<
                 tracing::info!(
                     target: "ceno_pipeline",
                     shard_id = shard_ctx.shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
                     phase = "proof_end",
                     elapsed_ms = proof_elapsed.as_millis(),
                     "compact replay pipeline event"
                 );
+                #[cfg(feature = "gpu")]
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "proof_end_shard_{}",
+                    shard_ctx.shard_id
+                ));
                 tracing::debug!(
                     "{}th shard proof created in {:?}",
                     shard_ctx.shard_id,
@@ -4306,6 +5049,18 @@ fn create_proofs_streaming<
                 );
                 #[cfg(feature = "gpu")]
                 crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                let rss_before_trim = process_rss_bytes();
+                let allocator_released = trim_process_allocator_pages();
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_before_bytes = rss_before_trim,
+                    rss_after_bytes = process_rss_bytes(),
+                    allocator_released,
+                    phase = "proof_allocator_trim",
+                    "released free host allocator pages before advancing the witness iterator"
+                );
                 tracing::info!("e2e proof stat: {}", zkvm_proof);
                 if pipeline_timing {
                     #[cfg(feature = "tensor-cuda")]
@@ -4338,6 +5093,13 @@ fn create_proofs_streaming<
                     witness_total.as_millis(),
                     proof_total.as_millis(),
                     proofs.len(),
+                );
+            }
+            if let Some(target_shard_id) = target_shard_id {
+                assert_eq!(
+                    proofs.len(),
+                    1,
+                    "requested diagnostic shard {target_shard_id} is outside the proof plan"
                 );
             }
             proofs

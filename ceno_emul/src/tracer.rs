@@ -126,6 +126,19 @@ pub trait ReplayEngine {
 pub trait StepCellExtractor {
     fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64;
 
+    /// Preflight-only chip expansion for a production stage descriptor. The
+    /// proof trace remains represented by its ordinary ECALL step; this hook
+    /// only lets native/Rust planning charge the Core set actually emitted by
+    /// the decoded stage/head range.
+    fn production_stage_chips(
+        &self,
+        _stage: u32,
+        _head_start: u32,
+        _head_count: u32,
+    ) -> Option<Vec<usize>> {
+        None
+    }
+
     fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
         None
     }
@@ -639,6 +652,20 @@ pub trait Tracer {
 
     fn track_syscall(&mut self, effects: SyscallEffects);
 
+    /// The first half of production TensorState planning executes the real
+    /// guest control flow, but production tensor syscalls only decode their
+    /// fixed descriptors.  This keeps shard admission ahead of Hidden work.
+    fn pure_aot_prepass(&self) -> bool {
+        false
+    }
+
+    /// Metadata-only tensor syscalls use this during the annotation-consuming
+    /// preflight to preserve real RAM access ordering without materializing
+    /// tensor payloads. The first planning pass does not need those ranges.
+    fn prepass_tracks_memory_ranges(&self) -> bool {
+        false
+    }
+
     fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle;
 
     fn final_register_accesses(&self) -> &LatestAccesses;
@@ -797,6 +824,12 @@ pub struct ShardPlanBuilder {
     cur_tower_peak: u64,
     cost_model: Option<Arc<ShardCostModel>>,
     num_instances: Vec<u64>,
+    /// Reset-independent Core counts through the latest atomic TensorBus cut.
+    /// Native AOT updates `num_instances` directly, so this is synchronized at
+    /// each EXPORT_END candidate rather than on every native instruction.
+    offline_num_instances: Vec<u64>,
+    offline_last_online_num_instances: Option<Vec<u64>>,
+    offline_last_shard_id: usize,
     cur_ecall_counts: BTreeMap<Word, u64>,
     cur_ecall_peak_cells: BTreeMap<Word, u64>,
     cur_cycle_in_shard: Cycle,
@@ -822,7 +855,66 @@ pub struct ShardPlanBuilder {
     direct_fallback_spans: Vec<crate::GpuReplayFallbackInterval>,
     tensor_segment_inner_repetitions: Option<usize>,
     tensor_segment_template: Option<Vec<PendingTensorStep>>,
+    tensor_state_plan_mode: TensorStatePlanMode,
+    pending_tensor_state: Option<PendingTensorStateSegment>,
+    tensor_state_annotations: Vec<TensorStateSegmentAnnotation>,
+    tensor_state_annotation_cursor: usize,
+    active_tensor_state: Option<ActiveTensorStateSegment>,
     finalized: bool,
+}
+
+#[derive(Clone, Debug)]
+enum TensorStatePlanMode {
+    Disabled,
+    Collect,
+    Consume(Arc<Vec<TensorStateSegmentAnnotation>>),
+}
+
+#[derive(Clone, Debug)]
+struct PendingTensorStateSegment {
+    identity: TensorStateEvent,
+    steps: Vec<PendingTensorStep>,
+    events: Vec<TensorStateEvent>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TensorStateEvent {
+    code: Word,
+    layer: u32,
+    stage: u32,
+    head_start: u32,
+    head_count: u32,
+}
+
+#[derive(Clone, Debug)]
+struct ActiveTensorStateSegment {
+    annotation_index: usize,
+    next_step: usize,
+    expected_shard_cost: u64,
+    events: Vec<TensorStateEvent>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TensorStateSegmentAnnotation {
+    pub layer: u32,
+    pub stage: u32,
+    pub head_start: u32,
+    pub head_count: u32,
+    pub start_cycle: Cycle,
+    pub end_cycle: Cycle,
+    pub total_cells: u64,
+    steps: Vec<PendingTensorStep>,
+    events: Vec<TensorStateEvent>,
+}
+
+impl TensorStateSegmentAnnotation {
+    pub fn step_count(&self) -> usize {
+        self.steps.len()
+    }
+
+    pub fn event_count(&self) -> usize {
+        self.events.len()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -839,14 +931,17 @@ pub struct TensorSegmentPlan {
     pub step_count: usize,
     /// The complete shard cost after this region's atomic admission.
     pub shard_cost_after_admission: u64,
+    /// Exact Core cost from program start through this atomic EXPORT_END.
+    pub prefix_core_cost: u64,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct PendingTensorStep {
     cycle: Cycle,
     kind: InsnKind,
     ecall_code: Option<Word>,
     generic_cells: u64,
+    production_stage_chips: Option<Vec<u32>>,
 }
 
 impl ShardPlanBuilder {
@@ -860,7 +955,8 @@ impl ShardPlanBuilder {
         cost_model: Option<Arc<ShardCostModel>>,
     ) -> Self {
         let initial_cycle = FullTracer::SUBCYCLES_PER_INSN;
-        let num_instances = vec![0; cost_model.as_ref().map_or(0, |model| model.chip_count())];
+        let chip_count = cost_model.as_ref().map_or(0, |model| model.chip_count());
+        let num_instances = vec![0; chip_count];
         ShardPlanBuilder {
             shard_cycle_boundaries: vec![initial_cycle],
             predicted_shard_costs: Vec::new(),
@@ -874,6 +970,9 @@ impl ShardPlanBuilder {
             cur_tower_peak: 0,
             cost_model,
             num_instances,
+            offline_num_instances: vec![0; chip_count],
+            offline_last_online_num_instances: None,
+            offline_last_shard_id: 0,
             cur_ecall_counts: BTreeMap::new(),
             cur_ecall_peak_cells: BTreeMap::new(),
             cur_cycle_in_shard: 0,
@@ -893,8 +992,29 @@ impl ShardPlanBuilder {
             direct_fallback_spans: Vec::new(),
             tensor_segment_inner_repetitions: None,
             tensor_segment_template: None,
+            tensor_state_plan_mode: TensorStatePlanMode::Disabled,
+            pending_tensor_state: None,
+            tensor_state_annotations: Vec::new(),
+            tensor_state_annotation_cursor: 0,
+            active_tensor_state: None,
             finalized: false,
         }
+    }
+
+    fn set_tensor_state_plan_mode(&mut self, mode: TensorStatePlanMode) {
+        assert_eq!(
+            self.cur_step_count, 0,
+            "TensorState plan mode changed after execution began"
+        );
+        self.tensor_state_plan_mode = mode;
+    }
+
+    pub fn tensor_state_annotations(&self) -> &[TensorStateSegmentAnnotation] {
+        &self.tensor_state_annotations
+    }
+
+    fn tensor_state_active(&self) -> bool {
+        self.pending_tensor_state.is_some() || self.active_tensor_state.is_some()
     }
 
     pub fn set_replay_range_capacity(&mut self, capacity: usize) {
@@ -1063,7 +1183,26 @@ impl ShardPlanBuilder {
             kind,
             ecall_code,
             generic_cells,
+            production_stage_chips: None,
         };
+        if matches!(self.tensor_state_plan_mode, TensorStatePlanMode::Collect)
+            && let Some(outer) = self.pending_tensor_state.as_mut()
+        {
+            outer.steps.push(step.clone());
+        }
+        if let TensorStatePlanMode::Consume(annotations) = &self.tensor_state_plan_mode {
+            if self.active_tensor_state.is_none()
+                && annotations
+                    .get(self.tensor_state_annotation_cursor)
+                    .is_some_and(|annotation| annotation.start_cycle == step_cycle)
+            {
+                self.begin_annotated_tensor_state_segment();
+            }
+            if self.active_tensor_state.is_some() {
+                self.admit_annotated_tensor_state_step(step);
+                return;
+            }
+        }
         let import_begin = matches!(
             ecall_code,
             Some(
@@ -1117,7 +1256,7 @@ impl ShardPlanBuilder {
         if let Some(model) = &self.cost_model {
             let mut counts = self.num_instances.clone();
             for step in steps {
-                for &chip in model.chips_for_step(step.kind, step.ecall_code) {
+                for &chip in self.pending_step_chips(model, step) {
                     counts[chip as usize] = counts[chip as usize].saturating_add(1);
                 }
             }
@@ -1219,6 +1358,7 @@ impl ShardPlanBuilder {
                 }
             );
         }
+        self.sync_offline_counts_before_tensor_segment();
         let start_cycle = pending.start_cycle;
         let end_cycle = pending
             .steps
@@ -1229,19 +1369,53 @@ impl ShardPlanBuilder {
         for step in pending.steps {
             self.admit_tensor_step_without_split(step);
         }
+        self.offline_last_online_num_instances = Some(self.num_instances.clone());
+        self.offline_last_shard_id = self.shard_id;
+        let prefix_core_cost = self.cost_model.as_ref().map_or(self.cur_cells, |model| {
+            model.shard_cost(&self.offline_num_instances)
+        });
         self.admitted_tensor_segments.push(TensorSegmentPlan {
             shard_id: self.shard_id,
             start_cycle,
             end_cycle,
             step_count,
             shard_cost_after_admission: self.cur_cells,
+            prefix_core_cost,
         });
+    }
+
+    fn sync_offline_counts_before_tensor_segment(&mut self) {
+        if self.cost_model.is_none() {
+            return;
+        }
+        match &self.offline_last_online_num_instances {
+            None => self.offline_num_instances.clone_from(&self.num_instances),
+            Some(previous) if self.offline_last_shard_id == self.shard_id => {
+                for ((offline, &current), &old) in self
+                    .offline_num_instances
+                    .iter_mut()
+                    .zip(&self.num_instances)
+                    .zip(previous)
+                {
+                    *offline = offline.saturating_add(current.saturating_sub(old));
+                }
+            }
+            Some(_) => {
+                for (offline, &current) in self
+                    .offline_num_instances
+                    .iter_mut()
+                    .zip(&self.num_instances)
+                {
+                    *offline = offline.saturating_add(current);
+                }
+            }
+        }
     }
 
     fn admit_tensor_step_without_split(&mut self, step: PendingTensorStep) {
         if let Some(model) = &self.cost_model {
-            let chips = model
-                .chips_for_step(step.kind, step.ecall_code)
+            let chips = self
+                .pending_step_chips(model, &step)
                 .iter()
                 .map(|&chip| chip as usize)
                 .collect::<SmallVec<[_; 2]>>();
@@ -1249,6 +1423,8 @@ impl ShardPlanBuilder {
             self.record_replay_step(step.kind);
             for chip in chips {
                 self.num_instances[chip] = self.num_instances[chip].saturating_add(1);
+                self.offline_num_instances[chip] =
+                    self.offline_num_instances[chip].saturating_add(1);
             }
             (
                 self.cur_trace_cells,
@@ -1269,6 +1445,244 @@ impl ShardPlanBuilder {
             .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
         self.cur_step_count = self.cur_step_count.saturating_add(1);
         self.debug_assert_cost_invariant();
+    }
+
+    fn pending_step_chips<'a>(
+        &self,
+        model: &'a ShardCostModel,
+        step: &'a PendingTensorStep,
+    ) -> &'a [u32] {
+        step.production_stage_chips
+            .as_deref()
+            .unwrap_or_else(|| model.chips_for_step(step.kind, step.ecall_code))
+    }
+
+    fn set_pending_production_stage_chips(&mut self, chips: Vec<usize>) {
+        let chips = chips
+            .into_iter()
+            .map(|chip| u32::try_from(chip).expect("chip index exceeds u32"))
+            .collect::<Vec<_>>();
+        if let TensorStatePlanMode::Consume(annotations) = &self.tensor_state_plan_mode {
+            let active = self
+                .active_tensor_state
+                .as_ref()
+                .expect("production stage executed outside annotated TensorState segment");
+            let step_index = active
+                .next_step
+                .checked_sub(1)
+                .expect("production stage resolved before its planner step");
+            let expected = annotations[active.annotation_index]
+                .steps
+                .get(step_index)
+                .expect("production stage exceeded annotated TensorState steps");
+            assert_eq!(
+                expected.ecall_code,
+                Some(crate::tensor::TENSOR_PRODUCTION_STAGE_V2),
+                "resolved production stage does not match annotated step"
+            );
+            assert_eq!(
+                expected.production_stage_chips.as_deref(),
+                Some(chips.as_slice()),
+                "resolved production stage chip set drift"
+            );
+            return;
+        }
+        let Some(segment) = self.pending_tensor_segment.as_mut() else {
+            return;
+        };
+        let Some(step) = segment.steps.last_mut() else {
+            return;
+        };
+        if step.ecall_code != Some(crate::tensor::TENSOR_PRODUCTION_STAGE_V2) {
+            return;
+        }
+        step.production_stage_chips = Some(chips.clone());
+        if let Some(outer) = self.pending_tensor_state.as_mut()
+            && let Some(step) = outer.steps.last_mut()
+            && step.ecall_code == Some(crate::tensor::TENSOR_PRODUCTION_STAGE_V2)
+        {
+            step.production_stage_chips = Some(chips);
+        }
+    }
+
+    fn begin_annotated_tensor_state_segment(&mut self) {
+        let TensorStatePlanMode::Consume(annotations) = &self.tensor_state_plan_mode else {
+            unreachable!()
+        };
+        let annotation = annotations[self.tensor_state_annotation_cursor].clone();
+        assert!(
+            self.cost_model.is_some(),
+            "TensorState annotation requires shard cost model"
+        );
+        assert!(
+            annotation.total_cells <= self.max_cell_per_shard,
+            "production TensorState segment layer={} stage={} heads={}..{} requires minimum max_cell_per_shard={} cells, configured cap={}",
+            annotation.layer,
+            annotation.stage,
+            annotation.head_start,
+            annotation.head_start.saturating_add(annotation.head_count),
+            annotation.total_cells,
+            self.max_cell_per_shard
+        );
+        let candidate = self.tensor_segment_candidate(&annotation.steps);
+        if self.cur_step_count > 0
+            && self.candidate_would_exceed_shard_with_steps(candidate, annotation.steps.len())
+        {
+            self.finish_current_shard(annotation.start_cycle);
+        }
+        let candidate = self.tensor_segment_candidate(&annotation.steps);
+        assert!(
+            !self.candidate_would_exceed_shard_with_steps(candidate, annotation.steps.len()),
+            "production TensorState segment layer={} stage={} heads={}..{} requires minimum max_cell_per_shard={} cells, configured cap={}",
+            annotation.layer,
+            annotation.stage,
+            annotation.head_start,
+            annotation.head_start.saturating_add(annotation.head_count),
+            annotation.total_cells,
+            self.max_cell_per_shard
+        );
+        self.active_tensor_state = Some(ActiveTensorStateSegment {
+            annotation_index: self.tensor_state_annotation_cursor,
+            next_step: 0,
+            expected_shard_cost: candidate,
+            events: Vec::new(),
+        });
+    }
+
+    fn admit_annotated_tensor_state_step(&mut self, actual: PendingTensorStep) {
+        let (annotation_index, next_step) = {
+            let active = self
+                .active_tensor_state
+                .as_ref()
+                .expect("active TensorState annotation");
+            (active.annotation_index, active.next_step)
+        };
+        let TensorStatePlanMode::Consume(annotations) = &self.tensor_state_plan_mode else {
+            unreachable!()
+        };
+        let annotation_len = annotations[annotation_index].steps.len();
+        let annotation_start = annotations[annotation_index].start_cycle;
+        let annotation_end = annotations[annotation_index].end_cycle;
+        let expected = annotations[annotation_index]
+            .steps
+            .get(next_step)
+            .expect("TensorState execution exceeded annotated end")
+            .clone();
+        assert_eq!(
+            (
+                actual.cycle,
+                actual.kind,
+                actual.ecall_code,
+                actual.generic_cells
+            ),
+            (
+                expected.cycle,
+                expected.kind,
+                expected.ecall_code,
+                expected.generic_cells
+            ),
+            "TensorState AOT execution drift at annotated step {next_step}"
+        );
+        self.admit_tensor_step_without_split(expected);
+        let active = self.active_tensor_state.as_mut().unwrap();
+        active.next_step += 1;
+        if active.next_step == annotation_len {
+            assert_eq!(
+                actual.cycle, annotation_end,
+                "TensorState annotated end-cycle drift"
+            );
+            assert_eq!(
+                self.cur_cells, active.expected_shard_cost,
+                "TensorState annotated shard-cost drift"
+            );
+            self.admitted_tensor_segments.push(TensorSegmentPlan {
+                shard_id: self.shard_id,
+                start_cycle: annotation_start,
+                end_cycle: annotation_end,
+                step_count: annotation_len,
+                shard_cost_after_admission: self.cur_cells,
+                prefix_core_cost: self.cur_cells,
+            });
+            self.tensor_state_annotation_cursor += 1;
+        }
+    }
+
+    fn observe_tensor_state_event(&mut self, event: TensorStateEvent) {
+        if matches!(self.tensor_state_plan_mode, TensorStatePlanMode::Collect) {
+            if event.code == crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2 {
+                assert!(
+                    self.pending_tensor_state.is_none(),
+                    "nested production TensorState segment"
+                );
+                let first = self
+                    .pending_tensor_segment
+                    .as_ref()
+                    .and_then(|segment| segment.steps.last())
+                    .expect("projection TensorState begin has no planner step")
+                    .clone();
+                self.pending_tensor_state = Some(PendingTensorStateSegment {
+                    identity: event,
+                    steps: vec![first],
+                    events: vec![event],
+                });
+                return;
+            }
+            let outer = self
+                .pending_tensor_state
+                .as_mut()
+                .expect("production TensorState stage/export without matching import");
+            outer.events.push(event);
+            if event.code == crate::tensor::TENSOR_PRODUCTION_EXPORT_END_V2 {
+                let outer = self.pending_tensor_state.take().unwrap();
+                self.finish_collected_tensor_state(outer);
+            }
+            return;
+        }
+        if let Some(active) = self.active_tensor_state.as_mut() {
+            active.events.push(event);
+            let TensorStatePlanMode::Consume(annotations) = &self.tensor_state_plan_mode else {
+                unreachable!()
+            };
+            let annotation = &annotations[active.annotation_index];
+            if active.next_step == annotation.steps.len()
+                && active.events.len() == annotation.events.len()
+            {
+                assert_eq!(
+                    active.events, annotation.events,
+                    "TensorState descriptor/event drift"
+                );
+                self.active_tensor_state = None;
+            }
+        }
+    }
+
+    fn finish_collected_tensor_state(&mut self, outer: PendingTensorStateSegment) {
+        validate_tensor_state_events(outer.identity, &outer.events);
+        let model = self
+            .cost_model
+            .as_ref()
+            .expect("TensorState collection requires shard cost model");
+        let mut counts = vec![0u64; model.chip_count()];
+        for step in &outer.steps {
+            for &chip in self.pending_step_chips(model, step) {
+                counts[chip as usize] = counts[chip as usize]
+                    .checked_add(1)
+                    .expect("TensorState chip count overflow");
+            }
+        }
+        let total_cells = model.shard_cost(&counts);
+        self.tensor_state_annotations
+            .push(TensorStateSegmentAnnotation {
+                layer: outer.identity.layer,
+                stage: outer.identity.stage,
+                head_start: outer.identity.head_start,
+                head_count: outer.identity.head_count,
+                start_cycle: outer.steps.first().unwrap().cycle,
+                end_cycle: outer.steps.last().unwrap().cycle,
+                total_cells,
+                steps: outer.steps,
+                events: outer.events,
+            });
     }
 
     fn preview_modeled_chips(&self, chips: &[usize]) -> (u64, u64, u64, u64) {
@@ -1651,6 +2065,21 @@ impl ShardPlanBuilder {
             self.pending_tensor_segment.is_none(),
             "unterminated TensorBus IMPORT_BEGIN in shard planner"
         );
+        assert!(
+            self.pending_tensor_state.is_none(),
+            "EOF while production TensorState segment is active"
+        );
+        assert!(
+            self.active_tensor_state.is_none(),
+            "EOF before annotated production TensorState end"
+        );
+        if let TensorStatePlanMode::Consume(annotations) = &self.tensor_state_plan_mode {
+            assert_eq!(
+                self.tensor_state_annotation_cursor,
+                annotations.len(),
+                "not every TensorState annotation was consumed"
+            );
+        }
         self.flush_replay_range();
         self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
         self.record_predicted_shard_cost();
@@ -1669,6 +2098,54 @@ impl ShardPlanBuilder {
         {
             self.shard_cycle_boundaries.push(cycle);
         }
+    }
+}
+
+fn validate_tensor_state_events(identity: TensorStateEvent, events: &[TensorStateEvent]) {
+    assert_eq!(
+        events.len(),
+        if identity.stage == ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION {
+            4
+        } else {
+            3
+        },
+        "production TensorState segment event count changed"
+    );
+    let expected_codes = if events.len() == 4 {
+        vec![
+            crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2,
+            crate::tensor::TENSOR_PRODUCTION_STAGE_V2,
+            crate::tensor::TENSOR_PRODUCTION_STAGE_V2,
+            crate::tensor::TENSOR_PRODUCTION_EXPORT_END_V2,
+        ]
+    } else {
+        vec![
+            crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2,
+            crate::tensor::TENSOR_PRODUCTION_STAGE_V2,
+            crate::tensor::TENSOR_PRODUCTION_EXPORT_END_V2,
+        ]
+    };
+    assert_eq!(
+        events.iter().map(|event| event.code).collect::<Vec<_>>(),
+        expected_codes,
+        "production TensorState segment event order changed"
+    );
+    for (index, event) in events.iter().enumerate() {
+        let expected_stage = if events.len() == 4 && index >= 2 {
+            ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_ATTENTION
+        } else {
+            identity.stage
+        };
+        assert_eq!(
+            (event.layer, event.stage, event.head_start, event.head_count),
+            (
+                identity.layer,
+                expected_stage,
+                identity.head_start,
+                identity.head_count
+            ),
+            "production TensorState segment identity changed"
+        );
     }
 }
 
@@ -2638,6 +3115,7 @@ pub struct PreflightTracerConfig {
     step_cell_extractor: Option<Arc<dyn StepCellExtractor>>,
     replay_range_capacity: usize,
     tensor_segment_inner_repetitions: Option<usize>,
+    tensor_state_plan_mode: TensorStatePlanMode,
 }
 
 impl fmt::Debug for PreflightTracer {
@@ -2683,6 +3161,7 @@ impl PreflightTracerConfig {
             step_cell_extractor: None,
             replay_range_capacity: 256 * 1024,
             tensor_segment_inner_repetitions: None,
+            tensor_state_plan_mode: TensorStatePlanMode::Disabled,
         }
     }
 
@@ -2718,6 +3197,19 @@ impl PreflightTracerConfig {
         self
     }
 
+    pub fn pure_aot_prepass(mut self) -> Self {
+        self.tensor_state_plan_mode = TensorStatePlanMode::Collect;
+        self
+    }
+
+    pub fn with_tensor_state_annotations(
+        mut self,
+        annotations: Arc<Vec<TensorStateSegmentAnnotation>>,
+    ) -> Self {
+        self.tensor_state_plan_mode = TensorStatePlanMode::Consume(annotations);
+        self
+    }
+
     pub fn step_cell_extractor(&self) -> Option<Arc<dyn StepCellExtractor>> {
         self.step_cell_extractor.clone()
     }
@@ -2732,6 +3224,7 @@ impl Default for PreflightTracerConfig {
             step_cell_extractor: None,
             replay_range_capacity: 256 * 1024,
             tensor_segment_inner_repetitions: None,
+            tensor_state_plan_mode: TensorStatePlanMode::Disabled,
         }
     }
 }
@@ -2774,6 +3267,7 @@ impl PreflightTracer {
         );
         planner.set_replay_range_capacity(config.replay_range_capacity);
         planner.set_tensor_segment_inner_repetitions(config.tensor_segment_inner_repetitions);
+        planner.set_tensor_state_plan_mode(config.tensor_state_plan_mode.clone());
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             pc: Default::default(),
@@ -2948,10 +3442,12 @@ impl PreflightTracer {
                 .as_ref()
                 .map(|extractor| extractor.cells_for_kind(self.last_kind, ecall_code))
                 .unwrap_or(0);
-            let was_pending_tensor_region = planner.pending_tensor_segment.is_some();
+            let was_pending_tensor_region =
+                planner.pending_tensor_segment.is_some() || planner.tensor_state_active();
             planner.observe_tensor_segment_step(self.cycle, self.last_kind, ecall_code, step_cells);
             split = planner.shard_id != old_shard;
-            let is_pending_tensor_region = planner.pending_tensor_segment.is_some();
+            let is_pending_tensor_region =
+                planner.pending_tensor_segment.is_some() || planner.tensor_state_active();
             self.direct_tensor_region_active = if is_pending_tensor_region {
                 true
             } else if was_pending_tensor_region {
@@ -3417,7 +3913,85 @@ impl Tracer for PreflightTracer {
         for op in effects.iter_mem_ops_mut() {
             self.record_memory_access(op.addr, op.previous_cycle);
         }
-        effects.finalize(self);
+        let witness = effects.finalize(self);
+        let boundary_event =
+            witness
+                .tensor_production_boundary
+                .as_ref()
+                .map(|boundary| TensorStateEvent {
+                    code: match boundary.kind {
+                        crate::tensor::TensorProductionBoundaryKind::Import => {
+                            crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2
+                        }
+                        crate::tensor::TensorProductionBoundaryKind::Export => {
+                            crate::tensor::TENSOR_PRODUCTION_EXPORT_END_V2
+                        }
+                    },
+                    layer: boundary.layer,
+                    stage: boundary.stage,
+                    head_start: boundary.head_start,
+                    head_count: boundary.head_count,
+                });
+        let stage_event =
+            witness
+                .tensor_production_full_layer
+                .as_ref()
+                .map(|stage| TensorStateEvent {
+                    code: crate::tensor::TENSOR_PRODUCTION_STAGE_V2,
+                    layer: stage.layer,
+                    stage: stage.stage,
+                    head_start: stage.head_start,
+                    head_count: stage.head_count,
+                });
+        if let Some(stage) = witness.tensor_production_full_layer.as_ref() {
+            if let Some(chips) = self
+                .config
+                .step_cell_extractor
+                .as_ref()
+                .and_then(|extractor| {
+                    extractor.production_stage_chips(
+                        stage.stage,
+                        stage.head_start,
+                        stage.head_count,
+                    )
+                })
+            {
+                if let Some(planner) = self.planner.as_mut() {
+                    tracing::info!(
+                        target: "ceno_pipeline",
+                        phase = "production_stage_cost",
+                        stage = stage.stage,
+                        head_start = stage.head_start,
+                        head_count = stage.head_count,
+                        chip_count = chips.len(),
+                        "planned production stage chip set"
+                    );
+                    planner.set_pending_production_stage_chips(chips);
+                }
+            }
+        }
+        if let Some(planner) = self.planner.as_mut() {
+            if let Some(event) = boundary_event {
+                planner.observe_tensor_state_event(event);
+            }
+            if let Some(event) = stage_event {
+                planner.observe_tensor_state_event(event);
+            }
+        }
+    }
+
+    fn pure_aot_prepass(&self) -> bool {
+        !matches!(
+            self.config.tensor_state_plan_mode,
+            TensorStatePlanMode::Disabled
+        )
+    }
+
+    fn prepass_tracks_memory_ranges(&self) -> bool {
+        matches!(
+            self.config.tensor_state_plan_mode,
+            TensorStatePlanMode::Consume(_)
+        )
     }
 
     #[inline(always)]

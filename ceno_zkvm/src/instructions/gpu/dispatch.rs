@@ -158,12 +158,42 @@ use super::{
 
 /// Transfer and materialize the lookup counters accumulated across this shard.
 pub fn flush_shared_lk_counters() -> Result<Option<Multiplicity<u64>>, ZKVMError> {
+    let audit = std::env::var_os("CENO_TENSOR_SOFTMAX_LK_AUDIT").is_some();
+    if audit {
+        let sums = super::cache::production_softmax_lookup_counter_sums()?;
+        tracing::info!(
+            ?sums,
+            "production softmax lookup counters before shard flush"
+        );
+    }
     let Some(counters) = take_shared_lk_counters() else {
         return Ok(None);
     };
-    info_span!("gpu_shard_lk_d2h")
-        .in_scope(|| gpu_lk_counters_to_multiplicity(counters))
-        .map(Some)
+    let multiplicity =
+        info_span!("gpu_shard_lk_d2h").in_scope(|| gpu_lk_counters_to_multiplicity(counters))?;
+    if audit {
+        use gkr_iop::tables::LookupTable;
+        let dynamic_20 = multiplicity[LookupTable::Dynamic as usize]
+            .iter()
+            .filter(|(key, _)| **key >= 1 << 20)
+            .map(|(_, count)| *count as u64)
+            .sum::<u64>();
+        let middle = multiplicity[LookupTable::LlamaProductionSoftmaxExpMiddle as usize]
+            .values()
+            .map(|count| *count as u64)
+            .sum::<u64>();
+        let high = multiplicity[LookupTable::LlamaProductionSoftmaxExpHigh as usize]
+            .values()
+            .map(|count| *count as u64)
+            .sum::<u64>();
+        tracing::info!(
+            dynamic_20,
+            middle,
+            high,
+            "production softmax multiplicity after shard D2H"
+        );
+    }
+    Ok(Some(multiplicity))
 }
 
 thread_local! {

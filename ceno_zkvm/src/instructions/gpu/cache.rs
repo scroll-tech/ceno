@@ -523,6 +523,43 @@ fn ensure_shard_metadata_cached_inner(
                 fetch_base_pc: counters.fetch_base_pc,
             });
 
+        if crate::scheme::gpu::should_log_gpu_memory() {
+            let lk_bytes = shared_lk_counters.as_ref().map_or(0usize, |counters| {
+                let optional_bytes = [
+                    counters.double_u8.as_ref(),
+                    counters.and_table.as_ref(),
+                    counters.or_table.as_ref(),
+                    counters.xor_table.as_ref(),
+                    counters.ltu_table.as_ref(),
+                    counters.pow_table.as_ref(),
+                    counters.llama_softmax_exp3.as_ref(),
+                    counters.llama_softmax_exp4.as_ref(),
+                    counters.llama_production_softmax_middle.as_ref(),
+                    counters.llama_production_softmax_high.as_ref(),
+                    counters.fetch.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                .map(|buffer| buffer.len() * std::mem::size_of::<u32>())
+                .sum::<usize>();
+                counters.dynamic.len() * std::mem::size_of::<u32>() + optional_bytes
+            });
+            tracing::info!(
+                target: "ceno_pipeline",
+                phase = "gpu_shard_metadata_ownership",
+                shard_id,
+                ec_bytes = ec_u32s * std::mem::size_of::<u32>(),
+                address_bytes = addr_capacity * std::mem::size_of::<u32>(),
+                lookup_bytes = lk_bytes,
+                scalar_and_counter_bytes = std::mem::size_of::<GpuShardScalars>()
+                    + std::mem::size_of::<u64>()
+                    + 2 * std::mem::size_of::<u32>()
+                    + 5 * std::mem::size_of::<u32>(),
+                "GPU shard metadata allocation ownership"
+            );
+            crate::scheme::gpu::log_gpu_device_state("shard_metadata_ready");
+        }
+
         tracing::info!(
             "[GPU shard] shard_id={}: shared buffers allocated: ec_capacity={}, addr_capacity={}",
             shard_id,
@@ -586,6 +623,52 @@ pub(crate) fn with_cached_shard_meta<R>(f: impl FnOnce(&ShardDeviceBuffers) -> R
         let cache = cache.borrow();
         let c = cache.as_ref().expect("shard metadata not uploaded");
         f(&c.device_bufs)
+    })
+}
+
+pub(crate) fn production_softmax_lookup_counter_sums() -> Result<(u64, u64, u64), ZKVMError> {
+    SHARD_META_CACHE.with(|cache| {
+        let cache = cache.borrow();
+        let counters = cache
+            .as_ref()
+            .and_then(|cached| cached.shared_lk_counters.as_ref())
+            .ok_or_else(|| {
+                ZKVMError::InvalidWitness(
+                    "production softmax lookup counter audit has no shard owner".into(),
+                )
+            })?;
+        let dynamic = counters.dynamic.to_vec().map_err(|error| {
+            ZKVMError::InvalidWitness(
+                format!("production softmax dynamic counter audit failed: {error}").into(),
+            )
+        })?;
+        let middle = counters
+            .llama_production_softmax_middle
+            .as_ref()
+            .expect("production softmax middle counter was allocated")
+            .to_vec()
+            .map_err(|error| {
+                ZKVMError::InvalidWitness(
+                    format!("production softmax middle counter audit failed: {error}").into(),
+                )
+            })?;
+        let high = counters
+            .llama_production_softmax_high
+            .as_ref()
+            .expect("production softmax high counter was allocated")
+            .to_vec()
+            .map_err(|error| {
+                ZKVMError::InvalidWitness(
+                    format!("production softmax high counter audit failed: {error}").into(),
+                )
+            })?;
+        let dynamic_20 = dynamic[(1 << 20)..]
+            .iter()
+            .map(|&count| u64::from(count))
+            .sum();
+        let middle = middle.iter().map(|&count| u64::from(count)).sum();
+        let high = high.iter().map(|&count| u64::from(count)).sum();
+        Ok((dynamic_20, middle, high))
     })
 }
 

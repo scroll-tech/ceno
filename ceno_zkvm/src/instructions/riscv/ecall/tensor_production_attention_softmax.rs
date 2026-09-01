@@ -23,8 +23,11 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-const ROWS: usize = 1 << 24;
-const SHIFT_ROWS: usize = 1 << 16;
+const HEAD_GROUP_BITS: usize = ceno_emul::tensor::production_attention::MATRIX_GROUP_BITS;
+const ROW_BITS: usize = 22 + HEAD_GROUP_BITS;
+const SHIFT_BITS: usize = ROW_BITS;
+const ROWS: usize = 1 << ROW_BITS;
+const SHIFT_ROWS: usize = 1 << SHIFT_BITS;
 const SEQUENCE: u64 = 2048;
 const SCORE_VERSION_OFFSET: u64 = 1;
 const PROBABILITY_VERSION_OFFSET: u64 = 2;
@@ -51,7 +54,7 @@ fn tensor_space_record<E: ExtensionField>(
 }
 
 pub struct TensorProductionSoftmaxCoreInstruction<E, const GROUP: usize>(PhantomData<E>);
-pub struct TensorProductionShiftCoreInstruction<E>(PhantomData<E>);
+pub struct TensorProductionShiftCoreInstruction<E, const GROUP: usize>(PhantomData<E>);
 
 #[derive(Debug)]
 pub struct TensorProductionShiftCoreConfig {
@@ -108,7 +111,9 @@ impl TensorProductionShiftCoreConfig {
     }
 }
 
-impl<E: ExtensionField> Instruction<E> for TensorProductionShiftCoreInstruction<E> {
+impl<E: ExtensionField, const GROUP: usize> Instruction<E>
+    for TensorProductionShiftCoreInstruction<E, GROUP>
+{
     type InstructionConfig = TensorProductionShiftCoreConfig;
     type InsnType = InsnKind;
 
@@ -117,7 +122,9 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionShiftCoreInstruction<
     }
 
     fn name() -> String {
-        "TensorAttentionShift".to_owned()
+        let start = GROUP * ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+        let end = start + ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT - 1;
+        format!("TensorAttentionShiftHeads{start:02}_{end:02}")
     }
 
     fn construct_circuit(
@@ -131,11 +138,17 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionShiftCoreInstruction<
         let output_version = cb.create_witin(|| "production_shift_output_version");
         let query = cb.create_structural_witin(
             || "production_shift_query",
-            StructuralWitInType::InnerRepeatingIncrementalSequence { k: 11, n: 16 },
+            StructuralWitInType::OuterRepeatingIncrementalSequence {
+                k: 11,
+                n: SHIFT_BITS,
+            },
         );
         let head = cb.create_structural_witin(
             || "production_shift_head",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 11, n: 16 },
+            StructuralWitInType::OuterRepeatingIncrementalSequence {
+                k: 22,
+                n: SHIFT_BITS,
+            },
         );
         let selector = cb.create_placeholder_structural_witin(|| "selector");
         let index = head.expr() * SEQUENCE + query.expr();
@@ -291,11 +304,15 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
     }
 
     fn name() -> String {
-        assert!(GROUP < 8, "invalid production softmax group");
+        assert!(
+            GROUP < ceno_emul::tensor::production_attention::CIRCUITS,
+            "invalid production softmax group"
+        );
+        let start = GROUP * ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
         format!(
             "TensorAttentionSoftmaxHeads{:02}_{:02}",
-            GROUP * 4,
-            GROUP * 4 + 3
+            start,
+            start + ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT - 1
         )
     }
 
@@ -362,7 +379,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
 
         let key = cb.create_structural_witin(
             || "production_softmax_key",
-            StructuralWitInType::InnerRepeatingIncrementalSequence { k: 11, n: 24 },
+            StructuralWitInType::InnerRepeatingIncrementalSequence { k: 11, n: ROW_BITS },
         );
         let query = cb.create_structural_witin(
             || "production_softmax_query",
@@ -370,7 +387,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         );
         let head = cb.create_structural_witin(
             || "production_softmax_head",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 22, n: 24 },
+            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 22, n: ROW_BITS },
         );
         let selector = cb.create_placeholder_structural_witin(|| "selector");
         cb.require_equal(
@@ -390,8 +407,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         let output_id_lo = cb.create_witin(|| "production_softmax_output_id_lo");
         let output_id_hi = cb.create_witin(|| "production_softmax_output_id_hi");
         let output_version = cb.create_witin(|| "production_softmax_output_version");
-        let global_head = head.expr() + E::BaseField::from_usize(GROUP * 4).expr();
-        let index = (global_head.clone() * SEQUENCE + query.expr()) * SEQUENCE + key.expr();
+        let index = (head.expr() * SEQUENCE + query.expr()) * SEQUENCE + key.expr();
         cb.read_record(
             || "production_softmax_score_read",
             RAMType::Custom,
@@ -404,7 +420,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
                 score.expr(),
             ),
         )?;
-        let shift_index = global_head.clone() * SEQUENCE + query.expr();
+        let shift_index = head.expr() * SEQUENCE + query.expr();
         cb.read_record(
             || "production_softmax_shift_read",
             RAMType::Custom,
@@ -482,5 +498,5 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
     }
 }
 
-const _: () = assert!(ROWS == 1 << 24);
-const _: () = assert!(SHIFT_ROWS == 1 << 16);
+const _: () = assert!(ROWS == ceno_emul::tensor::production_attention::GROUP_SCORE_ROWS);
+const _: () = assert!(SHIFT_ROWS == ceno_emul::tensor::production_attention::GROUP_SCORE_ROWS);

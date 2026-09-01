@@ -2072,6 +2072,15 @@ impl AotProgram {
             aot_plan_commit_diagnostic_state("HOST_BEFORE_NATIVE", "host", &context);
         }
         let started = Instant::now();
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "aot_native_entry_begin",
+            trace_mode,
+            max_steps,
+            native_max_steps,
+            start_pc = vm.get_pc().0,
+            "AOT native entry begin"
+        );
         let mut native_watchdog = AotNativeDiagnosticWatchdog::start(
             diagnostic_role,
             &self.cache_identity,
@@ -2087,6 +2096,16 @@ impl AotProgram {
                 vm.get_pc().0,
             )
         };
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "aot_native_entry_return",
+            trace_mode,
+            native_status,
+            executed_steps,
+            elapsed_ms = started.elapsed().as_millis(),
+            end_pc = vm.get_pc().0,
+            "AOT native entry returned"
+        );
         if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
             aot_plan_commit_diagnostic_state("HOST_AFTER_NATIVE", "host", &context);
         }

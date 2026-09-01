@@ -29,6 +29,8 @@ fn build_elfs() {
     let guest_target_str = guest_target.to_string_lossy().into_owned();
     let mut args = vec!["build", "--examples", "--target-dir", &guest_target_str];
     let llama_tiny = std::env::var_os("CARGO_FEATURE_LLAMA_TINY").is_some();
+    let production_heads_1 = std::env::var_os("CARGO_FEATURE_PRODUCTION_HEADS_1").is_some();
+    let production_heads_2 = std::env::var_os("CARGO_FEATURE_PRODUCTION_HEADS_2").is_some();
     let resident_block_1 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_1").is_some();
     let resident_block_2 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_2").is_some();
     let resident_block_4 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_4").is_some();
@@ -42,6 +44,16 @@ fn build_elfs() {
     );
     if llama_tiny {
         args.extend(["--features", "llama-tiny"]);
+    }
+    assert!(
+        !(production_heads_1 && production_heads_2),
+        "production head-count features are mutually exclusive"
+    );
+    if production_heads_1 {
+        args.extend(["--features", "production-heads-1"]);
+    }
+    if production_heads_2 {
+        args.extend(["--features", "production-heads-2"]);
     }
     if resident_block_1 {
         args.extend(["--features", "resident-block-1"]);
@@ -85,6 +97,12 @@ fn build_elfs() {
         let mut ceno_args = vec!["ceno", "build", "--example", example];
         if llama_tiny {
             ceno_args.extend(["--features", "llama-tiny"]);
+        }
+        if production_heads_1 {
+            ceno_args.extend(["--features", "production-heads-1"]);
+        }
+        if production_heads_2 {
+            ceno_args.extend(["--features", "production-heads-2"]);
         }
         if resident_block_1 {
             ceno_args.extend(["--features", "resident-block-1"]);

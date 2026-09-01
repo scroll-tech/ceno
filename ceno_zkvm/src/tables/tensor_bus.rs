@@ -30,7 +30,18 @@ const KEY_LOCAL_SHARD_CYCLE: usize = 23;
 const KEY_ORDINAL: usize = 24;
 const TENSOR_BUS_SEGMENT_EVENTS: usize = 2;
 const TENSOR_LLAMA2_HIDDEN_WORDS: u32 = 2048 * 4096;
+const TENSOR_LLAMA2_HEAD_WORDS: u32 = 2048 * 128;
+const PRODUCTION_IMPORT_LAYER: usize = 3;
+const PRODUCTION_IMPORT_STAGE: usize = 8;
+const PRODUCTION_IMPORT_HEAD_RANGE: usize = 9;
+const PRODUCTION_EXPORT_LAYER: usize = 3;
+const PRODUCTION_EXPORT_OUTPUT_WORDS: usize = 6;
+const PRODUCTION_EXPORT_STAGE: usize = 7;
+const PRODUCTION_EXPORT_HEAD_RANGE: usize = 8;
+const EVENT_BYTE_COUNT: usize = 10;
+const EVENT_WORD_COUNT: usize = 11;
 const _: () = assert!(TENSOR_LLAMA2_HIDDEN_WORDS == 8_388_608);
+const _: () = assert!(TENSOR_LLAMA2_HEAD_WORDS == 262_144);
 
 /// A canonical event is stored on the syscall witness at execution time and
 /// must exactly match the custom write record in TensorBusFixedEcall.
@@ -106,6 +117,30 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
         if section[0][2] != section[1][2] {
             return Err(tensor_bus_error("TensorBus boundary ABI mismatch"));
         }
+        if production {
+            if section[0][PRODUCTION_IMPORT_LAYER] != section[1][PRODUCTION_EXPORT_LAYER] {
+                return Err(tensor_bus_error("production TensorBus layer mismatch"));
+            }
+            let import_stage = section[0][PRODUCTION_IMPORT_STAGE];
+            let export_stage = section[1][PRODUCTION_EXPORT_STAGE];
+            if !matches!((import_stage, export_stage), (0, 1) | (2, 2)) {
+                return Err(tensor_bus_error("production TensorBus stage mismatch"));
+            }
+            if section[0][PRODUCTION_IMPORT_HEAD_RANGE] != section[1][PRODUCTION_EXPORT_HEAD_RANGE]
+            {
+                return Err(tensor_bus_error("production TensorBus head-range mismatch"));
+            }
+            let stage =
+                ceno_emul::tensor::production_attention::ProductionStage::from_raw(import_stage)
+                    .map_err(|_| tensor_bus_error("production TensorBus stage is invalid"))?;
+            let (head_start, head_count) =
+                ceno_emul::tensor::production_attention::decode_head_range(
+                    section[0][PRODUCTION_IMPORT_HEAD_RANGE],
+                );
+            stage
+                .validate_range(head_start, head_count)
+                .map_err(|_| tensor_bus_error("production TensorBus head range is invalid"))?;
+        }
         for (record, event) in section.iter().enumerate() {
             let abi_supported = if production {
                 event[2] == ceno_emul::tensor::TENSOR_ABI_V2
@@ -159,7 +194,18 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
                     }
                 }
                 code if code == TensorProductionImportBeginV2Spec::CODE => {
-                    if event[5] != TENSOR_LLAMA2_HIDDEN_WORDS || event[10] != event[5] * 4 {
+                    let stage = event[PRODUCTION_IMPORT_STAGE];
+                    let head_count = event[PRODUCTION_IMPORT_HEAD_RANGE] >> 16;
+                    let expected_words = match stage {
+                        0 => TENSOR_LLAMA2_HIDDEN_WORDS,
+                        1 => 3 * head_count * TENSOR_LLAMA2_HEAD_WORDS,
+                        2 => 2 * TENSOR_LLAMA2_HIDDEN_WORDS,
+                        _ => 0,
+                    };
+                    if expected_words == 0
+                        || event[EVENT_WORD_COUNT] != expected_words
+                        || event[EVENT_BYTE_COUNT] != expected_words * 4
+                    {
                         return Err(tensor_bus_error(
                             "production TensorBus import metadata mismatch",
                         ));
@@ -172,7 +218,19 @@ pub fn verify_tensor_bus_events(events: &[TensorBusEvent]) -> Result<(), ZKVMErr
                     }
                 }
                 code if code == TensorProductionExportEndV2Spec::CODE => {
-                    if event[6] != TENSOR_LLAMA2_HIDDEN_WORDS || event[10] != event[6] * 4 {
+                    let stage = event[PRODUCTION_EXPORT_STAGE];
+                    let head_count = event[PRODUCTION_EXPORT_HEAD_RANGE] >> 16;
+                    let expected_words = match stage {
+                        0 => 3 * TENSOR_LLAMA2_HIDDEN_WORDS,
+                        1 => head_count * TENSOR_LLAMA2_HEAD_WORDS,
+                        2 => TENSOR_LLAMA2_HIDDEN_WORDS,
+                        _ => 0,
+                    };
+                    if expected_words == 0
+                        || event[PRODUCTION_EXPORT_OUTPUT_WORDS] != expected_words
+                        || event[EVENT_WORD_COUNT] != expected_words
+                        || event[EVENT_BYTE_COUNT] != expected_words * 4
+                    {
                         return Err(tensor_bus_error(
                             "production TensorBus export metadata mismatch",
                         ));
@@ -223,6 +281,9 @@ pub fn verify_atomic_tensor_bus_shard_for_preflight(
 pub struct TensorBusConfig<E: ExtensionField> {
     event: [[WitIn; TENSOR_BUS_EVENT_WORDS]; TENSOR_BUS_SEGMENT_EVENTS],
     production: WitIn,
+    production_stage: [WitIn; 3],
+    production_head_start: WitIn,
+    production_head_count: WitIn,
     _marker: std::marker::PhantomData<E>,
 }
 
@@ -249,6 +310,25 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
             });
         let production = cb.create_witin(|| "tensor_bus_production");
         cb.assert_bit(|| "tensor_bus_production_bit", production.expr())?;
+        let production_stage = std::array::from_fn(|stage| {
+            cb.create_witin(|| format!("tensor_bus_production_stage_{stage}"))
+        });
+        for (stage, selector) in production_stage.iter().enumerate() {
+            cb.assert_bit(
+                || format!("tensor_bus_production_stage_{stage}_bit"),
+                selector.expr(),
+            )?;
+        }
+        cb.require_equal(
+            || "tensor_bus_production_one_stage",
+            production_stage
+                .iter()
+                .map(|selector| selector.expr())
+                .sum(),
+            production.expr(),
+        )?;
+        let production_head_start = cb.create_witin(|| "tensor_bus_production_head_start");
+        let production_head_count = cb.create_witin(|| "tensor_bus_production_head_count");
         for (record, (legacy_code, production_code)) in [
             (
                 ceno_emul::TensorImportBeginV1Spec::CODE,
@@ -319,32 +399,123 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
             (E::BaseField::ONE.expr() - production.expr())
                 * (event[0][5].expr() - event[1][6].expr()),
         )?;
+
+        // Production V2 descriptors have distinct layouts. A fused attention
+        // segment imports Hidden as projection stage 0 and exports its Context
+        // slice as attention stage 1; the post-FFN segment is stage 2 at both
+        // boundaries. Bind that pair and derive transfer sizes from the
+        // resulting segment kind. In particular, import word 5 is
+        // `input1_ptr`, not a length.
         cb.require_zero(
-            || "tensor_bus_production_transfer_words",
+            || "tensor_bus_production_layer",
             production.expr()
-                * (event[0][5].expr() - E::BaseField::from_u32(3).expr() * event[1][6].expr()),
+                * (event[0][PRODUCTION_IMPORT_LAYER].expr()
+                    - event[1][PRODUCTION_EXPORT_LAYER].expr()),
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_import_stage",
+            production.expr() * event[0][PRODUCTION_IMPORT_STAGE].expr()
+                - E::BaseField::from_u32(2).expr() * production_stage[2].expr(),
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_export_stage",
+            production.expr() * event[1][PRODUCTION_EXPORT_STAGE].expr()
+                - production_stage[1].expr()
+                - E::BaseField::from_u32(2).expr() * production_stage[2].expr(),
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_stage_zero_unused",
+            production_stage[0].expr(),
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_head_range",
+            production.expr()
+                * (event[0][PRODUCTION_IMPORT_HEAD_RANGE].expr()
+                    - event[1][PRODUCTION_EXPORT_HEAD_RANGE].expr()),
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_head_range_decode",
+            production.expr()
+                * (event[0][PRODUCTION_IMPORT_HEAD_RANGE].expr()
+                    - production_head_start.expr()
+                    - E::BaseField::from_u32(1 << 16).expr() * production_head_count.expr()),
+        )?;
+        let whole_stage = production_stage[2].expr();
+        cb.require_zero(
+            || "tensor_bus_production_whole_stage_head_start",
+            whole_stage.clone() * production_head_start.expr(),
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_whole_stage_head_count",
+            whole_stage * (production_head_count.expr() - E::BaseField::from_u32(32).expr()),
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_attention_head_count",
+            production_stage[1].expr()
+                * (production_head_count.expr()
+                    - E::BaseField::from_usize(
+                        ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT,
+                    )
+                    .expr()),
+        )?;
+        let import_words = production_stage[1].expr()
+            * E::BaseField::from_u32(TENSOR_LLAMA2_HIDDEN_WORDS).expr()
+            + production_stage[2].expr()
+                * E::BaseField::from_u32(2 * TENSOR_LLAMA2_HIDDEN_WORDS).expr();
+        let export_words = production_stage[1].expr()
+            * production_head_count.expr()
+            * E::BaseField::from_u32(TENSOR_LLAMA2_HEAD_WORDS).expr()
+            + production_stage[2].expr()
+                * E::BaseField::from_u32(TENSOR_LLAMA2_HIDDEN_WORDS).expr();
+        cb.require_zero(
+            || "tensor_bus_production_import_words",
+            production.expr() * event[0][EVENT_WORD_COUNT].expr() - import_words,
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_export_words",
+            production.expr() * event[1][EVENT_WORD_COUNT].expr() - export_words,
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_export_descriptor_words",
+            production.expr()
+                * (event[1][PRODUCTION_EXPORT_OUTPUT_WORDS].expr()
+                    - event[1][EVENT_WORD_COUNT].expr()),
         )?;
         let four = E::BaseField::from_u32(4).expr();
-        cb.require_equal(
-            || "tensor_bus_import_byte_len",
-            event[0][10].expr(),
-            four.clone() * event[0][5].expr(),
+        cb.require_zero(
+            || "tensor_bus_legacy_import_byte_len",
+            (E::BaseField::ONE.expr() - production.expr())
+                * (event[0][EVENT_BYTE_COUNT].expr() - four.clone() * event[0][5].expr()),
         )?;
-        cb.require_equal(
-            || "tensor_bus_export_byte_len",
-            event[1][10].expr(),
-            four * event[1][6].expr(),
+        cb.require_zero(
+            || "tensor_bus_legacy_export_byte_len",
+            (E::BaseField::ONE.expr() - production.expr())
+                * (event[1][EVENT_BYTE_COUNT].expr() - four.clone() * event[1][6].expr()),
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_import_byte_len",
+            production.expr()
+                * (event[0][EVENT_BYTE_COUNT].expr()
+                    - four.clone() * event[0][EVENT_WORD_COUNT].expr()),
+        )?;
+        cb.require_zero(
+            || "tensor_bus_production_export_byte_len",
+            production.expr()
+                * (event[1][EVENT_BYTE_COUNT].expr() - four * event[1][EVENT_WORD_COUNT].expr()),
         )?;
         // The complete 25-word event relation is claim-authoritative through
         // custom-RAM product reads.  Do not compare it to PublicValues here:
         // an Instance scalar in this GKR table is unsupported, and a host
         // supplied public tuple would not make the relation any stronger.
-        // The verifier instead requires this Core proof whenever the two
-        // boundary producer proofs are present (and vice versa); the product relation
-        // binds every event word, including the shard/local-cycle/ordinal key.
+        // The ordinary custom read/write product relation binds the Core to
+        // both producer proofs and every event word, including the
+        // shard/local-cycle/ordinal key.
         Ok(TensorBusConfig {
             event,
             production,
+            production_stage,
+            production_head_start,
+            production_head_count,
             _marker: std::marker::PhantomData,
         })
     }
@@ -411,7 +582,7 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
         verify_atomic_tensor_bus_shard(events)?;
         assert_eq!(
             num_witin,
-            TENSOR_BUS_SEGMENT_EVENTS * TENSOR_BUS_EVENT_WORDS + 1
+            TENSOR_BUS_SEGMENT_EVENTS * TENSOR_BUS_EVENT_WORDS + 6
         );
         // The default TableCircuit builder adds exactly one prefix selector.
         assert_eq!(num_structural_witin, 1);
@@ -421,10 +592,22 @@ impl<E: ExtensionField> TableCircuit<E> for TensorBusCircuit<E> {
         let structural = P3RowMajorMatrix::new(vec![E::BaseField::ONE; sections], 1);
         for (section, section_events) in events.chunks_exact(TENSOR_BUS_SEGMENT_EVENTS).enumerate()
         {
+            let production =
+                section_events[0][1] == ceno_emul::TensorProductionImportBeginV2Spec::CODE;
             values.values[section * num_witin + config.production.id as usize] =
-                E::BaseField::from_u32(u32::from(
-                    section_events[0][1] == ceno_emul::TensorProductionImportBeginV2Spec::CODE,
-                ));
+                E::BaseField::from_u32(u32::from(production));
+            if production {
+                let stage = usize::try_from(section_events[1][PRODUCTION_EXPORT_STAGE])
+                    .expect("production TensorBus export stage does not fit usize");
+                assert!(stage < config.production_stage.len());
+                values.values[section * num_witin + config.production_stage[stage].id as usize] =
+                    E::BaseField::ONE;
+                let packed = section_events[0][PRODUCTION_IMPORT_HEAD_RANGE];
+                values.values[section * num_witin + config.production_head_start.id as usize] =
+                    E::BaseField::from_u32(packed & 0xffff);
+                values.values[section * num_witin + config.production_head_count.id as usize] =
+                    E::BaseField::from_u32(packed >> 16);
+            }
             for (record, event) in section_events.iter().enumerate() {
                 for (word, value) in config.event[record].iter().zip(event) {
                     values.values[section * num_witin + word.id as usize] =

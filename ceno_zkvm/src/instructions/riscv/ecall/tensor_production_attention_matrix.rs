@@ -19,7 +19,7 @@ use gkr_iop::{
     tables::LookupTable,
 };
 use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitIn};
-use p3::field::PrimeCharacteristicRing;
+use p3::field::{Field, PrimeCharacteristicRing};
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -30,10 +30,12 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-const ROWS: usize = 1 << 24;
+const HEAD_GROUP_BITS: usize = ceno_emul::tensor::production_attention::MATRIX_GROUP_BITS;
+const ROW_BITS: usize = 22 + HEAD_GROUP_BITS;
+const ROWS: usize = 1 << ROW_BITS;
 const SEQUENCE: u64 = 2048;
 const HEAD_DIM: u64 = 128;
-const HEADS_PER_CORE: u64 = 4;
+const HEADS_PER_CORE: u64 = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT as u64;
 const CONTEXT_WORDS: u64 = 1 << 23;
 const SCORE_VERSION_OFFSET: u64 = 1;
 const PROBABILITY_VERSION_OFFSET: u64 = 2;
@@ -179,7 +181,7 @@ pub struct TensorProductionPvCoreConfig {
     pub(crate) remainder: WitIn,
     probability_low16: WitIn,
     probability_mid16: WitIn,
-    probability_high8: WitIn,
+    probability_high9: WitIn,
     w_sign: WitIn,
     w_low16: WitIn,
     w_high15: WitIn,
@@ -187,11 +189,6 @@ pub struct TensorProductionPvCoreConfig {
     q_limbs: [WitIn; 4],
     remainder_low16: WitIn,
     remainder_high4: WitIn,
-    axis: WitIn,
-    row_low7: WitIn,
-    row_high4: WitIn,
-    head: WitIn,
-    tile: WitIn,
     row_high_is_zero: WitIn,
     row_high_inverse: WitIn,
     row_high_is_last: WitIn,
@@ -201,11 +198,7 @@ pub struct TensorProductionPvCoreConfig {
     tile_is_last: WitIn,
     tile_last_inverse: WitIn,
     accumulator_q_before: WitIn,
-    accumulator_q_before_sign: WitIn,
-    accumulator_q_before_limbs: [WitIn; 4],
     accumulator_r_before: WitIn,
-    accumulator_r_before_low16: WitIn,
-    accumulator_r_before_high4: WitIn,
     accumulator_q_after: WitIn,
     accumulator_q_after_sign: WitIn,
     accumulator_q_after_limbs: [WitIn; 4],
@@ -214,8 +207,6 @@ pub struct TensorProductionPvCoreConfig {
     accumulator_r_after_high4: WitIn,
     carry: WitIn,
     final_q: WitIn,
-    final_q_sign: WitIn,
-    final_q_limbs: [WitIn; 4],
     final_remainder: WitIn,
     final_remainder_low16: WitIn,
     final_remainder_high4: WitIn,
@@ -227,6 +218,11 @@ pub struct TensorProductionPvCoreConfig {
     output_id_hi: WitIn,
     output_version: WitIn,
     physical_index: StructuralWitIn,
+    axis: StructuralWitIn,
+    row_low7: StructuralWitIn,
+    row_high4: StructuralWitIn,
+    head: StructuralWitIn,
+    tile: StructuralWitIn,
     matrix_a_selector: StructuralWitIn,
     matrix_w_selector: StructuralWitIn,
     matrix_output_selector: StructuralWitIn,
@@ -252,7 +248,7 @@ impl TensorProductionPvCoreConfig {
                 id(self.remainder),
                 id(self.probability_low16),
                 id(self.probability_mid16),
-                id(self.probability_high8),
+                id(self.probability_high9),
                 id(self.w_sign),
                 id(self.w_low16),
                 id(self.w_high15),
@@ -263,11 +259,6 @@ impl TensorProductionPvCoreConfig {
                 id(self.q_limbs[3]),
                 id(self.remainder_low16),
                 id(self.remainder_high4),
-                id(self.axis),
-                id(self.row_low7),
-                id(self.row_high4),
-                id(self.head),
-                id(self.tile),
                 id(self.row_high_is_zero),
                 id(self.row_high_inverse),
                 id(self.row_high_is_last),
@@ -277,14 +268,7 @@ impl TensorProductionPvCoreConfig {
                 id(self.tile_is_last),
                 id(self.tile_last_inverse),
                 id(self.accumulator_q_before),
-                id(self.accumulator_q_before_sign),
-                id(self.accumulator_q_before_limbs[0]),
-                id(self.accumulator_q_before_limbs[1]),
-                id(self.accumulator_q_before_limbs[2]),
-                id(self.accumulator_q_before_limbs[3]),
                 id(self.accumulator_r_before),
-                id(self.accumulator_r_before_low16),
-                id(self.accumulator_r_before_high4),
                 id(self.accumulator_q_after),
                 id(self.accumulator_q_after_sign),
                 id(self.accumulator_q_after_limbs[0]),
@@ -296,11 +280,6 @@ impl TensorProductionPvCoreConfig {
                 id(self.accumulator_r_after_high4),
                 id(self.carry),
                 id(self.final_q),
-                id(self.final_q_sign),
-                id(self.final_q_limbs[0]),
-                id(self.final_q_limbs[1]),
-                id(self.final_q_limbs[2]),
-                id(self.final_q_limbs[3]),
                 id(self.final_remainder),
                 id(self.final_remainder_low16),
                 id(self.final_remainder_high4),
@@ -314,6 +293,11 @@ impl TensorProductionPvCoreConfig {
             ],
             structural: [
                 structural_id(self.physical_index),
+                structural_id(self.axis),
+                structural_id(self.row_low7),
+                structural_id(self.row_high4),
+                structural_id(self.head),
+                structural_id(self.tile),
                 structural_id(self.matrix_a_selector),
                 structural_id(self.matrix_w_selector),
                 structural_id(self.matrix_output_selector),
@@ -326,10 +310,10 @@ impl TensorProductionPvCoreConfig {
                 ZKVMError::InvalidWitness("production PV structural width overflow".into())
             })?,
         };
-        if num_witin != 65
-            || num_structural_witin != 5
+        if num_witin != 48
+            || num_structural_witin != 10
             || map.witness != core::array::from_fn(|index| index as u32)
-            || map.structural != core::array::from_fn(|index| index as u32)
+            || map.structural != [5, 0, 1, 2, 3, 4, 6, 7, 8, 9]
         {
             return Err(ZKVMError::InvalidWitness(
                 "production PV device columns do not exactly cover the VK".into(),
@@ -437,6 +421,7 @@ fn attention_call_record<E: ExtensionField>(
     output_id_lo: Expression<E>,
     output_id_hi: Expression<E>,
     output_version: Expression<E>,
+    head_start: usize,
 ) -> Vec<Expression<E>> {
     vec![
         CustomRWTag::TensorState.expr::<E>(),
@@ -450,6 +435,9 @@ fn attention_call_record<E: ExtensionField>(
         output_version,
         E::BaseField::from_u32(ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER).expr(),
         E::BaseField::ZERO.expr(),
+        E::BaseField::ONE.expr(),
+        E::BaseField::from_usize(head_start).expr(),
+        E::BaseField::from_u64(HEADS_PER_CORE).expr(),
     ]
 }
 
@@ -491,18 +479,20 @@ fn add_matrix_layer<E: ExtensionField, C>(
 }
 
 fn qk_name(group: usize) -> String {
+    let start = group * HEADS_PER_CORE as usize;
     format!(
         "TensorAttentionQKHeads{:02}_{:02}",
-        group * 4,
-        group * 4 + 3
+        start,
+        start + HEADS_PER_CORE as usize - 1
     )
 }
 
 fn pv_name(group: usize) -> String {
+    let start = group * HEADS_PER_CORE as usize;
     format!(
         "TensorAttentionPVHeads{:02}_{:02}",
-        group * 4,
-        group * 4 + 3
+        start,
+        start + HEADS_PER_CORE as usize - 1
     )
 }
 
@@ -517,7 +507,10 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
     }
 
     fn name() -> String {
-        assert!(GROUP < 8, "invalid production QK group");
+        assert!(
+            GROUP < ceno_emul::tensor::production_attention::CIRCUITS,
+            "invalid production QK group"
+        );
         qk_name(GROUP)
     }
 
@@ -551,9 +544,13 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             ("production_qk_axis_high4_range", axis_high4, 4),
             ("production_qk_row_low7_range", row_low7, 7),
             ("production_qk_row_high4_range", row_high4, 4),
-            ("production_qk_head_range", head, 2),
         ] {
             dynamic_range(cb, name, value, bits)?;
+        }
+        if HEAD_GROUP_BITS == 0 {
+            cb.require_zero(|| "production_qk_single_head", head.expr())?;
+        } else {
+            dynamic_range(cb, "production_qk_head_range", head, HEAD_GROUP_BITS as u32)?;
         }
         let axis_active = cb.create_witin(|| "production_qk_axis_active");
         let axis_high_inverse = cb.create_witin(|| "production_qk_axis_high_inverse");
@@ -584,7 +581,10 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
 
         let physical_index = cb.create_structural_witin(
             || "production_qk_physical_index",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 24, n: 24 },
+            StructuralWitInType::OuterRepeatingIncrementalSequence {
+                k: ROW_BITS,
+                n: ROW_BITS,
+            },
         );
         let matrix_a_selector = cb.create_placeholder_structural_witin(|| "matrix_a_selector");
         let matrix_w_selector = cb.create_placeholder_structural_witin(|| "matrix_w_selector");
@@ -615,7 +615,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             call_row,
             call_row_inverse,
         )?;
-        if GROUP == 0 {
+        {
             let call_record = attention_call_record(
                 import_cycle.expr(),
                 input_id_lo.expr(),
@@ -624,6 +624,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
                 output_id_lo.expr(),
                 output_id_hi.expr(),
                 output_version.expr(),
+                GROUP * HEADS_PER_CORE as usize,
             );
             cb.read_rlc_record(
                 || "production_attention_call_once",
@@ -632,12 +633,12 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
                 conditional_rlc(cb, call_row.expr(), &call_record),
             )?;
         }
-        let global_head = head.expr() + E::BaseField::from_usize(GROUP * 4).expr();
-        let q_index = (global_head.clone() * SEQUENCE + row.clone()) * HEAD_DIM + axis_low7.expr();
-        let k_index = E::BaseField::from_u64(CONTEXT_WORDS).expr()
-            + (global_head.clone() * SEQUENCE + axis.clone()) * HEAD_DIM
+        let group_words = HEADS_PER_CORE * SEQUENCE * HEAD_DIM;
+        let q_index = (head.expr() * SEQUENCE + row.clone()) * HEAD_DIM + axis_low7.expr();
+        let k_index = E::BaseField::from_u64(group_words).expr()
+            + (head.expr() * SEQUENCE + axis.clone()) * HEAD_DIM
             + row_low7.expr();
-        let score_index = (global_head * SEQUENCE + row) * SEQUENCE + axis;
+        let score_index = (head.expr() * SEQUENCE + row) * SEQUENCE + axis;
         let q_record = tensor_space_record(
             import_cycle.expr(),
             input_id_lo.expr(),
@@ -778,7 +779,10 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
     }
 
     fn name() -> String {
-        assert!(GROUP < 8, "invalid production PV group");
+        assert!(
+            GROUP < ceno_emul::tensor::production_attention::CIRCUITS,
+            "invalid production PV group"
+        );
         pv_name(GROUP)
     }
 
@@ -792,7 +796,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         let remainder = cb.create_witin(|| "production_pv_remainder");
         let probability_low16 = cb.create_witin(|| "production_pv_probability_low16");
         let probability_mid16 = cb.create_witin(|| "production_pv_probability_mid16");
-        let probability_high8 = cb.create_witin(|| "production_pv_probability_high8");
+        let probability_high9 = cb.create_witin(|| "production_pv_probability_high9");
         dynamic_range(
             cb,
             "production_pv_probability_low16_range",
@@ -807,16 +811,16 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         )?;
         dynamic_range(
             cb,
-            "production_pv_probability_high8_range",
-            probability_high8,
-            8,
+            "production_pv_probability_high9_range",
+            probability_high9,
+            9,
         )?;
         cb.require_equal(
             || "production_pv_probability",
             a.expr(),
             probability_low16.expr()
                 + probability_mid16.expr() * (1u64 << 16)
-                + probability_high8.expr() * (1u64 << 32),
+                + probability_high9.expr() * (1u64 << 32),
         )?;
         let w_sign = cb.create_witin(|| "production_pv_w_sign");
         let w_low16 = cb.create_witin(|| "production_pv_w_low16");
@@ -855,20 +859,40 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             remainder_low16.expr() + remainder_high4.expr() * (1u64 << 16),
         )?;
 
-        let axis = cb.create_witin(|| "production_pv_axis");
-        let row_low7 = cb.create_witin(|| "production_pv_row_low7");
-        let row_high4 = cb.create_witin(|| "production_pv_row_high4");
-        let head = cb.create_witin(|| "production_pv_head");
-        let tile = cb.create_witin(|| "production_pv_tile");
-        for (name, value, bits) in [
-            ("production_pv_axis_range", axis, 7),
-            ("production_pv_row_low7_range", row_low7, 7),
-            ("production_pv_row_high4_range", row_high4, 4),
-            ("production_pv_head_range", head, 2),
-            ("production_pv_tile_range", tile, 4),
-        ] {
-            dynamic_range(cb, name, value, bits)?;
-        }
+        let axis_formula = cb.create_structural_witin(
+            || "production_pv_axis",
+            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 7, n: ROW_BITS },
+        );
+        let row_low7_formula = cb.create_structural_witin(
+            || "production_pv_row_low7_prefix",
+            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 14, n: ROW_BITS },
+        );
+        let row_high4_formula = cb.create_structural_witin(
+            || "production_pv_row_high4_prefix",
+            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 18, n: ROW_BITS },
+        );
+        let head_formula = cb.create_structural_witin(
+            || "production_pv_head_prefix",
+            StructuralWitInType::OuterRepeatingIncrementalSequence {
+                k: 18 + HEAD_GROUP_BITS,
+                n: ROW_BITS,
+            },
+        );
+        let tile_formula = cb.create_structural_witin(
+            || "production_pv_tile",
+            StructuralWitInType::InnerRepeatingIncrementalSequence {
+                k: 18 + HEAD_GROUP_BITS,
+                n: ROW_BITS,
+            },
+        );
+        let inv_128 = E::BaseField::from_u64(1 << 7).inverse().expr();
+        let inv_16384 = E::BaseField::from_u64(1 << 14).inverse().expr();
+        let inv_262144 = E::BaseField::from_u64(1 << 18).inverse().expr();
+        let axis = axis_formula.expr();
+        let row_low7 = (row_low7_formula.expr() - axis.clone()) * inv_128;
+        let row_high4 = (row_high4_formula.expr() - row_low7_formula.expr()) * inv_16384;
+        let head = (head_formula.expr() - row_high4_formula.expr()) * inv_262144;
+        let tile = tile_formula.expr();
         let row_high_is_zero = cb.create_witin(|| "production_pv_row_high_is_zero");
         let row_high_inverse = cb.create_witin(|| "production_pv_row_high_inverse");
         let row_high_is_last = cb.create_witin(|| "production_pv_row_high_is_last");
@@ -907,7 +931,10 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         )?;
         let physical_index = cb.create_structural_witin(
             || "production_pv_physical_index",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 24, n: 24 },
+            StructuralWitInType::OuterRepeatingIncrementalSequence {
+                k: ROW_BITS,
+                n: ROW_BITS,
+            },
         );
         let matrix_a_selector = cb.create_placeholder_structural_witin(|| "matrix_a_selector");
         let matrix_w_selector = cb.create_placeholder_structural_witin(|| "matrix_w_selector");
@@ -921,20 +948,11 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             axis.expr()
                 + row.clone() * 128
                 + head.expr() * (1u64 << 18)
-                + tile.expr() * (1u64 << 20),
+                + tile.expr() * (1u64 << (18 + HEAD_GROUP_BITS)),
         )?;
 
         let accumulator_q_before = cb.create_witin(|| "production_pv_accumulator_q_before");
-        let accumulator_q_before_sign =
-            cb.create_witin(|| "production_pv_accumulator_q_before_sign");
-        let accumulator_q_before_limbs = core::array::from_fn(|index| {
-            cb.create_witin(|| format!("production_pv_accumulator_q_before_limb_{index}"))
-        });
         let accumulator_r_before = cb.create_witin(|| "production_pv_accumulator_r_before");
-        let accumulator_r_before_low16 =
-            cb.create_witin(|| "production_pv_accumulator_r_before_low16");
-        let accumulator_r_before_high4 =
-            cb.create_witin(|| "production_pv_accumulator_r_before_high4");
         let accumulator_q_after = cb.create_witin(|| "production_pv_accumulator_q_after");
         let accumulator_q_after_sign = cb.create_witin(|| "production_pv_accumulator_q_after_sign");
         let accumulator_q_after_limbs = core::array::from_fn(|index| {
@@ -947,40 +965,28 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             cb.create_witin(|| "production_pv_accumulator_r_after_high4");
         signed_u64_limbs(
             cb,
-            "production_pv_accumulator_q_before",
-            accumulator_q_before,
-            accumulator_q_before_sign,
-            accumulator_q_before_limbs,
-        )?;
-        signed_u64_limbs(
-            cb,
             "production_pv_accumulator_q_after",
             accumulator_q_after,
             accumulator_q_after_sign,
             accumulator_q_after_limbs,
         )?;
-        for (name, low, high, value) in [
-            (
-                "production_pv_accumulator_r_before",
-                accumulator_r_before_low16,
-                accumulator_r_before_high4,
-                accumulator_r_before,
-            ),
-            (
-                "production_pv_accumulator_r_after",
-                accumulator_r_after_low16,
-                accumulator_r_after_high4,
-                accumulator_r_after,
-            ),
-        ] {
-            dynamic_range(cb, name, low, 16)?;
-            dynamic_range(cb, name, high, 4)?;
-            cb.require_equal(
-                || name,
-                value.expr() + Q20_HALF,
-                low.expr() + high.expr() * (1u64 << 16),
-            )?;
-        }
+        dynamic_range(
+            cb,
+            "production_pv_accumulator_r_after",
+            accumulator_r_after_low16,
+            16,
+        )?;
+        dynamic_range(
+            cb,
+            "production_pv_accumulator_r_after",
+            accumulator_r_after_high4,
+            4,
+        )?;
+        cb.require_equal(
+            || "production_pv_accumulator_r_after",
+            accumulator_r_after.expr() + Q20_HALF,
+            accumulator_r_after_low16.expr() + accumulator_r_after_high4.expr() * (1u64 << 16),
+        )?;
         let carry = cb.create_witin(|| "production_pv_carry");
         cb.require_zero(
             || "production_pv_carry_trit",
@@ -1007,17 +1013,6 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             tile_is_zero.expr() * accumulator_r_before.expr(),
         )?;
         let final_q = cb.create_witin(|| "production_pv_final_q");
-        let final_q_sign = cb.create_witin(|| "production_pv_final_q_sign");
-        let final_q_limbs = core::array::from_fn(|index| {
-            cb.create_witin(|| format!("production_pv_final_q_limb_{index}"))
-        });
-        signed_u64_limbs(
-            cb,
-            "production_pv_final_q_signed_u64",
-            final_q,
-            final_q_sign,
-            final_q_limbs,
-        )?;
         let final_remainder = cb.create_witin(|| "production_pv_final_remainder");
         let final_remainder_low16 = cb.create_witin(|| "production_pv_final_remainder_low16");
         let final_remainder_high4 = cb.create_witin(|| "production_pv_final_remainder_high4");
@@ -1051,9 +1046,8 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         let output_id_lo = cb.create_witin(|| "production_pv_output_id_lo");
         let output_id_hi = cb.create_witin(|| "production_pv_output_id_hi");
         let output_version = cb.create_witin(|| "production_pv_output_version");
-        let global_head = head.expr() + E::BaseField::from_usize(GROUP * 4).expr();
         let key = tile.expr() * 128 + axis.expr();
-        let probability_index = (global_head.clone() * SEQUENCE + row.clone()) * SEQUENCE + key;
+        let probability_index = (head.expr() * SEQUENCE + row.clone()) * SEQUENCE + key;
         cb.read_record(
             || "production_pv_probability_read",
             RAMType::Custom,
@@ -1067,8 +1061,9 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             ),
         )?;
         let v_key: Expression<E> = tile.expr() * 128 + row_low7.expr();
-        let v_index = E::BaseField::from_u64(2 * CONTEXT_WORDS).expr()
-            + (global_head.clone() * SEQUENCE + v_key.clone()) * HEAD_DIM
+        let group_words = HEADS_PER_CORE * SEQUENCE * HEAD_DIM;
+        let v_index = E::BaseField::from_u64(2 * group_words).expr()
+            + (head.expr() * SEQUENCE + v_key.clone()) * HEAD_DIM
             + axis.expr();
         let v_record = tensor_space_record(
             import_cycle.expr(),
@@ -1121,6 +1116,8 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             conditional_rlc(cb, w_write_selector, &w_state_out),
         )?;
 
+        let global_head =
+            E::BaseField::from_u64((GROUP * HEADS_PER_CORE as usize) as u64).expr() + head.expr();
         let context_index = (global_head * SEQUENCE + row) * HEAD_DIM + axis.expr();
         let accumulator_in = pv_state_record(
             PV_STATE_VERSION,
@@ -1180,7 +1177,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             remainder,
             probability_low16,
             probability_mid16,
-            probability_high8,
+            probability_high9,
             w_sign,
             w_low16,
             w_high15,
@@ -1188,11 +1185,6 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             q_limbs,
             remainder_low16,
             remainder_high4,
-            axis,
-            row_low7,
-            row_high4,
-            head,
-            tile,
             row_high_is_zero,
             row_high_inverse,
             row_high_is_last,
@@ -1202,11 +1194,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             tile_is_last,
             tile_last_inverse,
             accumulator_q_before,
-            accumulator_q_before_sign,
-            accumulator_q_before_limbs,
             accumulator_r_before,
-            accumulator_r_before_low16,
-            accumulator_r_before_high4,
             accumulator_q_after,
             accumulator_q_after_sign,
             accumulator_q_after_limbs,
@@ -1215,8 +1203,6 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             accumulator_r_after_high4,
             carry,
             final_q,
-            final_q_sign,
-            final_q_limbs,
             final_remainder,
             final_remainder_low16,
             final_remainder_high4,
@@ -1228,6 +1214,11 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             output_id_hi,
             output_version,
             physical_index,
+            axis: axis_formula,
+            row_low7: row_low7_formula,
+            row_high4: row_high4_formula,
+            head: head_formula,
+            tile: tile_formula,
             matrix_a_selector,
             matrix_w_selector,
             matrix_output_selector,
@@ -1240,6 +1231,59 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         params: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
         let config = Self::construct_circuit(cb, params)?;
+        assert_eq!(
+            cb.cs.num_witin as usize, 48,
+            "production PV witness width changed"
+        );
+        assert_eq!(
+            cb.cs.num_structural_witin as usize, 10,
+            "production PV structural width changed"
+        );
+        let reads = cb.cs.r_expressions.len() + cb.cs.r_table_expressions.len();
+        let writes = cb.cs.w_expressions.len() + cb.cs.w_table_expressions.len();
+        let lookups = cb.cs.lk_expressions.len() + cb.cs.lk_table_expressions.len();
+        assert_eq!(reads, 4, "production PV TensorBus/state read count changed");
+        assert_eq!(
+            writes, 3,
+            "production PV TensorBus/state write count changed"
+        );
+        assert_eq!(
+            lookups, 19,
+            "production PV Dynamic-range record count changed"
+        );
+        for expected in [
+            "production_pv_probability_read",
+            "production_pv_v_read_once",
+            "production_pv_w_state_read",
+            "production_pv_accumulator_read",
+        ] {
+            assert!(
+                cb.cs
+                    .r_expressions_namespace_map
+                    .iter()
+                    .any(|name| name.ends_with(expected)),
+                "production PV read record identity changed: {expected}"
+            );
+        }
+        for expected in [
+            "production_pv_w_state_write",
+            "production_pv_accumulator_write",
+            "production_pv_context_write",
+        ] {
+            assert!(
+                cb.cs
+                    .w_expressions_namespace_map
+                    .iter()
+                    .any(|name| name.ends_with(expected)),
+                "production PV write record identity changed: {expected}"
+            );
+        }
+        let lookup_virtual_rows = (ROWS / 2) * lookups.next_power_of_two();
+        assert_eq!(
+            lookup_virtual_rows,
+            (HEADS_PER_CORE as usize) << 26,
+            "production PV lookup virtual group changed"
+        );
         let columns = [config.a, config.w, config.q, config.remainder];
         let selectors = [
             config.matrix_a_selector,
@@ -1263,5 +1307,4 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
     }
 }
 
-const _: () = assert!(ROWS == 1 << 24);
-const _: () = assert!(HEADS_PER_CORE == 4);
+const _: () = assert!(ROWS == ceno_emul::tensor::production_attention::GROUP_SCORE_ROWS);

@@ -5,6 +5,7 @@ pub mod bn254;
 pub mod keccak_permute;
 pub mod keccak_xorin;
 pub mod phantom;
+mod prepass;
 pub mod pubio_commit;
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 pub(crate) mod pure;
@@ -42,6 +43,11 @@ pub fn handle_syscall<T: Tracer>(
     vm: &mut VMState<T>,
     function_code: u32,
 ) -> Result<SyscallEffects> {
+    if vm.tracer().pure_aot_prepass()
+        && let Some(result) = prepass::handle_heavy_syscall(vm, function_code)
+    {
+        return result;
+    }
     match function_code {
         KECCAK_PERMUTE => Ok(keccak_permute::keccak_permute(vm)),
         KECCAK_XORIN => Ok(keccak_xorin::keccak_xorin(vm)),
@@ -82,9 +88,7 @@ pub fn handle_syscall<T: Tracer>(
         crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2 => {
             tensor::tensor_production_import_begin_v2(vm)
         }
-        crate::tensor::TENSOR_PRODUCTION_FULL_LAYER_V2 => {
-            tensor::tensor_production_full_layer_v2(vm)
-        }
+        crate::tensor::TENSOR_PRODUCTION_STAGE_V2 => tensor::tensor_production_stage_v2(vm),
         crate::tensor::TENSOR_PRODUCTION_EXPORT_END_V2 => {
             tensor::tensor_production_export_end_v2(vm)
         }
@@ -102,6 +106,9 @@ pub fn handle_syscall<T: Tracer>(
 #[non_exhaustive]
 pub struct SyscallWitness {
     pub mem_ops: Vec<WriteOp>,
+    /// Real RAM ranges retained by metadata-only preflight syscalls. They are
+    /// not part of the proof witness; full replay reconstructs `mem_ops`.
+    pub(crate) mem_access_ranges: Vec<std::ops::Range<crate::WordAddr>>,
     pub reg_ops: Vec<WriteOp>,
     pub mem_future_access: Vec<u8>,
     pub reg_future_access: Vec<u8>,
@@ -139,6 +146,7 @@ impl SyscallWitness {
             mem_future_access: vec![0; mem_ops.len()],
             reg_future_access: vec![0; reg_ops.len()],
             mem_ops,
+            mem_access_ranges: Vec::new(),
             reg_ops,
             tensor_bus_records: Vec::new(),
             tensor_bus_event: None,
@@ -186,6 +194,16 @@ impl SyscallEffects {
 
     pub(crate) fn iter_mem_ops_mut(&mut self) -> impl Iterator<Item = &mut WriteOp> {
         self.witness.mem_ops.iter_mut()
+    }
+
+    pub(crate) fn iter_mem_access_ranges(
+        &self,
+    ) -> impl Iterator<Item = &std::ops::Range<crate::WordAddr>> {
+        self.witness.mem_access_ranges.iter()
+    }
+
+    pub(crate) fn push_mem_access_range(&mut self, range: std::ops::Range<crate::WordAddr>) {
+        self.witness.mem_access_ranges.push(range);
     }
 
     /// Keep track of register cycles. Memory cycles are finalized by `VMState`

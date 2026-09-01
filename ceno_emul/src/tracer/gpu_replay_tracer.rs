@@ -1,4 +1,5 @@
 use super::*;
+use rustc_hash::FxHashMap;
 
 /// Configuration for the compact, chunked witness replay producer.
 ///
@@ -149,6 +150,8 @@ pub struct GpuReplayTracer {
     next_accesses: Arc<NextAccessTape>,
     next_access_cursor: usize,
     syscall_witnesses: Vec<SyscallWitness>,
+    syscall_mem_indices: Vec<FxHashMap<WordAddr, usize>>,
+    syscall_reg_indices: Vec<FxHashMap<WordAddr, usize>>,
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     max_heap_addr_access: ByteAddr,
     max_hint_addr_access: ByteAddr,
@@ -185,6 +188,8 @@ impl GpuReplayTracer {
             next_accesses: Arc::new(NextAccessTape::default()),
             next_access_cursor: 0,
             syscall_witnesses: Vec::new(),
+            syscall_mem_indices: Vec::new(),
+            syscall_reg_indices: Vec::new(),
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             max_heap_addr_access: ByteAddr::from(platform.heap.start),
             max_hint_addr_access: ByteAddr::from(platform.hints.start),
@@ -414,6 +419,8 @@ impl GpuReplayTracer {
         self.shard_start_cycle = self.pending.cycle;
         self.ordinal = 0;
         self.syscall_witnesses.clear();
+        self.syscall_mem_indices.clear();
+        self.syscall_reg_indices.clear();
         let descriptor = &self.range_descriptors[self.next_range_descriptor];
         assert_eq!(descriptor.sequence, 0);
         if self.current.typed.len() != InsnKind::COUNT {
@@ -559,17 +566,22 @@ impl GpuReplayTracer {
     }
 
     fn annotate_syscall(&mut self, address: WordAddr, registers: bool) {
-        let witness = &mut self.syscall_witnesses[self.pending.syscall_index as usize];
-        let (ops, masks) = if registers {
-            (&witness.reg_ops, &mut witness.reg_future_access)
+        let witness_index = self.pending.syscall_index as usize;
+        let index = if registers {
+            self.syscall_reg_indices[witness_index]
+                .get(&address)
+                .copied()
         } else {
-            (&witness.mem_ops, &mut witness.mem_future_access)
-        };
-        let index = ops
-            .iter()
-            .rposition(|op| op.addr == address)
-            .expect("GPU replay syscall access/tape address mismatch");
-        masks[index] = 1;
+            self.syscall_mem_indices[witness_index]
+                .get(&address)
+                .copied()
+        }
+        .expect("GPU replay syscall access/tape address mismatch");
+        if registers {
+            self.syscall_witnesses[witness_index].reg_future_access[index] = 1;
+        } else {
+            self.syscall_witnesses[witness_index].mem_future_access[index] = 1;
+        }
     }
 
     fn update_mmio_bounds(&mut self, addr: WordAddr) {
@@ -863,7 +875,21 @@ impl Tracer for GpuReplayTracer {
         assert!(!self.pending.has_syscall(), "Only one syscall per step");
         self.pending.syscall_index = u32::try_from(self.syscall_witnesses.len())
             .expect("GPU replay syscall witness index exceeds u32");
+        let mem_indices = witness
+            .mem_ops
+            .iter()
+            .enumerate()
+            .map(|(index, op)| (op.addr, index))
+            .collect();
+        let reg_indices = witness
+            .reg_ops
+            .iter()
+            .enumerate()
+            .map(|(index, op)| (op.addr, index))
+            .collect();
         self.syscall_witnesses.push(witness);
+        self.syscall_mem_indices.push(mem_indices);
+        self.syscall_reg_indices.push(reg_indices);
     }
 
     #[inline(always)]

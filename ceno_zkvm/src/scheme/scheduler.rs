@@ -347,6 +347,9 @@ enum SchedulerWaitReason {
 }
 
 #[cfg(feature = "gpu")]
+const EXCLUSIVE_ADMISSION_SAFETY_MARGIN_BYTES: u64 = 32 * 1024 * 1024;
+
+#[cfg(feature = "gpu")]
 #[derive(Debug, PartialEq, Eq)]
 enum PhaseEventStatus {
     Incomplete,
@@ -608,6 +611,11 @@ impl ChipScheduler {
         tasks.sort_by(|a, b| b.estimated_memory_bytes.cmp(&a.estimated_memory_bytes));
 
         let total_tasks = tasks.len();
+        let exclusive_task_ids = tasks
+            .iter()
+            .filter(|task| task.circuit_name.starts_with("TensorProductionBoundary"))
+            .map(|task| task.task_id)
+            .collect::<std::collections::HashSet<_>>();
 
         tracing::info!(
             "[scheduler] Starting {} tasks, mode={}, workers={}, booking_baseline={:.2}MB, mem_pool_max={}GB",
@@ -1004,13 +1012,66 @@ impl ChipScheduler {
                 }
 
                 // Launch the first pending task whose memory fits; otherwise fall through to wait.
-                if tasks_inflight < worker_limit
-                    && let Some(vec_idx) = pending.iter().position(|task| {
-                        mem_pool
+                let exclusive_inflight = reservations.iter().any(|(task_id, reservation)| {
+                    !reservation.completed && exclusive_task_ids.contains(task_id)
+                });
+                let mut candidate_idx = None;
+                let mut exclusive_admission_error = None;
+                if tasks_inflight < worker_limit && !exclusive_inflight {
+                    for (vec_idx, task) in pending.iter().enumerate() {
+                        if exclusive_task_ids.contains(&task.task_id) {
+                            if tasks_inflight != 0 {
+                                continue;
+                            }
+                            match mem_pool.try_book_exclusive_capacity(
+                                task.booked_memory_bytes,
+                                EXCLUSIVE_ADMISSION_SAFETY_MARGIN_BYTES,
+                            ) {
+                                Ok(snapshot) => {
+                                    tracing::info!(
+                                        target: "ceno_pipeline",
+                                        task_id = task.task_id,
+                                        circuit = %task.circuit_name,
+                                        admitted = snapshot.admitted,
+                                        requested_bytes = snapshot.requested_bytes,
+                                        safety_margin_bytes = snapshot.safety_margin_bytes,
+                                        pool_used_bytes = snapshot.pool_used_bytes,
+                                        pool_reserved_bytes = snapshot.pool_reserved_bytes,
+                                        reusable_reserved_bytes = snapshot.reusable_reserved_bytes,
+                                        cuda_free_bytes = snapshot.cuda_free_bytes,
+                                        cuda_total_bytes = snapshot.cuda_total_bytes,
+                                        external_cuda_used_bytes = snapshot.external_cuda_used_bytes,
+                                        physical_headroom_bytes = snapshot.physical_headroom_bytes,
+                                        pool_max_bytes = snapshot.pool_max_bytes,
+                                        "exclusive scheduler admission"
+                                    );
+                                    if snapshot.admitted {
+                                        candidate_idx = Some(vec_idx);
+                                        break;
+                                    }
+                                }
+                                Err(error) => {
+                                    exclusive_admission_error = Some(error);
+                                    break;
+                                }
+                            }
+                        } else if mem_pool
                             .try_book_capacity(task.booked_memory_bytes)
                             .is_some()
-                    })
-                {
+                        {
+                            candidate_idx = Some(vec_idx);
+                            break;
+                        }
+                    }
+                }
+                if let Some(error) = exclusive_admission_error {
+                    drop(task_tx);
+                    return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                        format!("failed to measure exclusive CUDA admission: {error:?}")
+                            .into_boxed_str(),
+                    )));
+                }
+                if let Some(vec_idx) = candidate_idx {
                     let task = pending.remove(vec_idx);
                     let booked_mem = task.booked_memory_bytes;
                     let task_id = task.task_id;

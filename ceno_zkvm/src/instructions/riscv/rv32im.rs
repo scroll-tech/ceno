@@ -6,11 +6,14 @@ use super::{
 use crate::instructions::riscv::auipc::AuipcInstruction;
 #[cfg(not(feature = "llama-tiny"))]
 use crate::instructions::riscv::ecall::{
+    TensorProductionBoundaryAttentionInputInstruction,
+    TensorProductionBoundaryAttentionOutputInstruction,
     TensorProductionBoundaryHiddenInputInstruction,
-    TensorProductionBoundaryHiddenOutputInstruction, TensorProductionExportAnchorInstruction,
-    TensorProductionFullLayerAnchorInstruction, TensorProductionImportAnchorInstruction,
-    TensorProductionPvCoreInstruction, TensorProductionQkCoreInstruction,
-    TensorProductionShiftCoreInstruction, TensorProductionSoftmaxCoreInstruction,
+    TensorProductionBoundaryHiddenOutputInstruction, TensorProductionBoundaryPostInputInstruction,
+    TensorProductionBoundaryProjectionOutputInstruction, TensorProductionExportAnchorInstruction,
+    TensorProductionImportAnchorInstruction, TensorProductionPvCoreInstruction,
+    TensorProductionQkCoreInstruction, TensorProductionShiftCoreInstruction,
+    TensorProductionSoftmaxCoreInstruction, TensorProductionStageAnchorInstruction,
     collect_production_boundary_replay_descriptors,
 };
 #[cfg(feature = "u16limb_circuit")]
@@ -67,6 +70,170 @@ use crate::{
         OrTableCircuit, TableCircuit, XorTableCircuit,
     },
 };
+
+#[cfg(all(not(feature = "llama-tiny"), feature = "production-heads-1"))]
+macro_rules! production_groups {
+    ($m:ident) => {
+        [
+            $m!(0),
+            $m!(1),
+            $m!(2),
+            $m!(3),
+            $m!(4),
+            $m!(5),
+            $m!(6),
+            $m!(7),
+            $m!(8),
+            $m!(9),
+            $m!(10),
+            $m!(11),
+            $m!(12),
+            $m!(13),
+            $m!(14),
+            $m!(15),
+            $m!(16),
+            $m!(17),
+            $m!(18),
+            $m!(19),
+            $m!(20),
+            $m!(21),
+            $m!(22),
+            $m!(23),
+            $m!(24),
+            $m!(25),
+            $m!(26),
+            $m!(27),
+            $m!(28),
+            $m!(29),
+            $m!(30),
+            $m!(31),
+        ]
+    };
+}
+#[cfg(all(
+    not(feature = "llama-tiny"),
+    not(feature = "production-heads-1"),
+    feature = "production-heads-2"
+))]
+macro_rules! production_groups {
+    ($m:ident) => {
+        [
+            $m!(0),
+            $m!(1),
+            $m!(2),
+            $m!(3),
+            $m!(4),
+            $m!(5),
+            $m!(6),
+            $m!(7),
+            $m!(8),
+            $m!(9),
+            $m!(10),
+            $m!(11),
+            $m!(12),
+            $m!(13),
+            $m!(14),
+            $m!(15),
+        ]
+    };
+}
+#[cfg(all(
+    not(feature = "llama-tiny"),
+    not(any(feature = "production-heads-1", feature = "production-heads-2"))
+))]
+macro_rules! production_groups {
+    ($m:ident) => {
+        [
+            $m!(0),
+            $m!(1),
+            $m!(2),
+            $m!(3),
+            $m!(4),
+            $m!(5),
+            $m!(6),
+            $m!(7),
+        ]
+    };
+}
+
+#[cfg(all(not(feature = "llama-tiny"), feature = "production-heads-1"))]
+macro_rules! production_groups_each {
+    ($m:ident) => {
+        $m!(0);
+        $m!(1);
+        $m!(2);
+        $m!(3);
+        $m!(4);
+        $m!(5);
+        $m!(6);
+        $m!(7);
+        $m!(8);
+        $m!(9);
+        $m!(10);
+        $m!(11);
+        $m!(12);
+        $m!(13);
+        $m!(14);
+        $m!(15);
+        $m!(16);
+        $m!(17);
+        $m!(18);
+        $m!(19);
+        $m!(20);
+        $m!(21);
+        $m!(22);
+        $m!(23);
+        $m!(24);
+        $m!(25);
+        $m!(26);
+        $m!(27);
+        $m!(28);
+        $m!(29);
+        $m!(30);
+        $m!(31);
+    };
+}
+#[cfg(all(
+    not(feature = "llama-tiny"),
+    not(feature = "production-heads-1"),
+    feature = "production-heads-2"
+))]
+macro_rules! production_groups_each {
+    ($m:ident) => {
+        $m!(0);
+        $m!(1);
+        $m!(2);
+        $m!(3);
+        $m!(4);
+        $m!(5);
+        $m!(6);
+        $m!(7);
+        $m!(8);
+        $m!(9);
+        $m!(10);
+        $m!(11);
+        $m!(12);
+        $m!(13);
+        $m!(14);
+        $m!(15);
+    };
+}
+#[cfg(all(
+    not(feature = "llama-tiny"),
+    not(any(feature = "production-heads-1", feature = "production-heads-2"))
+))]
+macro_rules! production_groups_each {
+    ($m:ident) => {
+        $m!(0);
+        $m!(1);
+        $m!(2);
+        $m!(3);
+        $m!(4);
+        $m!(5);
+        $m!(6);
+        $m!(7);
+    };
+}
 use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
     Bn254FpMulSpec, ChipCostSpec, FullTracer as Tracer,
@@ -81,8 +248,7 @@ use ceno_emul::{
 };
 #[cfg(not(feature = "llama-tiny"))]
 use ceno_emul::{
-    TensorProductionExportEndV2Spec, TensorProductionFullLayerV2Spec,
-    TensorProductionImportBeginV2Spec,
+    TensorProductionExportEndV2Spec, TensorProductionImportBeginV2Spec, TensorProductionStageV2Spec,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;
@@ -116,6 +282,7 @@ use crate::instructions::riscv::ecall::{
     TensorHintRefCoreInstruction,
     tensor_llama_tiny::{audit_layer_graph, collect_layer_sections},
 };
+#[cfg(not(feature = "llama-tiny"))]
 use crate::tables::{ProductionSoftmaxExpHighTableCircuit, ProductionSoftmaxExpMiddleTableCircuit};
 #[cfg(feature = "llama-tiny")]
 use crate::tables::{
@@ -330,7 +497,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
         <TensorProductionImportAnchorInstruction<E> as Instruction<E>>::InstructionConfig,
     #[cfg(not(feature = "llama-tiny"))]
     pub tensor_production_full_layer_anchor_config:
-        <TensorProductionFullLayerAnchorInstruction<E> as Instruction<E>>::InstructionConfig,
+        <TensorProductionStageAnchorInstruction<E> as Instruction<E>>::InstructionConfig,
     #[cfg(not(feature = "llama-tiny"))]
     pub tensor_production_export_anchor_config:
         <TensorProductionExportAnchorInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -338,25 +505,47 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub tensor_production_boundary_hidden_input_config:
         <TensorProductionBoundaryHiddenInputInstruction<E> as Instruction<E>>::InstructionConfig,
     #[cfg(not(feature = "llama-tiny"))]
+    pub tensor_production_boundary_projection_output_configs: [
+        <TensorProductionBoundaryProjectionOutputInstruction<E, 0> as Instruction<E>>::InstructionConfig;
+        3
+    ],
+    #[cfg(not(feature = "llama-tiny"))]
+    pub tensor_production_boundary_attention_input_configs: [[
+        <TensorProductionBoundaryAttentionInputInstruction<E, 0, 0> as Instruction<E>>::InstructionConfig;
+        3
+    ]; ceno_emul::tensor::production_attention::CIRCUITS],
+    #[cfg(not(feature = "llama-tiny"))]
+    pub tensor_production_boundary_attention_output_configs: [
+        <TensorProductionBoundaryAttentionOutputInstruction<E, 0> as Instruction<E>>::InstructionConfig;
+        ceno_emul::tensor::production_attention::CIRCUITS
+    ],
+    #[cfg(not(feature = "llama-tiny"))]
+    pub tensor_production_boundary_post_input_configs: [
+        <TensorProductionBoundaryPostInputInstruction<E, 0> as Instruction<E>>::InstructionConfig;
+        2
+    ],
+    #[cfg(not(feature = "llama-tiny"))]
     pub tensor_production_boundary_hidden_output_config:
         <TensorProductionBoundaryHiddenOutputInstruction<E> as Instruction<E>>::InstructionConfig,
     #[cfg(not(feature = "llama-tiny"))]
     pub tensor_production_qk_configs: [
         <TensorProductionQkCoreInstruction<E, 0> as Instruction<E>>::InstructionConfig;
-        8
+        ceno_emul::tensor::production_attention::CIRCUITS
     ],
     #[cfg(not(feature = "llama-tiny"))]
-    pub tensor_production_shift_config:
-        <TensorProductionShiftCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_production_shift_configs: [
+        <TensorProductionShiftCoreInstruction<E, 0> as Instruction<E>>::InstructionConfig;
+        ceno_emul::tensor::production_attention::CIRCUITS
+    ],
     #[cfg(not(feature = "llama-tiny"))]
     pub tensor_production_softmax_configs: [
         <TensorProductionSoftmaxCoreInstruction<E, 0> as Instruction<E>>::InstructionConfig;
-        8
+        ceno_emul::tensor::production_attention::CIRCUITS
     ],
     #[cfg(not(feature = "llama-tiny"))]
     pub tensor_production_pv_configs: [
         <TensorProductionPvCoreInstruction<E, 0> as Instruction<E>>::InstructionConfig;
-        8
+        ceno_emul::tensor::production_attention::CIRCUITS
     ],
     // These are optional only in the compile-time Llama-tiny Tensor profile.
     // Keeping the inactive pairs out of construction matters: their fixed
@@ -502,6 +691,10 @@ pub struct Rv32imConfig<E: ExtensionField> {
     // serve ecall/table for no InsnKind
     pub ecall_cells_map: HashMap<String, u64>,
     pub shard_cost_model: Arc<ShardCostModel>,
+    #[cfg(not(feature = "llama-tiny"))]
+    pub production_stage_chip_sets: [Vec<usize>; 3],
+    #[cfg(not(feature = "llama-tiny"))]
+    pub production_attention_group_chip_sets: Vec<Vec<usize>>,
 }
 
 #[derive(Clone)]
@@ -921,10 +1114,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let tensor_production_import_anchor_config =
             register_ecall_circuit!(TensorProductionImportAnchorInstruction<E>, ecall_cells_map);
         #[cfg(not(feature = "llama-tiny"))]
-        let tensor_production_full_layer_anchor_config = register_ecall_circuit!(
-            TensorProductionFullLayerAnchorInstruction<E>,
-            ecall_cells_map
-        );
+        let tensor_production_full_layer_anchor_config =
+            register_ecall_circuit!(TensorProductionStageAnchorInstruction<E>, ecall_cells_map);
         #[cfg(not(feature = "llama-tiny"))]
         let tensor_production_export_anchor_config =
             register_ecall_circuit!(TensorProductionExportAnchorInstruction<E>, ecall_cells_map);
@@ -932,55 +1123,134 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let tensor_production_boundary_hidden_input_config =
             cs.register_opcode_circuit::<TensorProductionBoundaryHiddenInputInstruction<E>>();
         #[cfg(not(feature = "llama-tiny"))]
+        let tensor_production_boundary_projection_output_configs = [
+            cs.register_opcode_circuit::<TensorProductionBoundaryProjectionOutputInstruction<E, 0>>(),
+            cs.register_opcode_circuit::<TensorProductionBoundaryProjectionOutputInstruction<E, 1>>(),
+            cs.register_opcode_circuit::<TensorProductionBoundaryProjectionOutputInstruction<E, 2>>(),
+        ];
+        #[cfg(not(feature = "llama-tiny"))]
+        let tensor_production_boundary_attention_input_configs = {
+            macro_rules! one {
+                ($g:tt) => {
+                    [
+                        cs.register_opcode_circuit::<TensorProductionBoundaryAttentionInputInstruction<E, 0, $g>>(),
+                        cs.register_opcode_circuit::<TensorProductionBoundaryAttentionInputInstruction<E, 1, $g>>(),
+                        cs.register_opcode_circuit::<TensorProductionBoundaryAttentionInputInstruction<E, 2, $g>>(),
+                    ]
+                };
+            }
+            production_groups!(one)
+        };
+        #[cfg(not(feature = "llama-tiny"))]
+        let tensor_production_boundary_attention_output_configs = {
+            macro_rules! one {
+                ($g:tt) => {
+                    cs.register_opcode_circuit::<TensorProductionBoundaryAttentionOutputInstruction<E, $g>>()
+                };
+            }
+            production_groups!(one)
+        };
+        #[cfg(not(feature = "llama-tiny"))]
+        let tensor_production_boundary_post_input_configs = [
+            cs.register_opcode_circuit::<TensorProductionBoundaryPostInputInstruction<E, 0>>(),
+            cs.register_opcode_circuit::<TensorProductionBoundaryPostInputInstruction<E, 1>>(),
+        ];
+        #[cfg(not(feature = "llama-tiny"))]
         let tensor_production_boundary_hidden_output_config =
             cs.register_opcode_circuit::<TensorProductionBoundaryHiddenOutputInstruction<E>>();
         #[cfg(not(feature = "llama-tiny"))]
-        let tensor_production_qk_configs = [
-            cs.register_opcode_circuit::<TensorProductionQkCoreInstruction<E, 0>>(),
-            cs.register_opcode_circuit::<TensorProductionQkCoreInstruction<E, 1>>(),
-            cs.register_opcode_circuit::<TensorProductionQkCoreInstruction<E, 2>>(),
-            cs.register_opcode_circuit::<TensorProductionQkCoreInstruction<E, 3>>(),
-            cs.register_opcode_circuit::<TensorProductionQkCoreInstruction<E, 4>>(),
-            cs.register_opcode_circuit::<TensorProductionQkCoreInstruction<E, 5>>(),
-            cs.register_opcode_circuit::<TensorProductionQkCoreInstruction<E, 6>>(),
-            cs.register_opcode_circuit::<TensorProductionQkCoreInstruction<E, 7>>(),
-        ];
+        let tensor_production_qk_configs = {
+            macro_rules! one {
+                ($g:tt) => {
+                    cs.register_opcode_circuit::<TensorProductionQkCoreInstruction<E, $g>>()
+                };
+            }
+            production_groups!(one)
+        };
         #[cfg(not(feature = "llama-tiny"))]
-        let tensor_production_softmax_configs = [
-            cs.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E, 0>>(),
-            cs.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E, 1>>(),
-            cs.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E, 2>>(),
-            cs.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E, 3>>(),
-            cs.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E, 4>>(),
-            cs.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E, 5>>(),
-            cs.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E, 6>>(),
-            cs.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E, 7>>(),
-        ];
+        let tensor_production_softmax_configs = {
+            macro_rules! one {
+                ($g:tt) => {
+                    cs.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E, $g>>()
+                };
+            }
+            production_groups!(one)
+        };
         #[cfg(not(feature = "llama-tiny"))]
-        let tensor_production_shift_config =
-            cs.register_opcode_circuit::<TensorProductionShiftCoreInstruction<E>>();
+        let tensor_production_shift_configs = {
+            macro_rules! one {
+                ($g:tt) => {
+                    cs.register_opcode_circuit::<TensorProductionShiftCoreInstruction<E, $g>>()
+                };
+            }
+            production_groups!(one)
+        };
         #[cfg(not(feature = "llama-tiny"))]
-        let tensor_production_pv_configs = [
-            cs.register_opcode_circuit::<TensorProductionPvCoreInstruction<E, 0>>(),
-            cs.register_opcode_circuit::<TensorProductionPvCoreInstruction<E, 1>>(),
-            cs.register_opcode_circuit::<TensorProductionPvCoreInstruction<E, 2>>(),
-            cs.register_opcode_circuit::<TensorProductionPvCoreInstruction<E, 3>>(),
-            cs.register_opcode_circuit::<TensorProductionPvCoreInstruction<E, 4>>(),
-            cs.register_opcode_circuit::<TensorProductionPvCoreInstruction<E, 5>>(),
-            cs.register_opcode_circuit::<TensorProductionPvCoreInstruction<E, 6>>(),
-            cs.register_opcode_circuit::<TensorProductionPvCoreInstruction<E, 7>>(),
-        ];
+        let tensor_production_pv_configs = {
+            macro_rules! one {
+                ($g:tt) => {
+                    cs.register_opcode_circuit::<TensorProductionPvCoreInstruction<E, $g>>()
+                };
+            }
+            production_groups!(one)
+        };
         #[cfg(not(feature = "llama-tiny"))]
-        for (anchor, boundary) in [
+        let mut production_boundaries = vec![
             (
                 TensorProductionImportAnchorInstruction::<E>::name(),
                 TensorProductionBoundaryHiddenInputInstruction::<E>::name(),
             ),
             (
                 TensorProductionExportAnchorInstruction::<E>::name(),
+                TensorProductionBoundaryProjectionOutputInstruction::<E, 0>::name(),
+            ),
+            (
+                TensorProductionExportAnchorInstruction::<E>::name(),
+                TensorProductionBoundaryProjectionOutputInstruction::<E, 1>::name(),
+            ),
+            (
+                TensorProductionExportAnchorInstruction::<E>::name(),
+                TensorProductionBoundaryProjectionOutputInstruction::<E, 2>::name(),
+            ),
+            (
+                TensorProductionImportAnchorInstruction::<E>::name(),
+                TensorProductionBoundaryPostInputInstruction::<E, 0>::name(),
+            ),
+            (
+                TensorProductionImportAnchorInstruction::<E>::name(),
+                TensorProductionBoundaryPostInputInstruction::<E, 1>::name(),
+            ),
+            (
+                TensorProductionExportAnchorInstruction::<E>::name(),
                 TensorProductionBoundaryHiddenOutputInstruction::<E>::name(),
             ),
-        ] {
+        ];
+        #[cfg(not(feature = "llama-tiny"))]
+        {
+            macro_rules! push_boundaries {
+                ($g:expr) => {{
+                    production_boundaries.push((
+                        TensorProductionImportAnchorInstruction::<E>::name(),
+                        TensorProductionBoundaryAttentionInputInstruction::<E, 0, $g>::name(),
+                    ));
+                    production_boundaries.push((
+                        TensorProductionImportAnchorInstruction::<E>::name(),
+                        TensorProductionBoundaryAttentionInputInstruction::<E, 1, $g>::name(),
+                    ));
+                    production_boundaries.push((
+                        TensorProductionImportAnchorInstruction::<E>::name(),
+                        TensorProductionBoundaryAttentionInputInstruction::<E, 2, $g>::name(),
+                    ));
+                    production_boundaries.push((
+                        TensorProductionExportAnchorInstruction::<E>::name(),
+                        TensorProductionBoundaryAttentionOutputInstruction::<E, $g>::name(),
+                    ));
+                }};
+            }
+            production_groups_each!(push_boundaries);
+        }
+        #[cfg(not(feature = "llama-tiny"))]
+        for (anchor, boundary) in production_boundaries {
             let boundary_cs = cs
                 .get_cs(&boundary)
                 .expect("production boundary circuit missing");
@@ -999,47 +1269,55 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .expect("production anchor cell entry missing") += boundary_cells;
         }
         #[cfg(not(feature = "llama-tiny"))]
-        for name in [
-            TensorProductionQkCoreInstruction::<E, 0>::name(),
-            TensorProductionQkCoreInstruction::<E, 1>::name(),
-            TensorProductionQkCoreInstruction::<E, 2>::name(),
-            TensorProductionQkCoreInstruction::<E, 3>::name(),
-            TensorProductionQkCoreInstruction::<E, 4>::name(),
-            TensorProductionQkCoreInstruction::<E, 5>::name(),
-            TensorProductionQkCoreInstruction::<E, 6>::name(),
-            TensorProductionQkCoreInstruction::<E, 7>::name(),
-            TensorProductionShiftCoreInstruction::<E>::name(),
-            TensorProductionSoftmaxCoreInstruction::<E, 0>::name(),
-            TensorProductionSoftmaxCoreInstruction::<E, 1>::name(),
-            TensorProductionSoftmaxCoreInstruction::<E, 2>::name(),
-            TensorProductionSoftmaxCoreInstruction::<E, 3>::name(),
-            TensorProductionSoftmaxCoreInstruction::<E, 4>::name(),
-            TensorProductionSoftmaxCoreInstruction::<E, 5>::name(),
-            TensorProductionSoftmaxCoreInstruction::<E, 6>::name(),
-            TensorProductionSoftmaxCoreInstruction::<E, 7>::name(),
-            TensorProductionPvCoreInstruction::<E, 0>::name(),
-            TensorProductionPvCoreInstruction::<E, 1>::name(),
-            TensorProductionPvCoreInstruction::<E, 2>::name(),
-            TensorProductionPvCoreInstruction::<E, 3>::name(),
-            TensorProductionPvCoreInstruction::<E, 4>::name(),
-            TensorProductionPvCoreInstruction::<E, 5>::name(),
-            TensorProductionPvCoreInstruction::<E, 6>::name(),
-            TensorProductionPvCoreInstruction::<E, 7>::name(),
-        ] {
-            let matrix_cs = cs.get_cs(&name).expect("production matrix circuit missing");
-            let chip = chip_specs.len();
-            chip_specs.push(chip_cost_spec(matrix_cs));
-            ecall_name_to_chips
-                .get_mut(&TensorProductionFullLayerAnchorInstruction::<E>::name())
-                .expect("production full-layer cost entry missing")
-                .push(chip);
-            let matrix_cells = (matrix_cs.zkvm_v1_css.num_witin as u64
-                + matrix_cs.zkvm_v1_css.num_structural_witin as u64
-                + matrix_cs.zkvm_v1_css.num_fixed as u64)
-                * (1 << matrix_cs.rotation_vars().unwrap_or(0));
-            *ecall_cells_map
-                .get_mut(&TensorProductionFullLayerAnchorInstruction::<E>::name())
-                .expect("production full-layer cell entry missing") += matrix_cells;
+        let mut production_matrix_chips = Vec::new();
+        #[cfg(not(feature = "llama-tiny"))]
+        {
+            let mut production_matrix_names = Vec::new();
+            macro_rules! push_qk {
+                ($g:expr) => {
+                    production_matrix_names
+                        .push(TensorProductionQkCoreInstruction::<E, $g>::name());
+                };
+            }
+            macro_rules! push_shift {
+                ($g:expr) => {
+                    production_matrix_names
+                        .push(TensorProductionShiftCoreInstruction::<E, $g>::name());
+                };
+            }
+            macro_rules! push_softmax {
+                ($g:expr) => {
+                    production_matrix_names
+                        .push(TensorProductionSoftmaxCoreInstruction::<E, $g>::name());
+                };
+            }
+            macro_rules! push_pv {
+                ($g:expr) => {
+                    production_matrix_names
+                        .push(TensorProductionPvCoreInstruction::<E, $g>::name());
+                };
+            }
+            production_groups_each!(push_qk);
+            production_groups_each!(push_shift);
+            production_groups_each!(push_softmax);
+            production_groups_each!(push_pv);
+            for name in production_matrix_names {
+                let matrix_cs = cs.get_cs(&name).expect("production matrix circuit missing");
+                let chip = chip_specs.len();
+                chip_specs.push(chip_cost_spec(matrix_cs));
+                ecall_name_to_chips
+                    .get_mut(&TensorProductionStageAnchorInstruction::<E>::name())
+                    .expect("production full-layer cost entry missing")
+                    .push(chip);
+                production_matrix_chips.push(chip);
+                let matrix_cells = (matrix_cs.zkvm_v1_css.num_witin as u64
+                    + matrix_cs.zkvm_v1_css.num_structural_witin as u64
+                    + matrix_cs.zkvm_v1_css.num_fixed as u64)
+                    * (1 << matrix_cs.rotation_vars().unwrap_or(0));
+                *ecall_cells_map
+                    .get_mut(&TensorProductionStageAnchorInstruction::<E>::name())
+                    .expect("production full-layer cell entry missing") += matrix_cells;
+            }
         }
 
         let keccak_ecall_config = cs.register_opcode_circuit::<KeccakEcallInstruction<E>>();
@@ -1638,8 +1916,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         );
         #[cfg(not(feature = "llama-tiny"))]
         map_ecall(
-            TensorProductionFullLayerV2Spec::CODE,
-            TensorProductionFullLayerAnchorInstruction::<E>::name(),
+            TensorProductionStageV2Spec::CODE,
+            TensorProductionStageAnchorInstruction::<E>::name(),
         );
         #[cfg(not(feature = "llama-tiny"))]
         map_ecall(
@@ -1749,6 +2027,38 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         );
         map_ecall(Uint256MulSpec::CODE, Uint256MulInstruction::<E>::name());
         map_ecall(Sha256ExtendSpec::CODE, ShaExtendInstruction::<E>::name());
+        #[cfg(not(feature = "llama-tiny"))]
+        let (production_stage_chip_sets, production_attention_group_chip_sets) = {
+            let anchor = ecall_name_to_chips
+                .get(&TensorProductionStageAnchorInstruction::<E>::name())
+                .expect("production full-layer cost entry missing")
+                .first()
+                .copied()
+                .into_iter()
+                .collect::<Vec<_>>();
+            assert_eq!(production_matrix_chips.len() % 4, 0);
+            let group_count = production_matrix_chips.len() / 4;
+            let attention_groups: Vec<Vec<usize>> = (0..group_count)
+                .map(|group| {
+                    [
+                        anchor.clone(),
+                        vec![production_matrix_chips[group]],
+                        vec![production_matrix_chips[group_count + group]],
+                        vec![production_matrix_chips[2 * group_count + group]],
+                        vec![production_matrix_chips[3 * group_count + group]],
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect()
+                })
+                .collect();
+            let projection = anchor.clone();
+            let post = anchor;
+            (
+                [projection, attention_groups[0].clone(), post],
+                attention_groups,
+            )
+        };
         let shard_cost_model = Arc::new(
             ShardCostModel::new(opcode_chips, ecall_chips, chip_specs, E::DEGREE)
                 .with_atomic_ecalls([
@@ -1764,7 +2074,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     #[cfg(not(feature = "llama-tiny"))]
                     TensorProductionImportBeginV2Spec::CODE,
                     #[cfg(not(feature = "llama-tiny"))]
-                    TensorProductionFullLayerV2Spec::CODE,
+                    TensorProductionStageV2Spec::CODE,
                     #[cfg(not(feature = "llama-tiny"))]
                     TensorProductionExportEndV2Spec::CODE,
                 ]),
@@ -1867,11 +2177,19 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             #[cfg(not(feature = "llama-tiny"))]
             tensor_production_boundary_hidden_input_config,
             #[cfg(not(feature = "llama-tiny"))]
+            tensor_production_boundary_projection_output_configs,
+            #[cfg(not(feature = "llama-tiny"))]
+            tensor_production_boundary_attention_input_configs,
+            #[cfg(not(feature = "llama-tiny"))]
+            tensor_production_boundary_attention_output_configs,
+            #[cfg(not(feature = "llama-tiny"))]
+            tensor_production_boundary_post_input_configs,
+            #[cfg(not(feature = "llama-tiny"))]
             tensor_production_boundary_hidden_output_config,
             #[cfg(not(feature = "llama-tiny"))]
             tensor_production_qk_configs,
             #[cfg(not(feature = "llama-tiny"))]
-            tensor_production_shift_config,
+            tensor_production_shift_configs,
             #[cfg(not(feature = "llama-tiny"))]
             tensor_production_softmax_configs,
             #[cfg(not(feature = "llama-tiny"))]
@@ -1962,6 +2280,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             inst_cells_map,
             ecall_cells_map,
             shard_cost_model,
+            #[cfg(not(feature = "llama-tiny"))]
+            production_stage_chip_sets,
+            #[cfg(not(feature = "llama-tiny"))]
+            production_attention_group_chip_sets,
         };
 
         (config, inst_dispatch_builder)
@@ -2055,7 +2377,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             &self.tensor_production_import_anchor_config,
         );
         #[cfg(not(feature = "llama-tiny"))]
-        fixed.register_opcode_circuit::<TensorProductionFullLayerAnchorInstruction<E>>(
+        fixed.register_opcode_circuit::<TensorProductionStageAnchorInstruction<E>>(
             cs,
             &self.tensor_production_full_layer_anchor_config,
         );
@@ -2070,6 +2392,28 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             &self.tensor_production_boundary_hidden_input_config,
         );
         #[cfg(not(feature = "llama-tiny"))]
+        {
+            macro_rules! register_boundary {
+                ($instruction:ty, $config:expr) => {
+                    fixed.register_opcode_circuit::<$instruction>(cs, $config);
+                };
+            }
+            register_boundary!(TensorProductionBoundaryProjectionOutputInstruction<E, 0>, &self.tensor_production_boundary_projection_output_configs[0]);
+            register_boundary!(TensorProductionBoundaryProjectionOutputInstruction<E, 1>, &self.tensor_production_boundary_projection_output_configs[1]);
+            register_boundary!(TensorProductionBoundaryProjectionOutputInstruction<E, 2>, &self.tensor_production_boundary_projection_output_configs[2]);
+            register_boundary!(TensorProductionBoundaryPostInputInstruction<E, 0>, &self.tensor_production_boundary_post_input_configs[0]);
+            register_boundary!(TensorProductionBoundaryPostInputInstruction<E, 1>, &self.tensor_production_boundary_post_input_configs[1]);
+            macro_rules! register_attention_boundaries {
+                ($g:expr) => {{
+                    register_boundary!(TensorProductionBoundaryAttentionInputInstruction<E, 0, $g>, &self.tensor_production_boundary_attention_input_configs[$g][0]);
+                    register_boundary!(TensorProductionBoundaryAttentionInputInstruction<E, 1, $g>, &self.tensor_production_boundary_attention_input_configs[$g][1]);
+                    register_boundary!(TensorProductionBoundaryAttentionInputInstruction<E, 2, $g>, &self.tensor_production_boundary_attention_input_configs[$g][2]);
+                    register_boundary!(TensorProductionBoundaryAttentionOutputInstruction<E, $g>, &self.tensor_production_boundary_attention_output_configs[$g]);
+                }};
+            }
+            production_groups_each!(register_attention_boundaries);
+        }
+        #[cfg(not(feature = "llama-tiny"))]
         fixed.register_opcode_circuit::<TensorProductionBoundaryHiddenOutputInstruction<E>>(
             cs,
             &self.tensor_production_boundary_hidden_output_config,
@@ -2081,34 +2425,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     fixed.register_opcode_circuit::<$instruction>(cs, &self.$configs[$group]);
                 };
             }
-            register_production_matrix!(TensorProductionQkCoreInstruction<E, 0>, tensor_production_qk_configs, 0);
-            register_production_matrix!(TensorProductionQkCoreInstruction<E, 1>, tensor_production_qk_configs, 1);
-            register_production_matrix!(TensorProductionQkCoreInstruction<E, 2>, tensor_production_qk_configs, 2);
-            register_production_matrix!(TensorProductionQkCoreInstruction<E, 3>, tensor_production_qk_configs, 3);
-            register_production_matrix!(TensorProductionQkCoreInstruction<E, 4>, tensor_production_qk_configs, 4);
-            register_production_matrix!(TensorProductionQkCoreInstruction<E, 5>, tensor_production_qk_configs, 5);
-            register_production_matrix!(TensorProductionQkCoreInstruction<E, 6>, tensor_production_qk_configs, 6);
-            register_production_matrix!(TensorProductionQkCoreInstruction<E, 7>, tensor_production_qk_configs, 7);
-            fixed.register_opcode_circuit::<TensorProductionShiftCoreInstruction<E>>(
-                cs,
-                &self.tensor_production_shift_config,
-            );
-            register_production_matrix!(TensorProductionSoftmaxCoreInstruction<E, 0>, tensor_production_softmax_configs, 0);
-            register_production_matrix!(TensorProductionSoftmaxCoreInstruction<E, 1>, tensor_production_softmax_configs, 1);
-            register_production_matrix!(TensorProductionSoftmaxCoreInstruction<E, 2>, tensor_production_softmax_configs, 2);
-            register_production_matrix!(TensorProductionSoftmaxCoreInstruction<E, 3>, tensor_production_softmax_configs, 3);
-            register_production_matrix!(TensorProductionSoftmaxCoreInstruction<E, 4>, tensor_production_softmax_configs, 4);
-            register_production_matrix!(TensorProductionSoftmaxCoreInstruction<E, 5>, tensor_production_softmax_configs, 5);
-            register_production_matrix!(TensorProductionSoftmaxCoreInstruction<E, 6>, tensor_production_softmax_configs, 6);
-            register_production_matrix!(TensorProductionSoftmaxCoreInstruction<E, 7>, tensor_production_softmax_configs, 7);
-            register_production_matrix!(TensorProductionPvCoreInstruction<E, 0>, tensor_production_pv_configs, 0);
-            register_production_matrix!(TensorProductionPvCoreInstruction<E, 1>, tensor_production_pv_configs, 1);
-            register_production_matrix!(TensorProductionPvCoreInstruction<E, 2>, tensor_production_pv_configs, 2);
-            register_production_matrix!(TensorProductionPvCoreInstruction<E, 3>, tensor_production_pv_configs, 3);
-            register_production_matrix!(TensorProductionPvCoreInstruction<E, 4>, tensor_production_pv_configs, 4);
-            register_production_matrix!(TensorProductionPvCoreInstruction<E, 5>, tensor_production_pv_configs, 5);
-            register_production_matrix!(TensorProductionPvCoreInstruction<E, 6>, tensor_production_pv_configs, 6);
-            register_production_matrix!(TensorProductionPvCoreInstruction<E, 7>, tensor_production_pv_configs, 7);
+            macro_rules! qk { ($g:expr) => { register_production_matrix!(TensorProductionQkCoreInstruction<E, $g>, tensor_production_qk_configs, $g); }; }
+            macro_rules! shift { ($g:expr) => { register_production_matrix!(TensorProductionShiftCoreInstruction<E, $g>, tensor_production_shift_configs, $g); }; }
+            macro_rules! softmax { ($g:expr) => { register_production_matrix!(TensorProductionSoftmaxCoreInstruction<E, $g>, tensor_production_softmax_configs, $g); }; }
+            macro_rules! pv { ($g:expr) => { register_production_matrix!(TensorProductionPvCoreInstruction<E, $g>, tensor_production_pv_configs, $g); }; }
+            production_groups_each!(qk);
+            production_groups_each!(shift);
+            production_groups_each!(softmax);
+            production_groups_each!(pv);
         }
         if let Some(config) = &self.tensor_matmul_ecall_config {
             fixed.register_opcode_circuit::<TensorMatMulEcallInstruction<E>>(cs, config);
@@ -2614,9 +2938,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         );
         #[cfg(not(feature = "llama-tiny"))]
         assign_ecall!(
-            TensorProductionFullLayerAnchorInstruction<E>,
+            TensorProductionStageAnchorInstruction<E>,
             tensor_production_full_layer_anchor_config,
-            TensorProductionFullLayerV2Spec::CODE
+            TensorProductionStageV2Spec::CODE
         );
         #[cfg(not(feature = "llama-tiny"))]
         assign_ecall!(
@@ -2642,8 +2966,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     &boundary_records,
                 )?;
                 macro_rules! assign_production_boundary {
-                    ($part:expr, $instruction:ty, $config:ident) => {{
-                        let descriptor = descriptors[$part];
+                    ($descriptor:expr, $instruction:ty, $config:expr) => {{
+                        let descriptor = $descriptor;
                         let step = &shard_steps[descriptor.step_index];
                         let syscall = step
                             .syscall(&shard_ctx.syscall_witnesses)
@@ -2653,176 +2977,377 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                                         .into(),
                                 )
                             })?;
-                        let end = descriptor
-                            .mem_ops_start
-                            .checked_add(descriptor.rows)
-                            .ok_or_else(|| {
-                                ZKVMError::InvalidWitness(
-                                    "production boundary journal range overflow".into(),
-                                )
-                            })?;
-                        let journal = syscall
-                            .mem_ops
-                            .get(descriptor.mem_ops_start..end)
-                            .ok_or_else(|| {
-                                ZKVMError::InvalidWitness(
-                                    "production boundary journal range incomplete".into(),
-                                )
-                            })?;
+                        let (journal, journal_future_access) = if descriptor.is_memory {
+                            let end = descriptor.mem_ops_start.checked_add(descriptor.rows).ok_or_else(|| ZKVMError::InvalidWitness("production boundary journal range overflow".into()))?;
+                            let journal = syscall.mem_ops.get(descriptor.mem_ops_start..end).ok_or_else(|| ZKVMError::InvalidWitness("production boundary journal range incomplete".into()))?.to_vec();
+                            let future = syscall.mem_future_access.get(descriptor.mem_ops_start..end).ok_or_else(|| ZKVMError::InvalidWitness("production boundary future-access range incomplete".into()))?.to_vec();
+                            (journal, future)
+                        } else {
+                            (vec![], vec![])
+                        };
+                        if descriptor.is_memory {
+                            for (offset, op) in journal.iter().enumerate() {
+                                shard_ctx.send(
+                                    RAMType::Memory,
+                                    op.addr,
+                                    op.addr.baddr().0 as u64,
+                                    step.cycle() + Tracer::SUBCYCLE_MEM,
+                                    op.previous_cycle,
+                                    op.value.after,
+                                    Some(op.value.before),
+                                    journal_future_access[offset] != 0,
+                                );
+                            }
+                        }
                         let boundary_cs = cs
                             .get_cs(&<$instruction>::name())
                             .expect("production boundary circuit missing");
                         let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_boundary::assign_production_boundary_device(
-                            &self.$config,
+                            $config,
                             shard_ctx,
                             boundary_cs.zkvm_v1_css.num_witin as usize,
                             boundary_cs.zkvm_v1_css.num_structural_witin as usize,
                             shard_steps,
                             descriptor,
-                            journal,
+                            &journal,
                         )?;
                         witness.insert_opcode_assignment::<$instruction>(assignment, multiplicity);
                     }};
                 }
-                assign_production_boundary!(
-                    0,
-                    TensorProductionBoundaryHiddenInputInstruction<E>,
-                    tensor_production_boundary_hidden_input_config
-                );
-                assign_production_boundary!(
-                    1,
-                    TensorProductionBoundaryHiddenOutputInstruction<E>,
-                    tensor_production_boundary_hidden_output_config
-                );
+                for descriptor in descriptors {
+                    match (descriptor.stage, descriptor.direction, descriptor.part) {
+                        (0, 0, 0) => assign_production_boundary!(
+                            descriptor,
+                            TensorProductionBoundaryHiddenInputInstruction<E>,
+                            &self.tensor_production_boundary_hidden_input_config
+                        ),
+                        (0, 1, 0) => {
+                            assign_production_boundary!(descriptor, TensorProductionBoundaryProjectionOutputInstruction<E, 0>, &self.tensor_production_boundary_projection_output_configs[0])
+                        }
+                        (0, 1, 1) => {
+                            assign_production_boundary!(descriptor, TensorProductionBoundaryProjectionOutputInstruction<E, 1>, &self.tensor_production_boundary_projection_output_configs[1])
+                        }
+                        (0, 1, 2) => {
+                            assign_production_boundary!(descriptor, TensorProductionBoundaryProjectionOutputInstruction<E, 2>, &self.tensor_production_boundary_projection_output_configs[2])
+                        }
+                        (2, 0, 0) => {
+                            assign_production_boundary!(descriptor, TensorProductionBoundaryPostInputInstruction<E, 0>, &self.tensor_production_boundary_post_input_configs[0])
+                        }
+                        (2, 0, 1) => {
+                            assign_production_boundary!(descriptor, TensorProductionBoundaryPostInputInstruction<E, 1>, &self.tensor_production_boundary_post_input_configs[1])
+                        }
+                        (2, 1, 0) => assign_production_boundary!(
+                            descriptor,
+                            TensorProductionBoundaryHiddenOutputInstruction<E>,
+                            &self.tensor_production_boundary_hidden_output_config
+                        ),
+                        (1, direction, part) => {
+                            macro_rules! dispatch_group {
+                                ($g:expr) => {
+                                    if descriptor.group == $g {
+                                        match (direction, part) {
+                                            (0, 0) => assign_production_boundary!(descriptor, TensorProductionBoundaryAttentionInputInstruction<E, 0, $g>, &self.tensor_production_boundary_attention_input_configs[$g][0]),
+                                            (0, 1) => assign_production_boundary!(descriptor, TensorProductionBoundaryAttentionInputInstruction<E, 1, $g>, &self.tensor_production_boundary_attention_input_configs[$g][1]),
+                                            (0, 2) => assign_production_boundary!(descriptor, TensorProductionBoundaryAttentionInputInstruction<E, 2, $g>, &self.tensor_production_boundary_attention_input_configs[$g][2]),
+                                            (1, 0) => assign_production_boundary!(descriptor, TensorProductionBoundaryAttentionOutputInstruction<E, $g>, &self.tensor_production_boundary_attention_output_configs[$g]),
+                                            _ => return Err(ZKVMError::InvalidWitness("unexpected attention boundary variant".into())),
+                                        }
+                                        continue;
+                                    }
+                                };
+                            }
+                            production_groups_each!(dispatch_group);
+                            return Err(ZKVMError::InvalidWitness(
+                                "attention boundary group is not registered".into(),
+                            ));
+                        }
+                        _ => {
+                            return Err(ZKVMError::InvalidWitness(
+                                "unexpected production boundary variant".into(),
+                            ));
+                        }
+                    }
+                }
             }
         }
         #[cfg(all(not(feature = "llama-tiny"), feature = "gpu"))]
         {
-            let attention_records = instrunction_dispatch_ctx
-                .records_for_ecall_code(TensorProductionFullLayerV2Spec::CODE)
+            let stage_records = instrunction_dispatch_ctx
+                .records_for_ecall_code(TensorProductionStageV2Spec::CODE)
                 .unwrap_or(&[]);
-            if !attention_records.is_empty() {
-                if attention_records.len() != 1 {
+            if !stage_records.is_empty() {
+                let mut attention_records = Vec::new();
+                let mut post_count = 0usize;
+                let mut pending_projection = None;
+                for &record_index in stage_records {
+                    let call = shard_steps[record_index]
+                        .syscall(&shard_ctx.syscall_witnesses)
+                        .and_then(|syscall| syscall.tensor_production_full_layer.as_ref())
+                        .ok_or_else(|| {
+                            ZKVMError::InvalidWitness(
+                                "production attention call metadata missing during QK replay"
+                                    .into(),
+                            )
+                        })?;
+                    match call.stage {
+                        0 if pending_projection.is_none() => {
+                            pending_projection = Some((call.head_start, call.head_count));
+                        }
+                        1 if pending_projection == Some((call.head_start, call.head_count)) => {
+                            pending_projection = None;
+                            attention_records.push(record_index);
+                        }
+                        2 if pending_projection.is_none() => post_count += 1,
+                        _ => {
+                            return Err(ZKVMError::InvalidWitness(
+                                "production stage topology is not fused projection/attention pairs"
+                                    .into(),
+                            ));
+                        }
+                    }
+                }
+                if pending_projection.is_some() || post_count > 1 {
                     return Err(ZKVMError::InvalidWitness(
-                        "production QK replay requires exactly one atomic attention call".into(),
+                        "production stage topology has an incomplete pair or duplicate post stage"
+                            .into(),
                     ));
                 }
-                let step = &shard_steps[attention_records[0]];
-                let call = step
-                    .syscall(&shard_ctx.syscall_witnesses)
-                    .and_then(|syscall| syscall.tensor_production_full_layer.as_ref())
-                    .ok_or_else(|| {
+                if attention_records.len() > ceno_emul::tensor::production_attention::CIRCUITS {
+                    return Err(ZKVMError::InvalidWitness(
+                        format!(
+                            "production stage topology has too many attention calls ({} > {})",
+                            attention_records.len(),
+                            ceno_emul::tensor::production_attention::CIRCUITS
+                        )
+                        .into(),
+                    ));
+                }
+                attention_records.sort_unstable_by_key(|&record_index| {
+                    shard_steps[record_index]
+                        .syscall(&shard_ctx.syscall_witnesses)
+                        .and_then(|syscall| syscall.tensor_production_full_layer.as_ref())
+                        .map(|call| call.head_start)
+                        .unwrap_or(u32::MAX)
+                });
+                if !attention_records.is_empty() {
+                    let production_hal = gkr_iop::gpu::get_cuda_hal().map_err(|error| {
                         ZKVMError::InvalidWitness(
-                            "production attention call metadata missing during QK replay".into(),
+                            format!("production projected-QKV CUDA unavailable: {error}").into(),
                         )
                     })?;
-                let production_hal = gkr_iop::gpu::get_cuda_hal().map_err(|error| {
-                    ZKVMError::InvalidWitness(
-                        format!("production projected-QKV CUDA unavailable: {error}").into(),
-                    )
-                })?;
-                let projected_qkv = production_hal
-                    .witgen
-                    .reconstruct_production_projected_qkv()
-                    .map_err(|error| {
-                        ZKVMError::InvalidWitness(
-                            format!("production projected-QKV reconstruction failed: {error}")
+                    let first_group = attention_records
+                        .first()
+                        .and_then(|&record_index| {
+                            shard_steps[record_index]
+                                .syscall(&shard_ctx.syscall_witnesses)
+                                .and_then(|syscall| syscall.tensor_production_full_layer.as_ref())
+                        })
+                        .and_then(|call| usize::try_from(call.head_start).ok())
+                        .and_then(|start| {
+                            start.checked_div(
+                                ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT,
+                            )
+                        })
+                        .ok_or_else(|| {
+                            ZKVMError::InvalidWitness(
+                                "production attention head group overflow".into(),
+                            )
+                        })?;
+                    for (offset, &record_index) in attention_records.iter().enumerate() {
+                        let step = &shard_steps[record_index];
+                        let call = step
+                            .syscall(&shard_ctx.syscall_witnesses)
+                            .and_then(|syscall| syscall.tensor_production_full_layer.as_ref())
+                            .ok_or_else(|| {
+                                ZKVMError::InvalidWitness(
+                                    "production attention call metadata missing during QK replay"
+                                        .into(),
+                                )
+                            })?;
+                        let projected_bytes = 3
+                            * usize::try_from(call.head_count).unwrap_or_default()
+                            * ceno_emul::tensor::production_attention::SEQUENCE
+                            * ceno_emul::tensor::production_attention::HEAD_DIM
+                            * std::mem::size_of::<i32>();
+                        crate::instructions::gpu::chips::log_production_allocation(
+                            "projected_qkv_before",
+                            projected_bytes,
+                            0,
+                        );
+                        let projected_qkv = production_hal
+                            .witgen
+                            .reconstruct_production_projected_qkv(call.head_start, call.head_count)
+                            .map_err(|error| {
+                                ZKVMError::InvalidWitness(
+                                    format!(
+                                        "production projected-QKV reconstruction failed: {error}"
+                                    )
+                                    .into(),
+                                )
+                            })?;
+                        crate::instructions::gpu::chips::log_production_allocation(
+                            "projected_qkv_after",
+                            projected_bytes,
+                            0,
+                        );
+                        let selected_group = usize::try_from(call.head_start)
+                            .ok()
+                            .and_then(|start| {
+                                start.checked_div(
+                                    ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT,
+                                )
+                            })
+                            .ok_or_else(|| {
+                                ZKVMError::InvalidWitness(
+                                    "production attention head group overflow".into(),
+                                )
+                            })?;
+                        let expected_group = first_group + offset;
+                        if selected_group != expected_group
+                            || selected_group >= ceno_emul::tensor::production_attention::CIRCUITS
+                            || call.head_start as usize
+                                != expected_group
+                                    * ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
+                            || call.head_count as usize
+                                != ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
+                        {
+                            return Err(ZKVMError::InvalidWitness(
+                            "production attention descriptors are not contiguous aligned groups"
                                 .into(),
-                        )
-                    })?;
-                macro_rules! assign_production_qk {
-                    ($group:expr) => {{
-                        let qk_cs = cs
-                            .get_cs(&TensorProductionQkCoreInstruction::<E, $group>::name())
-                            .expect("production QK circuit missing");
-                        let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_matrix::assign_production_qk_device::<E, $group>(
-                            &self.tensor_production_qk_configs[$group],
-                            shard_ctx,
-                            qk_cs.zkvm_v1_css.num_witin as usize,
-                            qk_cs.zkvm_v1_css.num_structural_witin as usize,
-                            shard_steps,
-                            call,
-                            &projected_qkv,
-                        )?;
-                        witness.insert_opcode_assignment::<TensorProductionQkCoreInstruction<E, $group>>(assignment, multiplicity);
-                    }};
+                            ));
+                        }
+                        crate::instructions::gpu::chips::log_production_allocation(
+                            "attention_derived_before",
+                            ((call.head_count as usize) << 22) * std::mem::size_of::<u64>(),
+                            ((call.head_count as usize) << 11) * std::mem::size_of::<i64>(),
+                        );
+                        let attention_derived = production_hal
+                            .witgen
+                            .reconstruct_production_attention_derived(
+                                &projected_qkv,
+                                call.head_start,
+                                call.head_count,
+                            )
+                            .map_err(|error| {
+                                ZKVMError::InvalidWitness(
+                                    format!(
+                                        "production attention-derived reconstruction failed: {error}"
+                                    )
+                                    .into(),
+                                )
+                            })?;
+                        crate::instructions::gpu::chips::log_production_allocation(
+                            "attention_derived_after",
+                            ((call.head_count as usize) << 22) * std::mem::size_of::<u64>(),
+                            ((call.head_count as usize) << 11) * std::mem::size_of::<i64>(),
+                        );
+                        macro_rules! assign_production_qk {
+                        ($group:expr) => {{
+                            let qk_cs = cs
+                                .get_cs(&TensorProductionQkCoreInstruction::<E, $group>::name())
+                                .expect("production QK circuit missing");
+                            let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_matrix::assign_production_qk_device::<E, $group>(
+                                &self.tensor_production_qk_configs[$group],
+                                shard_ctx,
+                                qk_cs.zkvm_v1_css.num_witin as usize,
+                                qk_cs.zkvm_v1_css.num_structural_witin as usize,
+                                shard_steps,
+                                call,
+                                &projected_qkv,
+                            )?;
+                            witness.insert_opcode_assignment::<TensorProductionQkCoreInstruction<E, $group>>(assignment, multiplicity);
+                        }};
+                    }
+                        macro_rules! dispatch_qk {
+                            ($g:expr) => {
+                                if selected_group == $g {
+                                    assign_production_qk!($g);
+                                }
+                            };
+                        }
+                        production_groups_each!(dispatch_qk);
+                        macro_rules! assign_production_shift {
+                        ($group:expr) => {{
+                            let shift_cs = cs
+                                .get_cs(&TensorProductionShiftCoreInstruction::<E, $group>::name())
+                                .expect("production shift circuit missing");
+                            let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_softmax::assign_production_shift_device::<E, $group>(
+                                &self.tensor_production_shift_configs[$group],
+                                shard_ctx,
+                                shift_cs.zkvm_v1_css.num_witin as usize,
+                                shift_cs.zkvm_v1_css.num_structural_witin as usize,
+                                shard_steps,
+                                call,
+                                &attention_derived,
+                            )?;
+                            witness.insert_opcode_assignment::<TensorProductionShiftCoreInstruction<E, $group>>(
+                                assignment,
+                                multiplicity,
+                            );
+                        }};
+                    }
+                        macro_rules! dispatch_shift {
+                            ($g:expr) => {
+                                if selected_group == $g {
+                                    assign_production_shift!($g);
+                                }
+                            };
+                        }
+                        production_groups_each!(dispatch_shift);
+                        macro_rules! assign_production_softmax {
+                        ($group:expr) => {{
+                            let softmax_cs = cs
+                                .get_cs(&TensorProductionSoftmaxCoreInstruction::<E, $group>::name())
+                                .expect("production softmax circuit missing");
+                            let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_softmax::assign_production_softmax_device::<E, $group>(
+                                &self.tensor_production_softmax_configs[$group],
+                                shard_ctx,
+                                softmax_cs.zkvm_v1_css.num_witin as usize,
+                                softmax_cs.zkvm_v1_css.num_structural_witin as usize,
+                                shard_steps,
+                                call,
+                                &projected_qkv,
+                                &attention_derived,
+                            )?;
+                            witness.insert_opcode_assignment::<TensorProductionSoftmaxCoreInstruction<E, $group>>(assignment, multiplicity);
+                        }};
+                    }
+                        macro_rules! dispatch_softmax {
+                            ($g:expr) => {
+                                if selected_group == $g {
+                                    assign_production_softmax!($g);
+                                }
+                            };
+                        }
+                        production_groups_each!(dispatch_softmax);
+                        macro_rules! assign_production_pv {
+                        ($group:expr) => {{
+                            let pv_cs = cs
+                                .get_cs(&TensorProductionPvCoreInstruction::<E, $group>::name())
+                                .expect("production PV circuit missing");
+                            let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_matrix::assign_production_pv_device::<E, $group>(
+                                &self.tensor_production_pv_configs[$group],
+                                shard_ctx,
+                                pv_cs.zkvm_v1_css.num_witin as usize,
+                                pv_cs.zkvm_v1_css.num_structural_witin as usize,
+                                shard_steps,
+                                call,
+                                &projected_qkv,
+                                &attention_derived,
+                            )?;
+                            witness.insert_opcode_assignment::<TensorProductionPvCoreInstruction<E, $group>>(assignment, multiplicity);
+                        }};
+                    }
+                        macro_rules! dispatch_pv {
+                            ($g:expr) => {
+                                if selected_group == $g {
+                                    assign_production_pv!($g);
+                                }
+                            };
+                        }
+                        production_groups_each!(dispatch_pv);
+                    }
                 }
-                assign_production_qk!(0);
-                assign_production_qk!(1);
-                assign_production_qk!(2);
-                assign_production_qk!(3);
-                assign_production_qk!(4);
-                assign_production_qk!(5);
-                assign_production_qk!(6);
-                assign_production_qk!(7);
-                {
-                    let shift_cs = cs
-                        .get_cs(&TensorProductionShiftCoreInstruction::<E>::name())
-                        .expect("production shift circuit missing");
-                    let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_softmax::assign_production_shift_device::<E>(
-                        &self.tensor_production_shift_config,
-                        shard_ctx,
-                        shift_cs.zkvm_v1_css.num_witin as usize,
-                        shift_cs.zkvm_v1_css.num_structural_witin as usize,
-                        shard_steps,
-                        call,
-                        &projected_qkv,
-                    )?;
-                    witness.insert_opcode_assignment::<TensorProductionShiftCoreInstruction<E>>(
-                        assignment,
-                        multiplicity,
-                    );
-                }
-                macro_rules! assign_production_softmax {
-                    ($group:expr) => {{
-                        let softmax_cs = cs
-                            .get_cs(&TensorProductionSoftmaxCoreInstruction::<E, $group>::name())
-                            .expect("production softmax circuit missing");
-                        let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_softmax::assign_production_softmax_device::<E, $group>(
-                            &self.tensor_production_softmax_configs[$group],
-                            shard_ctx,
-                            softmax_cs.zkvm_v1_css.num_witin as usize,
-                            softmax_cs.zkvm_v1_css.num_structural_witin as usize,
-                            shard_steps,
-                            call,
-                            &projected_qkv,
-                        )?;
-                        witness.insert_opcode_assignment::<TensorProductionSoftmaxCoreInstruction<E, $group>>(assignment, multiplicity);
-                    }};
-                }
-                assign_production_softmax!(0);
-                assign_production_softmax!(1);
-                assign_production_softmax!(2);
-                assign_production_softmax!(3);
-                assign_production_softmax!(4);
-                assign_production_softmax!(5);
-                assign_production_softmax!(6);
-                assign_production_softmax!(7);
-                macro_rules! assign_production_pv {
-                    ($group:expr) => {{
-                        let pv_cs = cs
-                            .get_cs(&TensorProductionPvCoreInstruction::<E, $group>::name())
-                            .expect("production PV circuit missing");
-                        let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_matrix::assign_production_pv_device::<E, $group>(
-                            &self.tensor_production_pv_configs[$group],
-                            shard_ctx,
-                            pv_cs.zkvm_v1_css.num_witin as usize,
-                            pv_cs.zkvm_v1_css.num_structural_witin as usize,
-                            shard_steps,
-                            call,
-                            &projected_qkv,
-                        )?;
-                        witness.insert_opcode_assignment::<TensorProductionPvCoreInstruction<E, $group>>(assignment, multiplicity);
-                    }};
-                }
-                assign_production_pv!(0);
-                assign_production_pv!(1);
-                assign_production_pv!(2);
-                assign_production_pv!(3);
-                assign_production_pv!(4);
-                assign_production_pv!(5);
-                assign_production_pv!(6);
-                assign_production_pv!(7);
             }
         }
         if let Some(tensor_matmul_ecall_config) = &self.tensor_matmul_ecall_config {
@@ -3449,9 +3974,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                         );
                     }
                     #[cfg(not(feature = "llama-tiny"))]
-                    TensorProductionFullLayerV2Spec::CODE => {
+                    TensorProductionStageV2Spec::CODE => {
                         collect_ecall!(
-                            TensorProductionFullLayerAnchorInstruction<E>,
+                            TensorProductionStageAnchorInstruction<E>,
                             tensor_production_full_layer_anchor_config
                         );
                     }
@@ -3895,9 +4420,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .get(&TensorProductionImportAnchorInstruction::<E>::name())
                 .expect("unable to find production import"),
             #[cfg(not(feature = "llama-tiny"))]
-            TensorProductionFullLayerV2Spec::CODE => *self
+            TensorProductionStageV2Spec::CODE => *self
                 .ecall_cells_map
-                .get(&TensorProductionFullLayerAnchorInstruction::<E>::name())
+                .get(&TensorProductionStageAnchorInstruction::<E>::name())
                 .expect("unable to find production full layer"),
             #[cfg(not(feature = "llama-tiny"))]
             TensorProductionExportEndV2Spec::CODE => *self
@@ -4021,6 +4546,30 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
     fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
         Some(self.shard_cost_model.clone())
     }
+
+    fn production_stage_chips(
+        &self,
+        stage: u32,
+        head_start: u32,
+        head_count: u32,
+    ) -> Option<Vec<usize>> {
+        #[cfg(feature = "llama-tiny")]
+        {
+            let _ = (stage, head_start, head_count);
+            return None;
+        }
+        #[cfg(not(feature = "llama-tiny"))]
+        {
+            if stage == 1 {
+                let group = usize::try_from(head_start / head_count).ok()?;
+                return self
+                    .production_attention_group_chip_sets
+                    .get(group)
+                    .cloned();
+            }
+            self.production_stage_chip_sets.get(stage as usize).cloned()
+        }
+    }
 }
 
 impl<E: ExtensionField> StepCellExtractor for Rv32imConfig<E> {
@@ -4031,6 +4580,30 @@ impl<E: ExtensionField> StepCellExtractor for Rv32imConfig<E> {
 
     fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
         Some(self.shard_cost_model.clone())
+    }
+
+    fn production_stage_chips(
+        &self,
+        stage: u32,
+        head_start: u32,
+        head_count: u32,
+    ) -> Option<Vec<usize>> {
+        #[cfg(feature = "llama-tiny")]
+        {
+            let _ = (stage, head_start, head_count);
+            return None;
+        }
+        #[cfg(not(feature = "llama-tiny"))]
+        {
+            if stage == 1 {
+                let group = usize::try_from(head_start / head_count).ok()?;
+                return self
+                    .production_attention_group_chip_sets
+                    .get(group)
+                    .cloned();
+            }
+            self.production_stage_chip_sets.get(stage as usize).cloned()
+        }
     }
 }
 

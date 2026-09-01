@@ -1,12 +1,10 @@
-use super::{PublicValues, utils::wit_infer_by_expr};
+use super::utils::{first_layer_selector_contexts, wit_infer_by_expr};
+#[cfg(not(feature = "llama-tiny"))]
+use crate::tables::{LlamaTinyRom, ProductionSoftmaxExpHighRom, ProductionSoftmaxExpMiddleRom};
 use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    e2e::ShardContext,
-    structs::{
-        ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
-        ZKVMWitnesses,
-    },
+    structs::{ComposedConstrainSystem, ProgramParams, RAMType, ZKVMFixedTraces},
     tables::{ProgramTableCircuit, RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
@@ -16,6 +14,7 @@ use either::Either;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2, SmallField};
 use generic_static::StaticTypeMap;
 use gkr_iop::{
+    selector::{SelectorContext, SelectorType},
     tables::{
         LookupTable, OpsTable,
         ops::{AndTable, LtuTable, OrTable, PowTable, XorTable},
@@ -25,9 +24,9 @@ use gkr_iop::{
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, WitnessId, fmt,
-    mle::{ArcMultilinearExtension, MultilinearExtension},
+    mle::{ArcMultilinearExtension, FieldType, MultilinearExtension},
     util::ceil_log2,
-    utils::{eval_by_expr, eval_by_expr_with_fixed},
+    utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
 use p3::field::{Field, PrimeCharacteristicRing as FieldAlgebra};
 use rand::thread_rng;
@@ -39,7 +38,7 @@ use std::{
     hash::Hash,
     io::{BufReader, ErrorKind},
     marker::PhantomData,
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
 };
 use strum::IntoEnumIterator;
 use tiny_keccak::{Hasher, Keccak};
@@ -47,7 +46,659 @@ use witness::next_pow2_instance_padding;
 
 const MAX_CONSTRAINT_DEGREE: usize = 3;
 const MOCK_PROGRAM_SIZE: usize = 32;
+const MAX_MOCK_CHIP_HOST_BYTES: usize = 2 * 1024 * 1024 * 1024;
 pub const MOCK_PC_START: ByteAddr = ByteAddr(0x0800_0000);
+
+type MockRamRecords<E> = HashMap<String, (Vec<(E, usize)>, String)>;
+
+#[derive(Default)]
+struct MockTaskSelectorMasks<E: ExtensionField> {
+    zero: Option<ArcMultilinearExtension<'static, E>>,
+    lookup: Option<ArcMultilinearExtension<'static, E>>,
+    read: Option<ArcMultilinearExtension<'static, E>>,
+    write: Option<ArcMultilinearExtension<'static, E>>,
+    host_bytes: usize,
+}
+
+#[cfg(feature = "gpu")]
+fn exact_gpu_selector_masks<E: ExtensionField>(
+    circuit_name: &str,
+    composed_cs: &ComposedConstrainSystem<E>,
+    num_instances: [usize; 2],
+    num_vars: usize,
+) -> MockTaskSelectorMasks<E> {
+    let cs = &composed_cs.zkvm_v1_css;
+    let gkr_circuit = composed_cs
+        .gkr_circuit
+        .as_ref()
+        .unwrap_or_else(|| panic!("exact GPU mock requires a GKR circuit: {circuit_name}"));
+    let first_layer = gkr_circuit
+        .layers
+        .first()
+        .unwrap_or_else(|| panic!("exact GPU mock requires a first GKR layer: {circuit_name}"));
+    let selector_ctxs =
+        first_layer_selector_contexts(composed_cs, gkr_circuit, num_instances, num_vars);
+    assert_eq!(
+        selector_ctxs.len(),
+        first_layer.out_sel_and_eval_exprs.len(),
+        "exact GPU mock selector context/group count mismatch: {circuit_name}"
+    );
+
+    let mut cache: Vec<(
+        SelectorType<E>,
+        SelectorContext,
+        ArcMultilinearExtension<'static, E>,
+    )> = vec![];
+    let mut derive = |role: &str,
+                      selector: Option<&SelectorType<E>>,
+                      required: bool|
+     -> Option<ArcMultilinearExtension<'static, E>> {
+        let Some(selector) = selector else {
+            assert!(
+                !required,
+                "exact GPU mock missing {role} selector for active expressions: {circuit_name}"
+            );
+            return None;
+        };
+        assert!(
+            !matches!(selector, SelectorType::None),
+            "exact GPU mock does not accept SelectorType::None for {role}: {circuit_name}"
+        );
+
+        let matching_ctxs = first_layer
+            .out_sel_and_eval_exprs
+            .iter()
+            .zip_eq(selector_ctxs.iter())
+            .filter_map(|((candidate, outputs), ctx)| {
+                (candidate == selector && !outputs.is_empty()).then_some(ctx)
+            })
+            .collect_vec();
+        let ctx = *matching_ctxs.first().unwrap_or_else(|| {
+            panic!(
+                "exact GPU mock {role} selector is absent from first-layer groups: {circuit_name}"
+            )
+        });
+        assert!(
+            matching_ctxs.iter().all(|candidate| {
+                candidate.offset == ctx.offset
+                    && candidate.num_instances == ctx.num_instances
+                    && candidate.num_vars == ctx.num_vars
+            }),
+            "exact GPU mock {role} selector has conflicting first-layer contexts: {circuit_name}"
+        );
+        assert_eq!(
+            ctx.num_vars, num_vars,
+            "exact GPU mock {role} selector rotation/domain mismatch: {circuit_name}"
+        );
+        assert!(
+            ctx.offset
+                .checked_add(ctx.num_instances)
+                .is_some_and(|end| end <= (1usize << num_vars)),
+            "exact GPU mock {role} selector range exceeds its domain: {circuit_name}"
+        );
+
+        if let Some((_, _, mask)) = cache.iter().find(|(cached_selector, cached_ctx, _)| {
+            cached_selector == selector
+                && cached_ctx.offset == ctx.offset
+                && cached_ctx.num_instances == ctx.num_instances
+                && cached_ctx.num_vars == ctx.num_vars
+        }) {
+            return Some(mask.clone());
+        }
+
+        assert!(
+            matches!(
+                selector,
+                SelectorType::Whole(_)
+                    | SelectorType::Prefix(_)
+                    | SelectorType::OrderedSparse { .. }
+            ),
+            "exact GPU mock unsupported {role} selector type for row-mask materialization: {circuit_name}: {selector:?}"
+        );
+        let selector_mle = selector.to_mle(ctx).unwrap_or_else(|| {
+            panic!("exact GPU mock {role} selector produced no mask: {circuit_name}")
+        });
+        let mask: ArcMultilinearExtension<'static, E> = match selector_mle.evaluations() {
+            FieldType::Base(values) => {
+                MultilinearExtension::from_evaluations_vec(num_vars, values.to_vec()).into()
+            }
+            FieldType::Ext(values) => {
+                MultilinearExtension::from_evaluations_ext_vec(num_vars, values.to_vec()).into()
+            }
+            FieldType::Unreachable => unreachable!(),
+        };
+        assert_eq!(
+            mask.num_vars(),
+            num_vars,
+            "exact GPU mock {role} selector mask num-vars mismatch: {circuit_name}"
+        );
+        assert_eq!(
+            mask.evaluations().len(),
+            1usize << num_vars,
+            "exact GPU mock {role} selector mask length mismatch: {circuit_name}"
+        );
+        assert!(
+            selector_mask_is_boolean(&mask),
+            "exact GPU mock {role} selector mask is non-Boolean: {circuit_name}"
+        );
+        tracing::info!(
+            circuit = %circuit_name,
+            role,
+            selector_type = selector_type_name(selector),
+            offset = ctx.offset,
+            logical_instances = ctx.num_instances,
+            num_vars = ctx.num_vars,
+            active_rows = selector_mask_active_rows(&mask),
+            "MockProver selector-context equivalence audit"
+        );
+        cache.push((selector.clone(), ctx.clone(), mask.clone()));
+        Some(mask)
+    };
+
+    let zero = derive(
+        "zero",
+        cs.zero_selector.as_ref(),
+        !cs.assert_zero_expressions.is_empty() || !cs.assert_zero_sumcheck_expressions.is_empty(),
+    );
+    let lookup = derive(
+        "lookup",
+        cs.lk_selector.as_ref(),
+        !cs.lk_expressions.is_empty(),
+    );
+    let read = derive(
+        "read",
+        cs.r_selector.as_ref(),
+        !cs.r_expressions.is_empty() || !cs.r_table_expressions.is_empty(),
+    );
+    let write = derive(
+        "write",
+        cs.w_selector.as_ref(),
+        !cs.w_expressions.is_empty() || !cs.w_table_expressions.is_empty(),
+    );
+    let host_bytes = cache
+        .iter()
+        .map(|(_, _, mask)| match mask.evaluations() {
+            FieldType::Base(values) => values.len() * std::mem::size_of::<E::BaseField>(),
+            FieldType::Ext(values) => values.len() * std::mem::size_of::<E>(),
+            FieldType::Unreachable => unreachable!(),
+        })
+        .sum();
+    MockTaskSelectorMasks {
+        zero,
+        lookup,
+        read,
+        write,
+        host_bytes,
+    }
+}
+
+fn selector_type_name<E: ExtensionField>(selector: &SelectorType<E>) -> &'static str {
+    match selector {
+        SelectorType::None => "None",
+        SelectorType::Whole(_) => "Whole",
+        SelectorType::Prefix(_) => "Prefix",
+        SelectorType::OrderedSparse { .. } => "OrderedSparse",
+        SelectorType::QuarkBinaryTreeLessThan(_) => "QuarkBinaryTreeLessThan",
+    }
+}
+
+fn selector_mask_is_boolean<E: ExtensionField>(mask: &ArcMultilinearExtension<E>) -> bool {
+    match mask.evaluations() {
+        FieldType::Base(values) => values
+            .iter()
+            .all(|value| *value == E::BaseField::ZERO || *value == E::BaseField::ONE),
+        FieldType::Ext(values) => values
+            .iter()
+            .all(|value| *value == E::ZERO || *value == E::ONE),
+        FieldType::Unreachable => false,
+    }
+}
+
+fn selector_mask_active_rows<E: ExtensionField>(mask: &ArcMultilinearExtension<E>) -> usize {
+    match mask.evaluations() {
+        FieldType::Base(values) => values
+            .iter()
+            .filter(|value| **value == E::BaseField::ONE)
+            .count(),
+        FieldType::Ext(values) => values.iter().filter(|value| **value == E::ONE).count(),
+        FieldType::Unreachable => 0,
+    }
+}
+
+fn selector_mask_is_active<E: ExtensionField>(
+    mask: &ArcMultilinearExtension<E>,
+    index: usize,
+) -> bool {
+    match mask.evaluations() {
+        FieldType::Base(values) => values[index] == E::BaseField::ONE,
+        FieldType::Ext(values) => values[index] == E::ONE,
+        FieldType::Unreachable => unreachable!(),
+    }
+}
+
+struct MockRamRws<E: ExtensionField> {
+    reads: HashMap<E, usize>,
+    reads_by_annotation: MockRamRecords<E>,
+    writes: HashMap<E, usize>,
+    writes_by_annotation: MockRamRecords<E>,
+    global_state: HashMap<String, Vec<Vec<E>>>,
+    raw_samples: HashMap<E, Vec<u64>>,
+}
+
+impl<E: ExtensionField> Default for MockRamRws<E> {
+    fn default() -> Self {
+        Self {
+            reads: HashMap::new(),
+            reads_by_annotation: HashMap::new(),
+            writes: HashMap::new(),
+            writes_by_annotation: HashMap::new(),
+            global_state: HashMap::new(),
+            raw_samples: HashMap::new(),
+        }
+    }
+}
+
+fn mle_row_value<E: ExtensionField>(mle: &ArcMultilinearExtension<E>, row: usize) -> E {
+    match mle.evaluations() {
+        FieldType::Base(values) => E::from(values[row % values.len()]),
+        FieldType::Ext(values) => values[row % values.len()],
+        FieldType::Unreachable => unreachable!(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn raw_record_at_row<E: ExtensionField>(
+    raw_record: &[Expression<E>],
+    fixed: &[ArcMultilinearExtension<E>],
+    witness: &[ArcMultilinearExtension<E>],
+    structural_witness: &[ArcMultilinearExtension<E>],
+    circuit_pi_mles: &[ArcMultilinearExtension<E>],
+    circuit_pub_io_evals: &[Either<E::BaseField, E>],
+    challenges: &[E],
+    row: usize,
+) -> Vec<u64> {
+    let fixed = fixed
+        .iter()
+        .map(|mle| mle_row_value(mle, row))
+        .collect_vec();
+    let witness = witness
+        .iter()
+        .map(|mle| mle_row_value(mle, row))
+        .collect_vec();
+    let structural_witness = structural_witness
+        .iter()
+        .map(|mle| mle_row_value(mle, row))
+        .collect_vec();
+    let instance = circuit_pi_mles
+        .iter()
+        .map(|mle| mle_row_value(mle, row))
+        .chain(circuit_pub_io_evals.iter().map(|value| match value {
+            Either::Left(value) => E::from(*value),
+            Either::Right(value) => *value,
+        }))
+        .collect_vec();
+    raw_record
+        .iter()
+        .map(|expr| {
+            eval_by_expr_with_instance(
+                &fixed,
+                &witness,
+                &structural_witness,
+                &instance,
+                challenges,
+                expr,
+            )
+            .map_either(E::from, |value| value)
+            .into_inner()
+            .to_canonical_u64()
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn accumulate_ram_rws<E: ExtensionField>(
+    circuit_name: &str,
+    cs: &ConstraintSystem<E>,
+    fixed: &[ArcMultilinearExtension<E>],
+    witness: &[ArcMultilinearExtension<E>],
+    structural_witness: &[ArcMultilinearExtension<E>],
+    circuit_pi_mles: &[ArcMultilinearExtension<E>],
+    circuit_pub_io_evals: &[Either<E::BaseField, E>],
+    challenges: &[E],
+    num_rows: usize,
+    selector_masks: Option<&MockTaskSelectorMasks<E>>,
+    ram_type: RAMType,
+    accumulator: &mut MockRamRws<E>,
+) {
+    let w_selector: ArcMultilinearExtension<_> =
+        if let Some(selector) = selector_masks.and_then(|masks| masks.write.as_ref()) {
+            selector.clone()
+        } else if let Some(w_selector) = &cs.w_selector {
+            structural_witness[w_selector.selector_expr().id()].clone()
+        } else {
+            let mut selector = vec![E::BaseField::ONE; num_rows];
+            selector.resize(next_pow2_instance_padding(num_rows), E::BaseField::ZERO);
+            MultilinearExtension::from_evaluation_vec_smart(
+                ceil_log2(next_pow2_instance_padding(num_rows)),
+                selector,
+            )
+            .into()
+        };
+
+    for ((w_rlc_expr, annotation), (ram_type_expr, raw_record)) in (cs
+        .w_expressions
+        .iter()
+        .chain(cs.w_table_expressions.iter().map(|expr| &expr.expr)))
+    .zip_eq(
+        cs.w_expressions_namespace_map
+            .iter()
+            .chain(cs.w_table_expressions_namespace_map.iter()),
+    )
+    .zip_eq(cs.w_ram_types.iter())
+    {
+        let ram_type_mle = wit_infer_by_expr(
+            ram_type_expr,
+            cs.num_witin,
+            cs.num_fixed as WitnessId,
+            0,
+            fixed,
+            witness,
+            structural_witness,
+            circuit_pi_mles,
+            circuit_pub_io_evals,
+            challenges,
+        );
+        let write_rlc_records = wit_infer_by_expr(
+            w_rlc_expr,
+            cs.num_witin,
+            cs.num_fixed as WitnessId,
+            0,
+            fixed,
+            witness,
+            structural_witness,
+            circuit_pi_mles,
+            circuit_pub_io_evals,
+            challenges,
+        );
+        let ram_type_vec = ram_type_mle.get_ext_field_vec();
+        let write_rlc_records = write_rlc_records.get_ext_field_vec();
+        let write_rlc_records = write_rlc_records
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(i, _)| {
+                ram_type_vec[*i] == E::from_u32(ram_type as u32)
+                    && selector_mask_is_active(&w_selector, *i)
+            })
+            .collect_vec();
+        if write_rlc_records.is_empty() {
+            continue;
+        }
+
+        let mut records = vec![];
+        let selected_rows = write_rlc_records.len();
+        for (row, (physical_row, record_rlc)) in enumerate(write_rlc_records) {
+            if ram_type == RAMType::Custom && record_rlc == E::ZERO {
+                continue;
+            }
+            *accumulator.writes.entry(record_rlc).or_default() += 1;
+            if selected_rows <= 4096 || row < 2 || row + 2 >= selected_rows {
+                accumulator.raw_samples.insert(
+                    record_rlc,
+                    raw_record_at_row(
+                        raw_record,
+                        fixed,
+                        witness,
+                        structural_witness,
+                        circuit_pi_mles,
+                        circuit_pub_io_evals,
+                        challenges,
+                        physical_row,
+                    ),
+                );
+            }
+            records.push((record_rlc, row));
+        }
+        accumulator
+            .writes_by_annotation
+            .insert(annotation.clone(), (records, circuit_name.to_owned()));
+    }
+
+    let r_selector: ArcMultilinearExtension<_> =
+        if let Some(selector) = selector_masks.and_then(|masks| masks.read.as_ref()) {
+            selector.clone()
+        } else if let Some(r_selector) = &cs.r_selector {
+            structural_witness[r_selector.selector_expr().id()].clone()
+        } else {
+            let mut selector = vec![E::BaseField::ONE; num_rows];
+            selector.resize(next_pow2_instance_padding(num_rows), E::BaseField::ZERO);
+            MultilinearExtension::from_evaluation_vec_smart(
+                ceil_log2(next_pow2_instance_padding(num_rows)),
+                selector,
+            )
+            .into()
+        };
+
+    for ((r_rlc_expr, annotation), (ram_type_expr, r_exprs)) in (cs
+        .r_expressions
+        .iter()
+        .chain(cs.r_table_expressions.iter().map(|expr| &expr.expr)))
+    .zip_eq(
+        cs.r_expressions_namespace_map
+            .iter()
+            .chain(cs.r_table_expressions_namespace_map.iter()),
+    )
+    .zip_eq(cs.r_ram_types.iter())
+    {
+        let ram_type_mle = wit_infer_by_expr(
+            ram_type_expr,
+            cs.num_witin,
+            cs.num_fixed as WitnessId,
+            0,
+            fixed,
+            witness,
+            structural_witness,
+            circuit_pi_mles,
+            circuit_pub_io_evals,
+            challenges,
+        );
+        let read_records = wit_infer_by_expr(
+            r_rlc_expr,
+            cs.num_witin,
+            cs.num_fixed as WitnessId,
+            0,
+            fixed,
+            witness,
+            structural_witness,
+            circuit_pi_mles,
+            circuit_pub_io_evals,
+            challenges,
+        );
+        let ram_type_vec = ram_type_mle.get_ext_field_vec();
+        let read_records = read_records.get_ext_field_vec();
+        let read_records = read_records
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(i, _)| {
+                ram_type_vec[*i] == E::from_u32(ram_type as u32)
+                    && selector_mask_is_active(&r_selector, *i)
+            })
+            .collect_vec();
+        if read_records.is_empty() {
+            continue;
+        }
+
+        if ram_type == RAMType::GlobalState {
+            assert_eq!(r_exprs.len(), 3);
+            let r = r_exprs
+                .iter()
+                .skip(1)
+                .map(|expr| {
+                    let value = wit_infer_by_expr(
+                        expr,
+                        cs.num_witin,
+                        cs.num_fixed as WitnessId,
+                        0,
+                        fixed,
+                        witness,
+                        structural_witness,
+                        circuit_pi_mles,
+                        circuit_pub_io_evals,
+                        challenges,
+                    );
+                    filter_mle_by_selector_mle(value, r_selector.clone())
+                })
+                .collect_vec();
+            let r = (0..r[0].len())
+                .map(|row| r.iter().map(|values| values[row]).collect_vec())
+                .collect_vec();
+            assert!(
+                accumulator
+                    .global_state
+                    .insert(circuit_name.to_owned(), r)
+                    .is_none()
+            );
+        }
+
+        let mut records = vec![];
+        let selected_rows = read_records.len();
+        for (row, (physical_row, record)) in enumerate(read_records) {
+            if ram_type == RAMType::Custom && record == E::ZERO {
+                continue;
+            }
+            *accumulator.reads.entry(record).or_default() += 1;
+            if selected_rows <= 4096 || row < 2 || row + 2 >= selected_rows {
+                accumulator.raw_samples.insert(
+                    record,
+                    raw_record_at_row(
+                        r_exprs,
+                        fixed,
+                        witness,
+                        structural_witness,
+                        circuit_pi_mles,
+                        circuit_pub_io_evals,
+                        challenges,
+                        physical_row,
+                    ),
+                );
+            }
+            records.push((record, row));
+        }
+        accumulator
+            .reads_by_annotation
+            .insert(annotation.clone(), (records, circuit_name.to_owned()));
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn materialize_gpu_mle<E: ExtensionField>(
+    circuit_name: &str,
+    kind: &str,
+    index: usize,
+    expected_num_vars: usize,
+    mle: &gkr_iop::gpu::MultilinearExtensionGpu<'_, E>,
+) -> (ArcMultilinearExtension<'static, E>, usize) {
+    type BB = <BabyBearExt4 as ExtensionField>::BaseField;
+
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB>(),
+        "exact GPU mock materialization only supports BabyBear"
+    );
+    assert_eq!(
+        mle.inner().num_vars(),
+        expected_num_vars,
+        "{circuit_name} {kind}[{index}] num_vars differs from the GPU task domain"
+    );
+    let padded_len = 1usize
+        .checked_shl(expected_num_vars as u32)
+        .expect("exact GPU mock padded domain overflow");
+
+    let (cpu_mle, physical_len, field_layout, field_bytes) = match mle.inner() {
+        gkr_iop::gpu::GpuFieldType::Base(poly) => {
+            let mut values: Vec<E::BaseField> =
+                unsafe { std::mem::transmute(poly.to_cpu_vec(None)) };
+            let physical_len = values.len();
+            assert!(
+                physical_len <= padded_len,
+                "{circuit_name} {kind}[{index}] base evaluations exceed padded domain"
+            );
+            values.resize(padded_len, E::BaseField::ZERO);
+            (
+                MultilinearExtension::from_evaluations_vec(expected_num_vars, values),
+                physical_len,
+                "base",
+                std::mem::size_of::<E::BaseField>(),
+            )
+        }
+        gkr_iop::gpu::GpuFieldType::Ext(poly) => {
+            let mut values: Vec<E> = unsafe { std::mem::transmute(poly.to_cpu_vec(None)) };
+            let physical_len = values.len();
+            assert!(
+                physical_len <= padded_len,
+                "{circuit_name} {kind}[{index}] extension evaluations exceed padded domain"
+            );
+            values.resize(padded_len, E::ZERO);
+            (
+                MultilinearExtension::from_evaluations_ext_vec(expected_num_vars, values),
+                physical_len,
+                "extension",
+                std::mem::size_of::<E>(),
+            )
+        }
+        gkr_iop::gpu::GpuFieldType::VirtualExt(leaf) => {
+            assert_eq!(leaf.num_vars, expected_num_vars);
+            assert_eq!(leaf.row_offset, 0, "formula MLE row offset changed");
+            assert_eq!(leaf.padded_ops, 1, "formula MLE layout changed");
+            assert_eq!(leaf.valid_rows as usize, padded_len);
+            assert_eq!(leaf.compact_rows as usize, padded_len);
+            let values = match leaf.real_ops {
+                ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX => {
+                    (0..padded_len).map(E::BaseField::from_usize).collect_vec()
+                }
+                ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX_23 => (0..padded_len)
+                    .map(|row| E::BaseField::from_usize(row & ((1usize << 23) - 1)))
+                    .collect_vec(),
+                ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO => {
+                    vec![E::BaseField::ZERO; padded_len]
+                }
+                ceno_gpu::GPU_VIRTUAL_FORMULA_ONE => {
+                    vec![E::BaseField::ONE; padded_len]
+                }
+                other => panic!(
+                    "{circuit_name} {kind}[{index}] unsupported virtual GPU MLE formula {other}"
+                ),
+            };
+            (
+                MultilinearExtension::from_evaluations_vec(expected_num_vars, values),
+                padded_len,
+                "virtual-formula",
+                std::mem::size_of::<E::BaseField>(),
+            )
+        }
+        gkr_iop::gpu::GpuFieldType::Unreachable => {
+            panic!("{circuit_name} {kind}[{index}] has unreachable GPU MLE layout")
+        }
+    };
+    assert_eq!(cpu_mle.num_vars(), expected_num_vars);
+    assert_eq!(cpu_mle.evaluations.len(), padded_len);
+    let host_bytes = padded_len
+        .checked_mul(field_bytes)
+        .expect("exact GPU mock host-byte calculation overflow");
+    tracing::info!(
+        circuit = %circuit_name,
+        kind,
+        index,
+        expected_num_vars,
+        physical_len,
+        padded_len,
+        field_layout,
+        host_bytes,
+        "exact GPU MLE materialized for CPU MockProver"
+    );
+    (Arc::new(cpu_mle), host_bytes)
+}
 
 /// Allow LK Multiplicity's key to be used with `u64` and `GoldilocksExt2`.
 pub trait LkMultiplicityKey: Copy + Clone + Debug + Eq + Hash + Send {
@@ -425,7 +1076,11 @@ fn load_tables<E: ExtensionField>(
     }
 
     let mut table_vec = vec![];
-    load_dynamic_range_table::<_, 18>(&mut table_vec, cs, challenge);
+    load_dynamic_range_table::<_, { crate::scheme::constants::DYNAMIC_RANGE_MAX_BITS }>(
+        &mut table_vec,
+        cs,
+        challenge,
+    );
     load_double_u8_range_table(&mut table_vec, cs, challenge);
     load_op_table::<AndTable, _>(&mut table_vec, cs, challenge);
     load_op_table::<OrTable, _>(&mut table_vec, cs, challenge);
@@ -434,6 +1089,26 @@ fn load_tables<E: ExtensionField>(
     if E::BaseField::bits() > 32 {
         // this pow table only work on large prime field
         load_op_table::<PowTable, _>(&mut table_vec, cs, challenge);
+    }
+    #[cfg(not(feature = "llama-tiny"))]
+    fn load_production_rom<R: LlamaTinyRom, E: ExtensionField>(
+        t_vec: &mut Vec<Vec<u64>>,
+        cs: &ConstraintSystem<E>,
+        challenge: [E; 2],
+    ) {
+        for index in 0..R::ROWS {
+            let rlc_record = cs.rlc_chip_record(vec![
+                (R::CATEGORY as usize).into(),
+                R::input(index).into(),
+                R::output(index).into(),
+            ]);
+            t_vec.push(eval_by_expr(&[], &[], &challenge, &rlc_record).to_canonical_u64_vec());
+        }
+    }
+    #[cfg(not(feature = "llama-tiny"))]
+    {
+        load_production_rom::<ProductionSoftmaxExpMiddleRom, E>(&mut table_vec, cs, challenge);
+        load_production_rom::<ProductionSoftmaxExpHighRom, E>(&mut table_vec, cs, challenge);
     }
 
     HashSet::from_iter(table_vec)
@@ -559,6 +1234,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             structural_witin,
             pi_mles,
             pub_io_evals,
+            None,
             1,
             challenge,
             lkm,
@@ -575,6 +1251,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         structural_witin: &[ArcMultilinearExtension<'a, E>],
         pi_mles: &[ArcMultilinearExtension<'a, E>],
         pub_io_evals: &[Either<E::BaseField, E>],
+        selector_masks: Option<&MockTaskSelectorMasks<E>>,
         num_instances: usize,
         challenge: [E; 2],
         expected_lkm: Option<Multiplicity<u64>>,
@@ -610,7 +1287,9 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             }
 
             let zero_selector: ArcMultilinearExtension<_> =
-                if let Some(zero_selector) = &cs.zero_selector {
+                if let Some(selector) = selector_masks.and_then(|masks| masks.zero.as_ref()) {
+                    selector.clone()
+                } else if let Some(zero_selector) = &cs.zero_selector {
                     structural_witin[zero_selector.selector_expr().id()].clone()
                 } else {
                     let mut selector = vec![E::BaseField::ONE; num_instances];
@@ -704,17 +1383,20 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             }
         }
 
-        let lk_selector: ArcMultilinearExtension<_> = if let Some(lk_selector) = &cs.lk_selector {
-            structural_witin[lk_selector.selector_expr().id()].clone()
-        } else {
-            let mut selector = vec![E::BaseField::ONE; num_instances];
-            selector.resize(num_instance_padded, E::BaseField::ZERO);
-            MultilinearExtension::from_evaluation_vec_smart(
-                ceil_log2(num_instance_padded),
-                selector,
-            )
-            .into()
-        };
+        let lk_selector: ArcMultilinearExtension<_> =
+            if let Some(selector) = selector_masks.and_then(|masks| masks.lookup.as_ref()) {
+                selector.clone()
+            } else if let Some(lk_selector) = &cs.lk_selector {
+                structural_witin[lk_selector.selector_expr().id()].clone()
+            } else {
+                let mut selector = vec![E::BaseField::ONE; num_instances];
+                selector.resize(num_instance_padded, E::BaseField::ZERO);
+                MultilinearExtension::from_evaluation_vec_smart(
+                    ceil_log2(num_instance_padded),
+                    selector,
+                )
+                .into()
+            };
 
         // Lookup expressions
         for (expr, (name, (rom_type, _))) in cs.lk_expressions.iter().zip(
@@ -991,26 +1673,17 @@ Hints:
         );
     }
 
-    pub fn assert_satisfied_full(
-        shard_ctx: &ShardContext,
-        cs: &ZKVMConstraintSystem<E>,
+    #[cfg(feature = "gpu")]
+    pub(crate) fn assert_satisfied_gpu_tasks<PCS>(
         mut fixed_trace: ZKVMFixedTraces<E>,
-        witnesses: &ZKVMWitnesses<E>,
-        pi: &PublicValues,
+        lk_mlts: &std::collections::BTreeMap<String, Multiplicity<u64>>,
+        mut tasks: Vec<crate::scheme::scheduler::ChipTask<'_, gkr_iop::gpu::GpuBackend<E, PCS>>>,
+        pcs_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
         program: &Program,
     ) where
         E: LkMultiplicityKey,
+        PCS: mpcs::PolynomialCommitmentScheme<E> + 'static,
     {
-        let get_circuit_pi_inputs = |circuit_cs: &ConstraintSystem<E>| {
-            let circuit_pub_io_evals = circuit_cs
-                .instance
-                .iter()
-                .map(|instance| Either::Right(E::from(pi.query_by_index::<E>(instance.0))))
-                .collect_vec();
-            let circuit_pi_mles = vec![];
-            (circuit_pub_io_evals, circuit_pi_mles)
-        };
-
         let mut rng = thread_rng();
         let challenges = [0u8; 2].map(|_| E::random(&mut rng));
 
@@ -1021,55 +1694,136 @@ Hints:
             Some(challenges),
         );
 
-        let mut wit_mles = HashMap::new();
-        let mut structural_wit_mles = HashMap::new();
-        let mut fixed_mles = HashMap::new();
-        let mut num_instances = HashMap::new();
+        let mut ram_rws = [
+            MockRamRws::default(),
+            MockRamRws::default(),
+            MockRamRws::default(),
+            MockRamRws::default(),
+        ];
+        let mut mock_peak_host_bytes = 0usize;
+        let mut processed_circuits = 0usize;
 
         let mut lkm_tables = LkMultiplicityRaw::<E>::default();
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
-        let has_shard_gpu_lk = witnesses.lk_mlts().contains_key("__gpu_shard_lk");
-
-        // Process all circuits.
-        for (circuit_name, chip_inputs) in &witnesses.witnesses {
-            let composed_cs = cs.circuit_css.get(circuit_name).unwrap();
-            // for (circuit_name, composed_cs) in &cs.circuit_css {
-            let ComposedConstrainSystem {
-                zkvm_v1_css: cs, ..
-            } = &composed_cs;
-            let (circuit_pub_io_evals, circuit_pi_mles) = get_circuit_pi_inputs(cs);
-
-            // skip init table on non-first shard
-            if composed_cs.with_omc_init_only() && !shard_ctx.is_first_shard() {
-                wit_mles.insert(circuit_name.clone(), vec![]);
-                structural_wit_mles.insert(circuit_name.clone(), vec![]);
-                fixed_mles.insert(circuit_name.clone(), vec![]);
-                num_instances.insert(circuit_name.clone(), 0);
-                continue;
+        let fused_lk_names = lk_mlts
+            .keys()
+            .filter(|name| name.starts_with("__gpu_shard_lk"))
+            .collect_vec();
+        assert!(
+            fused_lk_names.len() <= 1,
+            "exact GPU mock found multiple shard lookup multiplicity sources: {fused_lk_names:?}"
+        );
+        let fused_lkm = fused_lk_names.first().map(|name| {
+            assert_eq!(
+                name.as_str(),
+                "__gpu_shard_lk",
+                "exact GPU mock found malformed shard lookup multiplicity source: {name}"
+            );
+            lk_mlts
+                .get(name.as_str())
+                .expect("validated shard lookup multiplicity source must exist")
+        });
+        let recorded_lkm = fused_lkm.map(|_| {
+            let mut combined = Multiplicity::default();
+            for (source, multiplicity) in lk_mlts {
+                for (rom_type, counts) in izip!(ROMType::iter(), multiplicity) {
+                    for (raw_key, count) in counts {
+                        assert_ne!(
+                            *count, 0,
+                            "recorded lookup source contains a zero count: source={source}, table={rom_type:?}, raw_key={raw_key}"
+                        );
+                    }
+                }
+                combined += multiplicity.clone();
             }
+            combined
+        });
+        let mut consumed_recorded_lk = BTreeSet::new();
+        tracing::info!(
+            ownership = if fused_lkm.is_some() {
+                "recorded_assignments_with_fused_shard"
+            } else {
+                "inferred_per_chip"
+            },
+            recorded_sources = if fused_lkm.is_some() {
+                lk_mlts.len()
+            } else {
+                0
+            },
+            "MockProver opcode lookup aggregate ownership"
+        );
 
-            assert!(chip_inputs.len() <= 1, "TODO support > 1 chip_inputs");
-            let chip_input = chip_inputs.first().filter(|ci| ci.num_instances() > 0);
-
-            if chip_input.is_none() {
-                wit_mles.insert(circuit_name.clone(), vec![]);
-                structural_wit_mles.insert(circuit_name.clone(), vec![]);
-                fixed_mles.insert(circuit_name.clone(), vec![]);
-                num_instances.insert(circuit_name.clone(), 0);
-                continue;
-            }
-
-            let chip_input = chip_input.unwrap();
-            let num_rows = chip_input.num_instances();
-
-            let [witness, structural_witness] = &chip_input.witness_rmms;
-            let mut witness = witness
-                .to_mles()
-                .into_iter()
-                .chain(structural_witness.to_mles())
-                .map(|w| w.into())
+        for task in &mut tasks {
+            crate::scheme::prover::prepare_gpu_chip_input(task, pcs_data);
+            let circuit_name = task.circuit_name.as_str();
+            let composed_cs = task.pk.get_cs();
+            let cs = &composed_cs.zkvm_v1_css;
+            let num_rows = task.input.num_instances();
+            let num_vars =
+                task.input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
+            let selector_masks = exact_gpu_selector_masks(
+                circuit_name,
+                composed_cs,
+                task.input.num_instances,
+                num_vars,
+            );
+            assert_eq!(task.input.witness.len(), cs.num_witin as usize);
+            assert_eq!(
+                task.input.structural_witness.len(),
+                cs.num_structural_witin as usize
+            );
+            let mut witness_host_bytes = 0usize;
+            let witness = task
+                .input
+                .witness
+                .iter()
+                .enumerate()
+                .map(|(index, mle)| {
+                    let (mle, bytes) =
+                        materialize_gpu_mle(circuit_name, "witness", index, num_vars, mle);
+                    witness_host_bytes = witness_host_bytes
+                        .checked_add(bytes)
+                        .expect("mock witness host-byte calculation overflow");
+                    mle
+                })
                 .collect_vec();
-            let structural_witness = witness.split_off(cs.num_witin as usize);
+            let mut structural_host_bytes = 0usize;
+            let structural_witness = task
+                .input
+                .structural_witness
+                .iter()
+                .enumerate()
+                .map(|(index, mle)| {
+                    let (mle, bytes) =
+                        materialize_gpu_mle(circuit_name, "structural", index, num_vars, mle);
+                    structural_host_bytes = structural_host_bytes
+                        .checked_add(bytes)
+                        .expect("mock structural host-byte calculation overflow");
+                    mle
+                })
+                .collect_vec();
+            let chip_peak_host_bytes = witness_host_bytes
+                .checked_add(structural_host_bytes)
+                .and_then(|bytes| bytes.checked_add(selector_masks.host_bytes))
+                .expect("mock chip host-byte calculation overflow");
+            assert!(
+                chip_peak_host_bytes <= MAX_MOCK_CHIP_HOST_BYTES,
+                "mock chip host materialization exceeds bound before D2H: circuit={circuit_name}, bytes={chip_peak_host_bytes}, bound={MAX_MOCK_CHIP_HOST_BYTES}"
+            );
+            mock_peak_host_bytes = mock_peak_host_bytes.max(chip_peak_host_bytes);
+            processed_circuits += 1;
+            tracing::info!(
+                circuit = %circuit_name,
+                witness_host_bytes,
+                structural_host_bytes,
+                selector_host_bytes = selector_masks.host_bytes,
+                chip_peak_host_bytes,
+                mock_peak_host_bytes,
+                "MockProver bounded per-chip host materialization"
+            );
+            assert_eq!(task.input.pi.len(), cs.instance.len());
+            let circuit_pub_io_evals = task.input.pi.clone();
+            let circuit_pi_mles = vec![];
             let fixed: Vec<_> = fixed_trace
                 .circuit_fixed_traces
                 .remove(circuit_name)
@@ -1090,8 +1844,9 @@ Hints:
                 // shard, rather than duplicating it across per-chip entries.
                 // The global table-vs-opcode comparison below still checks the
                 // complete multiplicity inferred from these chip constraints.
-                let lkm_from_assignments = (!has_shard_gpu_lk)
-                    .then(|| witnesses.get_lk_mlt(circuit_name).cloned())
+                let lkm_from_assignments = fused_lkm
+                    .is_none()
+                    .then(|| lk_mlts.get(circuit_name).cloned())
                     .flatten();
 
                 match Self::run_maybe_challenge_with_table(
@@ -1102,12 +1857,15 @@ Hints:
                     &structural_witness,
                     &circuit_pi_mles,
                     &circuit_pub_io_evals,
+                    Some(&selector_masks),
                     num_rows,
                     challenges,
                     lkm_from_assignments,
                 ) {
                     Ok(multiplicities) => {
-                        lkm_opcodes += multiplicities;
+                        if fused_lkm.is_none() {
+                            lkm_opcodes += multiplicities;
+                        }
                     }
                     Err(errors) => {
                         tracing::error!("Mock proving failed for opcode {}", circuit_name);
@@ -1121,7 +1879,7 @@ Hints:
                     num_rows
                 );
                 // gather lookup tables
-                for (expr, (rom_type, _)) in
+                for (expr, (rom_type, record)) in
                     izip!(&cs.lk_table_expressions, &cs.lk_expressions_items_map)
                 {
                     let lk_table = wit_infer_by_expr(
@@ -1154,20 +1912,117 @@ Hints:
                     .get_ext_field_vec()
                     .to_vec();
 
-                    for (key, multiplicity) in izip!(lk_table, multiplicity) {
-                        lkm_tables.set_count(
-                            *rom_type,
-                            key,
-                            multiplicity.to_canonical_u64() as usize,
-                        );
+                    let raw_keys = if *rom_type == ROMType::Instruction {
+                        let pc = record.first().unwrap_or_else(|| {
+                            panic!("instruction lookup table record must contain a PC")
+                        });
+                        wit_infer_by_expr(
+                            pc,
+                            cs.num_witin,
+                            cs.num_fixed as WitnessId,
+                            0,
+                            &fixed,
+                            &witness,
+                            &structural_witness,
+                            &circuit_pi_mles,
+                            &circuit_pub_io_evals,
+                            &challenges,
+                        )
+                        .get_ext_field_vec()
+                        .iter()
+                        .map(E::to_canonical_u64)
+                        .collect_vec()
+                    } else {
+                        (0..lk_table.len()).map(|row| row as u64).collect_vec()
+                    };
+                    assert_eq!(
+                        raw_keys.len(),
+                        lk_table.len(),
+                        "lookup table raw-key domain mismatch: circuit={circuit_name}, table={rom_type:?}"
+                    );
+
+                    for (raw_key, key, multiplicity) in izip!(raw_keys, lk_table, multiplicity) {
+                        let count = usize::try_from(multiplicity.to_canonical_u64())
+                            .expect("lookup table multiplicity must fit the host count domain");
+                        lkm_tables.set_count(*rom_type, key, count);
+                        if let Some(recorded_lkm) = recorded_lkm.as_ref() {
+                            let recorded_count = recorded_lkm[*rom_type as usize]
+                                .get(&raw_key)
+                                .copied()
+                                .unwrap_or_default();
+                            assert_eq!(
+                                count, recorded_count,
+                                "recorded lookup/table count mismatch: circuit={circuit_name}, table={rom_type:?}, raw_key={raw_key}"
+                            );
+                            if recorded_count != 0 {
+                                assert!(
+                                    consumed_recorded_lk.insert((*rom_type as usize, raw_key)),
+                                    "recorded lookup key consumed multiple times: table={rom_type:?}, raw_key={raw_key}"
+                                );
+                                lkm_opcodes += ((*rom_type, key), recorded_count);
+                            }
+                        }
                     }
                 }
             }
-            wit_mles.insert(circuit_name.clone(), witness);
-            structural_wit_mles.insert(circuit_name.clone(), structural_witness);
-            fixed_mles.insert(circuit_name.clone(), fixed);
-            num_instances.insert(circuit_name.clone(), num_rows);
+            for (ram_type, accumulator) in [
+                RAMType::GlobalState,
+                RAMType::Register,
+                RAMType::Memory,
+                RAMType::Custom,
+            ]
+            .into_iter()
+            .zip(&mut ram_rws)
+            {
+                accumulate_ram_rws(
+                    circuit_name,
+                    cs,
+                    &fixed,
+                    &witness,
+                    &structural_witness,
+                    &circuit_pi_mles,
+                    &circuit_pub_io_evals,
+                    &challenges,
+                    num_rows,
+                    Some(&selector_masks),
+                    ram_type,
+                    accumulator,
+                );
+            }
         }
+
+        if let Some(recorded_lkm) = recorded_lkm {
+            let mut recorded_entry_count = 0usize;
+            for (rom_type, counts) in izip!(ROMType::iter(), &recorded_lkm) {
+                for (raw_key, count) in counts {
+                    assert_ne!(
+                        *count, 0,
+                        "combined recorded lookup source contains a zero count: table={rom_type:?}, raw_key={raw_key}"
+                    );
+                    assert!(
+                        consumed_recorded_lk.contains(&(rom_type as usize, *raw_key)),
+                        "recorded lookup key is outside the table domain: table={rom_type:?}, raw_key={raw_key}, count={count}"
+                    );
+                    recorded_entry_count += 1;
+                }
+            }
+            assert_eq!(
+                consumed_recorded_lk.len(),
+                recorded_entry_count,
+                "recorded lookup multiplicity was not consumed exactly once"
+            );
+            tracing::info!(
+                recorded_entry_count,
+                "MockProver consumed recorded lookup aggregate exactly once"
+            );
+        }
+
+        tracing::info!(
+            processed_circuits,
+            mock_peak_host_bytes,
+            bound_bytes = MAX_MOCK_CHIP_HOST_BYTES,
+            "MockProver completed bounded chip inventory"
+        );
 
         // Assert lkm between all tables and combined opcode circuits
         let errors: Vec<MockProverError<E, E>> = compare_lkm(
@@ -1185,272 +2040,21 @@ Hints:
         // find out r != w errors
         let mut num_rw_mismatch_errors = 0;
 
-        macro_rules! derive_ram_rws {
-            ($ram_type:expr) => {{
-                let mut writes = HashSet::new();
-                let mut writes_grp_by_annotations = HashMap::new();
-                // store (pc, timestamp) for $ram_type == RAMType::GlobalState
-                let mut gs = HashMap::new();
-                for (
-                    circuit_name,
-                    ComposedConstrainSystem {
-                        zkvm_v1_css: cs, ..
-                    },
-                ) in &cs.circuit_css
-                {
-                    let fixed = fixed_mles.get(circuit_name).unwrap();
-                    let witness = wit_mles.get(circuit_name).unwrap();
-                    let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
-                    let (circuit_pub_io_evals, circuit_pi_mles) = get_circuit_pi_inputs(cs);
-
-                    let num_rows = num_instances.get(circuit_name).unwrap();
-                    if *num_rows == 0 {
-                        continue;
-                    }
-                    let w_selector: ArcMultilinearExtension<_> =
-                        if let Some(w_selector) = &cs.w_selector {
-                            structural_witness[w_selector.selector_expr().id()].clone()
-                        } else {
-                            let mut selector = vec![E::BaseField::ONE; *num_rows];
-                            selector.resize(next_pow2_instance_padding(*num_rows), E::BaseField::ZERO);
-                            MultilinearExtension::from_evaluation_vec_smart(
-                                ceil_log2(next_pow2_instance_padding(*num_rows)),
-                                selector,
-                            )
-                            .into()
-                        };
-
-                    for ((w_rlc_expr, annotation), (ram_type_expr, _)) in (cs
-                        .w_expressions
-                        .iter()
-                        .chain(cs.w_table_expressions.iter().map(|expr| &expr.expr)))
-                    .zip_eq(
-                        cs.w_expressions_namespace_map
-                            .iter()
-                            .chain(cs.w_table_expressions_namespace_map.iter()),
-                    )
-                    .zip_eq(cs.w_ram_types.iter())
-                    {
-                        let ram_type_mle = wit_infer_by_expr(
-                            ram_type_expr,
-                            cs.num_witin,
-                            cs.num_fixed as WitnessId,
-                            0,
-                            fixed,
-                            witness,
-                            structural_witness,
-                            &circuit_pi_mles,
-                            &circuit_pub_io_evals,
-                            &challenges,
-                        );
-                        let ram_type_vec = ram_type_mle.get_ext_field_vec();
-                        let write_rlc_records = wit_infer_by_expr(
-                            w_rlc_expr,
-                            cs.num_witin,
-                            cs.num_fixed as WitnessId,
-                            0,
-                            fixed,
-                            witness,
-                            structural_witness,
-                            &circuit_pi_mles,
-                            &circuit_pub_io_evals,
-                            &challenges,
-                        );
-                        let w_selector_vec = w_selector.get_base_field_vec();
-                        let write_rlc_records =
-                            filter_mle_by_predicate(write_rlc_records, |i, _v| {
-                                ram_type_vec[i] == E::from_u32($ram_type as u32)
-                                    && w_selector_vec[i] == E::BaseField::ONE
-                            });
-                        if write_rlc_records.is_empty() {
-                            continue;
-                        }
-
-                        let mut records = vec![];
-                        let mut writes_within_expr_dedup = HashSet::new();
-                        for (row, record_rlc) in enumerate(write_rlc_records) {
-                            if $ram_type == RAMType::Custom && record_rlc == E::ZERO {
-                                continue;
-                            }
-                            // TODO: report error
-                            assert_eq!(
-                                writes_within_expr_dedup.insert(record_rlc),
-                                true,
-                                "circuit name {circuit_name} within expression write duplicated on RAMType {:?} annotation {:?} on row {row}",
-                                $ram_type,
-                                annotation
-                            );
-                            assert_eq!(
-                                writes.insert(record_rlc),
-                                true,
-                                "circuit name {circuit_name} crossing-chip write duplicated on RAMType {:?} annotation {:?} on row {row}",
-                                $ram_type,
-                                annotation
-                            );
-                            records.push((record_rlc, row));
-                        }
-                        writes_grp_by_annotations
-                            .insert(annotation.clone(), (records, circuit_name.clone()));
-                    }
-                }
-
-                let mut reads = HashSet::new();
-                let mut reads_grp_by_annotations = HashMap::new();
-                for (
-                    circuit_name,
-                    ComposedConstrainSystem {
-                        zkvm_v1_css: cs, ..
-                    },
-                ) in &cs.circuit_css
-                {
-                    let fixed = fixed_mles.get(circuit_name).unwrap();
-                    let witness = wit_mles.get(circuit_name).unwrap();
-                    let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
-                    let (circuit_pub_io_evals, circuit_pi_mles) = get_circuit_pi_inputs(cs);
-                    let num_rows = num_instances.get(circuit_name).unwrap();
-                    if *num_rows == 0 {
-                        continue;
-                    }
-                    let r_selector: ArcMultilinearExtension<_> =
-                        if let Some(r_selector) = &cs.r_selector {
-                            structural_witness[r_selector.selector_expr().id()].clone()
-                        } else {
-                            let mut selector = vec![E::BaseField::ONE; *num_rows];
-                            selector.resize(next_pow2_instance_padding(*num_rows), E::BaseField::ZERO);
-                            MultilinearExtension::from_evaluation_vec_smart(
-                                ceil_log2(next_pow2_instance_padding(*num_rows)),
-                                selector,
-                            )
-                            .into()
-                        };
-                    for ((r_rlc_expr, annotation), (ram_type_expr, r_exprs)) in (cs
-                        .r_expressions
-                        .iter()
-                        .chain(cs.r_table_expressions.iter().map(|expr| &expr.expr)))
-                    .zip_eq(
-                        cs.r_expressions_namespace_map
-                            .iter()
-                            .chain(cs.r_table_expressions_namespace_map.iter()),
-                    )
-                    .zip_eq(cs.r_ram_types.iter())
-                    {
-                        let ram_type_mle = wit_infer_by_expr(
-                            ram_type_expr,
-                            cs.num_witin,
-                            cs.num_fixed as WitnessId,
-                            0,
-                            fixed,
-                            witness,
-                            structural_witness,
-                            &circuit_pi_mles,
-                            &circuit_pub_io_evals,
-                            &challenges,
-                        );
-                        let ram_type_vec = ram_type_mle.get_ext_field_vec();
-                        let read_records = wit_infer_by_expr(
-                            r_rlc_expr,
-                            cs.num_witin,
-                            cs.num_fixed as WitnessId,
-                            0,
-                            fixed,
-                            witness,
-                            structural_witness,
-                            &circuit_pi_mles,
-                            &circuit_pub_io_evals,
-                            &challenges,
-                        );
-                        let r_selector_vec = r_selector.get_base_field_vec();
-                        let read_records = filter_mle_by_predicate(read_records, |i, _v| {
-                            ram_type_vec[i] == E::from_u32($ram_type as u32)
-                                && r_selector_vec[i] == E::BaseField::ONE
-                        });
-                        if read_records.is_empty() {
-                            continue;
-                        }
-
-                        if $ram_type == RAMType::GlobalState {
-                            // r_exprs = [GlobalState, pc, timestamp]
-                            assert_eq!(r_exprs.len(), 3);
-                            let r = r_exprs
-                                .into_iter()
-                                .skip(1)
-                                .map(|expr| {
-                                    let v = wit_infer_by_expr(
-                                        expr,
-                                        cs.num_witin,
-                                        cs.num_fixed as WitnessId,
-                                        0,
-                                        fixed,
-                                        witness,
-                                        structural_witness,
-                                        &circuit_pi_mles,
-                                        &circuit_pub_io_evals,
-                                        &challenges,
-                                    );
-                                    filter_mle_by_selector_mle(v, r_selector.clone())
-                                })
-                                .collect_vec();
-                            // convert [[pc], [timestamp]] into [[pc, timestamp]]
-                            let r = (0..r[0].len())
-                                // TODO: use transpose
-                                .map(|row| r.iter().map(|r| r[row]).collect_vec())
-                                .collect_vec();
-
-                            assert!(gs.insert(circuit_name.clone(), r).is_none());
-                        };
-
-                        let mut records = vec![];
-                        let mut reads_within_expr_dedup = HashSet::new();
-                        for (row, record) in enumerate(read_records) {
-                            if $ram_type == RAMType::Custom && record == E::ZERO {
-                                continue;
-                            }
-                            // TODO: return error
-                            assert_eq!(
-                                reads_within_expr_dedup.insert(record),
-                                true,
-                                "circuit name {circuit_name} within expression read duplicated on RAMType {:?} annotation {:?} on row {row}",
-                                $ram_type,
-                                annotation,
-                            );
-                            assert_eq!(
-                                reads.insert(record),
-                                true,
-                                "circuit name {circuit_name} crossing-chip read duplicated on RAMType {:?} annotation {:?} on row {row}",
-                                $ram_type,
-                                annotation,
-                            );
-                            records.push((record, row));
-                        }
-                        reads_grp_by_annotations
-                            .insert(annotation.clone(), (records, circuit_name.clone()));
-                    }
-                }
-
-                (
-                    reads,
-                    reads_grp_by_annotations,
-                    writes,
-                    writes_grp_by_annotations,
-                    gs,
-                )
-            }};
-        }
         macro_rules! find_rw_mismatch {
-            ($reads:ident,$reads_grp_by_annotations:ident,$writes:ident,$writes_grp_by_annotations:ident,$ram_type:expr,$gs:expr) => {
-                for (annotation, (reads, circuit_name)) in &$reads_grp_by_annotations {
+            ($rws:ident,$ram_type:expr,$gs:expr) => {
+                for (annotation, (reads, circuit_name)) in &$rws.reads_by_annotation {
                     // (pc, timestamp)
                     let gs_of_circuit = $gs.get(circuit_name);
                     let num_missing = reads
                         .iter()
-                        .filter(|(read, _)| !$writes.contains(read))
+                        .filter(|(read, _)| !$rws.writes.contains_key(read))
                         .count();
                     let num_reads = reads.len();
                     reads
                         .iter()
-                        .filter(|(read, _)| !$writes.contains(read))
+                        .filter(|(read, _)| !$rws.writes.contains_key(read))
                         .take(10)
-                        .for_each(|(_, row)| {
+                        .for_each(|(read, row)| {
                             let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
                             let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
@@ -1460,7 +2064,10 @@ Hints:
                                 pc,
                                 ts,
                                 $ram_type,
-                            )
+                            );
+                            if let Some(raw_tuple) = $rws.raw_samples.get(read) {
+                                tracing::error!(?raw_tuple, "missing RAM read raw tuple");
+                            }
                         });
 
                     if num_missing > 10 {
@@ -1475,18 +2082,18 @@ Hints:
                     }
                     num_rw_mismatch_errors += num_missing;
                 }
-                for (annotation, (writes, circuit_name)) in &$writes_grp_by_annotations {
+                for (annotation, (writes, circuit_name)) in &$rws.writes_by_annotation {
                     let gs_of_circuit = $gs.get(circuit_name);
                     let num_missing = writes
                         .iter()
-                        .filter(|(write, _)| !$reads.contains(write))
+                        .filter(|(write, _)| !$rws.reads.contains_key(write))
                         .count();
                     let num_writes = writes.len();
                     writes
                         .iter()
-                        .filter(|(write, _)| !$reads.contains(write))
+                        .filter(|(write, _)| !$rws.reads.contains_key(write))
                         .take(10)
-                        .for_each(|(_, row)| {
+                        .for_each(|(write, row)| {
                             let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
                             let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
@@ -1496,7 +2103,10 @@ Hints:
                                 pc,
                                 ts,
                                 $ram_type,
-                            )
+                            );
+                            if let Some(raw_tuple) = $rws.raw_samples.get(write) {
+                                tracing::error!(?raw_tuple, "missing RAM write raw tuple");
+                            }
                         });
 
                     if num_missing > 10 {
@@ -1511,56 +2121,42 @@ Hints:
                     }
                     num_rw_mismatch_errors += num_missing;
                 }
+                let multiplicity_mismatches = $rws
+                    .reads
+                    .keys()
+                    .chain($rws.writes.keys())
+                    .collect::<HashSet<_>>()
+                    .into_iter()
+                    .map(|record| {
+                        $rws.reads.get(record).copied().unwrap_or_default().abs_diff(
+                            $rws.writes.get(record).copied().unwrap_or_default(),
+                        )
+                    })
+                    .sum::<usize>();
+                if multiplicity_mismatches != 0 {
+                    tracing::error!(
+                        ram_type = ?$ram_type,
+                        multiplicity_mismatches,
+                        "RAM record multiplicities differ"
+                    );
+                    num_rw_mismatch_errors += multiplicity_mismatches;
+                }
             };
         }
-        // part1 global state
-        let (gs_rs, rs_grp_by_anno, gs_ws, ws_grp_by_anno, gs) =
-            derive_ram_rws!(RAMType::GlobalState);
+        let [gs_rws, reg_rws, mem_rws, custom_rws] = ram_rws;
+        let gs = &gs_rws.global_state;
 
         // gs stores { (pc, timestamp) }
-        find_rw_mismatch!(
-            gs_rs,
-            rs_grp_by_anno,
-            gs_ws,
-            ws_grp_by_anno,
-            RAMType::GlobalState,
-            gs
-        );
+        find_rw_mismatch!(gs_rws, RAMType::GlobalState, gs);
 
         // part2 registers
-        let (reg_rs, rs_grp_by_anno, reg_ws, ws_grp_by_anno, _) =
-            derive_ram_rws!(RAMType::Register);
-        find_rw_mismatch!(
-            reg_rs,
-            rs_grp_by_anno,
-            reg_ws,
-            ws_grp_by_anno,
-            RAMType::Register,
-            gs
-        );
+        find_rw_mismatch!(reg_rws, RAMType::Register, gs);
 
         // part3 memory
-        let (mem_rs, rs_grp_by_anno, mem_ws, ws_grp_by_anno, _) = derive_ram_rws!(RAMType::Memory);
-        find_rw_mismatch!(
-            mem_rs,
-            rs_grp_by_anno,
-            mem_ws,
-            ws_grp_by_anno,
-            RAMType::Memory,
-            gs
-        );
+        find_rw_mismatch!(mem_rws, RAMType::Memory, gs);
 
         // part4 custom local buses
-        let (custom_rs, rs_grp_by_anno, custom_ws, ws_grp_by_anno, _) =
-            derive_ram_rws!(RAMType::Custom);
-        find_rw_mismatch!(
-            custom_rs,
-            rs_grp_by_anno,
-            custom_ws,
-            ws_grp_by_anno,
-            RAMType::Custom,
-            gs
-        );
+        find_rw_mismatch!(custom_rws, RAMType::Custom, gs);
 
         if num_rw_mismatch_errors > 0 {
             panic!("found {} r/w mismatch errors", num_rw_mismatch_errors);
@@ -1629,17 +2225,12 @@ fn filter_mle_by_selector_mle<E: ExtensionField>(
     target_mle: ArcMultilinearExtension<E>,
     selector: ArcMultilinearExtension<E>,
 ) -> Vec<E> {
+    assert_eq!(target_mle.evaluations().len(), selector.evaluations().len());
     target_mle
         .get_ext_field_vec()
         .iter()
-        .zip_eq(selector.get_base_field_vec())
-        .filter_map(|(v, sel)| {
-            if *sel == E::BaseField::ONE {
-                Some(*v)
-            } else {
-                None
-            }
-        })
+        .enumerate()
+        .filter_map(|(index, value)| selector_mask_is_active(&selector, index).then_some(*value))
         .collect_vec()
 }
 

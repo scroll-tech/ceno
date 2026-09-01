@@ -969,7 +969,7 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     use crate::{
         instructions::gpu::{
             chips::shard_ram::{
-                gpu_batch_continuation_ec_on_device, try_gpu_assign_shard_ram_ec_tree_from_device,
+                shard_ram_record_to_gpu_with_ordinal, try_gpu_assign_shard_ram_ec_tree_from_device,
             },
             dispatch::take_shared_device_buffers,
         },
@@ -1231,12 +1231,29 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
             ))
         })?;
 
-    // 5. GPU batch EC on device for continuation records
-    let (cont_ec_buf, cont_n_writes, cont_n_reads) = info_span!("gpu_batch_ec_on_device")
-        .in_scope(|| {
-            gpu_batch_continuation_ec_on_device(&write_record_pairs, &read_record_pairs)
-        })?;
+    // 5. Preserve FullTracer's already-canonical continuation order on the
+    // host. Reserve the emitted range now so the final backward merge cannot
+    // reallocate this multi-gigabyte vector. EC points are computed only after
+    // the exact merged order is known, directly into its sole device owner.
+    let cont_n_writes = write_record_pairs.len();
+    let cont_n_reads = read_record_pairs.len();
     let cont_total = cont_n_writes + cont_n_reads;
+    let raw_total = cont_total
+        .checked_add(ec_count)
+        .ok_or_else(|| ZKVMError::InvalidWitness("ShardRAM record count overflow".into()))?;
+    let continuation_records = info_span!("gpu_pack_ordered_continuation", n = cont_total)
+        .in_scope(|| {
+            let mut records = Vec::with_capacity(raw_total);
+            records.extend(
+                write_record_pairs
+                    .iter()
+                    .chain(read_record_pairs.iter())
+                    .map(|(record, _name, ordinal)| {
+                        shard_ram_record_to_gpu_with_ordinal(record, *ordinal)
+                    }),
+            );
+            records
+        });
 
     tracing::info!(
         "[GPU full pipeline] batch EC on device: {} writes + {} reads = {} continuation records",
@@ -1268,15 +1285,56 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
             .map_err(|_| ZKVMError::InvalidWitness("legacy bucket limit exceeds u32".into()))?,
     };
 
+    // The canonical GPU records no longer borrow these source tuples. Release
+    // their large host allocation before H2D, then return free glibc pages so
+    // the ShardRAM fix does not merely trade VRAM pressure for retained RSS.
+    let rss_before_source_drop = crate::e2e::process_rss_bytes();
+    drop(write_record_pairs);
+    drop(read_record_pairs);
+    let allocator_released = crate::e2e::trim_process_allocator_pages();
+    tracing::info!(
+        target: "ceno_pipeline",
+        phase = "gpu_shard_ram_host_source_release",
+        rss_before_bytes = rss_before_source_drop,
+        rss_after_bytes = crate::e2e::process_rss_bytes(),
+        allocator_released,
+        "released host continuation source tuples"
+    );
+
+    if crate::scheme::gpu::should_log_gpu_memory() {
+        const KEY_BYTES: usize = 24;
+        const RECORD_BYTES: usize =
+            std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>();
+        let padded_records = ec_count
+            .checked_add(cont_total)
+            .and_then(|total| total.checked_next_power_of_two())
+            .ok_or_else(|| ZKVMError::InvalidWitness("ShardRAM finalizer size overflow".into()))?;
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "gpu_shard_ram_finalizer_plan",
+            emitted_records = ec_count,
+            continuation_records = cont_total,
+            total_records = ec_count + cont_total,
+            padded_records,
+            retained_emitted_bytes = shared.ec_buf.len() * std::mem::size_of::<u32>(),
+            retained_continuation_bytes = 0,
+            canonical_output_bytes = (ec_count + cont_total) * RECORD_BYTES,
+            avoided_sort_key_bytes = padded_records * KEY_BYTES,
+            avoided_sort_scratch_bytes = padded_records * KEY_BYTES,
+            avoided_padded_output_bytes = padded_records * RECORD_BYTES,
+            "GPU ShardRAM finalizer allocation plan"
+        );
+        crate::scheme::gpu::log_gpu_device_state("shard_ram_before_finalize");
+    }
+
     // 6. Exactly one deterministic finalization feeds both consumers.
     let (partitioned_buf, num_writes, total_records, finalized_segments) =
         info_span!("gpu_merge_finalize").in_scope(|| {
             hal.witgen
-                .merge_and_finalize_records(
+                .merge_and_finalize_records_with_host_continuation(
                     &shared.ec_buf,
                     ec_count,
-                    &cont_ec_buf,
-                    cont_total,
+                    continuation_records,
                     &finalization_expectations,
                     None,
                 )

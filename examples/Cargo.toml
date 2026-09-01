@@ -31,6 +31,8 @@ substrate-bn.workspace = true
 
 [features]
 llama-tiny = ["ceno_rt/llama-tiny"]
+production-heads-1 = ["ceno_rt/production-heads-1"]
+production-heads-2 = ["ceno_rt/production-heads-2"]
 resident-block-1 = []
 resident-block-2 = []
 resident-block-4 = []

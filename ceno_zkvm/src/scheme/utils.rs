@@ -170,6 +170,18 @@ pub(crate) fn first_layer_selector_contexts<E: ExtensionField>(
 ) -> Vec<SelectorContext> {
     let cs = &composed_cs.zkvm_v1_css;
     let total_num_instances = num_instances.iter().sum();
+    let prefix_extent = composed_cs.zkvm_v1_css.prefix_selector_num_instances;
+    if let Some(extent) = prefix_extent {
+        assert!(extent.is_power_of_two() && extent > 0);
+        assert!(extent <= (1usize << num_vars));
+        if let Some(rotation_vars) = composed_cs.rotation_vars() {
+            assert_eq!(
+                extent,
+                1usize << rotation_vars,
+                "prefix selector extent must equal the rotating physical domain"
+            );
+        }
+    }
     let first_layer = circuit.layers.first().expect("empty gkr circuit layer");
     let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, circuit);
     let distinct_rw_selectors =
@@ -192,7 +204,12 @@ pub(crate) fn first_layer_selector_contexts<E: ExtensionField>(
                 }
             }
 
-            SelectorContext::new(0, total_num_instances, num_vars)
+            let active_instances = if matches!(selector, SelectorType::Prefix(_)) {
+                prefix_extent.unwrap_or(total_num_instances)
+            } else {
+                total_num_instances
+            };
+            SelectorContext::new(0, active_instances, num_vars)
         })
         .collect_vec()
 }
