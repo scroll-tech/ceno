@@ -1,9 +1,9 @@
 # Tensor VM Llama campaign checkpoint
 
 Schema: 2
-Status: ACTIVE — iteration 189 provider-side TensorVM ownership design required
+Status: ACTIVE — iteration 189 provider-side TensorVM ownership repair
 Root: `/root`
-Active implementor: none (iteration 188 terminal; awaiting ownership-design scope)
+Active implementor: `/root/tensor_vm_llama_i189_provider_ownership`
 Optional probe: none
 
 ## Goal and stop condition
@@ -47,12 +47,11 @@ reduce base-resident committed columns enough to close the measured shard-0
 
 ## Active task — iteration 189
 
-Iteration 188 isolated and fixed the PV probability witness-index bug, but the
-remaining provider/boundary counterpart class requires a separate ownership
-design before implementation. Preserve the existing record identities and do
-not fabricate Custom writes or weaken the mock/verifier. The next permitted
-step is to scope a canonical provider-side counterpart mechanism; no shard
-verifier or full-layer run is valid until that gate passes.
+Iteration 188 isolated and fixed the PV probability witness-index bug. User
+has now authorized the bounded provider/boundary ownership repair. Preserve
+all existing record identities and do not fabricate Custom writes or weaken
+the mock/verifier. No shard verifier or full-layer run is valid until the
+bounded mock gate passes.
 
 ## Latest terminal result — iteration 188
 
