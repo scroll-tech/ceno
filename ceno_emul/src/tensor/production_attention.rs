@@ -149,6 +149,8 @@ pub fn decode_head_range(packed: u32) -> (u32, u32) {
 
 pub const PRODUCTION_PROFILE: u32 = ceno_rt::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER;
 pub const WEIGHT_TILE_WORDS: usize = 1024;
+/// `1e-6 * 2^32 * HIDDEN`, rounded once into the integer RMS domain.
+pub const RMS_EPSILON_SCALED: u64 = 17_592_186;
 const OPERATION_TENSOR_DOMAIN: u32 = 0xa500_0000;
 const OPERATION_TENSOR_DOMAIN_MASK: u32 = 0xff00_0000;
 const OPERATION_TENSOR_LAYER_SHIFT: u32 = 19;
@@ -282,6 +284,12 @@ impl ProductionFullLayerOperationRecord {
 pub fn validate_full_layer_operation_records(
     records: &[ProductionFullLayerOperationRecord],
 ) -> Result<()> {
+    let first = records
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("production operation inventory is empty"))?;
+    let import_cycle = first.import_cycle;
+    let layer = first.layer;
+    ensure!(layer < 32, "production operation layer outside Llama-2-7B");
     let mut cursor = 0usize;
     fn expect_record(
         records: &[ProductionFullLayerOperationRecord],
@@ -301,8 +309,8 @@ pub fn validate_full_layer_operation_records(
         Ok(())
     }
     let rms = |role, tile| ProductionFullLayerOperationRecord {
-        import_cycle: 0,
-        layer: 0,
+        import_cycle,
+        layer,
         role,
         token: 0,
         token_count: SEQUENCE as u32,
@@ -311,8 +319,8 @@ pub fn validate_full_layer_operation_records(
         tile,
     };
     let pointwise = |role, columns| ProductionFullLayerOperationRecord {
-        import_cycle: 0,
-        layer: 0,
+        import_cycle,
+        layer,
         role,
         token: 0,
         token_count: SEQUENCE as u32,
@@ -323,6 +331,8 @@ pub fn validate_full_layer_operation_records(
     fn expect_dense(
         records: &[ProductionFullLayerOperationRecord],
         cursor: &mut usize,
+        import_cycle: u64,
+        layer: u32,
         role: TensorRole,
         k: usize,
         columns: usize,
@@ -334,8 +344,8 @@ pub fn validate_full_layer_operation_records(
                     records,
                     cursor,
                     ProductionFullLayerOperationRecord {
-                        import_cycle: 0,
-                        layer: 0,
+                        import_cycle,
+                        layer,
                         role,
                         token: 0,
                         token_count: SEQUENCE as u32,
@@ -351,22 +361,48 @@ pub fn validate_full_layer_operation_records(
     for tile in 0..4 {
         expect_record(records, &mut cursor, rms(TensorRole::InputNorm, tile))?;
     }
-    expect_dense(records, &mut cursor, TensorRole::Query, HIDDEN, HIDDEN)?;
+    expect_dense(
+        records,
+        &mut cursor,
+        import_cycle,
+        layer,
+        TensorRole::Query,
+        HIDDEN,
+        HIDDEN,
+    )?;
     expect_record(
         records,
         &mut cursor,
         pointwise(TensorRole::Query, HIDDEN as u32),
     )?;
-    expect_dense(records, &mut cursor, TensorRole::Key, HIDDEN, HIDDEN)?;
+    expect_dense(
+        records,
+        &mut cursor,
+        import_cycle,
+        layer,
+        TensorRole::Key,
+        HIDDEN,
+        HIDDEN,
+    )?;
     expect_record(
         records,
         &mut cursor,
         pointwise(TensorRole::Key, HIDDEN as u32),
     )?;
-    expect_dense(records, &mut cursor, TensorRole::Value, HIDDEN, HIDDEN)?;
     expect_dense(
         records,
         &mut cursor,
+        import_cycle,
+        layer,
+        TensorRole::Value,
+        HIDDEN,
+        HIDDEN,
+    )?;
+    expect_dense(
+        records,
+        &mut cursor,
+        import_cycle,
+        layer,
         TensorRole::AttentionOutput,
         HIDDEN,
         HIDDEN,
@@ -386,6 +422,8 @@ pub fn validate_full_layer_operation_records(
     expect_dense(
         records,
         &mut cursor,
+        import_cycle,
+        layer,
         TensorRole::FfnGate,
         HIDDEN,
         LLAMA2_7B_INTERMEDIATE,
@@ -393,6 +431,8 @@ pub fn validate_full_layer_operation_records(
     expect_dense(
         records,
         &mut cursor,
+        import_cycle,
+        layer,
         TensorRole::FfnUp,
         HIDDEN,
         LLAMA2_7B_INTERMEDIATE,
@@ -405,6 +445,8 @@ pub fn validate_full_layer_operation_records(
     expect_dense(
         records,
         &mut cursor,
+        import_cycle,
+        layer,
         TensorRole::FfnDown,
         LLAMA2_7B_INTERMEDIATE,
         HIDDEN,
@@ -485,12 +527,46 @@ pub fn role_weight_words(role: TensorRole) -> Result<usize> {
         .ok_or_else(|| anyhow::anyhow!("production role shape overflow"))
 }
 
-/// Deterministic hidden activation used by both the real guest and the
-/// independent full-tensor integer oracle.
+/// Deterministic first-layer hidden activation used by both the real guest and
+/// independent production replay.
 pub fn hidden_value(token: usize, column: usize) -> Result<i32> {
     ensure!(token < SEQUENCE, "hidden token outside production shape");
     ensure!(column < HIDDEN, "hidden column outside production shape");
-    Ok(i32::try_from((token * 29 + column * 17 + 11) % 31)? - 15)
+    Ok(match (token, column) {
+        (0, 0) => -25_344,
+        (0, 1) => -20_992,
+        (0, 2) => -16_640,
+        (0, 3) => -12_288,
+        _ => 0,
+    })
+}
+
+/// Exact production RMS inverse. The old CUDA path used `double`, which was
+/// neither an AIR relation nor guaranteed identical across devices. Production
+/// now defines the denominator as `floor(sqrt(energy + epsilon))` and rounds
+/// the Q16 inverse to nearest.
+pub fn production_rms_inv(energy: u64) -> Result<i32> {
+    let radicand = energy
+        .checked_add(RMS_EPSILON_SCALED)
+        .ok_or_else(|| anyhow::anyhow!("production RMS energy overflow"))?;
+    let mut root = 0u64;
+    let mut bit = 1u64 << 62;
+    while bit > radicand {
+        bit >>= 2;
+    }
+    let mut remainder = radicand;
+    while bit != 0 {
+        if remainder >= root + bit {
+            remainder -= root + bit;
+            root = (root >> 1) + bit;
+        } else {
+            root >>= 1;
+        }
+        bit >>= 2;
+    }
+    ensure!(root != 0, "production RMS denominator is zero");
+    let inverse = ((1u64 << 38) + root / 2) / root;
+    Ok(i32::try_from(inverse)?)
 }
 
 /// Generate a requested weight word directly from its logical HintRef.
@@ -934,4 +1010,22 @@ pub fn validate_device_capacity(total_bytes: u64, _free_bytes: u64) -> Result<()
         "16-GiB production attention device is too small"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod production_rms_tests {
+    use super::*;
+
+    #[test]
+    fn integer_rms_inverse_is_deterministic_and_monotone() {
+        let zero = production_rms_inv(0).unwrap();
+        let small = production_rms_inv(1 << 24).unwrap();
+        let large = production_rms_inv(1 << 40).unwrap();
+        assert!(zero >= small && small >= large && large > 0);
+
+        let root = 4_194u64;
+        assert!(root * root <= RMS_EPSILON_SCALED);
+        assert!((root + 1) * (root + 1) > RMS_EPSILON_SCALED);
+        assert_eq!(zero, (((1u64 << 38) + root / 2) / root) as i32);
+    }
 }

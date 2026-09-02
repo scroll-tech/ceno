@@ -16,7 +16,8 @@ pub use tracer::{
     GpuReplayStep, GpuReplayTracer, GpuReplayTracerConfig, LatestAccesses, MemOp, NextAccessEvent,
     NextAccessPair, NextAccessTape, NextCycleAccess, PreflightTracer, PreflightTracerConfig,
     ReadOp, ReplayChunk, ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel,
-    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, TensorSegmentPlan, Tracer, WriteOp,
+    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, TensorSegmentPlan,
+    TensorStateSegmentAnnotation, Tracer, WriteOp,
 };
 
 mod compact_journal;

@@ -50,7 +50,7 @@ pub(crate) fn assign_production_shift_device<E: ExtensionField, const GROUP: usi
             "production shift requires the BabyBear GPU backend".into(),
         ));
     }
-    if call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER || call.layer != 0 {
+    if call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER || call.layer >= 32 {
         return Err(ZKVMError::InvalidWitness(
             "production shift call identity changed".into(),
         ));
@@ -152,7 +152,7 @@ pub(crate) fn assign_production_softmax_device<E: ExtensionField, const GROUP: u
             "production softmax requires the BabyBear GPU backend and a valid group".into(),
         ));
     }
-    if call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER || call.layer != 0 {
+    if call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER || call.layer >= 32 {
         return Err(ZKVMError::InvalidWitness(
             "production softmax call identity changed".into(),
         ));

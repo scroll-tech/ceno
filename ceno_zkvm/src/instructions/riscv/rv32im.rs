@@ -10,11 +10,10 @@ use crate::instructions::riscv::ecall::{
     TensorProductionBoundaryAttentionOutputInstruction,
     TensorProductionBoundaryHiddenInputInstruction,
     TensorProductionBoundaryHiddenOutputInstruction, TensorProductionBoundaryPostInputInstruction,
-    TensorProductionBoundaryProjectionOutputInstruction, TensorProductionExportAnchorInstruction,
-    TensorProductionImportAnchorInstruction, TensorProductionPvCoreInstruction,
-    TensorProductionQkCoreInstruction, TensorProductionShiftCoreInstruction,
-    TensorProductionSoftmaxCoreInstruction, TensorProductionStageAnchorInstruction,
-    collect_production_boundary_replay_descriptors,
+    TensorProductionExportAnchorInstruction, TensorProductionImportAnchorInstruction,
+    TensorProductionPvCoreInstruction, TensorProductionQkCoreInstruction,
+    TensorProductionShiftCoreInstruction, TensorProductionSoftmaxCoreInstruction,
+    TensorProductionStageAnchorInstruction, collect_production_boundary_replay_descriptors,
 };
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::lui::LuiInstruction;
@@ -504,11 +503,6 @@ pub struct Rv32imConfig<E: ExtensionField> {
     #[cfg(not(feature = "llama-tiny"))]
     pub tensor_production_boundary_hidden_input_config:
         <TensorProductionBoundaryHiddenInputInstruction<E> as Instruction<E>>::InstructionConfig,
-    #[cfg(not(feature = "llama-tiny"))]
-    pub tensor_production_boundary_projection_output_configs: [
-        <TensorProductionBoundaryProjectionOutputInstruction<E, 0> as Instruction<E>>::InstructionConfig;
-        3
-    ],
     #[cfg(not(feature = "llama-tiny"))]
     pub tensor_production_boundary_attention_input_configs: [[
         <TensorProductionBoundaryAttentionInputInstruction<E, 0, 0> as Instruction<E>>::InstructionConfig;
@@ -1123,12 +1117,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let tensor_production_boundary_hidden_input_config =
             cs.register_opcode_circuit::<TensorProductionBoundaryHiddenInputInstruction<E>>();
         #[cfg(not(feature = "llama-tiny"))]
-        let tensor_production_boundary_projection_output_configs = [
-            cs.register_opcode_circuit::<TensorProductionBoundaryProjectionOutputInstruction<E, 0>>(),
-            cs.register_opcode_circuit::<TensorProductionBoundaryProjectionOutputInstruction<E, 1>>(),
-            cs.register_opcode_circuit::<TensorProductionBoundaryProjectionOutputInstruction<E, 2>>(),
-        ];
-        #[cfg(not(feature = "llama-tiny"))]
         let tensor_production_boundary_attention_input_configs = {
             macro_rules! one {
                 ($g:tt) => {
@@ -1199,18 +1187,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             (
                 TensorProductionImportAnchorInstruction::<E>::name(),
                 TensorProductionBoundaryHiddenInputInstruction::<E>::name(),
-            ),
-            (
-                TensorProductionExportAnchorInstruction::<E>::name(),
-                TensorProductionBoundaryProjectionOutputInstruction::<E, 0>::name(),
-            ),
-            (
-                TensorProductionExportAnchorInstruction::<E>::name(),
-                TensorProductionBoundaryProjectionOutputInstruction::<E, 1>::name(),
-            ),
-            (
-                TensorProductionExportAnchorInstruction::<E>::name(),
-                TensorProductionBoundaryProjectionOutputInstruction::<E, 2>::name(),
             ),
             (
                 TensorProductionImportAnchorInstruction::<E>::name(),
@@ -2177,8 +2153,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             #[cfg(not(feature = "llama-tiny"))]
             tensor_production_boundary_hidden_input_config,
             #[cfg(not(feature = "llama-tiny"))]
-            tensor_production_boundary_projection_output_configs,
-            #[cfg(not(feature = "llama-tiny"))]
             tensor_production_boundary_attention_input_configs,
             #[cfg(not(feature = "llama-tiny"))]
             tensor_production_boundary_attention_output_configs,
@@ -2398,9 +2372,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     fixed.register_opcode_circuit::<$instruction>(cs, $config);
                 };
             }
-            register_boundary!(TensorProductionBoundaryProjectionOutputInstruction<E, 0>, &self.tensor_production_boundary_projection_output_configs[0]);
-            register_boundary!(TensorProductionBoundaryProjectionOutputInstruction<E, 1>, &self.tensor_production_boundary_projection_output_configs[1]);
-            register_boundary!(TensorProductionBoundaryProjectionOutputInstruction<E, 2>, &self.tensor_production_boundary_projection_output_configs[2]);
             register_boundary!(TensorProductionBoundaryPostInputInstruction<E, 0>, &self.tensor_production_boundary_post_input_configs[0]);
             register_boundary!(TensorProductionBoundaryPostInputInstruction<E, 1>, &self.tensor_production_boundary_post_input_configs[1]);
             macro_rules! register_attention_boundaries {
@@ -2985,8 +2956,28 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                         } else {
                             (vec![], vec![])
                         };
+                        // Compact anchors constrain descriptor/handle words.
+                        // The boundary replay owns the bulk RAM journal and
+                        // must route it through ShardRAM so zero-valued heap
+                        // first touches, local finals, and later-shard reads
+                        // all receive their endpoint records.
                         if descriptor.is_memory {
                             for (offset, op) in journal.iter().enumerate() {
+                                // Projection imports intentionally stay compact
+                                // in PureAot: expanding the same 32-MiB hidden
+                                // range for every head would create a 268M-entry
+                                // next-access tape. The validated segment topology
+                                // guarantees another hidden read (the next head,
+                                // or PostFfn after the final head), so preserve the
+                                // canonical ShardRAM continuation explicitly.
+                                let has_future_access = if descriptor.stage == 0
+                                    && descriptor.direction == 0
+                                    && descriptor.part == 0
+                                {
+                                    true
+                                } else {
+                                    journal_future_access[offset] != 0
+                                };
                                 shard_ctx.send(
                                     RAMType::Memory,
                                     op.addr,
@@ -2995,7 +2986,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                                     op.previous_cycle,
                                     op.value.after,
                                     Some(op.value.before),
-                                    journal_future_access[offset] != 0,
+                                    has_future_access,
                                 );
                             }
                         }
@@ -3021,15 +3012,6 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                             TensorProductionBoundaryHiddenInputInstruction<E>,
                             &self.tensor_production_boundary_hidden_input_config
                         ),
-                        (0, 1, 0) => {
-                            assign_production_boundary!(descriptor, TensorProductionBoundaryProjectionOutputInstruction<E, 0>, &self.tensor_production_boundary_projection_output_configs[0])
-                        }
-                        (0, 1, 1) => {
-                            assign_production_boundary!(descriptor, TensorProductionBoundaryProjectionOutputInstruction<E, 1>, &self.tensor_production_boundary_projection_output_configs[1])
-                        }
-                        (0, 1, 2) => {
-                            assign_production_boundary!(descriptor, TensorProductionBoundaryProjectionOutputInstruction<E, 2>, &self.tensor_production_boundary_projection_output_configs[2])
-                        }
                         (2, 0, 0) => {
                             assign_production_boundary!(descriptor, TensorProductionBoundaryPostInputInstruction<E, 0>, &self.tensor_production_boundary_post_input_configs[0])
                         }
@@ -3176,7 +3158,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                         );
                         let projected_qkv = production_hal
                             .witgen
-                            .reconstruct_production_projected_qkv(call.head_start, call.head_count)
+                            .reconstruct_production_projected_qkv(
+                                call.layer,
+                                call.head_start,
+                                call.head_count,
+                            )
                             .map_err(|error| {
                                 ZKVMError::InvalidWitness(
                                     format!(
@@ -3216,6 +3202,38 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                                 .into(),
                             ));
                         }
+                        macro_rules! assign_projection_producers {
+                            ($group:expr) => {{
+                                macro_rules! assign_part {
+                                    ($part:expr, $values:expr) => {{
+                                        let producer_cs = cs
+                                            .get_cs(&TensorProductionBoundaryAttentionInputInstruction::<E, $part, $group>::name())
+                                            .expect("production tensor producer circuit missing");
+                                        let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_boundary::assign_production_tensor_producer_device(
+                                            &self.tensor_production_boundary_attention_input_configs[$group][$part],
+                                            shard_ctx,
+                                            producer_cs.zkvm_v1_css.num_witin as usize,
+                                            producer_cs.zkvm_v1_css.num_structural_witin as usize,
+                                            shard_steps,
+                                            call,
+                                            $values,
+                                        )?;
+                                        witness.insert_opcode_assignment::<TensorProductionBoundaryAttentionInputInstruction<E, $part, $group>>(assignment, multiplicity);
+                                    }};
+                                }
+                                assign_part!(0, &projected_qkv.query);
+                                assign_part!(1, &projected_qkv.key);
+                                assign_part!(2, &projected_qkv.value);
+                            }};
+                        }
+                        macro_rules! dispatch_projection_producers {
+                            ($g:expr) => {
+                                if selected_group == $g {
+                                    assign_projection_producers!($g);
+                                }
+                            };
+                        }
+                        production_groups_each!(dispatch_projection_producers);
                         crate::instructions::gpu::chips::log_production_allocation(
                             "attention_derived_before",
                             ((call.head_count as usize) << 22) * std::mem::size_of::<u64>(),

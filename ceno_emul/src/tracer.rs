@@ -2780,8 +2780,21 @@ impl FullTracer {
             unimplemented!("Only one memory access is supported");
         }
 
-        // Update the tracked min/max MMIO bounds so later phases only materialize
-        // the actually touched address range for heap / hint regions.
+        self.update_mmio_bounds(addr);
+
+        self.records[self.pending_index].memory_op = WriteOp {
+            addr,
+            value,
+            previous_cycle,
+        };
+        self.records[self.pending_index].has_memory_op = true;
+    }
+
+    /// Include every memory address owned by a syscall in the dynamic heap/hint
+    /// initialization range. Syscall memory stamps are finalized by `VMState`,
+    /// so they do not pass through `store_memory`.
+    #[inline(always)]
+    fn update_mmio_bounds(&mut self, addr: WordAddr) {
         if let Some((start_addr, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
             .as_mut()
@@ -2808,17 +2821,28 @@ impl FullTracer {
                 }
             }
         }
-
-        self.records[self.pending_index].memory_op = WriteOp {
-            addr,
-            value,
-            previous_cycle,
-        };
-        self.records[self.pending_index].has_memory_op = true;
     }
 
     #[inline(always)]
-    pub fn track_syscall(&mut self, effects: SyscallEffects) {
+    pub fn track_syscall(&mut self, mut effects: SyscallEffects) {
+        // Pure-AOT planning keeps large tensor RAM regions compact. They still
+        // define the dynamic zero-init domain even though individual mem_ops
+        // are reconstructed only during compact replay.
+        for range in effects.iter_mem_access_ranges() {
+            if range.start < range.end {
+                self.update_mmio_bounds(range.start);
+                self.update_mmio_bounds(WordAddr(range.end.0 - 1));
+            }
+        }
+        for range in effects.iter_mem_bound_ranges() {
+            if range.start < range.end {
+                self.update_mmio_bounds(range.start);
+                self.update_mmio_bounds(WordAddr(range.end.0 - 1));
+            }
+        }
+        for op in effects.iter_mem_ops_mut() {
+            self.update_mmio_bounds(op.addr);
+        }
         let witness = effects.finalize(self);
         let record = &mut self.records[self.pending_index];
         assert!(
@@ -3910,6 +3934,12 @@ impl Tracer for PreflightTracer {
 
     #[inline(always)]
     fn track_syscall(&mut self, mut effects: SyscallEffects) {
+        for range in effects.iter_mem_bound_ranges() {
+            if range.start < range.end {
+                self.update_mmio_bounds(range.start);
+                self.update_mmio_bounds(WordAddr(range.end.0 - 1));
+            }
+        }
         for op in effects.iter_mem_ops_mut() {
             self.record_memory_access(op.addr, op.previous_cycle);
         }

@@ -28,12 +28,16 @@ const STAGE_HEADS: u32 = 2;
 #[cfg(not(any(feature = "production-heads-1", feature = "production-heads-2")))]
 const STAGE_HEADS: u32 = 4;
 
-static mut HIDDEN: [i32; HIDDEN_WORDS] = [0; HIDDEN_WORDS];
-
 const INPUT_PREFIX: [i32; 4] = [-25_344, -20_992, -16_640, -12_288];
 
 fn main() {
-    let hidden_ptr = (&raw mut HIDDEN).cast::<i32>();
+    // Both long-lived activation buffers use ordinary heap RAM.  The VM heap
+    // is canonically zero-initialized, so the untouched hidden tail and the
+    // context first-touch writes participate in HeapInit/ShardRAM instead of
+    // relying on zero-valued ELF BSS entries that have no StaticMem rows.
+    let hidden_layout = Layout::array::<i32>(HIDDEN_WORDS).unwrap();
+    let hidden_ptr = unsafe { alloc(hidden_layout).cast::<i32>() };
+    assert!(!hidden_ptr.is_null());
     for (index, value) in INPUT_PREFIX.into_iter().enumerate() {
         unsafe { hidden_ptr.add(index).write(value) };
     }

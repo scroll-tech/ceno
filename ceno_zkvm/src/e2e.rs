@@ -1582,6 +1582,11 @@ impl CompactStepReplay {
                         pc = self.vm.get_pc().0,
                         "compact replay AOT chunk begin"
                     );
+                    #[cfg(all(
+                        feature = "aot-x86_64",
+                        target_arch = "x86_64",
+                        target_os = "linux"
+                    ))]
                     let ran = match self.aot.run_to_halt(&mut self.vm, max_steps) {
                         Ok(result) => {
                             tracing::info!(
@@ -1759,11 +1764,17 @@ impl CompactStepReplay {
                 let Some(boundary) = syscall.tensor_production_boundary.as_ref() else {
                     continue;
                 };
-                if boundary.kind == ceno_emul::tensor::TensorProductionBoundaryKind::Export
+                let is_context_export = boundary.kind
+                    == ceno_emul::tensor::TensorProductionBoundaryKind::Export
                     && boundary.stage
                         == ceno_emul::tensor::production_attention::ProductionStage::Attention
-                            .as_raw()
-                {
+                            .as_raw();
+                let is_hidden_import = boundary.kind
+                    == ceno_emul::tensor::TensorProductionBoundaryKind::Import
+                    && boundary.stage
+                        == ceno_emul::tensor::production_attention::ProductionStage::Projection
+                            .as_raw();
+                if is_context_export || is_hidden_import {
                     let future = syscall
                         .mem_future_access
                         .iter()
@@ -1772,10 +1783,15 @@ impl CompactStepReplay {
                     tracing::info!(
                         shard_id = self.shard_id,
                         syscall_index,
+                        kind = if is_context_export {
+                            "context_export"
+                        } else {
+                            "hidden_import"
+                        },
                         head_start = boundary.head_start,
                         mem_ops = syscall.mem_ops.len(),
                         future,
-                        "Context export future-access flags after compact replay"
+                        "Production boundary future-access flags after compact replay"
                     );
                 }
             }
@@ -2255,7 +2271,8 @@ pub fn emulate_program<'a>(
         annotations
     };
     #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
-    let tensor_state_annotations = Arc::new(Vec::new());
+    let tensor_state_annotations: Arc<Vec<ceno_emul::TensorStateSegmentAnnotation>> =
+        Arc::new(Vec::new());
 
     if let Some(annotation) = tensor_state_annotations
         .iter()
@@ -4110,13 +4127,48 @@ fn validate_shard_ram_cut_capacity(
                 .expect("CENO_EXPECT_PROJECTION_LIVE_RECORDS must be an integer")
         });
     let mut legal_first_cuts = Vec::new();
+    let mut invalid_planned_cuts = Vec::new();
     for (candidate, segment) in segments.iter().enumerate() {
-        let (live_records, by_source) = final_mem_live_at_cut(segment.end_cycle, final_mem_state);
+        let (static_live_records, mut by_source) =
+            final_mem_live_at_cut(segment.end_cycle, final_mem_state);
+        let groups = ceno_emul::tensor::production_attention::CIRCUITS;
+        let segments_per_layer = groups + 1;
+        let position = candidate % segments_per_layer;
+        let hidden_live = u64::from(candidate + 1 < segments.len())
+            * ceno_emul::tensor::production_attention::HIDDEN_WORDS as u64;
+        let context_live = if position < groups {
+            ((position + 1)
+                * ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
+                * ceno_emul::tensor::production_attention::SEQUENCE
+                * ceno_emul::tensor::production_attention::HEAD_DIM) as u64
+        } else {
+            0
+        };
+        let tensor_live_records = hidden_live
+            .checked_add(context_live)
+            .expect("TensorVM continuation record count overflow");
+        if tensor_live_records != 0 {
+            by_source.insert("tensor", tensor_live_records);
+        }
+        let live_records = static_live_records
+            .checked_add(tensor_live_records)
+            .expect("ShardRAM live record count overflow");
         let capacity = shard_ram_cut_capacity(live_records);
         let core_legal = segment.prefix_core_cost <= max_cell_per_shard;
         let capacity_legal = capacity.assignment_peak_bytes <= device_budget_bytes;
+        let is_planned_cut = segments
+            .get(candidate + 1)
+            .is_none_or(|next| next.shard_id != segment.shard_id);
         if core_legal && capacity_legal {
             legal_first_cuts.push(candidate);
+        } else if is_planned_cut {
+            invalid_planned_cuts.push((
+                candidate,
+                segment.shard_id,
+                capacity.live_records,
+                capacity.assignment_peak_bytes,
+                segment.prefix_core_cost,
+            ));
         }
         tracing::info!(
             target: "ceno_pipeline",
@@ -4137,6 +4189,7 @@ fn validate_shard_ram_cut_capacity(
             device_budget_bytes,
             core_legal,
             capacity_legal,
+            is_planned_cut,
             live_by_source = ?by_source,
             "costed atomic EXPORT_END candidate"
         );
@@ -4154,6 +4207,10 @@ fn validate_shard_ram_cut_capacity(
             );
         }
     }
+    assert!(
+        invalid_planned_cuts.is_empty(),
+        "planned atomic shard cuts exceed ShardRAM/Core capacity: {invalid_planned_cuts:?}; device_budget_bytes={device_budget_bytes}, max_cell_per_shard={max_cell_per_shard}"
+    );
     assert!(
         !legal_first_cuts.is_empty(),
         "no legal atomic first-shard cut: every EXPORT_END candidate exceeds either the explicit ShardRAM device budget ({device_budget_bytes} bytes) or Core budget ({max_cell_per_shard} cells)"

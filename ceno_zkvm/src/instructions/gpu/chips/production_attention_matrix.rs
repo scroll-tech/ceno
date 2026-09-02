@@ -44,7 +44,7 @@ pub(crate) fn assign_production_qk_device<E: ExtensionField, const GROUP: usize>
             "production QK requires the BabyBear GPU backend and a valid group".into(),
         ));
     }
-    if call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER || call.layer != 0 {
+    if call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER || call.layer >= 32 {
         return Err(ZKVMError::InvalidWitness(
             "production QK call identity changed".into(),
         ));
@@ -81,6 +81,7 @@ pub(crate) fn assign_production_qk_device<E: ExtensionField, const GROUP: usize>
             call.import_cycle,
             call.projected_qkv_tensor_id,
             call.projected_qkv_version,
+            call.layer,
             call.attention_output_tensor_id,
             call.attention_output_version,
             &projected_qkv.query,
@@ -162,7 +163,7 @@ pub(crate) fn assign_production_pv_device<E: ExtensionField, const GROUP: usize>
             "production PV requires the BabyBear GPU backend and a valid group".into(),
         ));
     }
-    if call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER || call.layer != 0 {
+    if call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER || call.layer >= 32 {
         return Err(ZKVMError::InvalidWitness(
             "production PV call identity changed".into(),
         ));

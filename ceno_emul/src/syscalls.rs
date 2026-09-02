@@ -109,6 +109,10 @@ pub struct SyscallWitness {
     /// Real RAM ranges retained by metadata-only preflight syscalls. They are
     /// not part of the proof witness; full replay reconstructs `mem_ops`.
     pub(crate) mem_access_ranges: Vec<std::ops::Range<crate::WordAddr>>,
+    /// Compact dynamic-MMIO bounds which do not represent RAM accesses. This
+    /// lets PureAot account for large zero-init tensor buffers without
+    /// expanding them into the next-access tape.
+    pub(crate) mem_bound_ranges: Vec<std::ops::Range<crate::WordAddr>>,
     pub reg_ops: Vec<WriteOp>,
     pub mem_future_access: Vec<u8>,
     pub reg_future_access: Vec<u8>,
@@ -147,6 +151,7 @@ impl SyscallWitness {
             reg_future_access: vec![0; reg_ops.len()],
             mem_ops,
             mem_access_ranges: Vec::new(),
+            mem_bound_ranges: Vec::new(),
             reg_ops,
             tensor_bus_records: Vec::new(),
             tensor_bus_event: None,
@@ -204,6 +209,16 @@ impl SyscallEffects {
 
     pub(crate) fn push_mem_access_range(&mut self, range: std::ops::Range<crate::WordAddr>) {
         self.witness.mem_access_ranges.push(range);
+    }
+
+    pub(crate) fn iter_mem_bound_ranges(
+        &self,
+    ) -> impl Iterator<Item = &std::ops::Range<crate::WordAddr>> {
+        self.witness.mem_bound_ranges.iter()
+    }
+
+    pub(crate) fn push_mem_bound_range(&mut self, range: std::ops::Range<crate::WordAddr>) {
+        self.witness.mem_bound_ranges.push(range);
     }
 
     /// Keep track of register cycles. Memory cycles are finalized by `VMState`

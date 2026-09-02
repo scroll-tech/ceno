@@ -355,7 +355,7 @@ impl ProductionFullLayerCudaProvider {
                     );
                     if role != TensorRole::Value {
                         let rope_started = std::time::Instant::now();
-                        self.launch_rope(witness, role)?;
+                        self.launch_rope(witness, layer, role)?;
                         tracing::info!(
                             target: "ceno_pipeline",
                             phase = "production_execute_substage",
@@ -389,7 +389,7 @@ impl ProductionFullLayerCudaProvider {
                     HIDDEN_WORDS / SEQUENCE,
                     16,
                 )?;
-                self.launch_residual(witness, TensorRole::AttentionOutput)?;
+                self.launch_residual(witness, layer, TensorRole::AttentionOutput)?;
                 self.launch_rms(witness, layer, TensorRole::PostAttentionNorm, false)?;
                 self.launch_dense(
                     witness,
@@ -407,7 +407,7 @@ impl ProductionFullLayerCudaProvider {
                     LLAMA2_7B_INTERMEDIATE,
                     16,
                 )?;
-                self.launch_swiglu(witness)?;
+                self.launch_swiglu(witness, layer)?;
                 self.launch_dense(
                     witness,
                     layer,
@@ -416,7 +416,7 @@ impl ProductionFullLayerCudaProvider {
                     HIDDEN_WORDS / SEQUENCE,
                     16,
                 )?;
-                self.launch_residual(witness, TensorRole::FfnDown)?;
+                self.launch_residual(witness, layer, TensorRole::FfnDown)?;
             }
         }
         for record in &witness.operation_records {
@@ -611,6 +611,7 @@ impl ProductionFullLayerCudaProvider {
     fn launch_rope(
         &self,
         witness: &mut ProductionFullLayerDeviceWitness,
+        layer: u32,
         role: TensorRole,
     ) -> Result<()> {
         let pairs = witness.query.len() / 2;
@@ -631,7 +632,7 @@ impl ProductionFullLayerCudaProvider {
             .operation_records
             .push(ProductionFullLayerOperationRecord {
                 import_cycle: 0,
-                layer: 0,
+                layer,
                 role,
                 token: 0,
                 token_count: SEQUENCE as u32,
@@ -646,6 +647,7 @@ impl ProductionFullLayerCudaProvider {
     fn launch_residual(
         &self,
         witness: &mut ProductionFullLayerDeviceWitness,
+        layer: u32,
         role: TensorRole,
     ) -> Result<()> {
         let (left, right, output) = match role {
@@ -673,7 +675,7 @@ impl ProductionFullLayerCudaProvider {
             .operation_records
             .push(ProductionFullLayerOperationRecord {
                 import_cycle: 0,
-                layer: 0,
+                layer,
                 role,
                 token: 0,
                 token_count: SEQUENCE as u32,
@@ -685,7 +687,11 @@ impl ProductionFullLayerCudaProvider {
         Ok(())
     }
 
-    fn launch_swiglu(&self, witness: &mut ProductionFullLayerDeviceWitness) -> Result<()> {
+    fn launch_swiglu(
+        &self,
+        witness: &mut ProductionFullLayerDeviceWitness,
+        layer: u32,
+    ) -> Result<()> {
         let cells = SEQUENCE * LLAMA2_7B_INTERMEDIATE;
         unsafe {
             self.stream
@@ -699,7 +705,7 @@ impl ProductionFullLayerCudaProvider {
             .operation_records
             .push(ProductionFullLayerOperationRecord {
                 import_cycle: 0,
-                layer: 0,
+                layer,
                 role: TensorRole::FfnGate,
                 token: 0,
                 token_count: SEQUENCE as u32,
@@ -838,6 +844,29 @@ extern "C" __device__ __forceinline__ long long centered_rescale(long long value
     return q;
 }
 
+extern "C" __device__ __forceinline__ unsigned long long production_isqrt(
+    unsigned long long value) {
+    unsigned long long root = 0;
+    unsigned long long bit = 1ull << 62;
+    while (bit > value) bit >>= 2;
+    while (bit) {
+        if (value >= root + bit) {
+            value -= root + bit;
+            root = (root >> 1) + bit;
+        } else {
+            root >>= 1;
+        }
+        bit >>= 2;
+    }
+    return root;
+}
+
+extern "C" __device__ __forceinline__ int production_rms_inverse(
+    unsigned long long energy) {
+    unsigned long long root = production_isqrt(energy + 17592186ull);
+    return (int)(((1ull << 38) + root / 2) / root);
+}
+
 extern "C" __global__ void production_full_layer_rms(
     const int *input, const int *weight, int *output, unsigned column_start) {
     unsigned cell = blockIdx.x * blockDim.x + threadIdx.x;
@@ -845,13 +874,12 @@ extern "C" __global__ void production_full_layer_rms(
     unsigned token = cell / 1024u;
     unsigned local_column = cell % 1024u;
     unsigned column = column_start + local_column;
-    long long energy = 0;
+    unsigned long long energy = 0;
     for (unsigned k = 0; k < 4096u; ++k) {
         long long value = input[token * 4096u + k];
-        energy += value * value;
+        energy += (unsigned long long)(value * value);
     }
-    double mean = (double)energy / 4096.0 + 1.0e-6 * 65536.0 * 65536.0;
-    int inv_rms = (int)(65536.0 * 65536.0 / sqrt(mean) + 0.5);
+    int inv_rms = production_rms_inverse(energy);
     long long weighted_inv = centered_rescale((long long)inv_rms * weight[local_column], 16u);
     output[token * 4096u + column] =
         (int)centered_rescale(weighted_inv * input[token * 4096u + column], 16u);

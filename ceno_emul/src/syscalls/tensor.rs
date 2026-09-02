@@ -766,9 +766,18 @@ pub(super) fn prepass_production_import_begin_v2<T: Tracer>(
     };
     if vm.tracer().prepass_tracks_memory_ranges() {
         match stage {
-            ProductionStage::Projection => {}
+            ProductionStage::Projection => {
+                effects.push_mem_bound_range(tensor_bus_word_range(
+                    words[2],
+                    crate::tensor::production_attention::HIDDEN_WORDS,
+                )?);
+            }
             ProductionStage::Attention => unreachable!(),
             ProductionStage::PostFfn => {
+                effects.push_mem_bound_range(tensor_bus_word_range(
+                    words[2],
+                    crate::tensor::production_attention::HIDDEN_WORDS,
+                )?);
                 effects.push_mem_access_range(tensor_bus_word_range(
                     words[3],
                     crate::tensor::production_attention::CONTEXT_WORDS,

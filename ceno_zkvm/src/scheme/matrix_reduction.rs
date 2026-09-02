@@ -25,6 +25,7 @@ pub const MATRIX_REDUCTION_COLUMNS: [usize; 4] = [0, 3, 6, 9];
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MatrixReductionKind {
     Tiny,
+    ProductionProjection,
     ProductionQk,
     ProductionPv,
 }
@@ -49,13 +50,26 @@ impl MatrixReductionDescriptor {
         }
     }
 
-    const fn production(kind: MatrixReductionKind, shift: u32) -> Self {
+    const fn production(kind: MatrixReductionKind, shift: u32, head_count: usize) -> Self {
+        let head_vars = head_count.trailing_zeros() as usize;
         Self {
             kind,
             columns: [0, 1, 2, 3],
-            output_vars: 24,
-            sumcheck_vars: 13,
+            output_vars: 22 + head_vars,
+            sumcheck_vars: 11 + head_vars,
             shift,
+        }
+    }
+
+    const fn production_projection() -> Self {
+        Self {
+            kind: MatrixReductionKind::ProductionProjection,
+            columns: [0, 1, 2, 3],
+            // Physical rows are [n7, m11, repeat5]. A is [k12, m11]
+            // and W is [n7, k12, repeat4], all on the same 2^23 domain.
+            output_vars: 23,
+            sumcheck_vars: 12,
+            shift: 16,
         }
     }
 }
@@ -64,20 +78,28 @@ pub fn descriptor(circuit_name: &str) -> Option<MatrixReductionDescriptor> {
     if circuit_name == "TensorBatchedMatMulCore" {
         return Some(MatrixReductionDescriptor::tiny());
     }
+    if circuit_name.starts_with("TensorProjectionDense") {
+        return Some(MatrixReductionDescriptor::production_projection());
+    }
     let production_group = |prefix: &str| {
-        (0..8).any(|group| {
-            circuit_name == format!("{prefix}Heads{:02}_{:02}", group * 4, group * 4 + 3)
-        })
+        let suffix = circuit_name.strip_prefix(prefix)?.strip_prefix("Heads")?;
+        let (start, end) = suffix.split_once('_')?;
+        let start = start.parse::<usize>().ok()?;
+        let end = end.parse::<usize>().ok()?;
+        let heads = end.checked_sub(start)?.checked_add(1)?;
+        (matches!(heads, 1 | 2 | 4) && end < 32 && start % heads == 0).then_some(heads)
     };
-    if production_group("TensorAttentionQK") {
+    if let Some(heads) = production_group("TensorAttentionQK") {
         Some(MatrixReductionDescriptor::production(
             MatrixReductionKind::ProductionQk,
             16,
+            heads,
         ))
-    } else if production_group("TensorAttentionPV") {
+    } else if let Some(heads) = production_group("TensorAttentionPV") {
         Some(MatrixReductionDescriptor::production(
             MatrixReductionKind::ProductionPv,
             20,
+            heads,
         ))
     } else {
         None
@@ -253,9 +275,11 @@ pub fn prove_production(
 > {
     if !matches!(
         descriptor.kind,
-        MatrixReductionKind::ProductionQk | MatrixReductionKind::ProductionPv
-    ) || descriptor.output_vars != 24
-        || descriptor.sumcheck_vars != 13
+        MatrixReductionKind::ProductionProjection
+            | MatrixReductionKind::ProductionQk
+            | MatrixReductionKind::ProductionPv
+    ) || !matches!(descriptor.output_vars, 22..=24)
+        || descriptor.sumcheck_vars != descriptor.output_vars - 11
     {
         return Err(ZKVMError::InvalidWitness(
             "invalid production matrix reduction descriptor".into(),
@@ -287,7 +311,14 @@ pub fn prove_production(
         .project_production_matrix(
             columns,
             &output_point,
-            descriptor.kind == MatrixReductionKind::ProductionPv,
+            match descriptor.kind {
+                MatrixReductionKind::ProductionQk => 0,
+                MatrixReductionKind::ProductionPv => 1,
+                MatrixReductionKind::ProductionProjection => 2,
+                MatrixReductionKind::Tiny => unreachable!(),
+            },
+            descriptor.output_vars,
+            descriptor.sumcheck_vars,
         )
         .map_err(|error| {
             ZKVMError::InvalidWitness(
@@ -442,8 +473,8 @@ fn verify_production<E: ExtensionField>(
     transcript: &mut impl Transcript<E>,
 ) -> Result<MatrixOpeningClaims<E>, ZKVMError> {
     if num_instances != 1 << descriptor.output_vars
-        || descriptor.output_vars != 24
-        || descriptor.sumcheck_vars != 13
+        || !matches!(descriptor.output_vars, 22..=24)
+        || descriptor.sumcheck_vars != descriptor.output_vars - 11
     {
         return Err(invalid("production matrix reduction shape mismatch"));
     }
@@ -482,8 +513,12 @@ fn verify_production<E: ExtensionField>(
         .collect::<Vec<_>>();
     transcript.append_field_element_ext(&proof.final_evals[0]);
     transcript.append_field_element_ext(&proof.final_evals[1]);
-    let h = &reduction_point[11..13];
-    let mut selector_eval = eq_eval(&logical_output[22..24], h);
+    let h = &reduction_point[11.min(descriptor.sumcheck_vars)..descriptor.sumcheck_vars];
+    let mut selector_eval = if descriptor.kind == MatrixReductionKind::ProductionProjection {
+        E::from_u64(1)
+    } else {
+        eq_eval(&logical_output[22..descriptor.output_vars], h)
+    };
     if descriptor.kind == MatrixReductionKind::ProductionPv {
         // PV's final four reduction coordinates select the K128 tile.  The
         // same four logical-output coordinates select the per-tile Q/R row.
@@ -513,7 +548,7 @@ fn production_output_point<E: ExtensionField>(
     kind: MatrixReductionKind,
     logical: &[E],
 ) -> Result<Point<E>, ZKVMError> {
-    if logical.len() != 24 {
+    if !(22..=24).contains(&logical.len()) {
         return Err(invalid("production matrix output point width mismatch"));
     }
     match kind {
@@ -521,10 +556,11 @@ fn production_output_point<E: ExtensionField>(
         MatrixReductionKind::ProductionPv => Ok(logical[..7]
             .iter()
             .chain(&logical[11..22])
-            .chain(&logical[22..24])
+            .chain(&logical[22..])
             .chain(&logical[7..11])
             .copied()
             .collect()),
+        MatrixReductionKind::ProductionProjection => Ok(logical.to_vec()),
         MatrixReductionKind::Tiny => Err(invalid("tiny matrix has no production point map")),
     }
 }
@@ -534,14 +570,24 @@ fn production_terminal_points<E: ExtensionField>(
     output: &[E],
     reduction: &[E],
 ) -> Result<(Point<E>, Point<E>), ZKVMError> {
-    if output.len() != 24 || reduction.len() != 13 {
+    if !(22..=24).contains(&output.len()) || reduction.len() != output.len() - 11 {
         return Err(invalid("production matrix terminal point width mismatch"));
     }
     let k = &reduction[..11];
-    let h = &reduction[11..13];
+    let h = &reduction[11..];
     let n = &output[..11];
     let m = &output[11..22];
     match kind {
+        MatrixReductionKind::ProductionProjection => {
+            let k = reduction;
+            let n = &output[..7];
+            let m = &output[7..18];
+            let repeat = &output[18..23];
+            Ok((
+                k.iter().chain(m).copied().collect(),
+                n.iter().chain(k).chain(&repeat[..4]).copied().collect(),
+            ))
+        }
         MatrixReductionKind::ProductionQk => Ok((
             k.iter().chain(m).chain(h).copied().collect(),
             n.iter().chain(k).chain(h).copied().collect(),
@@ -564,5 +610,71 @@ fn production_terminal_points<E: ExtensionField>(
                 .collect(),
         )),
         MatrixReductionKind::Tiny => Err(invalid("tiny matrix has no production terminal map")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ff_ext::BabyBearExt4;
+
+    #[test]
+    fn production_descriptor_derives_head_geometry() {
+        let projection = descriptor("TensorProjectionDenseQueryHeads00_00")
+            .expect("valid production projection descriptor");
+        assert_eq!(projection.kind, MatrixReductionKind::ProductionProjection);
+        assert_eq!((projection.output_vars, projection.sumcheck_vars), (23, 12));
+        for (name, output_vars, sumcheck_vars) in [
+            ("TensorAttentionQKHeads00_00", 22, 11),
+            ("TensorAttentionPVHeads02_03", 23, 12),
+            ("TensorAttentionQKHeads28_31", 24, 13),
+        ] {
+            let descriptor = descriptor(name).expect("valid production descriptor");
+            assert_eq!(descriptor.output_vars, output_vars);
+            assert_eq!(descriptor.sumcheck_vars, sumcheck_vars);
+        }
+        assert!(descriptor("TensorAttentionQKHeads01_02").is_none());
+        assert!(descriptor("TensorAttentionPVHeads31_32").is_none());
+    }
+
+    #[test]
+    fn production_point_maps_cover_head_one_and_four() {
+        for output_vars in [22usize, 24] {
+            let output = (0..output_vars)
+                .map(BabyBearExt4::from_usize)
+                .collect::<Vec<_>>();
+            let reduction = (0..output_vars - 11)
+                .map(|index| BabyBearExt4::from_usize(100 + index))
+                .collect::<Vec<_>>();
+            for kind in [
+                MatrixReductionKind::ProductionQk,
+                MatrixReductionKind::ProductionPv,
+            ] {
+                assert_eq!(
+                    production_output_point(kind, &output).unwrap().len(),
+                    output_vars
+                );
+                let (a, w) = production_terminal_points(kind, &output, &reduction).unwrap();
+                assert_eq!(a.len(), output_vars);
+                assert_eq!(w.len(), output_vars);
+            }
+        }
+        let output = (0..23).map(BabyBearExt4::from_usize).collect::<Vec<_>>();
+        let reduction = (0..12)
+            .map(|index| BabyBearExt4::from_usize(100 + index))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            production_output_point(MatrixReductionKind::ProductionProjection, &output)
+                .unwrap()
+                .len(),
+            23
+        );
+        let (a, w) = production_terminal_points(
+            MatrixReductionKind::ProductionProjection,
+            &output,
+            &reduction,
+        )
+        .unwrap();
+        assert_eq!((a.len(), w.len()), (23, 23));
     }
 }

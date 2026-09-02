@@ -56,8 +56,6 @@ pub type TensorProductionStageAnchorInstruction<E> = TensorProductionAnchorInstr
 pub type TensorProductionExportAnchorInstruction<E> = TensorProductionAnchorInstruction<E, 2>;
 pub type TensorProductionBoundaryHiddenInputInstruction<E> =
     TensorProductionBoundaryInstruction<E, 0, 0, 0, 0>;
-pub type TensorProductionBoundaryProjectionOutputInstruction<E, const PART: usize> =
-    TensorProductionBoundaryInstruction<E, 0, 1, PART, 0>;
 pub type TensorProductionBoundaryAttentionInputInstruction<
     E,
     const PART: usize,
@@ -906,7 +904,43 @@ impl<E: ExtensionField, const KIND: usize> Instruction<E>
                     || format!("production_boundary_input_part_{part}_start"),
                     conditional_type(active.clone()),
                     record.clone(),
-                    conditional_rlc(cb, active, &record),
+                    conditional_rlc(cb, active.clone(), &record),
+                )?;
+                // An import owns a complete RAM -> Tensor stream.  Close its
+                // cursor here; the resulting TensorState values are linked to
+                // later operations by their value records, not by a boundary
+                // cursor that spans unrelated tensors or stages.
+                let rows = is_projection.expr()
+                    * E::BaseField::from_usize(
+                        ceno_emul::tensor::production_attention::HIDDEN_WORDS,
+                    )
+                    .expr()
+                    + is_attention.expr()
+                        * E::BaseField::from_usize(
+                            ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
+                                * ceno_emul::tensor::production_attention::CONTEXT_WORDS
+                                / 32,
+                        )
+                        .expr()
+                    + is_post.expr()
+                        * E::BaseField::from_usize(
+                            ceno_emul::tensor::production_attention::HIDDEN_WORDS,
+                        )
+                        .expr();
+                let end_record = boundary_state_record(
+                    import_cycle.expr(),
+                    output_values[0].clone(),
+                    output_values[1].clone(),
+                    output_values[2].clone(),
+                    part,
+                    desc_before(2 + part),
+                    rows,
+                );
+                cb.read_rlc_record(
+                    || format!("production_boundary_input_part_{part}_end"),
+                    conditional_type(active.clone()),
+                    end_record.clone(),
+                    conditional_rlc(cb, active, &end_record),
                 )?;
             }
         } else if KIND == 1 {
@@ -1436,27 +1470,32 @@ impl<
                 tensor_record,
             )?;
         }
-        let state = |index: Expression<E>| {
-            boundary_state_record(
-                import_cycle.expr(),
-                tensor_id_lo.expr(),
-                tensor_id_hi.expr(),
-                tensor_version.expr(),
-                PART,
-                base_byte_address.expr(),
-                index,
-            )
-        };
-        cb.read_record(
-            || "production_boundary_state_in",
-            RAMType::Custom,
-            state(physical_local_index.expr()),
-        )?;
-        cb.write_record(
-            || "production_boundary_state_out",
-            RAMType::Custom,
-            state(physical_local_index.expr() + E::BaseField::ONE.expr()),
-        )?;
+        // Boundary-state records authenticate only real RAM<->Tensor streams.
+        // Internal projection producers are complete TensorState relations and
+        // have no guest-RAM cursor to carry across rows or shards.
+        if is_memory {
+            let state = |index: Expression<E>| {
+                boundary_state_record(
+                    import_cycle.expr(),
+                    tensor_id_lo.expr(),
+                    tensor_id_hi.expr(),
+                    tensor_version.expr(),
+                    PART,
+                    base_byte_address.expr(),
+                    index,
+                )
+            };
+            cb.read_record(
+                || "production_boundary_state_in",
+                RAMType::Custom,
+                state(physical_local_index.expr()),
+            )?;
+            cb.write_record(
+                || "production_boundary_state_out",
+                RAMType::Custom,
+                state(physical_local_index.expr() + E::BaseField::ONE.expr()),
+            )?;
+        }
         let structural = TensorProductionBoundaryStructuralConfig {
             physical_local_index,
             eq_rotation_left,

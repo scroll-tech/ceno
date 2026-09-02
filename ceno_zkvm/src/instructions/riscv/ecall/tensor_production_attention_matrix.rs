@@ -88,6 +88,7 @@ pub struct TensorProductionQkCoreConfig {
     input_id_lo: WitIn,
     input_id_hi: WitIn,
     input_version: WitIn,
+    layer: WitIn,
     output_id_lo: WitIn,
     output_id_hi: WitIn,
     output_version: WitIn,
@@ -133,6 +134,7 @@ impl TensorProductionQkCoreConfig {
                 id(self.input_id_lo),
                 id(self.input_id_hi),
                 id(self.input_version),
+                id(self.layer),
                 id(self.output_id_lo),
                 id(self.output_id_hi),
                 id(self.output_version),
@@ -157,7 +159,7 @@ impl TensorProductionQkCoreConfig {
                 ZKVMError::InvalidWitness("production QK structural width overflow".into())
             })?,
         };
-        if num_witin != 21
+        if num_witin != 22
             || num_structural_witin != 9
             || map.witness != core::array::from_fn(|index| index as u32)
             || map.structural != [4, 0, 1, 2, 3, 5, 6, 7, 8]
@@ -466,6 +468,7 @@ fn attention_call_record<E: ExtensionField>(
     output_id_lo: Expression<E>,
     output_id_hi: Expression<E>,
     output_version: Expression<E>,
+    layer: Expression<E>,
     head_start: usize,
 ) -> Vec<Expression<E>> {
     vec![
@@ -479,7 +482,7 @@ fn attention_call_record<E: ExtensionField>(
         output_id_hi,
         output_version,
         E::BaseField::from_u32(ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER).expr(),
-        E::BaseField::ZERO.expr(),
+        layer,
         E::BaseField::ONE.expr(),
         E::BaseField::from_usize(head_start).expr(),
         E::BaseField::from_u64(HEADS_PER_CORE).expr(),
@@ -654,6 +657,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         let input_id_lo = cb.create_witin(|| "production_qk_input_id_lo");
         let input_id_hi = cb.create_witin(|| "production_qk_input_id_hi");
         let input_version = cb.create_witin(|| "production_qk_input_version");
+        let layer = cb.create_witin(|| "production_qk_layer");
         let output_id_lo = cb.create_witin(|| "production_qk_output_id_lo");
         let output_id_hi = cb.create_witin(|| "production_qk_output_id_hi");
         let output_version = cb.create_witin(|| "production_qk_output_version");
@@ -675,6 +679,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
                 output_id_lo.expr(),
                 output_id_hi.expr(),
                 output_version.expr(),
+                layer.expr(),
                 GROUP * HEADS_PER_CORE as usize,
             );
             cb.read_rlc_record(
@@ -746,6 +751,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             input_id_lo,
             input_id_hi,
             input_version,
+            layer,
             output_id_lo,
             output_id_hi,
             output_version,
@@ -769,7 +775,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
         let config = Self::construct_circuit(cb, params)?;
         assert_eq!(
-            cb.cs.num_witin as usize, 21,
+            cb.cs.num_witin as usize, 22,
             "production QK witness width changed"
         );
         assert_eq!(
