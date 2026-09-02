@@ -154,6 +154,8 @@ fn main() {
     println!("cargo:rerun-if-changed=../ceno_rt/src/tensor.rs");
     println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_LLAMA_TINY");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PRODUCTION_HEADS_1");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PRODUCTION_HEADS_2");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RESIDENT_BLOCK_1");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RESIDENT_BLOCK_2");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RESIDENT_BLOCK_4");

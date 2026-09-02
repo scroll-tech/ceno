@@ -71,6 +71,7 @@ pub fn extract_shard_ram_column_map<E: ExtensionField>(
     let mut x = [0u32; 7];
     let mut y = [0u32; 7];
     for i in 0..7 {
+        // Leaf x aliases the matching final Poseidon output column.
         x[i] = config.x[i].id as u32;
         y[i] = config.y[i].id as u32;
     }

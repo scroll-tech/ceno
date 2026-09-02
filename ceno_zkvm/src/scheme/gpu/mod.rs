@@ -121,6 +121,34 @@ fn expect_jagged_pcs_data(pcs_data: &GpuPcsData) -> &GpuJaggedPcsData {
     }
 }
 
+pub(crate) fn spill_gpu_digest_before_main(pcs_data: &mut GpuPcsData) {
+    let cuda_hal = get_cuda_hal().expect("CUDA HAL unavailable for digest spill");
+    match pcs_data {
+        GpuPcsData::Basefold(data) => data
+            .spill_digest(cuda_hal.alloc_elems_on_device(0, false, None).expect("failed to allocate empty digest replacement"))
+            .expect("failed to spill Basefold digest to host"),
+        GpuPcsData::Jagged(data) => data
+            .inner
+            .spill_digest(cuda_hal.alloc_elems_on_device(0, false, None).expect("failed to allocate empty digest replacement"))
+            .expect("failed to spill Jagged inner Basefold digest to host"),
+    };
+    cuda_hal.inner.synchronize().expect("digest D2H synchronize failed");
+}
+
+pub(crate) fn restore_gpu_digest_before_open(pcs_data: &mut GpuPcsData) {
+    let cuda_hal = get_cuda_hal().expect("CUDA HAL unavailable for digest restore");
+    match pcs_data {
+        GpuPcsData::Basefold(data) => data
+            .restore_digest(&*cuda_hal)
+            .expect("failed to restore Basefold digest to device"),
+        GpuPcsData::Jagged(data) => data
+            .inner
+            .restore_digest(&*cuda_hal)
+            .expect("failed to restore Jagged inner Basefold digest to device"),
+    };
+    cuda_hal.inner.synchronize().expect("digest H2D synchronize failed");
+}
+
 fn jagged_trace_layouts<T>(traces: &[witness::RowMajorMatrix<T>]) -> Vec<GpuJaggedTraceLayout>
 where
     T: FieldAlgebra + Default + Sync + Clone + Send + Copy + 'static,

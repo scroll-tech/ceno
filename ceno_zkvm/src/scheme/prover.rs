@@ -827,7 +827,7 @@ impl<
 
             // commit to witness traces in batch
             #[cfg_attr(not(feature = "gpu"), allow(unused_mut))]
-            let (witness_mles, witness_data, witin_commit): (
+            let (witness_mles, mut witness_data, witin_commit): (
                 Vec<Arc<PB::MultilinearPoly<'_>>>,
                 PB::PcsData,
                 PCS::Commitment,
@@ -937,6 +937,13 @@ impl<
                 transcript.append_field_element_ext(&sample);
             }
 
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                let gpu_witness_data: &mut gkr_iop::gpu::GpuPcsData =
+                    unsafe { std::mem::transmute(&mut witness_data) };
+                crate::scheme::gpu::spill_gpu_digest_before_main(gpu_witness_data);
+            }
+
             let main_constraints_span =
                 entered_span!("prove_batched_main_constraints", profiling_1 = true);
             let (main_constraint_proof, main_constraint_results) =
@@ -947,6 +954,13 @@ impl<
                         &mut transcript,
                     )
                 })?;
+
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                let gpu_witness_data: &mut gkr_iop::gpu::GpuPcsData =
+                    unsafe { std::mem::transmute(&mut witness_data) };
+                crate::scheme::gpu::restore_gpu_digest_before_open(gpu_witness_data);
+            }
             let (points, evaluations) = collect_main_constraint_openings(main_constraint_results);
             exit_span!(main_constraints_span);
 

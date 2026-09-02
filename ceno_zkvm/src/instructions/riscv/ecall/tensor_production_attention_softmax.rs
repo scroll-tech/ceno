@@ -211,11 +211,10 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
 #[derive(Debug)]
 pub struct TensorProductionSoftmaxCoreConfig {
     score: WitIn,
-    limbs: [WitIn; 5],
+    limbs: [WitIn; 4],
     exp3: WitIn,
     exp4: WitIn,
     causal: WitIn,
-    comparison_diff: WitIn,
     comparison_diff_bits: [WitIn; 11],
     probability: WitIn,
     import_cycle: WitIn,
@@ -245,11 +244,9 @@ impl TensorProductionSoftmaxCoreConfig {
                 id(self.limbs[1]),
                 id(self.limbs[2]),
                 id(self.limbs[3]),
-                id(self.limbs[4]),
                 id(self.exp3),
                 id(self.exp4),
                 id(self.causal),
-                id(self.comparison_diff),
                 id(self.comparison_diff_bits[0]),
                 id(self.comparison_diff_bits[1]),
                 id(self.comparison_diff_bits[2]),
@@ -280,7 +277,7 @@ impl TensorProductionSoftmaxCoreConfig {
                 ZKVMError::InvalidWitness("production softmax structural width overflow".into())
             })?,
         };
-        if num_witin != 26
+        if num_witin != 24
             || num_structural_witin != 4
             || map.witness != core::array::from_fn(|index| index as u32)
             || map.structural != core::array::from_fn(|index| index as u32)
@@ -331,17 +328,13 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
                 vec![limb.expr(), E::BaseField::from_u32(bits).expr()],
             )?;
         }
-        cb.require_equal(
-            || "production_softmax_mixed_radix_magnitude",
-            limbs[0].expr()
-                + limbs[1].expr() * E::BaseField::from_u64(1 << 8).expr()
-                + limbs[2].expr() * E::BaseField::from_u64(1 << 28).expr(),
-            limbs[3].expr(),
-        )?;
+        let magnitude = limbs[0].expr()
+            + limbs[1].expr() * E::BaseField::from_u64(1 << 8).expr()
+            + limbs[2].expr() * E::BaseField::from_u64(1 << 28).expr();
         cb.require_equal(
             || "production_softmax_shifted_magnitude",
-            limbs[4].expr() - score.expr(),
-            limbs[3].expr(),
+            limbs[3].expr() - score.expr(),
+            magnitude,
         )?;
 
         let exp3 = cb.create_witin(|| "production_softmax_exp3");
@@ -359,22 +352,17 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
 
         let causal = cb.create_witin(|| "production_softmax_causal");
         cb.assert_bit(|| "production_softmax_causal_bit", causal.expr())?;
-        let comparison_diff = cb.create_witin(|| "production_softmax_comparison_diff");
         let comparison_diff_bits = core::array::from_fn(|index| {
             cb.create_witin(|| format!("production_softmax_comparison_diff_bit_{index}"))
         });
         for bit in comparison_diff_bits {
             cb.assert_bit(|| "production_softmax_comparison_diff_bit", bit.expr())?;
         }
-        cb.require_equal(
-            || "production_softmax_comparison_diff_bits",
-            comparison_diff.expr(),
-            comparison_diff_bits
-                .iter()
-                .enumerate()
-                .map(|(index, bit)| bit.expr() * E::BaseField::from_u64(1 << index).expr())
-                .sum(),
-        )?;
+        let comparison_diff: Expression<E> = comparison_diff_bits
+            .iter()
+            .enumerate()
+            .map(|(index, bit)| bit.expr() * E::BaseField::from_u64(1 << index).expr())
+            .sum();
         let probability = cb.create_witin(|| "production_softmax_probability");
 
         let key = cb.create_structural_witin(
@@ -393,9 +381,9 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         cb.require_equal(
             || "production_softmax_causal_comparison",
             query.expr() - key.expr(),
-            causal.expr() * comparison_diff.expr()
+            causal.expr() * comparison_diff.clone()
                 - (E::BaseField::ONE.expr() - causal.expr())
-                    * (comparison_diff.expr() + E::BaseField::ONE.expr()),
+                    * (comparison_diff + E::BaseField::ONE.expr()),
         )?;
         cb.require_equal(
             || "production_softmax_masked_probability",
@@ -430,7 +418,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
                 output_id_hi.expr(),
                 output_version.expr() + SHIFT_VERSION_OFFSET,
                 shift_index,
-                limbs[4].expr(),
+                limbs[3].expr(),
             ),
         )?;
         cb.write_record(
@@ -452,7 +440,6 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             exp3,
             exp4,
             causal,
-            comparison_diff,
             comparison_diff_bits,
             probability,
             import_cycle,
@@ -471,6 +458,24 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         params: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
         let config = Self::construct_circuit(cb, params)?;
+        assert_eq!(
+            cb.cs.num_witin as usize, 24,
+            "production softmax witness width changed"
+        );
+        assert_eq!(
+            cb.cs.num_structural_witin as usize, 4,
+            "production softmax structural width changed"
+        );
+        assert_eq!(
+            cb.cs.r_expressions.len() + cb.cs.r_table_expressions.len(),
+            2,
+            "production softmax read record count changed"
+        );
+        assert_eq!(
+            cb.cs.w_expressions.len() + cb.cs.w_table_expressions.len(),
+            1,
+            "production softmax write record count changed"
+        );
         let selector = SelectorType::Prefix(config.selector.expr());
         cb.cs.r_selector = Some(selector.clone());
         cb.cs.w_selector = Some(selector.clone());
