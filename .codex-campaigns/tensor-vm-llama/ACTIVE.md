@@ -1,9 +1,9 @@
 # Tensor VM Llama campaign checkpoint
 
 Schema: 2
-Status: ACTIVE — iteration 189 provider-side TensorVM ownership repair
+Status: ACTIVE — iteration 190 dedicated TensorVM producer seam required
 Root: `/root`
-Active implementor: `/root/tensor_vm_llama_i189_provider_ownership`
+Active implementor: none (iteration 189 terminal; architecture scope required)
 Optional probe: none
 
 ## Goal and stop condition
@@ -45,13 +45,29 @@ reduce base-resident committed columns enough to close the measured shard-0
    must base-prove and independently verify before the 33-shard layer or
    17-shard packing experiment is run.
 
-## Active task — iteration 189
+## Active task — iteration 190
 
-Iteration 188 isolated and fixed the PV probability witness-index bug. User
-has now authorized the bounded provider/boundary ownership repair. Preserve
-all existing record identities and do not fabricate Custom writes or weaken
-the mock/verifier. No shard verifier or full-layer run is valid until the
-bounded mock gate passes.
+Iteration 189 traced the remaining provider/boundary ownership mismatch and
+found that the fused provider emits only shape metadata, while the AIR needs
+complete row-level TensorState producer records. A sound fix therefore needs
+a dedicated provider-to-Custom row ledger or a restored producer chip. This
+changes record ownership architecture; do not fabricate records or weaken
+checks. No shard verifier or full-layer run is valid until that seam exists.
+
+## Latest terminal result — iteration 189
+
+Source trace confirms `ProductionFullLayerOperationRecord` contains only
+import cycle, layer, role, token range, output-column range, and tile. It has
+no tensor id/version/index/value fields, and no caller converts it into
+row-level Custom writes. Thus QK q/k and PV V reads have no sound producer;
+projection/boundary mismatches are the same ownership gap, not a stale
+future-shard flag. No mutation, mock rerun, shard proof, or multi-shard E2E
+was performed.
+
+Artifact: `.codex-campaigns/tensor-vm-llama/iteration-189-worker.md`
+SHA-256: `a9f1711eddb3111f23c8ca69fdb40884524dcbbd780d8c000748111f97f7c126`.
+Verdict: **CHANGES_REQUIRED** pending explicit scope for a dedicated
+provider-to-Custom row-ledger seam or restored TensorState producer chip.
 
 ## Latest terminal result — iteration 188
 
