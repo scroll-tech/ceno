@@ -1,9 +1,9 @@
 # Tensor VM Llama campaign checkpoint
 
 Schema: 2
-Status: ACTIVE — iteration 188 TensorVM record ownership repair
+Status: ACTIVE — iteration 189 provider-side TensorVM ownership design required
 Root: `/root`
-Active implementor: `/root/tensor_vm_llama_i188_rw_assignment`
+Active implementor: none (iteration 188 terminal; awaiting ownership-design scope)
 Optional probe: none
 
 ## Goal and stop condition
@@ -44,6 +44,36 @@ reduce base-resident committed columns enough to close the measured shard-0
 4. After a separately authorized implementation milestone, one heads-1 shard
    must base-prove and independently verify before the 33-shard layer or
    17-shard packing experiment is run.
+
+## Active task — iteration 189
+
+Iteration 188 isolated and fixed the PV probability witness-index bug, but the
+remaining provider/boundary counterpart class requires a separate ownership
+design before implementation. Preserve the existing record identities and do
+not fabricate Custom writes or weaken the mock/verifier. The next permitted
+step is to scope a canonical provider-side counterpart mechanism; no shard
+verifier or full-layer run is valid until that gate passes.
+
+## Latest terminal result — iteration 188
+
+The CUDA PV assignment now separates `probability_key = tile*128 + axis`
+from `v_key = tile*128 + row_low7`, matching the AIR. `cuda_hal` release check
+and the rebuilt production binary both passed. The bounded shard-0 mock reached
+the ownership checks and exited 101: the PV probability/softmax mismatch is
+absent; remaining aggregate deltas are Memory `17,039,360` and Custom
+`9,175,041`, with total mismatch errors `52,428,271`. Remaining sampled classes
+are projection/attention boundary Memory writes, QK q/k Custom reads, PV V
+Custom reads, and projection-boundary Custom tensor/state writes. No shard
+verifier or full 33-shard E2E was run because the mock gate failed.
+
+Commit: ceno-gpu `a35608b5 fix(tensor-vm): align PV probability witness index`.
+Artifact: `.codex-campaigns/tensor-vm-llama/iteration-188-worker.md`
+SHA-256: `ae5dd86ef17b19523807ec24c4fcaf1453901d9a169ebe862550a21f30d10208`.
+Mock log SHA-256: `91af02ce7feb35a63f9944d0db2d690a0993bd314d466297620bdff9876ddd9d`.
+
+The earlier digest-spill checkpoint remains committed and valid; its shard-0
+real prover completed without OOM, but independent verification still remains
+gated by the ownership mismatch and the unsupported head-1 matrix reducer.
 
 ## Active task — iteration 188
 
