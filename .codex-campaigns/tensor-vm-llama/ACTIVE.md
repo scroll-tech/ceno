@@ -1,9 +1,9 @@
 # Tensor VM Llama campaign checkpoint
 
 Schema: 2
-Status: ACTIVE — iteration 187 digest spill verifier refinement
+Status: ACTIVE — iteration 188 TensorVM record ownership repair
 Root: `/root`
-Active implementor: `/root/tensor_vm_llama_i187_digest_spill`
+Active implementor: `/root/tensor_vm_llama_i188_rw_assignment`
 Optional probe: none
 
 ## Goal and stop condition
@@ -45,7 +45,18 @@ reduce base-resident committed columns enough to close the measured shard-0
    must base-prove and independently verify before the 33-shard layer or
    17-shard packing experiment is run.
 
-## Active task — iteration 187
+## Active task — iteration 188
+
+Trace and repair the exact TensorVM custom/RAM counterpart mismatch from the
+bounded mock run. Preserve all record identities and shard semantics; do not
+weaken checks or broaden the unsupported head-1 matrix reducer. Plan:
+`.codex-campaigns/tensor-vm-llama/iteration-188-plan.md`.
+
+Continuation: the digest-spill implementation is committed and validated for
+the main OOM, but full shards remain gated on the TensorVM assignment and
+head-1 verifier blockers.
+
+## Previous active task — iteration 187
 
 Temporarily copy the Basefold/PCS digest D2H before batched-main, release its
 device allocation, and H2D it immediately before PCS opening consumes it.
