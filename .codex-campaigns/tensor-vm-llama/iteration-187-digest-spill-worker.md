@@ -2,10 +2,10 @@
 
 ## Verdict
 
-`CHANGES_REQUIRED` — digest spill reached the intended lifecycle and eliminated
-the Basefold main-slab allocation failure, but the final descriptor rerun
-stopped in a GPU matrix-reduction residency incompatibility. Full 33-shard E2E
-was not started because shard-0 did not independently verify.
+`REPLAN_REQUIRED` — digest spill reached the intended lifecycle and eliminated
+the Basefold main-slab allocation failure, but head-1 matrix metadata cannot be
+fixed within the current 4-head-only reduction implementation. Full 33-shard
+E2E was not started because shard-0 did not independently verify.
 
 ## Acceptance criteria and evidence
 
@@ -58,3 +58,16 @@ holding 12,558 MiB; no repeat was attempted.
 Root should review the GPU PV witness representation causing the resident
 base-field error and separately coordinate the TensorVM custom/RAM mismatch.
 Do not run 33 shards until clean shard-0 proof verification passes.
+
+## Refinement diagnosis
+
+`matrix_reduction::production()` hardcodes `output_vars=24` and
+`sumcheck_vars=13`, and `prove_production()` rejects any other shape. Head-1
+mock evidence reports `TensorAttentionPVHeads00_00` with `expected_num_vars=22`
+and 4,194,304 rows. Accepting `Heads00_00` in the shared descriptor therefore
+enters an unsupported prover path and fails `production matrix reduction
+requires resident base-field columns`; retaining the old descriptor makes the
+verifier reject the matrix selector groups. The candidate broadening was
+reverted. Correct handling requires a separate head-count-aware matrix
+reduction/metadata seam; weakening verification or changing PIOP semantics is
+unsafe and out of scope.

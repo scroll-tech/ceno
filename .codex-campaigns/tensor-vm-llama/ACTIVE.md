@@ -72,8 +72,15 @@ for resident base-field columns. Full 33-shard E2E is gated until shard-0
 independent verification passes. Mock proving logged substantial TensorVM
 custom/RAM mismatches and was killed while retaining 12,558 MiB.
 
+The head-1 descriptor broadening was reverted: the shared matrix reducer is
+hard-coded for 24 variables/4-head rows, while head-1 has 22 variables. Making
+the verifier accept that name without a head-count-aware reduction would be
+unsound. Mock diagnostics also report substantial existing TensorVM custom/RAM
+record mismatches; do not run the full layer until a clean shard-0 verifier gate
+exists.
+
 Artifact: `.codex-campaigns/tensor-vm-llama/iteration-187-digest-spill-worker.md`
-SHA-256: `ad26b860ca8f72c11a0ee94aff85762be05d06776cb4dd5a291d0a72591d9b26`
+SHA-256: `94d697e3ff4626c6c34ed576bfd96b850663a35d88936ecd29ed138e29dcfc3a`
 
 ## Latest terminal result — iteration 186
 

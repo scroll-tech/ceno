@@ -65,21 +65,9 @@ pub fn descriptor(circuit_name: &str) -> Option<MatrixReductionDescriptor> {
         return Some(MatrixReductionDescriptor::tiny());
     }
     let production_group = |prefix: &str| {
-        let Some(suffix) = circuit_name.strip_prefix(prefix).and_then(|name| name.strip_prefix("Heads")) else {
-            return false;
-        };
-        let Some((start, end)) = suffix.split_once('_') else {
-            return false;
-        };
-        let (Ok(start), Ok(end)) = (start.parse::<usize>(), end.parse::<usize>()) else {
-            return false;
-        };
-        let Some(heads) = end.checked_sub(start).and_then(|width| width.checked_add(1)) else {
-            return false;
-        };
-        // Production builds use one, two, or four heads per matrix chip;
-        // groups are aligned to that width within the 32-head layer.
-        matches!(heads, 1 | 2 | 4) && start < 32 && end < 32 && start % heads == 0
+        (0..8).any(|group| {
+            circuit_name == format!("{prefix}Heads{:02}_{:02}", group * 4, group * 4 + 3)
+        })
     };
     if production_group("TensorAttentionQK") {
         Some(MatrixReductionDescriptor::production(
