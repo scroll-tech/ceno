@@ -71,3 +71,18 @@ verifier reject the matrix selector groups. The candidate broadening was
 reverted. Correct handling requires a separate head-count-aware matrix
 reduction/metadata seam; weakening verification or changing PIOP semantics is
 unsafe and out of scope.
+
+## Follow-up mismatch diagnosis
+
+The bounded mock log reports keyed records missing on the opposite side, not
+merely zero-valued padding. Examples include `production_pv_v_read_once` raw
+tuple `[2,1,532,2,0,0,524288,0]`, `production_pv_probability_read` raw tuple
+`[2,1,532,3,0,2,1,268434910]`, and projection-boundary tensor writes at rows
+0–9 and 531–540. It also reports
+`ram_type=Memory multiplicity_mismatches=17039360`. These records are emitted
+by the PV/boundary circuit constraints while counterparts are absent from the
+shard-0 aggregate (or expected across another shard). Since the checker
+compares keyed records and raw tuples, this is evidence of a real
+assignment/ownership mismatch or omitted cross-shard counterpart, not a
+padding-only artifact. No mutation was made; changing ownership requires
+tracing the shard-boundary producer and is outside this digest milestone.

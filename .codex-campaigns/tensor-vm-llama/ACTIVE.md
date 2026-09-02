@@ -80,7 +80,14 @@ record mismatches; do not run the full layer until a clean shard-0 verifier gate
 exists.
 
 Artifact: `.codex-campaigns/tensor-vm-llama/iteration-187-digest-spill-worker.md`
-SHA-256: `94d697e3ff4626c6c34ed576bfd96b850663a35d88936ecd29ed138e29dcfc3a`
+SHA-256: `b0a6d8a08e4d5e3a027339da3bbbbaf6e729f1613a597def6a9e2d83ff2ae8cc`
+
+Follow-up mock diagnosis: keyed records such as PV V read
+`[2,1,532,2,0,0,524288,0]`, PV probability read
+`[2,1,532,3,0,2,1,268434910]`, and projection-boundary writes are missing on
+the opposite side of the shard-0 aggregate. Memory record multiplicity differs
+by exactly 17,039,360. This is real assignment/ownership evidence, not padding
+noise; trace the producer/counterpart before attempting the full layer.
 
 ## Latest terminal result — iteration 186
 
