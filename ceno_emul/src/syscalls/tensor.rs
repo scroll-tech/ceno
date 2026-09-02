@@ -129,39 +129,6 @@ fn tensor_bus_words<T: Tracer>(
     Ok(result)
 }
 
-fn tensor_bus_write_words<T: Tracer>(
-    vm: &VMState<T>,
-    ptr: u32,
-    values: &[i32],
-) -> Result<Vec<WriteOp>> {
-    ensure!(
-        ptr.is_multiple_of(4),
-        "TensorBus pointer is not word aligned"
-    );
-    let start = ByteAddr(ptr).waddr();
-    Ok(values
-        .iter()
-        .enumerate()
-        .map(|(index, &value)| {
-            let addr = start + index;
-            WriteOp {
-                addr,
-                value: Change::new(vm.peek_memory(addr), value as u32),
-                previous_cycle: 0,
-            }
-        })
-        .collect())
-}
-
-fn tensor_bus_word_range(ptr: u32, words: usize) -> Result<std::ops::Range<crate::WordAddr>> {
-    ensure!(
-        ptr.is_multiple_of(4),
-        "TensorBus pointer is not word aligned"
-    );
-    let start = ByteAddr(ptr).waddr();
-    Ok(start..start + words)
-}
-
 pub fn tensor_import_begin_v1<T: Tracer>(vm: &mut VMState<T>) -> Result<SyscallEffects> {
     let desc_ptr = vm.peek_register(Platform::reg_arg0());
     let desc = MemoryView::<_, TENSOR_TRANSFER_DESC_WORDS>::new(vm, desc_ptr);
@@ -545,7 +512,9 @@ pub fn tensor_production_import_begin_v2<T: Tracer>(vm: &mut VMState<T>) -> Resu
     use crate::tensor::{
         TensorProductionBoundaryKind, TensorProductionBoundaryPartWitness,
         TensorProductionBoundaryWitness,
-        production_attention::{ProductionStage, decode_head_range},
+        production_attention::{
+            ProductionStage, context_witness, decode_head_range, hidden_witness,
+        },
     };
 
     let desc_ptr = vm.peek_register(Platform::reg_arg0());
@@ -580,14 +549,12 @@ pub fn tensor_production_import_begin_v2<T: Tracer>(vm: &mut VMState<T>) -> Resu
                 words[3] == 0 && words[4] == 0,
                 "unused projection input pointer is nonzero"
             );
-            let (values, ops) = tensor_bus_words(vm, words[2], part_words[0])?;
-            input.extend(values.into_iter().map(|word| word as i32));
-            input_ops.extend(ops);
+            input.extend(hidden_witness());
             parts.push(TensorProductionBoundaryPartWitness {
                 part: 0,
-                base_byte_address: words[2],
+                base_byte_address: 0,
                 tensor_index_start: 0,
-                value_ops_start: TENSOR_TRANSFER_DESC_WORDS,
+                value_ops_start: 0,
                 word_count: part_words[0],
             });
         }
@@ -596,27 +563,23 @@ pub fn tensor_production_import_begin_v2<T: Tracer>(vm: &mut VMState<T>) -> Resu
         }
         ProductionStage::PostFfn => {
             ensure!(
-                words[2] != 0 && words[3] != 0 && words[4] == 0,
-                "post input RAM pointers are invalid"
+                words[2] == 0 && words[3] == 0 && words[4] == 0,
+                "provider post input pointers are nonzero"
             );
-            let (hidden, hidden_ops) = tensor_bus_words(vm, words[2], part_words[0])?;
-            let (context, context_ops) = tensor_bus_words(vm, words[3], part_words[1])?;
-            input.extend(hidden.into_iter().map(|word| word as i32));
-            input.extend(context.into_iter().map(|word| word as i32));
-            input_ops.extend(hidden_ops);
-            input_ops.extend(context_ops);
+            input.extend(hidden_witness());
+            input.extend(context_witness()?);
             parts.push(TensorProductionBoundaryPartWitness {
                 part: 0,
-                base_byte_address: words[2],
+                base_byte_address: 0,
                 tensor_index_start: 0,
-                value_ops_start: TENSOR_TRANSFER_DESC_WORDS,
+                value_ops_start: 0,
                 word_count: part_words[0],
             });
             parts.push(TensorProductionBoundaryPartWitness {
                 part: 1,
-                base_byte_address: words[3],
+                base_byte_address: 0,
                 tensor_index_start: part_words[0],
-                value_ops_start: TENSOR_TRANSFER_DESC_WORDS + part_words[0],
+                value_ops_start: 0,
                 word_count: part_words[1],
             });
         }
@@ -705,22 +668,14 @@ pub fn tensor_production_import_begin_v2<T: Tracer>(vm: &mut VMState<T>) -> Resu
 }
 
 fn prepass_tensor_handle(
-    layer: u32,
-    stage: u32,
-    head_start: u32,
+    _layer: u32,
+    _stage: u32,
+    _head_start: u32,
     version: u32,
 ) -> crate::tensor::bus::TensorHandle {
-    let segment_stage = if stage == ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_ATTENTION {
-        ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION
-    } else {
-        stage
-    };
     crate::tensor::bus::TensorHandle {
-        tensor_id: 0xa07_0000_0000_0000u64
-            | (u64::from(layer) << 24)
-            | (u64::from(segment_stage) << 16)
-            | u64::from(head_start),
-        version,
+        tensor_id: u64::from(version) + 1,
+        version: 0,
     }
 }
 
@@ -764,27 +719,6 @@ pub(super) fn prepass_production_import_begin_v2<T: Tracer>(
         next_pc: None,
         ..Default::default()
     };
-    if vm.tracer().prepass_tracks_memory_ranges() {
-        match stage {
-            ProductionStage::Projection => {
-                effects.push_mem_bound_range(tensor_bus_word_range(
-                    words[2],
-                    crate::tensor::production_attention::HIDDEN_WORDS,
-                )?);
-            }
-            ProductionStage::Attention => unreachable!(),
-            ProductionStage::PostFfn => {
-                effects.push_mem_bound_range(tensor_bus_word_range(
-                    words[2],
-                    crate::tensor::production_attention::HIDDEN_WORDS,
-                )?);
-                effects.push_mem_access_range(tensor_bus_word_range(
-                    words[3],
-                    crate::tensor::production_attention::CONTEXT_WORDS,
-                )?);
-            }
-        }
-    }
     effects.witness.tensor_production_boundary = Some(TensorProductionBoundaryWitness {
         kind: TensorProductionBoundaryKind::Import,
         layer: words[1],
@@ -910,7 +844,7 @@ pub(super) fn prepass_production_stage_v2<T: Tracer>(
         input == prepass_tensor_handle(words[1], words[4], head_start, input_version),
         "PureAotPrepass production stage input handle drift"
     );
-    let output = prepass_tensor_handle(words[1], words[4], head_start, input.version + 1);
+    let output = prepass_tensor_handle(words[1], words[4], head_start, input_version + 1);
     let mut output_view = MemoryView::<_, TENSOR_HANDLE_WORDS>::new(vm, words[3]);
     output_view.write([
         output.tensor_id as u32,
@@ -1006,24 +940,12 @@ pub fn tensor_production_export_end_v2<T: Tracer>(vm: &mut VMState<T>) -> Result
         );
     }
     vm.tensor_bus_end()?;
-    let output_ops = tensor_bus_write_words(vm, words[3], &output)?;
-    match stage {
-        ProductionStage::Projection => {
-            anyhow::bail!("projection output must remain inside fused TensorBus segment")
-        }
-        ProductionStage::Attention => {
-            ensure!(words[3] != 0, "attention Context RAM pointer is null");
-        }
-        ProductionStage::PostFfn => {
-            ensure!(words[3] != 0, "post output RAM pointer is null");
-        }
+    ensure!(words[3] == 0, "provider output pointer is nonzero");
+    if stage == ProductionStage::Projection {
+        anyhow::bail!("projection output must remain inside fused TensorBus segment")
     }
     let mut witness = SyscallWitness::new(
-        desc_ops
-            .into_iter()
-            .chain(handle_ops)
-            .chain(output_ops)
-            .collect(),
+        desc_ops.into_iter().chain(handle_ops).collect(),
         tensor_bus_reg_ops(desc_ptr),
     );
     witness.tensor_bus_records = records;
@@ -1048,9 +970,9 @@ pub fn tensor_production_export_end_v2<T: Tracer>(vm: &mut VMState<T>) -> Result
         values: output.clone().into(),
         parts: vec![TensorProductionBoundaryPartWitness {
             part: 0,
-            base_byte_address: words[3],
+            base_byte_address: 0,
             tensor_index_start: 0,
-            value_ops_start: TENSOR_TRANSFER_DESC_WORDS + TENSOR_HANDLE_WORDS,
+            value_ops_start: 0,
             word_count: output_words,
         }],
     });
@@ -1112,12 +1034,6 @@ pub(super) fn prepass_production_export_end_v2<T: Tracer>(
         next_pc: None,
         ..Default::default()
     };
-    if vm.tracer().prepass_tracks_memory_ranges() && stage == ProductionStage::Attention {
-        effects.push_mem_access_range(tensor_bus_word_range(
-            words[3],
-            stage.output_words(head_count)?,
-        )?);
-    }
     effects.witness.tensor_production_boundary = Some(TensorProductionBoundaryWitness {
         kind: TensorProductionBoundaryKind::Export,
         layer: words[1],

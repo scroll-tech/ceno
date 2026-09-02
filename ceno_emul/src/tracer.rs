@@ -1524,6 +1524,15 @@ impl ShardPlanBuilder {
             annotation.total_cells,
             self.max_cell_per_shard
         );
+        if self
+            .admitted_tensor_segments
+            .last()
+            .is_some_and(|segment| segment.shard_id == self.shard_id)
+        {
+            // Production attention circuits have one fixed-size instance per
+            // segment, so a shard must not pack two segments under one name.
+            self.finish_current_shard(annotation.start_cycle);
+        }
         let candidate = self.tensor_segment_candidate(&annotation.steps);
         if self.cur_step_count > 0
             && self.candidate_would_exceed_shard_with_steps(candidate, annotation.steps.len())
@@ -4468,6 +4477,54 @@ mod tests {
         assert_eq!(planner.shard_cycle_boundaries(), &[4, 8, 24]);
         assert_eq!(planner.cur_step_count(), 4);
         assert_eq!(planner.cur_cells(), 4);
+    }
+
+    #[test]
+    fn annotated_production_segments_get_distinct_shards_with_unbounded_budget() {
+        let model = cost_model(vec![ChipCostSpec {
+            rotation: 0,
+            trace_cells_per_row: 1,
+            tower_peak_cells_per_row: 0,
+            tower_peak_cells_by_bucket: None,
+        }]);
+        let step = |cycle| PendingTensorStep {
+            cycle,
+            kind: InsnKind::ADD,
+            ecall_code: None,
+            generic_cells: 0,
+            production_stage_chips: Some(vec![0]),
+        };
+        let annotation = |cycle, head_start| TensorStateSegmentAnnotation {
+            layer: 0,
+            stage: 1,
+            head_start,
+            head_count: 1,
+            start_cycle: cycle,
+            end_cycle: cycle,
+            total_cells: model.shard_cost(&[1]),
+            steps: vec![step(cycle)],
+            events: Vec::new(),
+        };
+        let annotations = Arc::new(vec![annotation(4, 0), annotation(8, 1)]);
+        let mut planner = ShardPlanBuilder::new_with_cost_model(u64::MAX, Cycle::MAX, Some(model));
+        planner.set_tensor_state_plan_mode(TensorStatePlanMode::Consume(annotations));
+
+        planner.begin_annotated_tensor_state_segment();
+        planner.admit_annotated_tensor_state_step(step(4));
+        planner.active_tensor_state = None;
+        planner.begin_annotated_tensor_state_segment();
+        planner.admit_annotated_tensor_state_step(step(8));
+
+        assert_eq!(planner.shard_cycle_boundaries(), &[4, 8]);
+        assert_eq!(planner.current_shard_id(), 1);
+        assert_eq!(
+            planner
+                .admitted_tensor_segments()
+                .iter()
+                .map(|segment| segment.shard_id)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
     }
 
     #[derive(Debug)]

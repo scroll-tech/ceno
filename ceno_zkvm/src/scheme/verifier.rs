@@ -823,7 +823,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 shard_ec_sum = shard_ec_sum + chip_shard_ec_sum;
             }
         }
+        if std::env::var_os("CENO_TENSOR_E2E_LOGUP_TRACE").is_some() {
+            tracing::info!(
+                shard_id,
+                dummy_table_item = ?dummy_table_item,
+                dummy_table_item_inverse = ?dummy_table_item.inverse(),
+                dummy_table_item_multiplicity,
+                raw_logup_sum = ?logup_sum,
+                "Gate-5 grouped logup aggregate before dummy correction"
+            );
+        }
         logup_sum -= E::from_u64(dummy_table_item_multiplicity as u64) * dummy_table_item.inverse();
+        if std::env::var_os("CENO_TENSOR_E2E_LOGUP_TRACE").is_some() {
+            tracing::info!(
+                shard_id,
+                corrected_logup_residual = ?logup_sum,
+                "Gate-5 grouped logup aggregate after dummy correction"
+            );
+        }
 
         #[cfg(debug_assertions)]
         {

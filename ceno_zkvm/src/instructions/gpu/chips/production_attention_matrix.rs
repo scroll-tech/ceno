@@ -19,8 +19,8 @@ use crate::{
     tables::RMMCollections,
 };
 
-pub(crate) fn assign_production_qk_device<E: ExtensionField, const GROUP: usize>(
-    config: &<TensorProductionQkCoreInstruction<E, GROUP> as crate::instructions::Instruction<E>>::InstructionConfig,
+pub(crate) fn assign_production_qk_device<E: ExtensionField>(
+    config: &<TensorProductionQkCoreInstruction<E> as crate::instructions::Instruction<E>>::InstructionConfig,
     shard_ctx: &ShardContext,
     num_witin: usize,
     num_structural_witin: usize,
@@ -33,12 +33,11 @@ pub(crate) fn assign_production_qk_device<E: ExtensionField, const GROUP: usize>
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
     let head_count = usize::try_from(call.head_count)
         .map_err(|_| ZKVMError::InvalidWitness("production QK head count overflow".into()))?;
-    let group_limit = 32 / head_count;
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>()
         || !matches!(head_count, 1 | 2 | 4)
         || head_count != ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
-        || GROUP >= group_limit
-        || call.head_start as usize != GROUP * head_count
+        || call.head_start as usize >= 32
+        || call.head_start as usize % head_count != 0
     {
         return Err(ZKVMError::InvalidWitness(
             "production QK requires the BabyBear GPU backend and a valid group".into(),
@@ -76,7 +75,7 @@ pub(crate) fn assign_production_qk_device<E: ExtensionField, const GROUP: usize>
         .witgen
         .witgen_production_attention_qk(
             columns,
-            GROUP as u32,
+            call.head_start,
             call.head_count,
             call.import_cycle,
             call.projected_qkv_tensor_id,
@@ -137,8 +136,8 @@ pub(crate) fn assign_production_qk_device<E: ExtensionField, const GROUP: usize>
     Ok(([witness, structural], Multiplicity::default()))
 }
 
-pub(crate) fn assign_production_pv_device<E: ExtensionField, const GROUP: usize>(
-    config: &<TensorProductionPvCoreInstruction<E, GROUP> as crate::instructions::Instruction<E>>::InstructionConfig,
+pub(crate) fn assign_production_pv_device<E: ExtensionField>(
+    config: &<TensorProductionPvCoreInstruction<E> as crate::instructions::Instruction<E>>::InstructionConfig,
     shard_ctx: &ShardContext,
     num_witin: usize,
     num_structural_witin: usize,
@@ -152,12 +151,11 @@ pub(crate) fn assign_production_pv_device<E: ExtensionField, const GROUP: usize>
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
     let head_count = usize::try_from(call.head_count)
         .map_err(|_| ZKVMError::InvalidWitness("production PV head count overflow".into()))?;
-    let group_limit = 32 / head_count;
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>()
         || !matches!(head_count, 1 | 2 | 4)
         || head_count != ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
-        || GROUP >= group_limit
-        || call.head_start as usize != GROUP * head_count
+        || call.head_start as usize >= 32
+        || call.head_start as usize % head_count != 0
     {
         return Err(ZKVMError::InvalidWitness(
             "production PV requires the BabyBear GPU backend and a valid group".into(),
@@ -195,11 +193,12 @@ pub(crate) fn assign_production_pv_device<E: ExtensionField, const GROUP: usize>
         .witgen
         .witgen_production_attention_pv(
             columns,
-            GROUP as u32,
+            call.head_start,
             call.head_count,
             call.import_cycle,
             call.projected_qkv_tensor_id,
             call.projected_qkv_version,
+            call.layer,
             call.attention_output_tensor_id,
             call.attention_output_version,
             &projected_qkv.value,

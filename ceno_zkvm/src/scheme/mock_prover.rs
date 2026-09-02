@@ -1705,6 +1705,8 @@ Hints:
 
         let mut lkm_tables = LkMultiplicityRaw::<E>::default();
         let mut lkm_opcodes = LkMultiplicityRaw::<E>::default();
+        let mut lkm_opcodes_by_circuit = Vec::new();
+        let mut table_raw_keys_by_element: HashMap<(usize, E), Vec<u64>> = HashMap::new();
         let fused_lk_names = lk_mlts
             .keys()
             .filter(|name| name.starts_with("__gpu_shard_lk"))
@@ -1838,12 +1840,10 @@ Hints:
                     circuit_name,
                     num_rows
                 );
-                // Assert opcode and check single opcode lk multiplicity
-                // Also combine multiplicity in lkm_opcodes
-                // Fused GPU replay records lookup multiplicity once for the
-                // shard, rather than duplicating it across per-chip entries.
-                // The global table-vs-opcode comparison below still checks the
-                // complete multiplicity inferred from these chip constraints.
+                // Assert the opcode and infer its lookup multiplicity directly
+                // from the constrained witness. Fused GPU replay records lookup
+                // multiplicity once for table assignment, but that recorded
+                // aggregate must not replace this independent query-side sum.
                 let lkm_from_assignments = fused_lkm
                     .is_none()
                     .then(|| lk_mlts.get(circuit_name).cloned())
@@ -1863,13 +1863,14 @@ Hints:
                     lkm_from_assignments,
                 ) {
                     Ok(multiplicities) => {
-                        if fused_lkm.is_none() {
-                            lkm_opcodes += multiplicities;
-                        }
+                        let multiplicities = multiplicities.into_finalize_result();
+                        lkm_opcodes += multiplicities.clone();
+                        lkm_opcodes_by_circuit.push((circuit_name.to_string(), multiplicities));
                     }
                     Err(errors) => {
                         tracing::error!("Mock proving failed for opcode {}", circuit_name);
                         print_errors(&errors, &witness, &cs.witin_namespace_map, true);
+                        panic!("Mock proving failed for opcode {circuit_name}");
                     }
                 }
             } else {
@@ -1942,6 +1943,10 @@ Hints:
                     );
 
                     for (raw_key, key, multiplicity) in izip!(raw_keys, lk_table, multiplicity) {
+                        table_raw_keys_by_element
+                            .entry((*rom_type as usize, key))
+                            .or_default()
+                            .push(raw_key);
                         let count = usize::try_from(multiplicity.to_canonical_u64())
                             .expect("lookup table multiplicity must fit the host count domain");
                         lkm_tables.set_count(*rom_type, key, count);
@@ -1959,7 +1964,6 @@ Hints:
                                     consumed_recorded_lk.insert((*rom_type as usize, raw_key)),
                                     "recorded lookup key consumed multiple times: table={rom_type:?}, raw_key={raw_key}"
                                 );
-                                lkm_opcodes += ((*rom_type, key), recorded_count);
                             }
                         }
                     }
@@ -2034,7 +2038,58 @@ Hints:
             tracing::info!("Mock proving successful for tables");
         } else {
             tracing::error!("Mock proving failed for tables - {} errors", errors.len());
+            for error in &errors {
+                let MockProverError::LkMultiplicityError {
+                    rom_type,
+                    key,
+                    count,
+                } = error
+                else {
+                    continue;
+                };
+                let raw_keys = table_raw_keys_by_element
+                    .get(&(*rom_type as usize, *key))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "lookup mismatch element is outside table domain: table={rom_type:?}, element={key:?}"
+                        )
+                    });
+                let inferred_sources = lkm_opcodes_by_circuit
+                    .iter()
+                    .filter_map(|(source, multiplicity)| {
+                        multiplicity[*rom_type as usize]
+                            .get(key)
+                            .copied()
+                            .filter(|source_count| *source_count != 0)
+                            .map(|source_count| (source.as_str(), source_count))
+                    })
+                    .collect_vec();
+                let recorded_sources = lk_mlts
+                    .iter()
+                    .flat_map(|(source, multiplicity)| {
+                        raw_keys.iter().filter_map(move |raw_key| {
+                            multiplicity[*rom_type as usize]
+                                .get(raw_key)
+                                .copied()
+                                .filter(|source_count| *source_count != 0)
+                                .map(|source_count| (source.as_str(), *raw_key, source_count))
+                        })
+                    })
+                    .collect_vec();
+                tracing::error!(
+                    table = ?rom_type,
+                    ?raw_keys,
+                    count,
+                    ?inferred_sources,
+                    ?recorded_sources,
+                    "MockProver lookup multiplicity source mismatch"
+                );
+            }
             print_errors(&errors, &[], &[], true);
+            panic!(
+                "Mock proving failed for tables with {} lookup multiplicity errors",
+                errors.len()
+            );
         }
 
         // find out r != w errors
@@ -2120,6 +2175,21 @@ Hints:
                         tracing::error!("--------------------");
                     }
                     num_rw_mismatch_errors += num_missing;
+                }
+                if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some() {
+                    for (write, write_count) in &$rws.writes {
+                        let read_count = $rws.reads.get(write).copied().unwrap_or_default();
+                        if *write_count > read_count {
+                            let raw_tuple = $rws.raw_samples.get(write);
+                            tracing::error!(
+                                ?raw_tuple,
+                                read_count,
+                                write_count,
+                                surplus = *write_count - read_count,
+                                "surplus RAM write raw tuple"
+                            );
+                        }
+                    }
                 }
                 let multiplicity_mismatches = $rws
                     .reads

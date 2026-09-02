@@ -1,4 +1,4 @@
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 #[cfg(feature = "gpu")]
 use gkr_iop::error::BackendError;
 use gkr_iop::{
@@ -317,6 +317,84 @@ where
             crate::scheme::utils::WitnessBuildStage::Tower,
         )
     });
+    if std::env::var_os("CENO_TENSOR_E2E_LOGUP_EXPR_TRACE").is_some()
+        && (task.circuit_name.starts_with("TensorProductionBoundary")
+            || task.circuit_name == "DYNAMIC_RANGE_20"
+            || task.circuit_name == "ADD"
+            || task.circuit_name == "ADDI"
+            || task.circuit_name == "ANDI"
+            || task.circuit_name == "AUIPC"
+            || task.circuit_name == "BEQ"
+            || task.circuit_name == "BLTU"
+            || task.circuit_name == "BNE"
+            || task.circuit_name == "JALR"
+            || task.circuit_name == "LUI"
+            || task.circuit_name == "LW"
+            || task.circuit_name == "OR"
+            || task.circuit_name == "SLTIU"
+            || task.circuit_name == "SW"
+            || task.circuit_name == "ShardRamCircuit"
+            || task.circuit_name == "TensorAttentionPv"
+            || task.circuit_name == "TensorAttentionQk"
+            || task.circuit_name == "TensorAttentionSoftmax"
+            || task.circuit_name == "TensorProductionExportEndAnchor"
+            || task.circuit_name == "TensorProductionImportBeginAnchor"
+            || task.circuit_name == "TensorProductionStageAnchor")
+    {
+        let cs = &cs.zkvm_v1_css;
+        let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+        let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+        let lookup_offset = num_reads + num_writes;
+        if cs.lk_table_expressions.is_empty() {
+            for (expression_index, record) in records[lookup_offset..]
+                .iter()
+                .take(cs.lk_expressions.len())
+                .enumerate()
+            {
+                let denominators = record.inner_to_mle().get_ext_field_vec().to_vec();
+                let contribution = p3::field::batch_multiplicative_inverse(&denominators)
+                    .into_iter()
+                    .sum::<E>();
+                tracing::info!(
+                    target: "ceno_gpu::tensor_logup_expression",
+                    circuit = %task.circuit_name,
+                    expression_index,
+                    namespace = ?cs.lk_expressions_namespace_map.get(expression_index),
+                    rows = denominators.len(),
+                    contribution = ?contribution,
+                    "Gate-5 direct lookup expression contribution"
+                );
+            }
+        } else {
+            let table_lookups = cs.lk_table_expressions.len();
+            for expression_index in 0..table_lookups {
+                let numerators = records[lookup_offset + expression_index]
+                    .inner_to_mle()
+                    .get_ext_field_vec()
+                    .to_vec();
+                let denominators = records[lookup_offset + table_lookups + expression_index]
+                    .inner_to_mle()
+                    .get_ext_field_vec()
+                    .to_vec();
+                assert_eq!(numerators.len(), denominators.len());
+                let inverses = p3::field::batch_multiplicative_inverse(&denominators);
+                let contribution = numerators
+                    .into_iter()
+                    .zip(inverses)
+                    .map(|(numerator, inverse)| numerator * inverse)
+                    .sum::<E>();
+                tracing::info!(
+                    target: "ceno_gpu::tensor_logup_expression",
+                    circuit = %task.circuit_name,
+                    expression_index,
+                    namespace = ?cs.lk_expressions_namespace_map.get(expression_index),
+                    rows = denominators.len(),
+                    contribution = ?contribution,
+                    "Gate-5 direct lookup table expression contribution"
+                );
+            }
+        }
+    }
     // Gate-5's frozen hidden-K4096 E2E has one physical row per syscall
     // circuit.  Copy just its already-materialized tower-facing record MLEs
     // under an opt-in flag so a raw custom-record producer can be compared to
@@ -324,11 +402,215 @@ where
     // the individual record identities.  This is diagnostic-only D2H; it is
     // never used by proof construction.
     if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some()
-        && task.circuit_name.starts_with("TensorProduction")
+        && (task.circuit_name.starts_with("TensorProduction")
+            || matches!(
+                task.circuit_name.as_str(),
+                "ADDI"
+                    | "BNE"
+                    | "ECALL_STATE_CONTINUATION"
+                    | "LUI"
+                    | "LocalRAMTableFinal"
+                    | "SW"
+                    | "ShardRamCircuit"
+                    | "ShardRamEcTreeCircuit"
+                    | "TensorAttentionPv"
+                    | "TensorAttentionQk"
+                    | "TensorBusCircuit"
+            ))
     {
         let cs = &cs.zkvm_v1_css;
         let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
         let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+        if matches!(task.circuit_name.as_str(), "ADDI" | "SW") {
+            use gkr_iop::gpu::gpu_prover::{Buffer, GpuFieldType};
+            let populated_rows = input_num_instances.iter().sum::<usize>();
+            let copy_witness_column = |column: usize| -> Vec<E::BaseField> {
+                assert!(column < input.witness.len());
+                let GpuFieldType::Base(poly) = input.witness[column].inner() else {
+                    panic!("producer-key diagnostic requires base-field witness columns");
+                };
+                let values = poly
+                    .evaluations()
+                    .to_vec_n(populated_rows)
+                    .expect("producer-key diagnostic witness D2H failed");
+                // GPU proving supports BabyBear here, so its base element is E::BaseField.
+                unsafe { std::mem::transmute::<Vec<_>, Vec<E::BaseField>>(values) }
+            };
+            let scalar =
+                |column: &[E::BaseField], row: usize| -> u64 { column[row].to_canonical_u64() };
+            let factor_for_key = |key: [u64; 5]| -> E {
+                let mut factor = challenges[0];
+                let mut beta_power = E::ONE;
+                for item in key {
+                    factor += E::from_u64(item) * beta_power;
+                    beta_power *= challenges[1];
+                }
+                factor
+            };
+            let endpoint = |direction: &str, namespace_suffix: &str| {
+                let (offset, namespaces): (usize, Vec<&String>) = if direction == "read" {
+                    (
+                        0,
+                        cs.r_expressions_namespace_map
+                            .iter()
+                            .chain(cs.r_table_expressions_namespace_map.iter())
+                            .collect(),
+                    )
+                } else {
+                    (
+                        num_reads,
+                        cs.w_expressions_namespace_map
+                            .iter()
+                            .chain(cs.w_table_expressions_namespace_map.iter())
+                            .collect(),
+                    )
+                };
+                let relative_idx = namespaces
+                    .iter()
+                    .position(|namespace| namespace.ends_with(namespace_suffix))
+                    .unwrap_or_else(|| panic!("missing producer endpoint {namespace_suffix}"));
+                (offset + relative_idx, namespaces[relative_idx].as_str())
+            };
+            let emit_key = |direction: &str,
+                            namespace_suffix: &str,
+                            physical_row: usize,
+                            key: [u64; 5]| {
+                let (record_idx, namespace) = endpoint(direction, namespace_suffix);
+                let factor = records[record_idx].inner_to_mle().get_ext_field_vec()[physical_row];
+                assert_eq!(
+                    factor_for_key(key),
+                    factor,
+                    "producer raw key does not reproduce namespace row factor: circuit={} direction={direction} namespace={namespace} row={physical_row}",
+                    task.circuit_name
+                );
+                let value = key[2] | (key[3] << 16);
+                tracing::info!(
+                    target: "ceno_gpu::tensor_producer_key",
+                    circuit = %task.circuit_name,
+                    direction,
+                    namespace,
+                    physical_row,
+                    slot = namespace_suffix,
+                    ram_type = key[0],
+                    addr = key[1],
+                    value,
+                    local_clk = key[4],
+                    factor = ?factor,
+                    "Gate-5 producer ordered endpoint key"
+                );
+            };
+
+            if task.circuit_name == "SW" {
+                assert_eq!(input.witness.len(), 23, "SW witness layout changed");
+                assert_eq!(populated_rows, 32, "target31 SW row count changed");
+                // StoreConfig allocation IDs: prev_mem_val=4..5, aligned
+                // mem_addr=8..9, mem_prev_ts=20. SW has no address low bits.
+                let mem_prev_ts = copy_witness_column(20);
+                let prev_mem_lo = copy_witness_column(4);
+                let prev_mem_hi = copy_witness_column(5);
+                let mem_addr_lo = copy_witness_column(8);
+                let mem_addr_hi = copy_witness_column(9);
+                for row in 0..populated_rows {
+                    emit_key(
+                        "read",
+                        "/write_memory/read_record",
+                        row,
+                        [
+                            crate::structs::RAMType::Memory as u64,
+                            scalar(&mem_addr_lo, row) | (scalar(&mem_addr_hi, row) << 16),
+                            scalar(&prev_mem_lo, row),
+                            scalar(&prev_mem_hi, row),
+                            scalar(&mem_prev_ts, row),
+                        ],
+                    );
+                }
+            } else {
+                assert_eq!(input.witness.len(), 18, "ADDI witness layout changed");
+                assert_eq!(populated_rows, 15, "target31 ADDI row count changed");
+                // ADDI config allocation IDs: rs1=0..1, imm/sign=2..3,
+                // carries=4..5, ts=7, rd id/prev_ts/prev_value=12..15.
+                let ts = copy_witness_column(7);
+                let rd_id = copy_witness_column(12);
+                let rd_prev_ts = copy_witness_column(13);
+                let rd_prev_lo = copy_witness_column(14);
+                let rd_prev_hi = copy_witness_column(15);
+                let rs1_lo = copy_witness_column(0);
+                let rs1_hi = copy_witness_column(1);
+                let imm = copy_witness_column(2);
+                let imm_sign = copy_witness_column(3);
+                let carry_lo = copy_witness_column(4);
+                let carry_hi = copy_witness_column(5);
+                let raw_key = |row: usize, write: bool| -> [u64; 5] {
+                    let value = if write {
+                        let lo = scalar(&rs1_lo, row) + scalar(&imm, row)
+                            - (scalar(&carry_lo, row) << 16);
+                        let hi = scalar(&rs1_hi, row)
+                            + scalar(&imm_sign, row) * 0xffff
+                            + scalar(&carry_lo, row)
+                            - (scalar(&carry_hi, row) << 16);
+                        assert!(lo <= u16::MAX as u64 && hi <= u16::MAX as u64);
+                        [lo, hi]
+                    } else {
+                        [scalar(&rd_prev_lo, row), scalar(&rd_prev_hi, row)]
+                    };
+                    [
+                        crate::structs::RAMType::Register as u64,
+                        scalar(&rd_id, row),
+                        value[0],
+                        value[1],
+                        if write {
+                            scalar(&ts, row) + ceno_emul::FullTracer::SUBCYCLE_RD
+                        } else {
+                            scalar(&rd_prev_ts, row)
+                        },
+                    ]
+                };
+                for row in [0usize, 1, 2, 3, 4, 5, 12] {
+                    emit_key("read", "/write_rd/read_record", row, raw_key(row, false));
+                }
+                for row in 0..5 {
+                    emit_key("write", "/write_rd/write_record", row, raw_key(row, true));
+                }
+            }
+        }
+        if task.circuit_name == "ShardRamCircuit" {
+            assert_eq!([num_reads, num_writes], [2, 2]);
+            for (direction, populated_rows, record_indices) in [
+                ("read", 0..input_num_instances[0], [0, 1]),
+                (
+                    "write",
+                    input_num_instances[0]..input_num_instances.iter().sum(),
+                    [num_reads, num_reads + 1],
+                ),
+            ] {
+                let first = records[record_indices[0]].inner_to_mle();
+                let second = records[record_indices[1]].inner_to_mle();
+                let first_factors = first.get_ext_field_vec();
+                let second_factors = second.get_ext_field_vec();
+                assert_eq!(first_factors.len(), second_factors.len());
+                let grouped_product = first_factors.iter().copied().product::<E>()
+                    * second_factors.iter().copied().product::<E>();
+                let populated_product = populated_rows
+                    .clone()
+                    .map(|physical_row| first_factors[physical_row] * second_factors[physical_row])
+                    .product::<E>();
+                assert_eq!(
+                    populated_product, grouped_product,
+                    "ShardRam combined populated-row factors do not reproduce both grouped record products"
+                );
+                for (direction_row, physical_row) in populated_rows.enumerate() {
+                    tracing::info!(
+                        target: "ceno_gpu::tensor_shard_ram_row",
+                        circuit = %task.circuit_name,
+                        direction,
+                        direction_row,
+                        physical_row,
+                        factor = ?(first_factors[physical_row] * second_factors[physical_row]),
+                        "Gate-5 ShardRAM combined logical-row compressed factor"
+                    );
+                }
+            }
+        }
         for (record_idx, record) in records.iter().take(num_reads + num_writes).enumerate() {
             let (direction, namespace) = if record_idx < num_reads {
                 (
@@ -348,7 +630,73 @@ where
                     }),
                 )
             };
-            let values = record.inner_to_mle().get_ext_field_vec().to_vec();
+            let record_mle = record.inner_to_mle();
+            let factors = record_mle.get_ext_field_vec();
+            let product = factors.iter().copied().product::<E>();
+            if task.circuit_name == "ShardRamCircuit" && matches!(record_idx, 0 | 2) {
+                let populated_rows = if direction == "read" {
+                    0..input_num_instances[0]
+                } else {
+                    input_num_instances[0]..input_num_instances.iter().sum()
+                };
+                let populated_product = populated_rows
+                    .clone()
+                    .map(|physical_row| factors[physical_row])
+                    .product::<E>();
+                assert_eq!(
+                    populated_product, product,
+                    "ShardRam ordinary populated-row factors do not reproduce grouped record product"
+                );
+                for (direction_row, physical_row) in populated_rows.enumerate() {
+                    tracing::info!(
+                        target: "ceno_gpu::tensor_shard_ram_row",
+                        circuit = %task.circuit_name,
+                        record_idx,
+                        direction,
+                        direction_row,
+                        physical_row,
+                        factor = ?factors[physical_row],
+                        "Gate-5 ShardRAM ordinary logical-row compressed factor"
+                    );
+                }
+            }
+            let is_ram_endpoint = namespace.is_some_and(|namespace| match task.circuit_name.as_str() {
+                "ADDI" | "BNE" | "LUI" => {
+                    namespace.contains("/read_rs1/")
+                        || namespace.contains("/read_rs2/")
+                        || namespace.contains("/write_rd/")
+                }
+                "SW" => {
+                    namespace.contains("/read_rs1/")
+                        || namespace.contains("/read_rs2/")
+                        || namespace.contains("/write_memory/")
+                }
+                "LocalRAMTableFinal" => namespace.ends_with("/final_table"),
+                _ => false,
+            });
+            if is_ram_endpoint {
+                let populated_rows = 0..input_num_instances.iter().sum();
+                let populated_product = populated_rows
+                    .clone()
+                    .map(|physical_row| factors[physical_row])
+                    .product::<E>();
+                assert_eq!(
+                    populated_product, product,
+                    "producer endpoint populated-row factors do not reproduce grouped record product"
+                );
+                for physical_row in populated_rows {
+                    tracing::info!(
+                        target: "ceno_gpu::tensor_producer_row",
+                        circuit = %task.circuit_name,
+                        record_idx,
+                        direction,
+                        namespace = ?namespace,
+                        physical_row,
+                        factor = ?factors[physical_row],
+                        "Gate-5 producer logical-row compressed factor"
+                    );
+                }
+            }
             tracing::info!(
                 target: "ceno_gpu::tensor_record_path",
                 circuit = %task.circuit_name,
@@ -357,8 +705,8 @@ where
                 record_idx,
                 direction,
                 namespace = ?namespace,
-                values = ?values,
-                "Gate-5 individual tower record MLE"
+                product = ?product,
+                "Gate-5 compact individual tower record MLE product"
             );
         }
     }
@@ -1400,13 +1748,12 @@ impl<
 
             #[cfg(feature = "gpu")]
             if [
-                "TensorAttentionQKHeads",
-                "TensorAttentionPVHeads",
-                "TensorAttentionShiftHeads",
-                "TensorAttentionSoftmaxHeads",
+                "TensorAttentionQk",
+                "TensorAttentionPv",
+                "TensorAttentionShift",
+                "TensorAttentionSoftmax",
             ]
-            .iter()
-            .any(|prefix| circuit_name.starts_with(prefix))
+            .contains(&circuit_name.as_str())
             {
                 let trace_rows = witness_trace_rows[this_idx].unwrap_or_else(|| {
                     panic!("{circuit_name}: production TensorVM trace rows are missing")

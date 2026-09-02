@@ -755,7 +755,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 })
             })
             .collect::<Vec<_>>();
-
         let global_input = shard_ctx
             .write_records()
             .par_iter()

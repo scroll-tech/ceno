@@ -141,8 +141,8 @@ pub enum TensorProductionBoundaryKind {
     Export,
 }
 
-/// Bulk boundary rows are retained in the syscall RAM journal but assigned by
-/// one row-oriented Core rather than materialized as ECALL columns.
+/// Boundary rows are assigned by one row-oriented Core rather than materialized
+/// as ECALL columns. Provider-owned parts have no corresponding RAM journal.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TensorProductionBoundaryPartWitness {
     pub part: u32,
@@ -162,7 +162,7 @@ pub struct TensorProductionBoundaryWitness {
     pub stage: u32,
     pub head_start: u32,
     pub head_count: u32,
-    /// Boundary values are shared by all parts. Logical slots deliberately
+    /// Boundary values are shared by all parts. Provider-owned parts deliberately
     /// have no corresponding bulk RAM journal entries.
     pub values: Arc<[i32]>,
     pub parts: Vec<TensorProductionBoundaryPartWitness>,

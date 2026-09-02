@@ -48,6 +48,7 @@ const PV_W_STATE_VERSION: u64 = 11;
 
 fn tensor_space_record<E: ExtensionField>(
     import_cycle: Expression<E>,
+    layer: Expression<E>,
     tensor_id_lo: Expression<E>,
     tensor_id_hi: Expression<E>,
     version: Expression<E>,
@@ -58,6 +59,7 @@ fn tensor_space_record<E: ExtensionField>(
         CustomRWTag::TensorState.expr::<E>(),
         E::BaseField::ONE.expr(),
         import_cycle,
+        layer,
         tensor_id_lo,
         tensor_id_hi,
         version,
@@ -66,8 +68,8 @@ fn tensor_space_record<E: ExtensionField>(
     ]
 }
 
-pub struct TensorProductionQkCoreInstruction<E, const GROUP: usize>(PhantomData<E>);
-pub struct TensorProductionPvCoreInstruction<E, const GROUP: usize>(PhantomData<E>);
+pub struct TensorProductionQkCoreInstruction<E>(PhantomData<E>);
+pub struct TensorProductionPvCoreInstruction<E>(PhantomData<E>);
 
 #[derive(Debug)]
 pub struct TensorProductionQkCoreConfig {
@@ -89,10 +91,10 @@ pub struct TensorProductionQkCoreConfig {
     input_id_hi: WitIn,
     input_version: WitIn,
     layer: WitIn,
+    head_start: WitIn,
     output_id_lo: WitIn,
     output_id_hi: WitIn,
     output_version: WitIn,
-    call_row: WitIn,
     call_row_inverse: WitIn,
     axis_low7: StructuralWitIn,
     axis_high4: StructuralWitIn,
@@ -135,10 +137,10 @@ impl TensorProductionQkCoreConfig {
                 id(self.input_id_hi),
                 id(self.input_version),
                 id(self.layer),
+                id(self.head_start),
                 id(self.output_id_lo),
                 id(self.output_id_hi),
                 id(self.output_version),
-                id(self.call_row),
                 id(self.call_row_inverse),
             ],
             structural: [
@@ -210,12 +212,14 @@ pub struct TensorProductionPvCoreConfig {
     final_remainder_high4: WitIn,
     final_remainder_high4_bits: [WitIn; 3],
     import_cycle: WitIn,
+    layer: WitIn,
     input_id_lo: WitIn,
     input_id_hi: WitIn,
     input_version: WitIn,
     output_id_lo: WitIn,
     output_id_hi: WitIn,
     output_version: WitIn,
+    head_start: WitIn,
     physical_index: StructuralWitIn,
     axis: StructuralWitIn,
     row_low7: StructuralWitIn,
@@ -288,12 +292,14 @@ impl TensorProductionPvCoreConfig {
                 id(self.final_remainder_high4_bits[1]),
                 id(self.final_remainder_high4_bits[2]),
                 id(self.import_cycle),
+                id(self.layer),
                 id(self.input_id_lo),
                 id(self.input_id_hi),
                 id(self.input_version),
                 id(self.output_id_lo),
                 id(self.output_id_hi),
                 id(self.output_version),
+                id(self.head_start),
             ],
             structural: [
                 structural_id(self.physical_index),
@@ -314,7 +320,7 @@ impl TensorProductionPvCoreConfig {
                 ZKVMError::InvalidWitness("production PV structural width overflow".into())
             })?,
         };
-        if num_witin != 53
+        if num_witin != 55
             || num_structural_witin != 10
             || map.witness != core::array::from_fn(|index| index as u32)
             || map.structural != [5, 0, 1, 2, 3, 4, 6, 7, 8, 9]
@@ -469,7 +475,7 @@ fn attention_call_record<E: ExtensionField>(
     output_id_hi: Expression<E>,
     output_version: Expression<E>,
     layer: Expression<E>,
-    head_start: usize,
+    head_start: Expression<E>,
 ) -> Vec<Expression<E>> {
     vec![
         CustomRWTag::TensorState.expr::<E>(),
@@ -484,7 +490,7 @@ fn attention_call_record<E: ExtensionField>(
         E::BaseField::from_u32(ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER).expr(),
         layer,
         E::BaseField::ONE.expr(),
-        E::BaseField::from_usize(head_start).expr(),
+        head_start,
         E::BaseField::from_u64(HEADS_PER_CORE).expr(),
     ]
 }
@@ -526,27 +532,7 @@ fn add_matrix_layer<E: ExtensionField, C>(
     Ok((config, chip.gkr_circuit()))
 }
 
-fn qk_name(group: usize) -> String {
-    let start = group * HEADS_PER_CORE as usize;
-    format!(
-        "TensorAttentionQKHeads{:02}_{:02}",
-        start,
-        start + HEADS_PER_CORE as usize - 1
-    )
-}
-
-fn pv_name(group: usize) -> String {
-    let start = group * HEADS_PER_CORE as usize;
-    format!(
-        "TensorAttentionPVHeads{:02}_{:02}",
-        start,
-        start + HEADS_PER_CORE as usize - 1
-    )
-}
-
-impl<E: ExtensionField, const GROUP: usize> Instruction<E>
-    for TensorProductionQkCoreInstruction<E, GROUP>
-{
+impl<E: ExtensionField> Instruction<E> for TensorProductionQkCoreInstruction<E> {
     type InstructionConfig = TensorProductionQkCoreConfig;
     type InsnType = InsnKind;
 
@@ -555,11 +541,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
     }
 
     fn name() -> String {
-        assert!(
-            GROUP < ceno_emul::tensor::production_attention::CIRCUITS,
-            "invalid production QK group"
-        );
-        qk_name(GROUP)
+        "TensorAttentionQk".into()
     }
 
     fn construct_circuit(
@@ -658,16 +640,15 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         let input_id_hi = cb.create_witin(|| "production_qk_input_id_hi");
         let input_version = cb.create_witin(|| "production_qk_input_version");
         let layer = cb.create_witin(|| "production_qk_layer");
+        let head_start = cb.create_witin(|| "production_qk_head_start");
         let output_id_lo = cb.create_witin(|| "production_qk_output_id_lo");
         let output_id_hi = cb.create_witin(|| "production_qk_output_id_hi");
         let output_version = cb.create_witin(|| "production_qk_output_version");
-        let call_row = cb.create_witin(|| "production_qk_call_row");
         let call_row_inverse = cb.create_witin(|| "production_qk_call_row_inverse");
-        zero_indicator(
+        let call_row = derived_zero_indicator(
             cb,
             "production_qk_call_row_exact",
             physical_index.expr(),
-            call_row,
             call_row_inverse,
         )?;
         {
@@ -680,22 +661,23 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
                 output_id_hi.expr(),
                 output_version.expr(),
                 layer.expr(),
-                GROUP * HEADS_PER_CORE as usize,
+                head_start.expr(),
             );
             cb.read_rlc_record(
                 || "production_attention_call_once",
-                conditional_type(call_row.expr()),
+                conditional_type(call_row.clone()),
                 call_record.clone(),
-                conditional_rlc(cb, call_row.expr(), &call_record),
+                conditional_rlc(cb, call_row, &call_record),
             )?;
         }
         let group_words = HEADS_PER_CORE * SEQUENCE * HEAD_DIM;
         let q_index = row.clone() * HEAD_DIM + axis_low7.clone();
         let k_index =
             E::BaseField::from_u64(group_words).expr() + axis.clone() * HEAD_DIM + row_low7.clone();
-        let score_index = row * SEQUENCE + axis;
+        let score_index = (head_start.expr() * SEQUENCE + row) * SEQUENCE + axis;
         let q_record = tensor_space_record(
             import_cycle.expr(),
+            layer.expr(),
             input_id_lo.expr(),
             input_id_hi.expr(),
             input_version.expr(),
@@ -710,6 +692,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         )?;
         let k_record = tensor_space_record(
             import_cycle.expr(),
+            layer.expr(),
             input_id_lo.expr(),
             input_id_hi.expr(),
             input_version.expr(),
@@ -727,6 +710,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             RAMType::Custom,
             tensor_space_record(
                 import_cycle.expr(),
+                layer.expr(),
                 output_id_lo.expr(),
                 output_id_hi.expr(),
                 output_version.expr() + SCORE_VERSION_OFFSET,
@@ -752,10 +736,10 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             input_id_hi,
             input_version,
             layer,
+            head_start,
             output_id_lo,
             output_id_hi,
             output_version,
-            call_row,
             call_row_inverse,
             axis_low7: axis_low7_formula,
             axis_high4: axis_high4_formula,
@@ -823,10 +807,11 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
 fn pv_state_record<E: ExtensionField>(
     version: u64,
     import_cycle: Expression<E>,
+    layer: Expression<E>,
     output_id_lo: Expression<E>,
     output_id_hi: Expression<E>,
     output_version: Expression<E>,
-    group: usize,
+    head_start: Expression<E>,
     index: Expression<E>,
     step: Expression<E>,
     values: impl IntoIterator<Item = Expression<E>>,
@@ -835,10 +820,11 @@ fn pv_state_record<E: ExtensionField>(
         crate::structs::CustomRWTag::TensorState.expr::<E>(),
         E::BaseField::from_u64(version).expr(),
         import_cycle,
+        layer,
         output_id_lo,
         output_id_hi,
         output_version,
-        E::BaseField::from_usize(group).expr(),
+        head_start,
         index,
         step,
     ];
@@ -846,9 +832,7 @@ fn pv_state_record<E: ExtensionField>(
     record
 }
 
-impl<E: ExtensionField, const GROUP: usize> Instruction<E>
-    for TensorProductionPvCoreInstruction<E, GROUP>
-{
+impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> {
     type InstructionConfig = TensorProductionPvCoreConfig;
     type InsnType = InsnKind;
 
@@ -857,11 +841,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
     }
 
     fn name() -> String {
-        assert!(
-            GROUP < ceno_emul::tensor::production_attention::CIRCUITS,
-            "invalid production PV group"
-        );
-        pv_name(GROUP)
+        "TensorAttentionPv".into()
     }
 
     fn construct_circuit(
@@ -1104,19 +1084,23 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         )?;
 
         let import_cycle = cb.create_witin(|| "production_pv_import_cycle");
+        let layer = cb.create_witin(|| "production_pv_layer");
         let input_id_lo = cb.create_witin(|| "production_pv_input_id_lo");
         let input_id_hi = cb.create_witin(|| "production_pv_input_id_hi");
         let input_version = cb.create_witin(|| "production_pv_input_version");
         let output_id_lo = cb.create_witin(|| "production_pv_output_id_lo");
         let output_id_hi = cb.create_witin(|| "production_pv_output_id_hi");
         let output_version = cb.create_witin(|| "production_pv_output_version");
+        let head_start = cb.create_witin(|| "production_pv_head_start");
         let key = tile.expr() * 128 + axis.expr();
-        let probability_index = (head.expr() * SEQUENCE + row.clone()) * SEQUENCE + key;
+        let global_head = head_start.expr() + head.expr();
+        let probability_index = (global_head.clone() * SEQUENCE + row.clone()) * SEQUENCE + key;
         cb.read_record(
             || "production_pv_probability_read",
             RAMType::Custom,
             tensor_space_record(
                 import_cycle.expr(),
+                layer.expr(),
                 output_id_lo.expr(),
                 output_id_hi.expr(),
                 output_version.expr() + PROBABILITY_VERSION_OFFSET,
@@ -1131,6 +1115,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             + axis.expr();
         let v_record = tensor_space_record(
             import_cycle.expr(),
+            layer.expr(),
             input_id_lo.expr(),
             input_id_hi.expr(),
             input_version.expr(),
@@ -1146,10 +1131,11 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         let w_state_in = pv_state_record(
             PV_W_STATE_VERSION,
             import_cycle.expr(),
+            layer.expr(),
             input_id_lo.expr(),
             input_id_hi.expr(),
             input_version.expr(),
-            GROUP,
+            head_start.expr(),
             v_index.clone(),
             row_high4.expr(),
             [w.expr()],
@@ -1164,10 +1150,11 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         let w_state_out = pv_state_record(
             PV_W_STATE_VERSION,
             import_cycle.expr(),
+            layer.expr(),
             input_id_lo.expr(),
             input_id_hi.expr(),
             input_version.expr(),
-            GROUP,
+            head_start.expr(),
             v_index,
             row_high4.expr() + 1,
             [w.expr()],
@@ -1180,16 +1167,15 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             conditional_rlc(cb, w_write_selector, &w_state_out),
         )?;
 
-        let global_head =
-            E::BaseField::from_u64((GROUP * HEADS_PER_CORE as usize) as u64).expr() + head.expr();
-        let context_index = (global_head * SEQUENCE + row) * HEAD_DIM + axis.expr();
+        let context_index = (head.expr() * SEQUENCE + row) * HEAD_DIM + axis.expr();
         let accumulator_in = pv_state_record(
             PV_STATE_VERSION,
             import_cycle.expr(),
+            layer.expr(),
             output_id_lo.expr(),
             output_id_hi.expr(),
             output_version.expr(),
-            GROUP,
+            head_start.expr(),
             context_index.clone(),
             tile.expr(),
             [accumulator_q_before.expr(), accumulator_r_before.expr()],
@@ -1204,10 +1190,11 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         let accumulator_out = pv_state_record(
             PV_STATE_VERSION,
             import_cycle.expr(),
+            layer.expr(),
             output_id_lo.expr(),
             output_id_hi.expr(),
             output_version.expr(),
-            GROUP,
+            head_start.expr(),
             context_index.clone(),
             tile.expr() + 1,
             [accumulator_q_after.expr(), accumulator_r_after.expr()],
@@ -1221,6 +1208,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         )?;
         let context_record = tensor_space_record(
             import_cycle.expr(),
+            layer.expr(),
             output_id_lo.expr(),
             output_id_hi.expr(),
             output_version.expr(),
@@ -1270,12 +1258,14 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
             final_remainder_high4,
             final_remainder_high4_bits,
             import_cycle,
+            layer,
             input_id_lo,
             input_id_hi,
             input_version,
             output_id_lo,
             output_id_hi,
             output_version,
+            head_start,
             physical_index,
             axis: axis_formula,
             row_low7: row_low7_formula,
@@ -1295,7 +1285,7 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
         let config = Self::construct_circuit(cb, params)?;
         assert_eq!(
-            cb.cs.num_witin as usize, 53,
+            cb.cs.num_witin as usize, 55,
             "production PV witness width changed"
         );
         assert_eq!(
@@ -1367,6 +1357,83 @@ impl<E: ExtensionField, const GROUP: usize> Instruction<E>
         Err(ZKVMError::InvalidWitness(
             "production PV requires deterministic device replay".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::circuit_builder::ConstraintSystem;
+    use ff_ext::{BabyBearExt4, FieldFrom};
+    use multilinear_extensions::utils::eval_by_expr_with_instance;
+
+    type E = BabyBearExt4;
+
+    fn signature<I: Instruction<E>>() -> (String, usize, usize, usize, usize) {
+        let mut cs = ConstraintSystem::<E>::new(|| I::name());
+        let mut cb = CircuitBuilder::new(&mut cs);
+        I::build_gkr_iop_circuit(&mut cb, &ProgramParams::default()).expect("build circuit");
+        (
+            I::name(),
+            cb.cs.num_witin as usize,
+            cb.cs.num_structural_witin as usize,
+            cb.cs.r_expressions.len() + cb.cs.r_table_expressions.len(),
+            cb.cs.w_expressions.len() + cb.cs.w_table_expressions.len(),
+        )
+    }
+
+    fn eval_constant(expr: &Expression<E>) -> E {
+        eval_by_expr_with_instance::<E>(&[], &[], &[], &[], &[E::from_v(7), E::from_v(11)], expr)
+            .unwrap_right()
+    }
+
+    #[test]
+    fn qk_and_pv_have_one_descriptor_independent_signature() {
+        let qk = signature::<TensorProductionQkCoreInstruction<E>>();
+        let pv = signature::<TensorProductionPvCoreInstruction<E>>();
+        for (layer, head) in [(0, 0), (0, 31), (31, 7)] {
+            assert_eq!(
+                qk,
+                ("TensorAttentionQk".into(), 22, 9, 3, 1),
+                "QK signature changed for descriptor layer={layer} head={head}"
+            );
+            assert_eq!(
+                pv,
+                ("TensorAttentionPv".into(), 55, 10, 4, 3),
+                "PV signature changed for descriptor layer={layer} head={head}"
+            );
+        }
+        assert_eq!(ROWS, 1 << 22);
+    }
+
+    #[test]
+    fn layer_and_head_are_part_of_constrained_record_identities() {
+        let constant = |value| <E as ExtensionField>::BaseField::from_u64(value).expr();
+        let call = attention_call_record(
+            constant(3),
+            constant(4),
+            constant(5),
+            constant(6),
+            constant(7),
+            constant(8),
+            constant(9),
+            constant(10),
+            constant(11),
+        );
+        assert_eq!(eval_constant(&call[10]), E::from_v(10));
+        assert_eq!(eval_constant(&call[12]), E::from_v(11));
+
+        let tensor = tensor_space_record(
+            constant(3),
+            constant(10),
+            constant(4),
+            constant(5),
+            constant(6),
+            constant(7),
+            constant(8),
+        );
+        assert_eq!(eval_constant(&tensor[3]), E::from_v(10));
+        assert_ne!(eval_constant(&tensor[3]), E::from_v(12));
     }
 }
 

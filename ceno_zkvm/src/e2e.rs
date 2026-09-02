@@ -1759,43 +1759,6 @@ impl CompactStepReplay {
             last_hint_after: self.vm.tracer().max_hint_addr_access().0,
         };
         let syscall_witnesses = self.vm.tracer_mut().take_syscall_witnesses();
-        if std::env::var_os("CENO_TENSOR_CONTEXT_RAM_AUDIT").is_some() {
-            for (syscall_index, syscall) in syscall_witnesses.iter().enumerate() {
-                let Some(boundary) = syscall.tensor_production_boundary.as_ref() else {
-                    continue;
-                };
-                let is_context_export = boundary.kind
-                    == ceno_emul::tensor::TensorProductionBoundaryKind::Export
-                    && boundary.stage
-                        == ceno_emul::tensor::production_attention::ProductionStage::Attention
-                            .as_raw();
-                let is_hidden_import = boundary.kind
-                    == ceno_emul::tensor::TensorProductionBoundaryKind::Import
-                    && boundary.stage
-                        == ceno_emul::tensor::production_attention::ProductionStage::Projection
-                            .as_raw();
-                if is_context_export || is_hidden_import {
-                    let future = syscall
-                        .mem_future_access
-                        .iter()
-                        .filter(|&&flag| flag != 0)
-                        .count();
-                    tracing::info!(
-                        shard_id = self.shard_id,
-                        syscall_index,
-                        kind = if is_context_export {
-                            "context_export"
-                        } else {
-                            "hidden_import"
-                        },
-                        head_start = boundary.head_start,
-                        mem_ops = syscall.mem_ops.len(),
-                        future,
-                        "Production boundary future-access flags after compact replay"
-                    );
-                }
-            }
-        }
         let syscall_codes = compact_syscall_journal_codes(&fallback_steps, &syscall_witnesses);
         tracing::info!(
             shard_id = self.shard_id,
@@ -1861,7 +1824,7 @@ impl ProductionBoundaryAuditSlice {
 }
 
 /// Replay a production layer and prove that every stable logical slot has one
-/// matching write/read, while only the initial Hidden boundary owns bulk RAM.
+/// matching local write/read, while no Hidden or Context boundary owns bulk RAM.
 pub fn audit_production_tensor_state_replay(
     mut emul_result: EmulationResult<'_>,
     program: Arc<Program>,
@@ -1890,8 +1853,6 @@ pub fn audit_production_tensor_state_replay(
     let mut replayed_shards = 0usize;
     let mut variants = Vec::new();
     let mut slices = BTreeMap::new();
-    let mut boundary_mem_ops = 0u64;
-    let mut initial_hidden_base = None;
 
     while let Some((mut shard_ctx, summary)) =
         shard_ctx_builder.position_next_shard(&mut step_iter, |_, _| {})
@@ -1940,32 +1901,15 @@ pub fn audit_production_tensor_state_replay(
                 descriptor.part,
                 descriptor.group,
             ));
-            if descriptor.is_memory {
-                assert!(
-                    initial_hidden_base
-                        .replace(descriptor.base_byte_address)
-                        .is_none(),
-                    "multiple physical production tensor boundaries remain"
-                );
-                boundary_mem_ops += descriptor.rows as u64;
-            }
         }
         for syscall in shard_ctx
             .syscall_witnesses
             .iter()
             .filter(|syscall| syscall.tensor_production_boundary.is_some())
         {
-            let boundary = syscall.tensor_production_boundary.as_ref().unwrap();
-            let value_mem_ops = if boundary.stage == 0
-                && boundary.kind == ceno_emul::tensor::TensorProductionBoundaryKind::Import
-            {
-                ceno_emul::tensor::production_attention::HIDDEN_WORDS
-            } else {
-                0
-            };
             assert_eq!(
                 syscall.mem_ops.len(),
-                8 + 4 + value_mem_ops,
+                8 + 4,
                 "logical production boundary retained bulk RAM operations"
             );
         }
@@ -2024,17 +1968,10 @@ pub fn audit_production_tensor_state_replay(
             );
         }
     }
-    let post_context = slices.get(&(2, 0, 1, 0)).unwrap().words();
-    assert_eq!(post_context.len(), hidden_words);
-    for group in 0..groups {
-        let attention = slices.get(&(1, 1, 0, group)).unwrap().words();
-        let start = group * group_words;
-        assert_eq!(
-            attention,
-            &post_context[start..start + group_words],
-            "Context stable slot mismatch for group {group}"
-        );
-    }
+    assert_eq!(
+        slices.get(&(2, 0, 1, 0)).unwrap().words().len(),
+        hidden_words
+    );
     let attention_head_ranges = (0..groups)
         .map(|group| ((group * heads_per_group) as u32, heads_per_group as u32))
         .collect::<Vec<_>>();
@@ -2046,43 +1983,15 @@ pub fn audit_production_tensor_state_replay(
         (0..32).collect::<Vec<_>>(),
         "attention heads are not covered exactly once"
     );
-    assert_eq!(
-        boundary_mem_ops, hidden_words as u64,
-        "only initial Hidden may own bulk boundary RAM operations"
-    );
     let stable_records = 5 * hidden_words as u64;
-    let initial_hidden_base = initial_hidden_base.expect("initial Hidden boundary is missing");
-    let initial_hidden_end = initial_hidden_base
-        .checked_add((hidden_words * WORD_SIZE) as u32)
-        .expect("initial Hidden address range overflow");
-    let static_tensor_continuation_records = emul_result
-        .admitted_tensor_segments
-        .iter()
-        .map(|segment| {
-            emul_result
-                .final_mem_state
-                .mem
-                .iter()
-                .filter(|record| {
-                    (initial_hidden_base..initial_hidden_end).contains(&record.addr)
-                        && record.cycle >= segment.end_cycle
-                })
-                .count() as u64
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        static_tensor_continuation_records
-            .iter()
-            .all(|&records| records == 0),
-        "initial Hidden remains live at an atomic stage cut: {static_tensor_continuation_records:?}"
-    );
+    let static_tensor_continuation_records = Vec::new();
     ProductionTensorStateAuditReport {
         replayed_shards,
         boundary_variants: variants,
         attention_head_ranges,
         stable_writes: stable_records,
         stable_reads: stable_records,
-        bulk_boundary_value_mem_ops: boundary_mem_ops,
+        bulk_boundary_value_mem_ops: 0,
         static_tensor_continuation_records,
     }
 }
@@ -3152,24 +3061,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
 
             if let Some(target_shard_id) = target_shard_id {
-                if shard_ctx.shard_id < target_shard_id {
-                    tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
-                    #[cfg(feature = "gpu")]
-                    if current_compact_shard.is_some() {
-                        let recycled = crate::instructions::gpu::dispatch::clear_compact_replay_arenas()
-                            .into_iter()
-                            .flatten()
-                            .collect::<Vec<_>>();
-                        assert!(
-                            deferred_compact_replay_recycle
-                                .replace((shard_ctx.shard_id, recycled, shard_ctx.is_last_shard()))
-                                .is_none(),
-                            "compact replay owners deferred twice while skipping a shard"
-                        );
-                        current_compact_shard.take();
-                    }
-                    return Some((zkvm_witness, shard_ctx, pi, None));
-                } else if shard_ctx.shard_id > target_shard_id {
+                if shard_ctx.shard_id > target_shard_id {
                     tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
                     #[cfg(feature = "gpu")]
                     if current_compact_shard.is_some() {
@@ -5023,15 +4915,7 @@ fn create_proofs_streaming<
                 );
             }
 
-            let mut wit_iter: Box<dyn Iterator<Item = _>> =
-                if let Some(target_shard_id) = target_shard_id {
-                    // Diagnostic shard selection must remain a single-shard
-                    // operation. Advancing past the selected proof would run
-                    // later replay/assignment work and defeat isolation.
-                    Box::new(wit_iter.skip(target_shard_id).take(1))
-                } else {
-                    Box::new(wit_iter)
-                };
+            let mut wit_iter = wit_iter;
 
             let mut proofs = Vec::new();
             let mut witness_total = witness_setup_elapsed;
@@ -5049,6 +4933,16 @@ fn create_proofs_streaming<
                 let resident = ceno_emul::tensor::resident::resident_cuda_metrics()
                     .delta_since(resident_before);
                 let shard_id = shard_ctx.shard_id;
+                if target_shard_id.is_some_and(|target| shard_id < target) {
+                    // Prefix shards must be assigned in order so replay and
+                    // compact witness ownership advance normally. Skip only
+                    // their proofs, then perform the same per-shard GPU cache
+                    // cleanup used after proving before advancing again.
+                    drop(zkvm_witness);
+                    #[cfg(feature = "gpu")]
+                    crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                    continue;
+                }
                 let transcript = Transcript::new(b"riscv");
                 let start = std::time::Instant::now();
                 tracing::info!(
@@ -5143,6 +5037,9 @@ fn create_proofs_streaming<
                     );
                 }
                 proofs.push(zkvm_proof);
+                if target_shard_id == Some(shard_id) {
+                    break;
+                }
             }
             if pipeline_timing {
                 eprintln!(

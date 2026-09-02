@@ -81,21 +81,14 @@ pub fn descriptor(circuit_name: &str) -> Option<MatrixReductionDescriptor> {
     if circuit_name.starts_with("TensorProjectionDense") {
         return Some(MatrixReductionDescriptor::production_projection());
     }
-    let production_group = |prefix: &str| {
-        let suffix = circuit_name.strip_prefix(prefix)?.strip_prefix("Heads")?;
-        let (start, end) = suffix.split_once('_')?;
-        let start = start.parse::<usize>().ok()?;
-        let end = end.parse::<usize>().ok()?;
-        let heads = end.checked_sub(start)?.checked_add(1)?;
-        (matches!(heads, 1 | 2 | 4) && end < 32 && start % heads == 0).then_some(heads)
-    };
-    if let Some(heads) = production_group("TensorAttentionQK") {
+    let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+    if circuit_name == "TensorAttentionQk" {
         Some(MatrixReductionDescriptor::production(
             MatrixReductionKind::ProductionQk,
             16,
             heads,
         ))
-    } else if let Some(heads) = production_group("TensorAttentionPV") {
+    } else if circuit_name == "TensorAttentionPv" {
         Some(MatrixReductionDescriptor::production(
             MatrixReductionKind::ProductionPv,
             20,
@@ -619,22 +612,20 @@ mod tests {
     use ff_ext::BabyBearExt4;
 
     #[test]
-    fn production_descriptor_derives_head_geometry() {
+    fn production_descriptor_uses_generic_attention_geometry() {
         let projection = descriptor("TensorProjectionDenseQueryHeads00_00")
             .expect("valid production projection descriptor");
         assert_eq!(projection.kind, MatrixReductionKind::ProductionProjection);
         assert_eq!((projection.output_vars, projection.sumcheck_vars), (23, 12));
-        for (name, output_vars, sumcheck_vars) in [
-            ("TensorAttentionQKHeads00_00", 22, 11),
-            ("TensorAttentionPVHeads02_03", 23, 12),
-            ("TensorAttentionQKHeads28_31", 24, 13),
-        ] {
+        let head_vars =
+            ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT.trailing_zeros() as usize;
+        for name in ["TensorAttentionQk", "TensorAttentionPv"] {
             let descriptor = descriptor(name).expect("valid production descriptor");
-            assert_eq!(descriptor.output_vars, output_vars);
-            assert_eq!(descriptor.sumcheck_vars, sumcheck_vars);
+            assert_eq!(descriptor.output_vars, 22 + head_vars);
+            assert_eq!(descriptor.sumcheck_vars, 11 + head_vars);
         }
-        assert!(descriptor("TensorAttentionQKHeads01_02").is_none());
-        assert!(descriptor("TensorAttentionPVHeads31_32").is_none());
+        assert!(descriptor("TensorAttentionQKHeads00_00").is_none());
+        assert!(descriptor("TensorAttentionPVHeads00_00").is_none());
     }
 
     #[test]

@@ -143,6 +143,30 @@ impl ProductionStage {
     }
 }
 
+/// Deterministic production hidden witness used independently by every shard.
+pub fn hidden_witness() -> Vec<i32> {
+    let mut values = vec![0; HIDDEN_WORDS];
+    values[..4].copy_from_slice(&[-25_344, -20_992, -16_640, -12_288]);
+    values
+}
+
+/// Canonical full Context witness independently supplied to post-FFN.
+pub fn context_witness() -> Result<Vec<i32>> {
+    let mut values = Vec::with_capacity(CONTEXT_WORDS);
+    for head in 0..HEADS {
+        for token in 0..SEQUENCE {
+            for dim in 0..HEAD_DIM {
+                values.push(fixture_context_value(head, token, dim)?);
+            }
+        }
+    }
+    ensure!(
+        values.len() == CONTEXT_WORDS,
+        "Context witness shape changed"
+    );
+    Ok(values)
+}
+
 pub fn decode_head_range(packed: u32) -> (u32, u32) {
     (packed & 0xffff, packed >> 16)
 }
@@ -1027,5 +1051,25 @@ mod production_rms_tests {
         assert!(root * root <= RMS_EPSILON_SCALED);
         assert!((root + 1) * (root + 1) > RMS_EPSILON_SCALED);
         assert_eq!(zero, (((1u64 << 38) + root / 2) / root) as i32);
+    }
+
+    #[test]
+    #[test]
+    fn provider_hidden_has_exact_production_shape_and_prefix() {
+        let hidden = hidden_witness();
+        assert_eq!(hidden.len(), 1 << 23);
+        assert_eq!(&hidden[..4], &[-25_344, -20_992, -16_640, -12_288]);
+        assert!(hidden[4..].iter().all(|&value| value == 0));
+    }
+
+    #[test]
+    fn provider_context_has_exact_production_shape() {
+        let context = context_witness().unwrap();
+        assert_eq!(context.len(), 1 << 23);
+        assert_eq!(context[context_index(0, 0, 0).unwrap()], 0);
+        assert_eq!(
+            context[context_index(31, SEQUENCE - 1, HEAD_DIM - 1).unwrap()],
+            fixture_context_value(31, SEQUENCE - 1, HEAD_DIM - 1).unwrap()
+        );
     }
 }

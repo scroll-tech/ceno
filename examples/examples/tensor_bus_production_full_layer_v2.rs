@@ -7,9 +7,6 @@
 //! runtime tuning variable. Projection and attention are fused per head range
 //! in one TensorBus segment. Q/K/V never receive guest addresses.
 
-extern crate alloc;
-
-use alloc::alloc::{Layout, alloc};
 use ceno_rt::tensor::{
     TENSOR_ABI_V2, TENSOR_LLAMA2_HEAD_WORDS, TENSOR_LLAMA2_HEADS, TENSOR_LLAMA2_HIDDEN_WORDS,
     TENSOR_PRODUCTION_STAGE_ATTENTION, TENSOR_PRODUCTION_STAGE_POST_FFN,
@@ -28,57 +25,27 @@ const STAGE_HEADS: u32 = 2;
 #[cfg(not(any(feature = "production-heads-1", feature = "production-heads-2")))]
 const STAGE_HEADS: u32 = 4;
 
-const INPUT_PREFIX: [i32; 4] = [-25_344, -20_992, -16_640, -12_288];
-
 fn main() {
-    // Both long-lived activation buffers use ordinary heap RAM.  The VM heap
-    // is canonically zero-initialized, so the untouched hidden tail and the
-    // context first-touch writes participate in HeapInit/ShardRAM instead of
-    // relying on zero-valued ELF BSS entries that have no StaticMem rows.
-    let hidden_layout = Layout::array::<i32>(HIDDEN_WORDS).unwrap();
-    let hidden_ptr = unsafe { alloc(hidden_layout).cast::<i32>() };
-    assert!(!hidden_ptr.is_null());
-    for (index, value) in INPUT_PREFIX.into_iter().enumerate() {
-        unsafe { hidden_ptr.add(index).write(value) };
-    }
-    // Context is produced exactly once in ordered, disjoint head slices before
-    // post-FFN reads it. Keep it in the canonical zero-initialized heap range
-    // so each first-touch export is owned by the ordinary HeapInit/ShardRAM
-    // lifecycle instead of inflating the ELF-wide static-memory tables.
-    let context_layout = Layout::array::<i32>(HIDDEN_WORDS).unwrap();
-    let context_ptr = unsafe { alloc(context_layout).cast::<i32>() };
-    assert!(!context_ptr.is_null());
+    // Hidden and Context are independent provider-owned ordinary witnesses.
+    // This performance milestone intentionally has no guest activation buffers.
     for head_start in (0..TENSOR_LLAMA2_HEADS).step_by(STAGE_HEADS as usize) {
-        let offset = head_start * TENSOR_LLAMA2_HEAD_WORDS;
-        unsafe {
-            run_attention_segment(
-                head_start,
-                STAGE_HEADS,
-                hidden_ptr,
-                context_ptr.add(offset as usize),
-            )
-        };
+        unsafe { run_attention_segment(head_start, STAGE_HEADS, core::ptr::null()) };
     }
     unsafe {
         run_stage(
             TENSOR_PRODUCTION_STAGE_POST_FFN,
             0,
             TENSOR_LLAMA2_HEADS,
-            hidden_ptr,
-            context_ptr,
             core::ptr::null(),
-            hidden_ptr,
+            core::ptr::null(),
+            core::ptr::null(),
+            core::ptr::null_mut(),
             HIDDEN_WORDS as u32,
         )
     };
 }
 
-unsafe fn run_attention_segment(
-    head_start: u32,
-    head_count: u32,
-    hidden: *const i32,
-    context: *mut i32,
-) {
+unsafe fn run_attention_segment(head_start: u32, head_count: u32, hidden: *const i32) {
     let mut imported = TensorHandleV1::default();
     let mut projected = TensorHandleV1::default();
     let mut attended = TensorHandleV1::default();
@@ -116,7 +83,7 @@ unsafe fn run_attention_segment(
         abi_version: TENSOR_ABI_V2,
         layer: 0,
         input_handle_ptr: (&raw const attended) as *const TensorHandleV1 as u32,
-        output_ptr: context as u32,
+        output_ptr: core::ptr::null_mut::<i32>() as u32,
         output_len: head_count * TENSOR_LLAMA2_HEAD_WORDS,
         stage: TENSOR_PRODUCTION_STAGE_ATTENTION,
         head_range: tensor_production_head_range(head_start, head_count),

@@ -1,8 +1,5 @@
-use ceno_emul::{StepRecord, WriteOp, tensor::TensorProductionFullLayerWitness};
-use ceno_gpu::{
-    Buffer,
-    common::{BufferImpl, witgen::ProductionAttentionBoundaryInputOp},
-};
+use ceno_emul::{StepRecord, tensor::TensorProductionFullLayerWitness};
+use ceno_gpu::{Buffer, common::BufferImpl};
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use p3::field::PrimeCharacteristicRing;
@@ -134,7 +131,6 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
     num_structural_witin: usize,
     steps: &[StepRecord],
     descriptor: TensorProductionBoundaryReplayDescriptor,
-    journal: &[WriteOp],
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
 
@@ -145,11 +141,7 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
         ));
     }
     config.validate_device_layout(num_structural_witin)?;
-    let expected_width = if descriptor.is_memory { 15 } else { 9 };
-    if num_witin != expected_width
-        || (descriptor.is_memory && journal.len() != descriptor.rows)
-        || (!descriptor.is_memory && !journal.is_empty())
-    {
+    if num_witin != 9 {
         return Err(ZKVMError::InvalidWitness(
             "production boundary width or journal length changed".into(),
         ));
@@ -183,66 +175,10 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
     let values = &descriptor.values
         [descriptor.tensor_index_start..descriptor.tensor_index_start + descriptor.rows];
     let use_virtual_structural = descriptor.log_rows == 23;
-    let result = if descriptor.is_memory {
-        let rhs = descriptor.syscall_cycle.checked_add(3).ok_or_else(|| {
-            ZKVMError::InvalidWitness("production boundary timestamp overflow".into())
-        })?;
-        if rhs >= 1 << 32 {
-            return Err(ZKVMError::InvalidWitness(
-                "production boundary timestamp exceeds device field input".into(),
-            ));
-        }
-        let packed = journal
-            .iter()
-            .zip(values)
-            .enumerate()
-            .map(|(row, (op, &value))| {
-                let previous_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
-                let expected_address = descriptor
-                    .base_byte_address
-                    .checked_add(u32::try_from(row * 4).map_err(|_| {
-                        ZKVMError::InvalidWitness(
-                            "production boundary row address offset overflow".into(),
-                        )
-                    })?)
-                    .ok_or_else(|| {
-                        ZKVMError::InvalidWitness("production boundary row address overflow".into())
-                    })?;
-                let value = value as u32;
-                if op.addr.baddr().0 != expected_address
-                    || op.value.after != value
-                    || (descriptor.direction == 0 && op.value.before != value)
-                    || previous_cycle >= rhs
-                    || rhs - previous_cycle > (1 << 29)
-                {
-                    return Err(ZKVMError::InvalidWitness(
-                        "production boundary RAM operation is noncanonical".into(),
-                    ));
-                }
-                Ok(ProductionAttentionBoundaryInputOp {
-                    before_value: op.value.before,
-                    after_value: op.value.after,
-                    previous_cycle_lo: previous_cycle as u32,
-                    previous_cycle_hi: (previous_cycle >> 32) as u32,
-                })
-            })
-            .collect::<Result<Vec<_>, ZKVMError>>()?;
-        let columns = config.device_input_column_map(num_witin, num_structural_witin)?;
-        hal.witgen.witgen_production_attention_boundary_input(
-            columns,
-            &packed,
-            descriptor.import_cycle,
-            descriptor.syscall_cycle,
-            descriptor.tensor_id,
-            descriptor.tensor_version,
-            descriptor.base_byte_address,
-            descriptor.layer,
-            dynamic_lk_ptr,
-            false,
-        )
-    } else {
-        let columns = config.device_output_column_map(num_witin, num_structural_witin)?;
-        hal.witgen.witgen_production_attention_boundary_output(
+    let columns = config.device_output_column_map(num_witin, num_structural_witin)?;
+    let result = hal
+        .witgen
+        .witgen_production_attention_boundary_output(
             columns,
             values,
             descriptor.import_cycle,
@@ -253,12 +189,11 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
             dynamic_lk_ptr,
             false,
         )
-    }
-    .map_err(|error| {
-        ZKVMError::InvalidWitness(
-            format!("production boundary GPU assignment failed: {error}").into(),
-        )
-    })?;
+        .map_err(|error| {
+            ZKVMError::InvalidWitness(
+                format!("production boundary GPU assignment failed: {error}").into(),
+            )
+        })?;
     if result.witness.len() != allocation_elems {
         return Err(ZKVMError::InvalidWitness(
             "production boundary device allocation length changed".into(),

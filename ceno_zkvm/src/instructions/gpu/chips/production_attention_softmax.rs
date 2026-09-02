@@ -24,8 +24,8 @@ use crate::{
     tables::RMMCollections,
 };
 
-pub(crate) fn assign_production_shift_device<E: ExtensionField, const GROUP: usize>(
-    config: &<TensorProductionShiftCoreInstruction<E, GROUP> as crate::instructions::Instruction<
+pub(crate) fn assign_production_shift_device<E: ExtensionField>(
+    config: &<TensorProductionShiftCoreInstruction<E> as crate::instructions::Instruction<
         E,
     >>::InstructionConfig,
     shard_ctx: &ShardContext,
@@ -39,12 +39,11 @@ pub(crate) fn assign_production_shift_device<E: ExtensionField, const GROUP: usi
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
     let head_count = usize::try_from(call.head_count)
         .map_err(|_| ZKVMError::InvalidWitness("production shift head count overflow".into()))?;
-    let group_limit = 32 / head_count;
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>()
         || !matches!(head_count, 1 | 2 | 4)
         || head_count != ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
-        || GROUP >= group_limit
-        || call.head_start as usize != GROUP * head_count
+        || call.head_start as usize >= 32
+        || call.head_start as usize % head_count != 0
     {
         return Err(ZKVMError::InvalidWitness(
             "production shift requires the BabyBear GPU backend".into(),
@@ -71,6 +70,8 @@ pub(crate) fn assign_production_shift_device<E: ExtensionField, const GROUP: usi
         .witgen
         .witgen_production_attention_shift(
             columns,
+            call.layer,
+            call.head_start,
             call.head_count,
             call.import_cycle,
             call.attention_output_tensor_id,
@@ -127,8 +128,8 @@ pub(crate) fn assign_production_shift_device<E: ExtensionField, const GROUP: usi
     Ok(([witness, structural], Multiplicity::default()))
 }
 
-pub(crate) fn assign_production_softmax_device<E: ExtensionField, const GROUP: usize>(
-    config: &<TensorProductionSoftmaxCoreInstruction<E, GROUP> as crate::instructions::Instruction<E>>::InstructionConfig,
+pub(crate) fn assign_production_softmax_device<E: ExtensionField>(
+    config: &<TensorProductionSoftmaxCoreInstruction<E> as crate::instructions::Instruction<E>>::InstructionConfig,
     shard_ctx: &ShardContext,
     num_witin: usize,
     num_structural_witin: usize,
@@ -141,12 +142,11 @@ pub(crate) fn assign_production_softmax_device<E: ExtensionField, const GROUP: u
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
     let head_count = usize::try_from(call.head_count)
         .map_err(|_| ZKVMError::InvalidWitness("production softmax head count overflow".into()))?;
-    let group_limit = 32 / head_count;
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>()
         || !matches!(head_count, 1 | 2 | 4)
         || head_count != ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
-        || GROUP >= group_limit
-        || call.head_start as usize != GROUP * head_count
+        || call.head_start as usize >= 32
+        || call.head_start as usize % head_count != 0
     {
         return Err(ZKVMError::InvalidWitness(
             "production softmax requires the BabyBear GPU backend and a valid group".into(),
@@ -197,9 +197,10 @@ pub(crate) fn assign_production_softmax_device<E: ExtensionField, const GROUP: u
         .witgen
         .witgen_production_attention_softmax(
             columns,
-            GROUP as u32,
+            call.head_start,
             call.head_count,
             call.import_cycle,
+            call.layer,
             call.attention_output_tensor_id,
             call.attention_output_version,
             &projected_qkv.query,

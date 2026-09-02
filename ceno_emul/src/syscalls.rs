@@ -207,18 +207,10 @@ impl SyscallEffects {
         self.witness.mem_access_ranges.iter()
     }
 
-    pub(crate) fn push_mem_access_range(&mut self, range: std::ops::Range<crate::WordAddr>) {
-        self.witness.mem_access_ranges.push(range);
-    }
-
     pub(crate) fn iter_mem_bound_ranges(
         &self,
     ) -> impl Iterator<Item = &std::ops::Range<crate::WordAddr>> {
         self.witness.mem_bound_ranges.iter()
-    }
-
-    pub(crate) fn push_mem_bound_range(&mut self, range: std::ops::Range<crate::WordAddr>) {
-        self.witness.mem_bound_ranges.push(range);
     }
 
     /// Keep track of register cycles. Memory cycles are finalized by `VMState`

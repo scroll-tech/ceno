@@ -5,7 +5,8 @@ use std::{sync::Arc, time::Instant};
 use ceno_zkvm::{
     e2e::{
         KECCAK_EMPTY_WORDS, MultiProver, Preset, emulate_program, prepare_fulltracer_aot_program,
-        prepare_preflight_aot_program, run_e2e_proof, setup_platform, setup_program,
+        prepare_preflight_aot_program, run_e2e_proof, run_e2e_single_shard_debug_verify,
+        setup_platform, setup_program,
     },
     scheme::{
         ZKVMProof, create_backend, create_prover, hal::ProverDevice, prover::ZKVMProver,
@@ -150,8 +151,7 @@ fn run() {
     let program =
         ceno_emul::Program::load_elf(ceno_examples::tensor_bus_production_full_layer_v2, u32::MAX)
             .expect("load exact production-attention guest");
-    // Context occupies the first 32 MiB of the canonical dynamic heap. Keep
-    // the padded heap below the fixed hint window.
+    // Hidden and Context are provider witnesses, so the guest has no activation heap.
     let platform = setup_platform(Preset::Ceno, &program, 1024 * 1024, 96 * 1024 * 1024);
     let max_cells_per_shard = std::env::var("CENO_MAX_CELLS_PER_SHARD")
         .map(|value| {
@@ -250,6 +250,20 @@ fn run() {
     let device = create_prover(backend);
     let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
     let keyed = Instant::now();
+    if let Some(path) = std::env::var_os("CENO_VERIFY_TARGET_PROOF_PATH") {
+        let encoded = std::fs::read(&path)
+            .expect("read persisted shard-0 production proof for diagnostic verification");
+        let proof: ZKVMProof<E, Pcs> = bincode::deserialize(&encoded)
+            .expect("deserialize persisted shard-0 production proof for diagnostic verification");
+        let verifier = ZKVMVerifier::new(vk);
+        run_e2e_single_shard_debug_verify(&verifier, proof, None, MAX_STEPS);
+        println!(
+            "production persisted shard-0 independent segment verification: path={} bytes={} result=Ok(true)",
+            path.to_string_lossy(),
+            encoded.len(),
+        );
+        return;
+    }
     let prover = ZKVMProver::new(pk.into(), device);
     let init_mem = prover.setup_init_mem(&[]);
     let mock_proving = std::env::var_os("MOCK_PROVING").is_some_and(|value| value == "1");
@@ -259,8 +273,8 @@ fn run() {
             .expect("CENO_TARGET_SHARD_ID must be a non-negative integer")
     });
     assert!(
-        target_shard_id.is_none() || target_shard_id == Some(0),
-        "production PCS localization is restricted to shard 0"
+        target_shard_id.is_none_or(|shard_id| shard_id < ATTENTION_GROUPS + 1),
+        "production target shard is outside the exact layer"
     );
     let proofs = run_e2e_proof(
         &prover,
@@ -279,37 +293,44 @@ fn run() {
         println!("production shard-0 exact GPU MLE MockProver diagnostic completed");
         return;
     }
-    if target_shard_id == Some(0) {
-        assert_eq!(proofs.len(), 1, "shard-0 selector produced multiple proofs");
+    if let Some(target_shard_id) = target_shard_id {
         assert_eq!(
-            proofs[0].public_values.shard_id, 0,
-            "shard-0 selector returned another shard"
+            proofs.len(),
+            1,
+            "target-shard selector produced multiple proofs"
+        );
+        assert_eq!(
+            proofs[0].public_values.shard_id as usize, target_shard_id,
+            "target-shard selector returned another shard"
         );
         let proof_bytes =
-            bincode::serialized_size(&proofs[0]).expect("serialize shard-0 production proof");
+            bincode::serialized_size(&proofs[0]).expect("serialize target-shard production proof");
         let opening_bytes = bincode::serialized_size(&proofs[0].opening_proof)
-            .expect("serialize shard-0 production opening");
+            .expect("serialize target-shard production opening");
         let commitment_bytes = bincode::serialized_size(&proofs[0].witin_commit)
-            .expect("serialize shard-0 production commitment");
+            .expect("serialize target-shard production commitment");
         if let Some(path) = std::env::var_os("CENO_TARGET_PROOF_PATH") {
             let encoded = bincode::serialize(&proofs[0])
-                .expect("serialize shard-0 production proof for diagnostic persistence");
+                .expect("serialize target-shard production proof for diagnostic persistence");
             std::fs::write(&path, &encoded)
-                .expect("persist shard-0 production proof before verification");
+                .expect("persist target-shard production proof before verification");
             println!(
-                "production shard-0 proof persisted: path={} bytes={}",
+                "production target-shard proof persisted: shard={target_shard_id} path={} bytes={}",
                 path.to_string_lossy(),
                 encoded.len()
             );
         }
-        println!("production shard-0 proof inventory:\n{}", proofs[0]);
+        println!(
+            "production target-shard proof inventory: shard={target_shard_id}\n{}",
+            proofs[0]
+        );
         for (index, proof) in &proofs[0].chip_proofs {
             let name = vk
                 .circuit_index_to_name
                 .get(index)
-                .unwrap_or_else(|| panic!("shard-0 circuit index {index} missing from VK"));
+                .unwrap_or_else(|| panic!("target-shard circuit index {index} missing from VK"));
             println!(
-                "production shard-0 chip metadata: index={index} name={name} instances={:?} main_out={} read_groups={} write_groups={} lookup_groups={} proof_bytes={}",
+                "production target-shard chip metadata: shard={target_shard_id} index={index} name={name} instances={:?} main_out={} read_groups={} write_groups={} lookup_groups={} proof_bytes={}",
                 proof.num_instances,
                 proof.main_out_evals.len(),
                 proof.r_out_evals.len(),
@@ -319,20 +340,17 @@ fn run() {
             );
         }
         let verifier = ZKVMVerifier::new(vk);
-        let local_result = verifier.verify_full_trace_proofs_halt(
-            vec![proofs[0].clone()],
-            vec![BasicTranscript::new(b"riscv")],
-            false,
-        );
+        run_e2e_single_shard_debug_verify(&verifier, proofs[0].clone(), None, MAX_STEPS);
         println!(
-            "production shard-0 independent verification: proof_bytes={proof_bytes} commitment_bytes={commitment_bytes} opening_bytes={opening_bytes} result={local_result:?}"
-        );
-        assert!(
-            local_result.expect("independent production shard-0 verification returned an error"),
-            "independent production shard-0 verification rejected the honest proof"
+            "production target-shard independent segment verification: shard={target_shard_id} proof_bytes={proof_bytes} commitment_bytes={commitment_bytes} opening_bytes={opening_bytes} result=Ok(true)"
         );
         return;
     }
+    assert_eq!(
+        proofs.len(),
+        ATTENTION_GROUPS + 1,
+        "production full layer did not produce exact shard count"
+    );
     let mut names = vec![
         "TensorProductionImportBeginAnchor".to_string(),
         "TensorProductionStageAnchor".to_string(),
@@ -340,38 +358,25 @@ fn run() {
         "TensorProductionBoundaryProjectionInputPart0".to_string(),
         "TensorProductionBoundaryPostFfnOutputPart0".to_string(),
     ];
-    for prefix in [
-        "TensorAttentionQKHeads",
-        "TensorAttentionShiftHeads",
-        "TensorAttentionSoftmaxHeads",
-        "TensorAttentionPVHeads",
-    ] {
-        for group in 0..ATTENTION_GROUPS {
-            let head_start = group * HEADS_PER_CIRCUIT;
-            names.push(format!(
-                "{prefix}{:02}_{:02}",
-                head_start,
-                head_start + HEADS_PER_CIRCUIT - 1
-            ));
-        }
-    }
-    let expected_circuits = 5 + 4 * ATTENTION_GROUPS;
+    names.extend([
+        "TensorAttentionQk".to_string(),
+        "TensorAttentionShift".to_string(),
+        "TensorAttentionSoftmax".to_string(),
+        "TensorAttentionPv".to_string(),
+    ]);
+    let expected_circuits = 9;
     assert_eq!(
         names.len(),
         expected_circuits,
         "production circuit inventory changed"
     );
-    let first_head_range = format!("{:02}_{:02}", 0, HEADS_PER_CIRCUIT - 1);
     let boundary_index = circuit_index(&vk, "TensorProductionBoundaryProjectionInputPart0");
     let tensor_bus_index = circuit_index(&vk, "TensorBusCircuit");
     let import_anchor_index = circuit_index(&vk, "TensorProductionImportBeginAnchor");
     let export_anchor_index = circuit_index(&vk, "TensorProductionExportEndAnchor");
-    let qk_index = circuit_index(&vk, &format!("TensorAttentionQKHeads{first_head_range}"));
-    let softmax_index = circuit_index(
-        &vk,
-        &format!("TensorAttentionSoftmaxHeads{first_head_range}"),
-    );
-    let pv_index = circuit_index(&vk, &format!("TensorAttentionPVHeads{first_head_range}"));
+    let qk_index = circuit_index(&vk, "TensorAttentionQk");
+    let softmax_index = circuit_index(&vk, "TensorAttentionSoftmax");
+    let pv_index = circuit_index(&vk, "TensorAttentionPv");
     names.sort_by_key(|name| circuit_index(&vk, name));
     let indices = names
         .iter()
@@ -434,30 +439,40 @@ fn run() {
         assert!(rejects(&verifier, omitted), "{label} verified");
     }
 
-    for (label, index) in [
-        ("tensor_bus_core", tensor_bus_index),
-        ("import_anchor", import_anchor_index),
-        ("export_anchor", export_anchor_index),
-        ("boundary", boundary_index),
-        ("qk", qk_index),
-        ("softmax_limb0", softmax_index),
-        ("softmax_limb1", softmax_index),
-        ("softmax_limb2", softmax_index),
-        ("softmax_exp3", softmax_index),
-        ("softmax_exp4", softmax_index),
-        ("causal", softmax_index),
-        ("pv_k128", pv_index),
+    for (label, index, tamper_read) in [
+        ("tensor_bus_core", tensor_bus_index, true),
+        ("import_anchor", import_anchor_index, false),
+        ("export_anchor", export_anchor_index, false),
+        ("boundary", boundary_index, false),
+        ("qk", qk_index, false),
+        ("softmax_limb0", softmax_index, false),
+        ("softmax_limb1", softmax_index, false),
+        ("softmax_limb2", softmax_index, false),
+        ("softmax_exp3", softmax_index, false),
+        ("softmax_exp4", softmax_index, false),
+        ("causal", softmax_index, false),
+        ("pv_k128", pv_index, false),
     ] {
         let mut tampered = proofs.clone();
         let production_shard = tampered
             .iter()
             .position(|proof| proof.chip_proofs.contains_key(&index))
             .unwrap_or_else(|| panic!("{label} proof shard missing"));
-        tampered[production_shard]
+        let proof = tampered[production_shard]
             .chip_proofs
             .get_mut(&index)
-            .unwrap_or_else(|| panic!("{label} proof missing"))
-            .w_out_evals[0][0] += E::ONE;
+            .unwrap_or_else(|| panic!("{label} proof missing"));
+        let output_evals = if tamper_read {
+            &mut proof.r_out_evals
+        } else {
+            &mut proof.w_out_evals
+        };
+        let output_group = output_evals
+            .first_mut()
+            .unwrap_or_else(|| panic!("{label} tamper output group missing"));
+        *output_group
+            .first_mut()
+            .unwrap_or_else(|| panic!("{label} tamper output evaluation missing")) += E::ONE;
         assert!(rejects(&verifier, tampered), "{label} tamper verified");
     }
 
@@ -467,7 +482,7 @@ fn run() {
         .sum::<u64>();
     let shards = proofs.len();
     println!(
-        "production full-layer GPU E2E verified: batch=1 sequence=2048 hidden=4096 heads=32 heads_per_circuit={HEADS_PER_CIRCUIT} head_dim=128 profile=2 layer=0 shards={shards} production_shards={production_shards:?} max_cells_per_shard={max_cells_per_shard} circuits={expected_circuits} hidden_input_bytes={HIDDEN_BYTES} hidden_output_bytes={HIDDEN_BYTES} logical_h2d_bytes={HIDDEN_BYTES} logical_d2h_bytes={HIDDEN_BYTES} intermediate_h2d_bytes=0 intermediate_d2h_bytes=0 qk_multiplications={} pv_multiplications={} total_multiplications={TOTAL_MULTIPLICATIONS} pv_k_tile=128 pv_k_tiles=16 proof_bytes={proof_bytes} prepare_ms={} keygen_ms={} witness_and_base_prove_ms={} verify_ms={} total_ms={} tensor_bus_core_omission=reject import_anchor_omission=reject export_anchor_omission=reject boundary_omission=reject qk_omission=reject softmax_omission=reject pv_omission=reject tensor_bus_core_tamper=reject import_anchor_tamper=reject export_anchor_tamper=reject boundary_tamper=reject qk_tamper=reject five_softmax_lookups_tamper=reject causal_tamper=reject pv_k128_tamper=reject",
+        "production full-layer GPU E2E verified: batch=1 sequence=2048 hidden=4096 heads=32 heads_per_circuit={HEADS_PER_CIRCUIT} head_dim=128 profile=2 layer=0 shards={shards} production_shards={production_shards:?} max_cells_per_shard={max_cells_per_shard} circuits={expected_circuits} hidden_input_bytes={HIDDEN_BYTES} hidden_output_bytes={HIDDEN_BYTES} hidden_boundary_memory_rows=0 context_boundary_memory_rows=0 logical_h2d_bytes={HIDDEN_BYTES} logical_d2h_bytes={HIDDEN_BYTES} intermediate_h2d_bytes=0 intermediate_d2h_bytes=0 qk_multiplications={} pv_multiplications={} total_multiplications={TOTAL_MULTIPLICATIONS} pv_k_tile=128 pv_k_tiles=16 proof_bytes={proof_bytes} prepare_ms={} keygen_ms={} witness_and_base_prove_ms={} verify_ms={} total_ms={} tensor_bus_core_omission=reject import_anchor_omission=reject export_anchor_omission=reject boundary_omission=reject qk_omission=reject softmax_omission=reject pv_omission=reject tensor_bus_core_tamper=reject import_anchor_tamper=reject export_anchor_tamper=reject boundary_tamper=reject qk_tamper=reject five_softmax_lookups_tamper=reject causal_tamper=reject pv_k128_tamper=reject",
         TOTAL_MULTIPLICATIONS / 2,
         TOTAL_MULTIPLICATIONS / 2,
         prepared.duration_since(started).as_millis(),

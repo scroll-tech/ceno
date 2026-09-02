@@ -1,9 +1,8 @@
 //! Row-oriented RAM/Tensor-space boundary for one exact production layer.
 //!
-//! Hidden input and output are two deterministic 2^23-row artifacts. They are
-//! circuits inside one atomic shard, never segment or shard cuts.
-//! The descriptor ECALL anchors the chain; each row owns exactly one RAM and
-//! one Tensor-space relation.
+//! Hidden and Context boundaries are provider-owned ordinary witnesses. The
+//! descriptor ECALL anchors each local Tensor-space relation; this intentionally
+//! omits equality between attention Context slices and the post-FFN Context.
 
 use std::{array, marker::PhantomData, sync::Arc};
 
@@ -43,8 +42,6 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-const PART_WORDS: usize = 1 << 23;
-const BOUNDARY_STATE_VERSION: u32 = 8;
 const TENSOR_SPACE_VERSION: u32 = 1;
 const FULL_LAYER_CALL_VERSION: u32 = 9;
 const DESC_WORDS: usize = 8;
@@ -75,6 +72,7 @@ struct AnchorMemory<E: ExtensionField> {
     before: UInt<E>,
     after: UInt<E>,
     memory: WriteMEM,
+    write: bool,
 }
 
 #[derive(Debug)]
@@ -144,6 +142,7 @@ fn anchor_memory<E: ExtensionField>(
         before,
         after,
         memory,
+        write,
     })
 }
 
@@ -249,22 +248,6 @@ struct TensorProductionBoundaryStructuralConfig {
 }
 
 #[derive(Debug)]
-pub struct TensorProductionBoundaryInputConfig<E: ExtensionField> {
-    layer: WitIn,
-    import_cycle: WitIn,
-    boundary_cycle: WitIn,
-    tensor_id_lo: WitIn,
-    tensor_id_hi: WitIn,
-    tensor_version: WitIn,
-    base_byte_address: WitIn,
-    before_value: UInt<E>,
-    value: UInt<E>,
-    sign: WitIn,
-    memory: WriteMEM,
-    structural: TensorProductionBoundaryStructuralConfig,
-}
-
-#[derive(Debug)]
 pub struct TensorProductionBoundaryOutputConfig<E: ExtensionField> {
     layer: WitIn,
     import_cycle: WitIn,
@@ -279,14 +262,12 @@ pub struct TensorProductionBoundaryOutputConfig<E: ExtensionField> {
 
 #[derive(Debug)]
 pub enum TensorProductionBoundaryConfig<E: ExtensionField> {
-    Input(TensorProductionBoundaryInputConfig<E>),
     Output(TensorProductionBoundaryOutputConfig<E>),
 }
 
 impl<E: ExtensionField> TensorProductionBoundaryConfig<E> {
     fn structural(&self) -> &TensorProductionBoundaryStructuralConfig {
         match self {
-            Self::Input(config) => &config.structural,
             Self::Output(config) => &config.structural,
         }
     }
@@ -320,98 +301,6 @@ impl<E: ExtensionField> TensorProductionBoundaryConfig<E> {
     }
 
     #[cfg(feature = "gpu")]
-    pub(crate) fn device_input_column_map(
-        &self,
-        num_witin: usize,
-        num_structural_witin: usize,
-    ) -> Result<ceno_gpu::common::witgen::ProductionAttentionBoundaryInputColumnMap, ZKVMError>
-    {
-        use ceno_gpu::common::witgen::ProductionAttentionBoundaryInputColumnMap;
-
-        self.validate_device_layout(num_structural_witin)?;
-        let Self::Input(config) = self else {
-            return Err(ZKVMError::InvalidWitness(
-                "production boundary input config kind changed".into(),
-            ));
-        };
-        let before_value = config.before_value.wits_in().ok_or_else(|| {
-            ZKVMError::InvalidWitness(
-                "production boundary before-value limbs are not witness cells".into(),
-            )
-        })?;
-        let value = config.value.wits_in().ok_or_else(|| {
-            ZKVMError::InvalidWitness(
-                "production boundary value limbs are not witness cells".into(),
-            )
-        })?;
-        if before_value.len() != 2
-            || value.len() != 2
-            || config.memory.lt_cfg.0.max_bits != 29
-            || config.memory.lt_cfg.0.diff.len() != 2
-        {
-            return Err(ZKVMError::InvalidWitness(
-                "production boundary UInt/WriteMEM layout changed".into(),
-            ));
-        }
-        let id = |cell: WitIn| cell.id as u32;
-        let structural = self.structural();
-        let map = ProductionAttentionBoundaryInputColumnMap {
-            layer: id(config.layer),
-            import_cycle: id(config.import_cycle),
-            boundary_cycle: id(config.boundary_cycle),
-            tensor_id_lo: id(config.tensor_id_lo),
-            tensor_id_hi: id(config.tensor_id_hi),
-            tensor_version: id(config.tensor_version),
-            base_byte_address: id(config.base_byte_address),
-            before_value_limbs: [id(before_value[0]), id(before_value[1])],
-            value_limbs: [id(value[0]), id(value[1])],
-            sign: id(config.sign),
-            prev_ts: id(config.memory.prev_ts),
-            lt_diff: [
-                id(config.memory.lt_cfg.0.diff[0]),
-                id(config.memory.lt_cfg.0.diff[1]),
-            ],
-            physical_local_index: structural.physical_local_index.id as u32,
-            prefix: structural.selector.id as u32,
-            num_witin: u32::try_from(num_witin).map_err(|_| {
-                ZKVMError::InvalidWitness("production boundary witness width overflow".into())
-            })?,
-            num_structural_witin: u32::try_from(num_structural_witin).map_err(|_| {
-                ZKVMError::InvalidWitness("production boundary structural width overflow".into())
-            })?,
-        };
-        let mut witin_ids = map
-            .before_value_limbs
-            .iter()
-            .chain(map.value_limbs.iter())
-            .chain(map.lt_diff.iter())
-            .copied()
-            .chain([
-                map.layer,
-                map.import_cycle,
-                map.boundary_cycle,
-                map.tensor_id_lo,
-                map.tensor_id_hi,
-                map.tensor_version,
-                map.base_byte_address,
-                map.sign,
-                map.prev_ts,
-            ])
-            .collect_vec();
-        witin_ids.sort_unstable();
-        if num_witin != 15
-            || witin_ids != (0..15).collect_vec()
-            || map.physical_local_index as usize >= num_structural_witin
-            || map.prefix as usize >= num_structural_witin
-        {
-            return Err(ZKVMError::InvalidWitness(
-                "production boundary input columns do not exactly cover the VK".into(),
-            ));
-        }
-        Ok(map)
-    }
-
-    #[cfg(feature = "gpu")]
     pub(crate) fn device_output_column_map(
         &self,
         num_witin: usize,
@@ -421,11 +310,7 @@ impl<E: ExtensionField> TensorProductionBoundaryConfig<E> {
         use ceno_gpu::common::witgen::ProductionAttentionBoundaryOutputColumnMap;
 
         self.validate_device_layout(num_structural_witin)?;
-        let Self::Output(config) = self else {
-            return Err(ZKVMError::InvalidWitness(
-                "production boundary output config kind changed".into(),
-            ));
-        };
+        let Self::Output(config) = self;
         let value = config.value.wits_in().ok_or_else(|| {
             ZKVMError::InvalidWitness(
                 "production boundary value limbs are not witness cells".into(),
@@ -494,13 +379,10 @@ pub struct TensorProductionBoundaryReplayDescriptor {
     pub part: usize,
     pub group: usize,
     pub step_index: StepIndex,
-    pub syscall_cycle: u64,
     pub import_cycle: u64,
     pub tensor_id: u64,
     pub tensor_version: u32,
     pub base_byte_address: u32,
-    pub is_memory: bool,
-    pub mem_ops_start: usize,
     pub tensor_index_start: usize,
     pub values: Arc<[i32]>,
     pub rows: usize,
@@ -508,7 +390,7 @@ pub struct TensorProductionBoundaryReplayDescriptor {
 }
 
 impl TensorProductionBoundaryReplayDescriptor {
-    fn validate(self, syscall: &ceno_emul::SyscallWitness) -> Result<Self, ZKVMError> {
+    fn validate(self) -> Result<Self, ZKVMError> {
         if self.rows != 1 << self.log_rows {
             return Err(ZKVMError::InvalidWitness(
                 "production boundary replay row count changed".into(),
@@ -522,32 +404,6 @@ impl TensorProductionBoundaryReplayDescriptor {
             return Err(ZKVMError::InvalidWitness(
                 "production boundary value range is incomplete".into(),
             ));
-        }
-        if self.is_memory {
-            let end = self.mem_ops_start.checked_add(self.rows).ok_or_else(|| {
-                ZKVMError::InvalidWitness("production boundary RAM range overflow".into())
-            })?;
-            let ops = syscall
-                .mem_ops
-                .get(self.mem_ops_start..end)
-                .ok_or_else(|| {
-                    ZKVMError::InvalidWitness("production boundary RAM range is incomplete".into())
-                })?;
-            let first = ops.first().expect("production boundary is non-empty");
-            let last = ops.last().expect("production boundary is non-empty");
-            let expected_last = self
-                .base_byte_address
-                .checked_add(((self.rows - 1) * WORD_SIZE) as u32)
-                .ok_or_else(|| {
-                    ZKVMError::InvalidWitness("production boundary address range overflow".into())
-                })?;
-            if first.addr.baddr().0 != self.base_byte_address
-                || last.addr.baddr().0 != expected_last
-            {
-                return Err(ZKVMError::InvalidWitness(
-                    "production boundary RAM endpoints are not canonical".into(),
-                ));
-            }
         }
         Ok(self)
     }
@@ -600,7 +456,6 @@ pub fn collect_production_boundary_replay_descriptors(
         }
         for part_witness in &boundary.parts {
             let part = part_witness.part as usize;
-            let mem_ops_start = part_witness.value_ops_start;
             descriptors.push(
                 TensorProductionBoundaryReplayDescriptor {
                     layer: boundary.layer,
@@ -609,19 +464,16 @@ pub fn collect_production_boundary_replay_descriptors(
                     part,
                     group,
                     step_index: index,
-                    syscall_cycle: shard_ctx.aligned_current_ts(step.cycle()),
-                    import_cycle: shard_ctx.aligned_current_ts(boundary.import_cycle),
+                    import_cycle: boundary.import_cycle,
                     tensor_id: boundary.tensor_id,
                     tensor_version: boundary.version,
                     base_byte_address: part_witness.base_byte_address,
-                    is_memory: matches!((stage, direction), (0, 0) | (1, 1) | (2, 0) | (2, 1)),
-                    mem_ops_start,
                     tensor_index_start: part_witness.tensor_index_start,
                     values: boundary.values.clone(),
                     rows: part_witness.word_count,
                     log_rows: part_witness.word_count.trailing_zeros() as usize,
                 }
-                .validate(syscall)?,
+                .validate()?,
             );
         }
     }
@@ -648,11 +500,19 @@ pub fn collect_production_boundary_replay_descriptors(
             ));
         }
     }
+    tracing::info!(
+        target: "ceno_pipeline",
+        hidden_memory_rows = 0,
+        context_memory_rows = 0,
+        boundary_parts = descriptors.len(),
+        "Production boundary ownership classified"
+    );
     Ok(descriptors)
 }
 
 fn tensor_space_record<E: ExtensionField>(
     import_cycle: Expression<E>,
+    layer: Expression<E>,
     tensor_id_lo: Expression<E>,
     tensor_id_hi: Expression<E>,
     version: Expression<E>,
@@ -663,33 +523,12 @@ fn tensor_space_record<E: ExtensionField>(
         CustomRWTag::TensorState.expr::<E>(),
         E::BaseField::from_u32(TENSOR_SPACE_VERSION).expr(),
         import_cycle,
+        layer,
         tensor_id_lo,
         tensor_id_hi,
         version,
         index,
         value,
-    ]
-}
-
-fn boundary_state_record<E: ExtensionField>(
-    import_cycle: Expression<E>,
-    tensor_id_lo: Expression<E>,
-    tensor_id_hi: Expression<E>,
-    version: Expression<E>,
-    part: usize,
-    base_byte_address: Expression<E>,
-    index: Expression<E>,
-) -> Vec<Expression<E>> {
-    vec![
-        CustomRWTag::TensorState.expr::<E>(),
-        E::BaseField::from_u32(BOUNDARY_STATE_VERSION).expr(),
-        import_cycle,
-        tensor_id_lo,
-        tensor_id_hi,
-        version,
-        E::BaseField::from_usize(part).expr(),
-        base_byte_address,
-        index,
     ]
 }
 
@@ -882,68 +721,7 @@ impl<E: ExtensionField, const KIND: usize> Instruction<E>
         let output_values = output_handle
             .as_ref()
             .map(|handle| handle_values(handle, true));
-        if KIND == 0 {
-            let output_values = output_values.as_ref().expect("import output handle");
-            for part in 0..3 {
-                let active = match part {
-                    0 => E::BaseField::ONE.expr(),
-                    1 => is_attention.expr() + is_post.expr(),
-                    2 => is_attention.expr(),
-                    _ => unreachable!(),
-                };
-                let record = boundary_state_record(
-                    import_cycle.expr(),
-                    output_values[0].clone(),
-                    output_values[1].clone(),
-                    output_values[2].clone(),
-                    part,
-                    desc_before(2 + part),
-                    E::BaseField::ZERO.expr(),
-                );
-                cb.write_rlc_record(
-                    || format!("production_boundary_input_part_{part}_start"),
-                    conditional_type(active.clone()),
-                    record.clone(),
-                    conditional_rlc(cb, active.clone(), &record),
-                )?;
-                // An import owns a complete RAM -> Tensor stream.  Close its
-                // cursor here; the resulting TensorState values are linked to
-                // later operations by their value records, not by a boundary
-                // cursor that spans unrelated tensors or stages.
-                let rows = is_projection.expr()
-                    * E::BaseField::from_usize(
-                        ceno_emul::tensor::production_attention::HIDDEN_WORDS,
-                    )
-                    .expr()
-                    + is_attention.expr()
-                        * E::BaseField::from_usize(
-                            ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
-                                * ceno_emul::tensor::production_attention::CONTEXT_WORDS
-                                / 32,
-                        )
-                        .expr()
-                    + is_post.expr()
-                        * E::BaseField::from_usize(
-                            ceno_emul::tensor::production_attention::HIDDEN_WORDS,
-                        )
-                        .expr();
-                let end_record = boundary_state_record(
-                    import_cycle.expr(),
-                    output_values[0].clone(),
-                    output_values[1].clone(),
-                    output_values[2].clone(),
-                    part,
-                    desc_before(2 + part),
-                    rows,
-                );
-                cb.read_rlc_record(
-                    || format!("production_boundary_input_part_{part}_end"),
-                    conditional_type(active.clone()),
-                    end_record.clone(),
-                    conditional_rlc(cb, active, &end_record),
-                )?;
-            }
-        } else if KIND == 1 {
+        if KIND == 1 {
             let input_values = input_values.as_ref().expect("full-layer input handle");
             let output_values = output_values.as_ref().expect("full-layer output handle");
             let call = production_full_layer_call_record(
@@ -963,68 +741,6 @@ impl<E: ExtensionField, const KIND: usize> Instruction<E>
                 call.clone(),
                 conditional_rlc(cb, is_attention.expr(), &call),
             )?;
-        } else {
-            let input_values = input_values.as_ref().expect("export input handle");
-            for part in 0..3 {
-                let active = if part == 0 {
-                    E::BaseField::ONE.expr()
-                } else {
-                    is_projection.expr()
-                };
-                let base = desc_before(3)
-                    + E::BaseField::from_usize(
-                        part * ceno_emul::tensor::production_attention::CONTEXT_WORDS * WORD_SIZE,
-                    )
-                    .expr();
-                let rows = if part == 0 {
-                    is_projection.expr()
-                        * E::BaseField::from_usize(
-                            ceno_emul::tensor::production_attention::CONTEXT_WORDS,
-                        )
-                        .expr()
-                        + is_attention.expr()
-                            * head_count.expr()
-                            * E::BaseField::from_usize(
-                                ceno_emul::tensor::production_attention::SEQUENCE
-                                    * ceno_emul::tensor::production_attention::HEAD_DIM,
-                            )
-                            .expr()
-                        + is_post.expr()
-                            * E::BaseField::from_usize(
-                                ceno_emul::tensor::production_attention::HIDDEN_WORDS,
-                            )
-                            .expr()
-                } else {
-                    E::BaseField::from_usize(ceno_emul::tensor::production_attention::CONTEXT_WORDS)
-                        .expr()
-                };
-                for (name, index) in [("start", E::BaseField::ZERO.expr()), ("end", rows)] {
-                    let record = boundary_state_record(
-                        import_cycle.expr(),
-                        input_values[0].clone(),
-                        input_values[1].clone(),
-                        input_values[2].clone(),
-                        part,
-                        base.clone(),
-                        index,
-                    );
-                    if name == "start" {
-                        cb.write_rlc_record(
-                            || format!("production_boundary_output_part_{part}_start"),
-                            conditional_type(active.clone()),
-                            record.clone(),
-                            conditional_rlc(cb, active.clone(), &record),
-                        )?;
-                    } else {
-                        cb.read_rlc_record(
-                            || format!("production_boundary_output_part_{part}_end"),
-                            conditional_type(active.clone()),
-                            record.clone(),
-                            conditional_rlc(cb, active.clone(), &record),
-                        )?;
-                    }
-                }
-            }
         }
 
         if KIND != 1 {
@@ -1155,6 +871,30 @@ impl<E: ExtensionField, const KIND: usize> Instruction<E>
             }
             config.vm_state.assign_instance(instance, shard_ctx, step)?;
             let code = production_spec::<KIND>().0;
+            if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some() {
+                let op = step.rs1().expect("production anchor ECALL register");
+                tracing::info!(
+                    target: "ceno_gpu::tensor_anchor_ram_owner",
+                    kind = KIND,
+                    owner = production_spec::<KIND>().1,
+                    role = "ecall_id",
+                    ram_type = "Register",
+                    addr = Platform::reg_ecall() as u64,
+                    before_value = op.value,
+                    after_value = op.value,
+                    previous_cycle = op.previous_cycle,
+                    local_previous_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle),
+                    current_cycle = step.cycle() + FullTracer::SUBCYCLE_RS1,
+                    local_clk = shard_ctx
+                        .aligned_current_ts(step.cycle() + FullTracer::SUBCYCLE_RS1),
+                    future = step.has_future_access(StepRecord::FUTURE_ACCESS_RS1),
+                    expected_read_namespace = "read_rs/read_record",
+                    expected_write_namespace = "read_rs/write_record",
+                    assignment_emitted = true,
+                    assignment_prev_value = ?Option::<u32>::None,
+                    "Production anchor emulator RAM-event owner"
+                );
+            }
             config.ecall_id.assign_op(
                 instance,
                 shard_ctx,
@@ -1172,6 +912,30 @@ impl<E: ExtensionField, const KIND: usize> Instruction<E>
                 &mut lkm,
                 syscall.reg_ops[0].value.after,
             )?;
+            if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some() {
+                let op = &syscall.reg_ops[0];
+                tracing::info!(
+                    target: "ceno_gpu::tensor_anchor_ram_owner",
+                    kind = KIND,
+                    owner = production_spec::<KIND>().1,
+                    role = "desc_ptr",
+                    ram_type = "Register",
+                    addr = Platform::reg_arg0() as u64,
+                    before_value = op.value.before,
+                    after_value = op.value.after,
+                    previous_cycle = op.previous_cycle,
+                    local_previous_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle),
+                    current_cycle = step.cycle() + FullTracer::SUBCYCLE_RD,
+                    local_clk = shard_ctx
+                        .aligned_current_ts(step.cycle() + FullTracer::SUBCYCLE_RD),
+                    future = syscall.reg_future_access[0] != 0,
+                    expected_read_namespace = "write_rd/read_record",
+                    expected_write_namespace = "write_rd/write_record",
+                    assignment_emitted = true,
+                    assignment_prev_value = ?Some(op.value.before),
+                    "Production anchor emulator RAM-event owner"
+                );
+            }
             config.desc_ptr.0.assign_op(
                 instance,
                 shard_ctx,
@@ -1209,12 +973,52 @@ impl<E: ExtensionField, const KIND: usize> Instruction<E>
             };
             for (memory, &mem_index) in memories.iter().zip(&selected) {
                 let op = &syscall.mem_ops[mem_index];
+                let traced_addr = op.addr.baddr().0;
+                if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some()
+                    && (matches!(traced_addr, 0x3fff_ff30 | 0x3fff_ff40)
+                        || ((8..12).contains(&mem_index)
+                            && (0x3fff_ff10..=0x3fff_ff2c).contains(&traced_addr)))
+                {
+                    let role = match (KIND, mem_index) {
+                        (_, 0..8) => format!("desc[{}]", mem_index),
+                        (0, 8..) => format!("output_handle[{}]", mem_index - 8),
+                        (1, 8..12) => format!("input_handle[{}]", mem_index - 8),
+                        (1, 12..) => format!("output_handle[{}]", mem_index - 12),
+                        (2, 8..) => format!("input_handle[{}]", mem_index - 8),
+                        _ => unreachable!("production anchor memory layout"),
+                    };
+                    tracing::info!(
+                        target: "ceno_gpu::tensor_anchor_ram_owner",
+                        kind = KIND,
+                        owner = production_spec::<KIND>().1,
+                        role,
+                        mem_index,
+                        ram_type = "Memory",
+                        addr = op.addr.baddr().0 as u64,
+                        before_value = op.value.before,
+                        after_value = op.value.after,
+                        previous_cycle = op.previous_cycle,
+                        local_previous_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle),
+                        current_cycle = step.cycle() + FullTracer::SUBCYCLE_MEM,
+                        local_clk = shard_ctx
+                            .aligned_current_ts(step.cycle() + FullTracer::SUBCYCLE_MEM),
+                        future = syscall.mem_future_access[mem_index] != 0,
+                        expected_read_namespace = "write_memory/read_record",
+                        expected_write_namespace = "write_memory/write_record",
+                        assignment_emitted = true,
+                        assignment_prev_value = ?Some(op.value.before),
+                        "Production anchor emulator RAM-event owner"
+                    );
+                }
                 memory
                     .before
                     .assign_value(instance, UIntValue::new_unchecked(op.value.before));
-                memory
-                    .after
-                    .assign_value(instance, UIntValue::new(op.value.after, &mut lkm));
+                let after = if memory.write {
+                    UIntValue::new(op.value.after, &mut lkm)
+                } else {
+                    UIntValue::new_unchecked(op.value.after)
+                };
+                memory.after.assign_value(instance, after);
                 memory.memory.assign_op(
                     instance,
                     shard_ctx,
@@ -1242,7 +1046,11 @@ impl<E: ExtensionField, const KIND: usize> Instruction<E>
             set_val!(
                 instance,
                 config.import_cycle,
-                shard_ctx.aligned_current_ts(import_cycle)
+                if KIND == 1 {
+                    import_cycle
+                } else {
+                    shard_ctx.aligned_current_ts(import_cycle)
+                }
             );
             set_val!(instance, config.key_shard_id, shard_ctx.shard_id as u64);
             set_val!(
@@ -1321,44 +1129,6 @@ impl<E: ExtensionField, const KIND: usize> Instruction<E>
             None,
             syscall.reg_future_access[0] != 0,
         );
-        // The ECALL owns the complete RAM journal exactly once. Compact anchor
-        // columns constrain descriptor/meta/handles; boundary Core rows consume
-        // the bulk entries from the same ShardRAM stream.
-        if std::env::var_os("CENO_TENSOR_CONTEXT_RAM_AUDIT").is_some()
-            && KIND == 2
-            && syscall
-                .tensor_production_boundary
-                .as_ref()
-                .is_some_and(|boundary| {
-                    boundary.stage
-                        == ceno_emul::tensor::production_attention::ProductionStage::Attention
-                            .as_raw()
-                })
-        {
-            let future = syscall
-                .mem_future_access
-                .iter()
-                .filter(|&&flag| flag != 0)
-                .count();
-            tracing::info!(
-                shard_id = shard_ctx.shard_id,
-                mem_ops = syscall.mem_ops.len(),
-                future,
-                "Context export future-access flags entering production RAM collector"
-            );
-        }
-        for (index, op) in syscall.mem_ops.iter().enumerate() {
-            shard_ctx.send(
-                RAMType::Memory,
-                op.addr,
-                op.addr.baddr().0 as u64,
-                step.cycle() + FullTracer::SUBCYCLE_MEM,
-                op.previous_cycle,
-                op.value.after,
-                Some(op.value.before),
-                syscall.mem_future_access[index] != 0,
-            );
-        }
         Ok(())
     }
 }
@@ -1396,17 +1166,12 @@ impl<
     ) -> Result<Self::InstructionConfig, ZKVMError> {
         let log_rows = production_boundary_log_rows(STAGE, DIRECTION, PART);
         assert!(GROUP < ceno_emul::tensor::production_attention::CIRCUITS);
-        let is_memory = matches!((STAGE, DIRECTION), (0, 0) | (1, 1) | (2, 0) | (2, 1));
         let layer = cb.create_witin(|| "production_boundary_layer");
         let import_cycle = cb.create_witin(|| "production_boundary_import_cycle");
-        let boundary_cycle = is_memory.then(|| cb.create_witin(|| "production_boundary_cycle"));
         let tensor_id_lo = cb.create_witin(|| "production_boundary_tensor_id_lo");
         let tensor_id_hi = cb.create_witin(|| "production_boundary_tensor_id_hi");
         let tensor_version = cb.create_witin(|| "production_boundary_tensor_version");
         let base_byte_address = cb.create_witin(|| "production_boundary_base_byte_address");
-        let before_value = is_memory
-            .then(|| UInt::new(|| "production_boundary_before_value", cb))
-            .transpose()?;
         let value = UInt::new(|| "production_boundary_value", cb)?;
         let sign = cb.create_witin(|| "production_boundary_sign");
         cb.assert_bit(|| "production_boundary_sign_bit", sign.expr())?;
@@ -1432,32 +1197,34 @@ impl<
             cb.create_placeholder_structural_witin(|| "production_boundary_rotation_right");
         let eq_rotation = cb.create_placeholder_structural_witin(|| "production_boundary_rotation");
         let selector = cb.create_placeholder_structural_witin(|| "selector");
-        let memory = if let Some(boundary_cycle) = boundary_cycle {
-            let address = base_byte_address.expr()
-                + physical_local_index.expr() * E::BaseField::from_u32(4).expr();
-            let memory = WriteMEM::construct_circuit(
-                cb,
-                address,
-                before_value.as_ref().unwrap().memory_expr(),
-                value.memory_expr(),
-                boundary_cycle,
-            )?;
-            Some(memory)
-        } else {
-            None
-        };
         let global_index = physical_local_index.expr()
             + E::BaseField::from_usize(production_boundary_tensor_offset(STAGE, DIRECTION, PART))
                 .expr();
         let tensor_record = tensor_space_record(
             import_cycle.expr(),
+            layer.expr(),
             tensor_id_lo.expr(),
             tensor_id_hi.expr(),
             tensor_version.expr(),
             global_index,
             signed_value.clone(),
         );
-        if DIRECTION == 0 {
+        let is_provider_hidden = matches!(
+            (STAGE, DIRECTION, PART),
+            (0, 0, 0) | (2, 0, 0) | (2, 0, 1) | (2, 1, 0)
+        );
+        if is_provider_hidden {
+            cb.write_record(
+                || "production_hidden_witness_local_write",
+                RAMType::Custom,
+                tensor_record.clone(),
+            )?;
+            cb.read_record(
+                || "production_hidden_witness_local_read",
+                RAMType::Custom,
+                tensor_record,
+            )?;
+        } else if DIRECTION == 0 {
             cb.write_record(
                 || "production_boundary_tensor_write",
                 RAMType::Custom,
@@ -1470,32 +1237,6 @@ impl<
                 tensor_record,
             )?;
         }
-        // Boundary-state records authenticate only real RAM<->Tensor streams.
-        // Internal projection producers are complete TensorState relations and
-        // have no guest-RAM cursor to carry across rows or shards.
-        if is_memory {
-            let state = |index: Expression<E>| {
-                boundary_state_record(
-                    import_cycle.expr(),
-                    tensor_id_lo.expr(),
-                    tensor_id_hi.expr(),
-                    tensor_version.expr(),
-                    PART,
-                    base_byte_address.expr(),
-                    index,
-                )
-            };
-            cb.read_record(
-                || "production_boundary_state_in",
-                RAMType::Custom,
-                state(physical_local_index.expr()),
-            )?;
-            cb.write_record(
-                || "production_boundary_state_out",
-                RAMType::Custom,
-                state(physical_local_index.expr() + E::BaseField::ONE.expr()),
-            )?;
-        }
         let structural = TensorProductionBoundaryStructuralConfig {
             physical_local_index,
             eq_rotation_left,
@@ -1503,38 +1244,19 @@ impl<
             eq_rotation,
             selector,
         };
-        if let (Some(boundary_cycle), Some(memory)) = (boundary_cycle, memory) {
-            Ok(TensorProductionBoundaryConfig::Input(
-                TensorProductionBoundaryInputConfig {
-                    layer,
-                    import_cycle,
-                    boundary_cycle,
-                    tensor_id_lo,
-                    tensor_id_hi,
-                    tensor_version,
-                    base_byte_address,
-                    before_value: before_value.unwrap(),
-                    value,
-                    sign,
-                    memory,
-                    structural,
-                },
-            ))
-        } else {
-            Ok(TensorProductionBoundaryConfig::Output(
-                TensorProductionBoundaryOutputConfig {
-                    layer,
-                    import_cycle,
-                    tensor_id_lo,
-                    tensor_id_hi,
-                    tensor_version,
-                    base_byte_address,
-                    value,
-                    sign,
-                    structural,
-                },
-            ))
-        }
+        Ok(TensorProductionBoundaryConfig::Output(
+            TensorProductionBoundaryOutputConfig {
+                layer,
+                import_cycle,
+                tensor_id_lo,
+                tensor_id_hi,
+                tensor_version,
+                base_byte_address,
+                value,
+                sign,
+                structural,
+            },
+        ))
     }
 
     fn build_gkr_iop_circuit(
