@@ -101,9 +101,9 @@ fn validate_tensor_bus_event_indices() {
             ProductionStage::Projection.as_raw(),
             ProductionStage::Attention.as_raw(),
             0,
-            HEADS_PER_CIRCUIT as u32,
+            1,
             HIDDEN_WORDS as u32,
-            HEADS_PER_CIRCUIT as u32 * (SEQUENCE * 128) as u32,
+            (SEQUENCE * 128) as u32,
         ),
         (
             ProductionStage::PostFfn.as_raw(),

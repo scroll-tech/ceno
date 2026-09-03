@@ -69,12 +69,16 @@ pub use tensor_production_attention::{
     TensorProductionBoundaryHiddenOutputInstruction, TensorProductionBoundaryPostInputInstruction,
     TensorProductionBoundaryReplayDescriptor, TensorProductionExportAnchorInstruction,
     TensorProductionImportAnchorInstruction, TensorProductionStageAnchorInstruction,
-    collect_production_boundary_replay_descriptors,
+    collect_production_boundary_replay_descriptors, validate_production_attention_group,
+    validate_production_boundary_group,
 };
 pub use tensor_production_attention_fused::{
-    TensorProductionQkShiftSoftmaxCoreConfig, TensorProductionQkShiftSoftmaxCoreInstruction,
+    TensorAttentionQkShiftSoftmax, TensorProductionQkShiftSoftmaxCoreConfig,
+    TensorProductionQkShiftSoftmaxCoreInstruction,
 };
-pub use tensor_production_attention_matrix::TensorProductionPvCoreInstruction;
+pub use tensor_production_attention_matrix::{
+    TensorAttentionPv, TensorProductionPvCoreInstruction,
+};
 pub use tensor_rms::{TensorRmsLookupCoreInstruction, TensorRmsLookupEcallInstruction};
 pub use uint256::{Secp256k1InvInstruction, Secp256r1InvInstruction, Uint256MulInstruction};
 pub use weierstrass_add::WeierstrassAddAssignInstruction;

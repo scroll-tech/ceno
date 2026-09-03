@@ -28,20 +28,32 @@ pub(crate) fn assign_production_qk_shift_softmax_device<E: ExtensionField>(
     num_witin: usize,
     num_structural_witin: usize,
     steps: &[StepRecord],
-    call: &TensorProductionFullLayerWitness,
+    calls: &[&TensorProductionFullLayerWitness],
     projected_qkv: &ProductionProjectedQkv,
     attention_derived: &ProductionAttentionDerived,
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
+    let head_count = calls.len();
+    let call = calls.first().ok_or_else(|| {
+        ZKVMError::InvalidWitness("production fused attention call group is empty".into())
+    })?;
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>()
-        || call.head_count != 1
+        || !head_count.is_power_of_two()
+        || head_count > 32
+        || head_count != ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
         || call.head_start >= 32
+        || call.head_start as usize % head_count != 0
+        || calls.iter().enumerate().any(|(slot, item)| {
+            item.head_count != 1
+                || item.head_start != call.head_start + slot as u32
+                || item.layer != call.layer
+        })
         || call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER
         || call.layer >= 32
     {
         return Err(ZKVMError::InvalidWitness(
-            "production fused attention requires the BabyBear GPU heads-1 profile".into(),
+            "production fused attention requires a valid BabyBear GPU head group".into(),
         ));
     }
     let hal = get_cuda_hal().map_err(|error| {
@@ -64,7 +76,8 @@ pub(crate) fn assign_production_qk_shift_softmax_device<E: ExtensionField>(
             "production fused attention requires shard-owned GPU lookup counters".into(),
         )
     })?;
-    let rows = 1usize << 22;
+    let rows = head_count << 22;
+    let log_rows = 22 + head_count.ilog2() as usize;
     super::log_production_allocation(
         "qk_shift_softmax_before",
         rows * num_witin * std::mem::size_of::<E::BaseField>(),
@@ -78,14 +91,20 @@ pub(crate) fn assign_production_qk_shift_softmax_device<E: ExtensionField>(
         .witgen
         .witgen_production_attention_qk_shift_softmax(
             columns,
-            call.head_start,
-            call.head_count,
-            call.import_cycle,
-            call.projected_qkv_tensor_id,
-            call.projected_qkv_version,
-            call.layer,
-            call.attention_output_tensor_id,
-            call.attention_output_version,
+            &calls
+                .iter()
+                .map(|call| {
+                    (
+                        call.head_start,
+                        call.import_cycle,
+                        call.projected_qkv_tensor_id,
+                        call.projected_qkv_version,
+                        call.layer,
+                        call.attention_output_tensor_id,
+                        call.attention_output_version,
+                    )
+                })
+                .collect::<Vec<_>>(),
             &projected_qkv.query,
             &projected_qkv.key,
             &attention_derived.shift,
@@ -121,10 +140,10 @@ pub(crate) fn assign_production_qk_shift_softmax_device<E: ExtensionField>(
     );
     validate_non_rotating_domain(
         "QkShiftSoftmax",
-        1,
+        head_count,
         22,
         rows,
-        22,
+        log_rows,
         num_witin,
         num_structural_witin,
         &witness,

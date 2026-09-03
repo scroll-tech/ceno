@@ -30,12 +30,11 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-const HEAD_GROUP_BITS: usize = ceno_emul::tensor::production_attention::MATRIX_GROUP_BITS;
-const ROW_BITS: usize = 22 + HEAD_GROUP_BITS;
-const ROWS: usize = 1 << ROW_BITS;
+const ROWS_PER_HEAD_BITS: usize = 22;
+const ACTIVE_HEADS_PER_SHARD: usize = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+const ACTIVE_ROWS: usize = ACTIVE_HEADS_PER_SHARD << ROWS_PER_HEAD_BITS;
 const SEQUENCE: u64 = 2048;
 const HEAD_DIM: u64 = 128;
-const HEADS_PER_CORE: u64 = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT as u64;
 const CONTEXT_WORDS: u64 = 1 << 23;
 const PROBABILITY_VERSION_OFFSET: u64 = 2;
 const ATTENTION_CALL_VERSION: u64 = 9;
@@ -66,7 +65,9 @@ fn tensor_space_record<E: ExtensionField>(
     ]
 }
 
-pub struct TensorProductionPvCoreInstruction<E>(PhantomData<E>);
+pub struct TensorAttentionPv<E, const HEADS_PER_SHARD: usize>(PhantomData<E>);
+
+pub type TensorProductionPvCoreInstruction<E> = TensorAttentionPv<E, ACTIVE_HEADS_PER_SHARD>;
 
 pub struct TensorProductionPvCoreConfig {
     // Stable A/W/Q/R offsets consumed by the matrix reduction.
@@ -408,7 +409,9 @@ fn pv_state_record<E: ExtensionField>(
     record
 }
 
-impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> {
+impl<E: ExtensionField, const HEADS_PER_SHARD: usize> Instruction<E>
+    for TensorAttentionPv<E, HEADS_PER_SHARD>
+{
     type InstructionConfig = TensorProductionPvCoreConfig;
     type InsnType = InsnKind;
 
@@ -417,13 +420,22 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
     }
 
     fn name() -> String {
-        "TensorAttentionPv".into()
+        if HEADS_PER_SHARD == ACTIVE_HEADS_PER_SHARD {
+            "TensorAttentionPv".into()
+        } else {
+            format!("TensorAttentionPvHeads{HEADS_PER_SHARD}")
+        }
     }
 
     fn construct_circuit(
         cb: &mut CircuitBuilder<E>,
         _: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
+        assert!(
+            HEADS_PER_SHARD.is_power_of_two() && HEADS_PER_SHARD <= 32,
+            "HEADS_PER_SHARD must be a nonzero power of two no larger than 32"
+        );
+        let row_bits = ROWS_PER_HEAD_BITS + HEADS_PER_SHARD.trailing_zeros() as usize;
         let a = cb.create_witin(|| "production_pv_a");
         let w = cb.create_witin(|| "production_pv_w");
         let q = cb.create_witin(|| "production_pv_q");
@@ -491,37 +503,36 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
 
         let axis_formula = cb.create_structural_witin(
             || "production_pv_axis",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 7, n: ROW_BITS },
+            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 7, n: row_bits },
         );
         let row_low7_formula = cb.create_structural_witin(
             || "production_pv_row_low7_prefix",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 14, n: ROW_BITS },
+            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 14, n: row_bits },
         );
         let row_high4_formula = cb.create_structural_witin(
             || "production_pv_row_high4_prefix",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 18, n: ROW_BITS },
+            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 18, n: row_bits },
         );
         let head_formula = cb.create_structural_witin(
             || "production_pv_head_prefix",
-            StructuralWitInType::OuterRepeatingIncrementalSequence {
-                k: 18 + HEAD_GROUP_BITS,
-                n: ROW_BITS,
+            StructuralWitInType::InnerRepeatingIncrementalSequence {
+                k: ROWS_PER_HEAD_BITS,
+                n: row_bits,
             },
         );
         let tile_formula = cb.create_structural_witin(
             || "production_pv_tile",
             StructuralWitInType::InnerRepeatingIncrementalSequence {
-                k: 18 + HEAD_GROUP_BITS,
-                n: ROW_BITS,
+                k: 18,
+                n: ROWS_PER_HEAD_BITS,
             },
         );
         let inv_128 = E::BaseField::from_u64(1 << 7).inverse().expr();
         let inv_16384 = E::BaseField::from_u64(1 << 14).inverse().expr();
-        let inv_262144 = E::BaseField::from_u64(1 << 18).inverse().expr();
         let axis = axis_formula.expr();
         let row_low7 = (row_low7_formula.expr() - axis.clone()) * inv_128;
         let row_high4 = (row_high4_formula.expr() - row_low7_formula.expr()) * inv_16384;
-        let head = (head_formula.expr() - row_high4_formula.expr()) * inv_262144;
+        let head = head_formula.expr();
         let tile = tile_formula.expr();
         let row_high_inverse = cb.create_witin(|| "production_pv_row_high_inverse");
         let row_high_last_inverse = cb.create_witin(|| "production_pv_row_high_last_inverse");
@@ -554,8 +565,8 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
         let physical_index = cb.create_structural_witin(
             || "production_pv_physical_index",
             StructuralWitInType::OuterRepeatingIncrementalSequence {
-                k: ROW_BITS,
-                n: ROW_BITS,
+                k: row_bits,
+                n: row_bits,
             },
         );
         let matrix_a_selector = cb.create_placeholder_structural_witin(|| "matrix_a_selector");
@@ -569,8 +580,8 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
             physical_index.expr(),
             axis.expr()
                 + row.clone() * 128
-                + head.expr() * (1u64 << 18)
-                + tile.expr() * (1u64 << (18 + HEAD_GROUP_BITS)),
+                + tile.expr() * (1u64 << 18)
+                + head.expr() * (1u64 << ROWS_PER_HEAD_BITS),
         )?;
 
         let accumulator_q_before = cb.create_witin(|| "production_pv_accumulator_q_before");
@@ -668,9 +679,9 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
         let output_id_hi = cb.create_witin(|| "production_pv_output_id_hi");
         let output_version = cb.create_witin(|| "production_pv_output_version");
         let head_start = cb.create_witin(|| "production_pv_head_start");
+        let slot_head = head_start.expr() + head.clone();
         let key = tile.expr() * 128 + axis.expr();
-        let global_head = head_start.expr() + head.expr();
-        let probability_index = (global_head.clone() * SEQUENCE + row.clone()) * SEQUENCE + key;
+        let probability_index = row.clone() * SEQUENCE + key;
         cb.read_record(
             || "production_pv_probability_read",
             RAMType::Custom,
@@ -685,10 +696,9 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
             ),
         )?;
         let v_key: Expression<E> = tile.expr() * 128 + row_low7.expr();
-        let group_words = HEADS_PER_CORE * SEQUENCE * HEAD_DIM;
-        let v_index = E::BaseField::from_u64(2 * group_words).expr()
-            + (head.expr() * SEQUENCE + v_key.clone()) * HEAD_DIM
-            + axis.expr();
+        let head_words = SEQUENCE * HEAD_DIM;
+        let v_index =
+            E::BaseField::from_u64(2 * head_words).expr() + v_key.clone() * HEAD_DIM + axis.expr();
         let v_record = tensor_space_record(
             import_cycle.expr(),
             layer.expr(),
@@ -711,7 +721,7 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
             input_id_lo.expr(),
             input_id_hi.expr(),
             input_version.expr(),
-            head_start.expr(),
+            slot_head.clone(),
             v_index.clone(),
             row_high4.expr(),
             [w.expr()],
@@ -730,7 +740,7 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
             input_id_lo.expr(),
             input_id_hi.expr(),
             input_version.expr(),
-            head_start.expr(),
+            slot_head.clone(),
             v_index,
             row_high4.expr() + 1,
             [w.expr()],
@@ -743,7 +753,7 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
             conditional_rlc(cb, w_write_selector, &w_state_out),
         )?;
 
-        let context_index = (head.expr() * SEQUENCE + row) * HEAD_DIM + axis.expr();
+        let context_index = row * HEAD_DIM + axis.expr();
         let accumulator_in = pv_state_record(
             PV_STATE_VERSION,
             import_cycle.expr(),
@@ -751,7 +761,7 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
             output_id_lo.expr(),
             output_id_hi.expr(),
             output_version.expr(),
-            head_start.expr(),
+            slot_head.clone(),
             context_index.clone(),
             tile.expr(),
             [accumulator_q_before.expr(), accumulator_r_before.expr()],
@@ -770,7 +780,7 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
             output_id_lo.expr(),
             output_id_hi.expr(),
             output_version.expr(),
-            head_start.expr(),
+            slot_head,
             context_index.clone(),
             tile.expr() + 1,
             [accumulator_q_after.expr(), accumulator_r_after.expr()],
@@ -907,10 +917,11 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionPvCoreInstruction<E> 
                 "production PV write record identity changed: {expected}"
             );
         }
-        let lookup_virtual_rows = (ROWS / 2) * lookups.next_power_of_two();
+        let rows = HEADS_PER_SHARD << ROWS_PER_HEAD_BITS;
+        let lookup_virtual_rows = (rows / 2) * lookups.next_power_of_two();
         assert_eq!(
             lookup_virtual_rows,
-            (HEADS_PER_CORE as usize) << 25,
+            HEADS_PER_SHARD << 25,
             "production PV lookup virtual group changed"
         );
         let columns = [config.a, config.w, config.q, config.remainder];
@@ -944,6 +955,7 @@ mod tests {
     use multilinear_extensions::utils::eval_by_expr_with_instance;
 
     type E = BabyBearExt4;
+    type F = <E as ExtensionField>::BaseField;
 
     fn signature<I: Instruction<E>>() -> (String, usize, usize, usize, usize) {
         let mut cs = ConstraintSystem::<E>::new(|| I::name());
@@ -963,6 +975,133 @@ mod tests {
             .unwrap_right()
     }
 
+    fn circuit<const N: usize>() -> (ConstraintSystem<E>, TensorProductionPvCoreConfig) {
+        let mut cs = ConstraintSystem::<E>::new(|| TensorAttentionPv::<E, N>::name());
+        let config = {
+            let mut cb = CircuitBuilder::new(&mut cs);
+            TensorAttentionPv::<E, N>::construct_circuit(&mut cb, &ProgramParams::default())
+                .unwrap()
+        };
+        (cs, config)
+    }
+
+    fn eval(expr: &Expression<E>, witness: &[F], structural: &[F]) -> E {
+        let witness = witness.iter().copied().map(E::from).collect::<Vec<_>>();
+        let structural = structural.iter().copied().map(E::from).collect::<Vec<_>>();
+        eval_by_expr_with_instance::<E>(
+            &[],
+            &witness,
+            &structural,
+            &[],
+            &[E::from_v(7), E::from_v(11)],
+            expr,
+        )
+        .unwrap_right()
+    }
+
+    fn named_zero<'a>(cs: &'a ConstraintSystem<E>, needle: &str) -> &'a Expression<E> {
+        cs.assert_zero_expressions_namespace_map
+            .iter()
+            .zip(&cs.assert_zero_expressions)
+            .chain(
+                cs.assert_zero_sumcheck_expressions_namespace_map
+                    .iter()
+                    .zip(&cs.assert_zero_sumcheck_expressions),
+            )
+            .find_map(|(name, expression)| name.contains(needle).then_some(expression))
+            .unwrap_or_else(|| panic!("missing PV constraint {needle}"))
+    }
+
+    fn structural_row(config: &TensorProductionPvCoreConfig, physical: u64) -> Vec<F> {
+        let mut structural = vec![F::ZERO; 10];
+        let set = |values: &mut [F], cell: StructuralWitIn, value: u64| {
+            values[cell.id as usize] = F::from_u64(value);
+        };
+        set(&mut structural, config.axis, physical & 0x7f);
+        set(&mut structural, config.row_low7, physical & 0x3fff);
+        set(&mut structural, config.row_high4, physical & 0x3ffff);
+        set(&mut structural, config.head, physical >> 22);
+        set(&mut structural, config.tile, (physical >> 18) & 15);
+        set(&mut structural, config.physical_index, physical);
+        structural
+    }
+
+    #[test]
+    fn generic_pv_geometry_and_domain_are_exact() {
+        fn check<const N: usize>() {
+            let (cs, config) = circuit::<N>();
+            let row_bits = 22 + N.trailing_zeros() as usize;
+            match &cs.structural_witins[config.physical_index.id as usize].witin_type {
+                StructuralWitInType::OuterRepeatingIncrementalSequence { k, n } => {
+                    assert_eq!((*k, *n), (row_bits, row_bits));
+                }
+                other => panic!("unexpected PV physical-index formula: {other:?}"),
+            }
+            let witness = vec![F::ZERO; 55];
+            for physical in [0, (1u64 << 22) - 1, ((N as u64) << 22) - 1] {
+                assert_eq!(
+                    eval(
+                        named_zero(&cs, "production_pv_physical_coordinate"),
+                        &witness,
+                        &structural_row(&config, physical),
+                    ),
+                    E::ZERO
+                );
+            }
+        }
+        check::<1>();
+        check::<2>();
+        check::<4>();
+    }
+
+    #[test]
+    fn invalid_pv_head_geometry_is_rejected_at_configuration() {
+        for rejected in [
+            std::panic::catch_unwind(circuit::<0>),
+            std::panic::catch_unwind(circuit::<3>),
+        ] {
+            assert!(rejected.is_err());
+        }
+    }
+
+    #[test]
+    fn pv_state_head_is_group_base_plus_structural_slot() {
+        let (cs, config) = circuit::<2>();
+        let mut witness = vec![F::ZERO; 55];
+        witness[config.head_start.id as usize] = F::from_u64(8);
+        let structural = structural_row(&config, 1 << 22);
+        let record_index = cs
+            .r_expressions_namespace_map
+            .iter()
+            .position(|name| name.ends_with("production_pv_w_state_read"))
+            .expect("PV state record");
+        assert_eq!(
+            eval(&cs.r_ram_types[record_index].1[7], &witness, &structural),
+            E::from_v(9)
+        );
+    }
+
+    #[test]
+    fn pv_accumulator_seed_resets_at_each_slot_boundary() {
+        let (cs, config) = circuit::<2>();
+        let mut witness = vec![F::ZERO; 55];
+        witness[config.accumulator_q_before.id as usize] = F::ONE;
+        let seed = named_zero(&cs, "production_pv_accumulator_seed_q");
+        assert_eq!(
+            eval(seed, &witness, &structural_row(&config, 1 << 22)),
+            E::ONE
+        );
+        witness[config.tile_inverse.id as usize] = F::ONE;
+        assert_eq!(
+            eval(
+                seed,
+                &witness,
+                &structural_row(&config, (1 << 22) + (1 << 18)),
+            ),
+            E::ZERO
+        );
+    }
+
     #[test]
     fn pv_has_one_descriptor_independent_signature() {
         let pv = signature::<TensorProductionPvCoreInstruction<E>>();
@@ -973,7 +1112,7 @@ mod tests {
                 "PV signature changed for descriptor layer={layer} head={head}"
             );
         }
-        assert_eq!(ROWS, 1 << 22);
+        assert_eq!(ACTIVE_ROWS, ACTIVE_HEADS_PER_SHARD << 22);
     }
 
     #[test]
@@ -993,4 +1132,4 @@ mod tests {
     }
 }
 
-const _: () = assert!(ROWS == ceno_emul::tensor::production_attention::GROUP_SCORE_ROWS);
+const _: () = assert!(ACTIVE_ROWS == ceno_emul::tensor::production_attention::GROUP_SCORE_ROWS);

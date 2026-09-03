@@ -81,17 +81,32 @@ pub fn descriptor(circuit_name: &str) -> Option<MatrixReductionDescriptor> {
     if circuit_name.starts_with("TensorProjectionDense") {
         return Some(MatrixReductionDescriptor::production_projection());
     }
-    let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
-    if matches!(
+    let active_heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+    let suffixed_heads = |base: &str| {
+        circuit_name
+            .strip_prefix(base)
+            .and_then(|suffix| suffix.strip_prefix("Heads"))
+            .and_then(|heads| heads.parse::<usize>().ok())
+            .filter(|heads| heads.is_power_of_two() && *heads <= 32)
+    };
+    let qk_heads = if matches!(
         circuit_name,
         "TensorAttentionQk" | "TensorAttentionQkShiftSoftmax"
     ) {
+        Some(active_heads)
+    } else {
+        suffixed_heads("TensorAttentionQkShiftSoftmax")
+    };
+    if let Some(heads) = qk_heads {
         Some(MatrixReductionDescriptor::production(
             MatrixReductionKind::ProductionQk,
             16,
             heads,
         ))
-    } else if circuit_name == "TensorAttentionPv" {
+    } else if let Some(heads) = (circuit_name == "TensorAttentionPv")
+        .then_some(active_heads)
+        .or_else(|| suffixed_heads("TensorAttentionPv"))
+    {
         Some(MatrixReductionDescriptor::production(
             MatrixReductionKind::ProductionPv,
             20,
@@ -100,6 +115,26 @@ pub fn descriptor(circuit_name: &str) -> Option<MatrixReductionDescriptor> {
     } else {
         None
     }
+}
+
+fn valid_production_descriptor(descriptor: MatrixReductionDescriptor) -> bool {
+    matches!(
+        descriptor.kind,
+        MatrixReductionKind::ProductionProjection
+            | MatrixReductionKind::ProductionQk
+            | MatrixReductionKind::ProductionPv
+    ) && matches!(descriptor.output_vars, 22..=27)
+        && descriptor.sumcheck_vars == descriptor.output_vars - 11
+}
+
+pub fn exact_production_domain(
+    num_instances: usize,
+    descriptor: MatrixReductionDescriptor,
+) -> bool {
+    valid_production_descriptor(descriptor)
+        && 1usize
+            .checked_shl(descriptor.output_vars as u32)
+            .is_some_and(|expected| num_instances == expected)
 }
 
 #[derive(Clone, Debug)]
@@ -269,14 +304,7 @@ pub fn prove_production(
     ),
     ZKVMError,
 > {
-    if !matches!(
-        descriptor.kind,
-        MatrixReductionKind::ProductionProjection
-            | MatrixReductionKind::ProductionQk
-            | MatrixReductionKind::ProductionPv
-    ) || !matches!(descriptor.output_vars, 22..=24)
-        || descriptor.sumcheck_vars != descriptor.output_vars - 11
-    {
+    if !valid_production_descriptor(descriptor) {
         return Err(ZKVMError::InvalidWitness(
             "invalid production matrix reduction descriptor".into(),
         ));
@@ -468,10 +496,7 @@ fn verify_production<E: ExtensionField>(
     descriptor: MatrixReductionDescriptor,
     transcript: &mut impl Transcript<E>,
 ) -> Result<MatrixOpeningClaims<E>, ZKVMError> {
-    if num_instances != 1 << descriptor.output_vars
-        || !matches!(descriptor.output_vars, 22..=24)
-        || descriptor.sumcheck_vars != descriptor.output_vars - 11
-    {
+    if !exact_production_domain(num_instances, descriptor) {
         return Err(invalid("production matrix reduction shape mismatch"));
     }
     let logical_output =
@@ -674,5 +699,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!((a.len(), w.len()), (23, 23));
+    }
+
+    #[test]
+    fn production_domain_is_exact_for_every_supported_power_of_two() {
+        for heads in [1usize, 2, 4, 8, 16, 32] {
+            let descriptor =
+                MatrixReductionDescriptor::production(MatrixReductionKind::ProductionQk, 16, heads);
+            let exact = heads << 22;
+            assert!(exact_production_domain(exact, descriptor));
+            assert!(!exact_production_domain(1 << 22, descriptor) || heads == 1);
+            assert!(!exact_production_domain(1 << 21, descriptor));
+            assert!(!exact_production_domain(exact / 2, descriptor));
+        }
     }
 }

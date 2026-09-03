@@ -29,7 +29,9 @@ fn main() {
     // Hidden and Context are independent provider-owned ordinary witnesses.
     // This performance milestone intentionally has no guest activation buffers.
     for head_start in (0..TENSOR_LLAMA2_HEADS).step_by(STAGE_HEADS as usize) {
-        unsafe { run_attention_segment(head_start, STAGE_HEADS, core::ptr::null()) };
+        for slot in 0..STAGE_HEADS {
+            unsafe { run_attention_segment(head_start + slot, 1, core::ptr::null()) };
+        }
     }
     unsafe {
         run_stage(

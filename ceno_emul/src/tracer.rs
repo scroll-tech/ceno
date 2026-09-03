@@ -857,6 +857,7 @@ pub struct ShardPlanBuilder {
     tensor_segment_template: Option<Vec<PendingTensorStep>>,
     tensor_state_plan_mode: TensorStatePlanMode,
     pending_tensor_state: Option<PendingTensorStateSegment>,
+    pending_tensor_state_interstitial_steps: Vec<PendingTensorStep>,
     tensor_state_annotations: Vec<TensorStateSegmentAnnotation>,
     tensor_state_annotation_cursor: usize,
     active_tensor_state: Option<ActiveTensorStateSegment>,
@@ -994,6 +995,7 @@ impl ShardPlanBuilder {
             tensor_segment_template: None,
             tensor_state_plan_mode: TensorStatePlanMode::Disabled,
             pending_tensor_state: None,
+            pending_tensor_state_interstitial_steps: Vec::new(),
             tensor_state_annotations: Vec::new(),
             tensor_state_annotation_cursor: 0,
             active_tensor_state: None,
@@ -1010,6 +1012,14 @@ impl ShardPlanBuilder {
     }
 
     pub fn tensor_state_annotations(&self) -> &[TensorStateSegmentAnnotation] {
+        assert!(
+            self.tensor_state_annotations.iter().all(|annotation| {
+                annotation.stage != ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION
+                    || annotation.head_count
+                        == crate::tensor::production_attention::HEADS_PER_CIRCUIT as u32
+            }),
+            "production TensorState annotations contain an incomplete attention group"
+        );
         &self.tensor_state_annotations
     }
 
@@ -1185,10 +1195,30 @@ impl ShardPlanBuilder {
             generic_cells,
             production_stage_chips: None,
         };
+        let import_begin = matches!(
+            ecall_code,
+            Some(
+                crate::tensor::TENSOR_IMPORT_BEGIN_V1
+                    | crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2
+            )
+        );
         if matches!(self.tensor_state_plan_mode, TensorStatePlanMode::Collect)
             && let Some(outer) = self.pending_tensor_state.as_mut()
         {
             outer.steps.push(step.clone());
+        } else if matches!(self.tensor_state_plan_mode, TensorStatePlanMode::Collect)
+            && !import_begin
+            && self
+                .tensor_state_annotations
+                .last()
+                .is_some_and(|annotation| {
+                    annotation.stage == ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION
+                        && annotation.head_count
+                            < crate::tensor::production_attention::HEADS_PER_CIRCUIT as u32
+                })
+        {
+            self.pending_tensor_state_interstitial_steps
+                .push(step.clone());
         }
         if let TensorStatePlanMode::Consume(annotations) = &self.tensor_state_plan_mode {
             if self.active_tensor_state.is_none()
@@ -1203,13 +1233,6 @@ impl ShardPlanBuilder {
                 return;
             }
         }
-        let import_begin = matches!(
-            ecall_code,
-            Some(
-                crate::tensor::TENSOR_IMPORT_BEGIN_V1
-                    | crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2
-            )
-        );
         let export_end = matches!(
             ecall_code,
             Some(
@@ -1680,18 +1703,66 @@ impl ShardPlanBuilder {
             }
         }
         let total_cells = model.shard_cost(&counts);
-        self.tensor_state_annotations
-            .push(TensorStateSegmentAnnotation {
-                layer: outer.identity.layer,
-                stage: outer.identity.stage,
-                head_start: outer.identity.head_start,
-                head_count: outer.identity.head_count,
-                start_cycle: outer.steps.first().unwrap().cycle,
-                end_cycle: outer.steps.last().unwrap().cycle,
-                total_cells,
-                steps: outer.steps,
-                events: outer.events,
-            });
+        let mut annotation = TensorStateSegmentAnnotation {
+            layer: outer.identity.layer,
+            stage: outer.identity.stage,
+            head_start: outer.identity.head_start,
+            head_count: outer.identity.head_count,
+            start_cycle: outer.steps.first().unwrap().cycle,
+            end_cycle: outer.steps.last().unwrap().cycle,
+            total_cells,
+            steps: outer.steps,
+            events: outer.events,
+        };
+        let mut interstitial_steps =
+            std::mem::take(&mut self.pending_tensor_state_interstitial_steps);
+        let group_heads = crate::tensor::production_attention::HEADS_PER_CIRCUIT as u32;
+        if annotation.stage == ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION
+            && group_heads > 1
+            && let Some(previous) = self.tensor_state_annotations.last_mut()
+            && previous.stage == annotation.stage
+            && previous.layer == annotation.layer
+            && previous.head_count < group_heads
+        {
+            assert_eq!(
+                annotation.head_start,
+                previous.head_start + previous.head_count,
+                "production attention heads are not contiguous and ordered"
+            );
+            assert_eq!(
+                annotation.head_count, 1,
+                "production attention slot is not head-1"
+            );
+            previous.head_count += 1;
+            previous.end_cycle = annotation.end_cycle;
+            previous.steps.append(&mut interstitial_steps);
+            previous.steps.append(&mut annotation.steps);
+            previous.events.append(&mut annotation.events);
+            let mut counts = vec![0u64; model.chip_count()];
+            for step in &previous.steps {
+                let chips = step
+                    .production_stage_chips
+                    .as_deref()
+                    .unwrap_or_else(|| model.chips_for_step(step.kind, step.ecall_code));
+                for &chip in chips {
+                    counts[chip as usize] = counts[chip as usize]
+                        .checked_add(1)
+                        .expect("TensorState chip count overflow");
+                }
+            }
+            previous.total_cells = model.shard_cost(&counts);
+        } else {
+            assert!(
+                interstitial_steps.is_empty(),
+                "production attention group ended before its adjacent head"
+            );
+            assert!(
+                annotation.stage != ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION
+                    || annotation.head_start % group_heads == 0,
+                "production attention group is not canonically aligned"
+            );
+            self.tensor_state_annotations.push(annotation);
+        }
     }
 
     fn preview_modeled_chips(&self, chips: &[usize]) -> (u64, u64, u64, u64) {
@@ -4525,6 +4596,79 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![0, 1]
         );
+    }
+
+    #[cfg(feature = "production-heads-2")]
+    #[test]
+    fn grouped_attention_annotation_keeps_interstitial_guest_steps() {
+        let model = cost_model(vec![ChipCostSpec {
+            rotation: 0,
+            trace_cells_per_row: 1,
+            tower_peak_cells_per_row: 0,
+            tower_peak_cells_by_bucket: None,
+        }]);
+        let step = |cycle| PendingTensorStep {
+            cycle,
+            kind: InsnKind::ADD,
+            ecall_code: None,
+            generic_cells: 0,
+            production_stage_chips: Some(vec![0]),
+        };
+        let segment = |cycle, head_start| {
+            let identity = TensorStateEvent {
+                code: crate::tensor::TENSOR_PRODUCTION_IMPORT_BEGIN_V2,
+                layer: 0,
+                stage: ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION,
+                head_start,
+                head_count: 1,
+            };
+            let event = |code, stage| TensorStateEvent {
+                code,
+                stage,
+                ..identity
+            };
+            PendingTensorStateSegment {
+                identity,
+                steps: vec![step(cycle)],
+                events: vec![
+                    identity,
+                    event(
+                        crate::tensor::TENSOR_PRODUCTION_STAGE_V2,
+                        ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_PROJECTION,
+                    ),
+                    event(
+                        crate::tensor::TENSOR_PRODUCTION_STAGE_V2,
+                        ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_ATTENTION,
+                    ),
+                    event(
+                        crate::tensor::TENSOR_PRODUCTION_EXPORT_END_V2,
+                        ceno_rt::tensor::TENSOR_PRODUCTION_STAGE_ATTENTION,
+                    ),
+                ],
+            }
+        };
+        let mut planner =
+            ShardPlanBuilder::new_with_cost_model(u64::MAX, Cycle::MAX, Some(model.clone()));
+        planner.set_tensor_state_plan_mode(TensorStatePlanMode::Collect);
+
+        planner.finish_collected_tensor_state(segment(4, 0));
+        planner.observe_tensor_segment_step(8, InsnKind::ADD, None, 0);
+        planner.finish_collected_tensor_state(segment(12, 1));
+
+        let annotation = planner
+            .tensor_state_annotations()
+            .first()
+            .expect("one grouped annotation");
+        assert_eq!(annotation.head_count, 2);
+        assert_eq!(
+            annotation
+                .steps
+                .iter()
+                .map(|step| step.cycle)
+                .collect::<Vec<_>>(),
+            vec![4, 8, 12]
+        );
+        assert_eq!(annotation.total_cells, model.shard_cost(&[3]));
     }
 
     #[derive(Debug)]

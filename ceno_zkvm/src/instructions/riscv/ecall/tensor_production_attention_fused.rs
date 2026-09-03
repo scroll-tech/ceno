@@ -27,15 +27,19 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-const ROW_BITS: usize = 22;
-const ROWS: usize = 1 << ROW_BITS;
+const ROWS_PER_HEAD_BITS: usize = 22;
+const ACTIVE_HEADS_PER_SHARD: usize = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+const ACTIVE_ROWS: usize = ACTIVE_HEADS_PER_SHARD << ROWS_PER_HEAD_BITS;
 const SEQUENCE: u64 = 2048;
 const HEAD_DIM: u64 = 128;
 const ATTENTION_CALL_VERSION: u64 = 9;
 const PROBABILITY_VERSION_OFFSET: u64 = 2;
 const Q16_SCALE: u64 = 1 << 16;
 
-pub struct TensorProductionQkShiftSoftmaxCoreInstruction<E>(PhantomData<E>);
+pub struct TensorAttentionQkShiftSoftmax<E, const HEADS_PER_SHARD: usize>(PhantomData<E>);
+
+pub type TensorProductionQkShiftSoftmaxCoreInstruction<E> =
+    TensorAttentionQkShiftSoftmax<E, ACTIVE_HEADS_PER_SHARD>;
 
 #[derive(Debug)]
 pub struct TensorProductionQkShiftSoftmaxCoreConfig {
@@ -254,7 +258,7 @@ fn conditional_rlc<E: ExtensionField>(
     cb.rlc_chip_record(record.to_vec()) * selector.clone() + E::BaseField::ONE.expr() - selector
 }
 
-fn add_qk_relation<E: ExtensionField>(
+fn add_qk_relation<E: ExtensionField, const HEADS_PER_SHARD: usize>(
     cb: &mut CircuitBuilder<E>,
 ) -> Result<
     (
@@ -279,19 +283,31 @@ fn add_qk_relation<E: ExtensionField>(
 
     let axis_low7_formula = cb.create_structural_witin(
         || "production_fused_axis_low7_prefix",
-        StructuralWitInType::OuterRepeatingIncrementalSequence { k: 7, n: ROW_BITS },
+        StructuralWitInType::OuterRepeatingIncrementalSequence {
+            k: 7,
+            n: ROWS_PER_HEAD_BITS + HEADS_PER_SHARD.trailing_zeros() as usize,
+        },
     );
     let axis_high4_formula = cb.create_structural_witin(
         || "production_fused_axis_high4_prefix",
-        StructuralWitInType::OuterRepeatingIncrementalSequence { k: 11, n: ROW_BITS },
+        StructuralWitInType::OuterRepeatingIncrementalSequence {
+            k: 11,
+            n: ROWS_PER_HEAD_BITS + HEADS_PER_SHARD.trailing_zeros() as usize,
+        },
     );
     let row_low7_formula = cb.create_structural_witin(
         || "production_fused_row_low7_prefix",
-        StructuralWitInType::OuterRepeatingIncrementalSequence { k: 18, n: ROW_BITS },
+        StructuralWitInType::OuterRepeatingIncrementalSequence {
+            k: 18,
+            n: ROWS_PER_HEAD_BITS + HEADS_PER_SHARD.trailing_zeros() as usize,
+        },
     );
     let row_high4_formula = cb.create_structural_witin(
         || "production_fused_row_high4_prefix",
-        StructuralWitInType::OuterRepeatingIncrementalSequence { k: 22, n: ROW_BITS },
+        StructuralWitInType::OuterRepeatingIncrementalSequence {
+            k: ROWS_PER_HEAD_BITS,
+            n: ROWS_PER_HEAD_BITS + HEADS_PER_SHARD.trailing_zeros() as usize,
+        },
     );
     let axis_low7 = axis_low7_formula.expr();
     let axis_high4 = (axis_high4_formula.expr() - axis_low7_formula.expr())
@@ -330,8 +346,8 @@ fn add_qk_relation<E: ExtensionField>(
     let physical_index = cb.create_structural_witin(
         || "production_fused_physical_index",
         StructuralWitInType::OuterRepeatingIncrementalSequence {
-            k: ROW_BITS,
-            n: ROW_BITS,
+            k: ROWS_PER_HEAD_BITS + HEADS_PER_SHARD.trailing_zeros() as usize,
+            n: ROWS_PER_HEAD_BITS + HEADS_PER_SHARD.trailing_zeros() as usize,
         },
     );
     let matrix_a_selector = cb.create_placeholder_structural_witin(|| "matrix_a_selector");
@@ -341,10 +357,15 @@ fn add_qk_relation<E: ExtensionField>(
     let selector = cb.create_placeholder_structural_witin(|| "selector");
     let key: Expression<E> = axis_low7.clone() + axis_high4 * 128;
     let query: Expression<E> = row_low7.clone() + row_high4 * 128;
+    let local_row = row_high4_formula.expr();
+    let slot = (physical_index.expr() - local_row.clone())
+        * E::BaseField::from_u64(1 << ROWS_PER_HEAD_BITS)
+            .inverse()
+            .expr();
     cb.require_equal(
         || "production_fused_physical_coordinate",
         physical_index.expr(),
-        key.clone() + query.clone() * SEQUENCE,
+        key.clone() + query.clone() * SEQUENCE + slot.clone() * (1 << ROWS_PER_HEAD_BITS),
     )?;
 
     let import_cycle = cb.create_witin(|| "production_fused_import_cycle");
@@ -357,10 +378,10 @@ fn add_qk_relation<E: ExtensionField>(
     let output_id_hi = cb.create_witin(|| "production_fused_output_id_hi");
     let output_version = cb.create_witin(|| "production_fused_output_version");
     let call_row_inverse = cb.create_witin(|| "production_fused_call_row_inverse");
-    let call_row = E::BaseField::ONE.expr() - physical_index.expr() * call_row_inverse.expr();
+    let call_row = E::BaseField::ONE.expr() - local_row.clone() * call_row_inverse.expr();
     cb.require_zero(
         || "production_fused_call_row_exact",
-        physical_index.expr() * call_row.clone(),
+        local_row * call_row.clone(),
     )?;
     let call_record = vec![
         CustomRWTag::TensorState.expr::<E>(),
@@ -375,7 +396,7 @@ fn add_qk_relation<E: ExtensionField>(
         E::BaseField::from_u32(ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER).expr(),
         layer.expr(),
         E::BaseField::ONE.expr(),
-        head_start.expr(),
+        head_start.expr() + slot.clone(),
         E::BaseField::ONE.expr(),
     ];
     cb.read_rlc_record(
@@ -472,7 +493,7 @@ fn add_qk_relation<E: ExtensionField>(
     ))
 }
 
-fn add_softmax_relation<E: ExtensionField>(
+fn add_softmax_relation<E: ExtensionField, const HEADS_PER_SHARD: usize>(
     cb: &mut CircuitBuilder<E>,
     config: &TensorProductionQkShiftSoftmaxCoreConfig,
     key: Expression<E>,
@@ -528,7 +549,7 @@ fn add_softmax_relation<E: ExtensionField>(
         config.probability.expr(),
         config.causal.expr() * config.exp3.expr() * config.exp4.expr(),
     )?;
-    let index = (config.head_start.expr() * SEQUENCE + query) * SEQUENCE + key;
+    let index = query * SEQUENCE + key;
     cb.write_record(
         || "production_fused_softmax_probability_write",
         RAMType::Custom,
@@ -545,22 +566,32 @@ fn add_softmax_relation<E: ExtensionField>(
     Ok(())
 }
 
-impl<E: ExtensionField> Instruction<E> for TensorProductionQkShiftSoftmaxCoreInstruction<E> {
+impl<E: ExtensionField, const HEADS_PER_SHARD: usize> Instruction<E>
+    for TensorAttentionQkShiftSoftmax<E, HEADS_PER_SHARD>
+{
     type InstructionConfig = TensorProductionQkShiftSoftmaxCoreConfig;
     type InsnType = InsnKind;
     fn inst_kinds() -> &'static [InsnKind] {
         &[]
     }
     fn name() -> String {
-        "TensorAttentionQkShiftSoftmax".into()
+        if HEADS_PER_SHARD == ACTIVE_HEADS_PER_SHARD {
+            "TensorAttentionQkShiftSoftmax".into()
+        } else {
+            format!("TensorAttentionQkShiftSoftmaxHeads{HEADS_PER_SHARD}")
+        }
     }
 
     fn construct_circuit(
         cb: &mut CircuitBuilder<E>,
         _: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let (config, key, query) = add_qk_relation(cb)?;
-        add_softmax_relation(cb, &config, key, query)?;
+        assert!(
+            HEADS_PER_SHARD.is_power_of_two() && HEADS_PER_SHARD <= 32,
+            "HEADS_PER_SHARD must be a nonzero power of two no larger than 32"
+        );
+        let (config, key, query) = add_qk_relation::<E, HEADS_PER_SHARD>(cb)?;
+        add_softmax_relation::<E, HEADS_PER_SHARD>(cb, &config, key, query)?;
         Ok(config)
     }
 
@@ -637,7 +668,7 @@ impl<E: ExtensionField> Instruction<E> for TensorProductionQkShiftSoftmaxCoreIns
 }
 
 #[cfg(not(feature = "llama-tiny"))]
-const _: () = assert!(ROWS == ceno_emul::tensor::production_attention::GROUP_SCORE_ROWS);
+const _: () = assert!(ACTIVE_ROWS == ceno_emul::tensor::production_attention::GROUP_SCORE_ROWS);
 
 #[cfg(test)]
 mod tests {
@@ -667,6 +698,22 @@ mod tests {
         let config = {
             let mut cb = CircuitBuilder::new(&mut cs);
             TensorProductionQkShiftSoftmaxCoreInstruction::construct_circuit(
+                &mut cb,
+                &ProgramParams::default(),
+            )
+            .unwrap()
+        };
+        (cs, config)
+    }
+
+    fn generic_circuit<const N: usize>() -> (
+        ConstraintSystem<E>,
+        TensorProductionQkShiftSoftmaxCoreConfig,
+    ) {
+        let mut cs = ConstraintSystem::<E>::new(|| TensorAttentionQkShiftSoftmax::<E, N>::name());
+        let config = {
+            let mut cb = CircuitBuilder::new(&mut cs);
+            TensorAttentionQkShiftSoftmax::<E, N>::construct_circuit(
                 &mut cb,
                 &ProgramParams::default(),
             )
@@ -777,6 +824,80 @@ mod tests {
             .collect()
     }
 
+    fn structural_row(config: &TensorProductionQkShiftSoftmaxCoreConfig, physical: u64) -> Vec<F> {
+        let mut structural = vec![F::ZERO; 9];
+        let set = |values: &mut [F], cell: StructuralWitIn, value: u64| {
+            values[cell.id as usize] = F::from_u64(value);
+        };
+        set(&mut structural, config.axis_low7, physical & 0x7f);
+        set(&mut structural, config.axis_high4, physical & 0x7ff);
+        set(&mut structural, config.row_low7, physical & 0x3ffff);
+        set(&mut structural, config.row_high4, physical & 0x3fffff);
+        set(&mut structural, config.physical_index, physical);
+        structural
+    }
+
+    #[test]
+    fn generic_head_geometry_and_domain_are_exact() {
+        fn check<const N: usize>() {
+            let (cs, config) = generic_circuit::<N>();
+            let row_bits = 22 + N.trailing_zeros() as usize;
+            match &cs.structural_witins[config.physical_index.id as usize].witin_type {
+                StructuralWitInType::OuterRepeatingIncrementalSequence { k, n } => {
+                    assert_eq!((*k, *n), (row_bits, row_bits));
+                }
+                other => panic!("unexpected physical-index formula: {other:?}"),
+            }
+            let witness = vec![F::ZERO; 41];
+            for physical in [0, (1u64 << 22) - 1, ((N as u64) << 22) - 1] {
+                let structural = structural_row(&config, physical);
+                assert_eq!(
+                    eval(
+                        named_zero(&cs, "production_fused_physical_coordinate"),
+                        &witness,
+                        &structural,
+                    ),
+                    E::ZERO
+                );
+            }
+        }
+        check::<1>();
+        check::<2>();
+        check::<4>();
+    }
+
+    #[test]
+    fn invalid_head_geometry_is_rejected_at_configuration() {
+        for rejected in [
+            std::panic::catch_unwind(generic_circuit::<0>),
+            std::panic::catch_unwind(generic_circuit::<3>),
+        ] {
+            assert!(rejected.is_err());
+        }
+    }
+
+    #[test]
+    fn slot_head_and_call_descriptor_are_bound_per_slot() {
+        let (cs, config) = generic_circuit::<2>();
+        let mut witness = vec![F::ZERO; 41];
+        witness[config.head_start.id as usize] = F::from_u64(8);
+        witness[config.import_cycle.id as usize] = F::from_u64(101);
+        witness[config.input_version.id as usize] = F::from_u64(7);
+        witness[config.output_version.id as usize] = F::from_u64(9);
+        let structural = structural_row(&config, 1 << 22);
+        let record_index = cs
+            .r_expressions_namespace_map
+            .iter()
+            .position(|name| name.ends_with("production_fused_attention_call_once"))
+            .expect("fused call record");
+        let record = &cs.r_ram_types[record_index].1;
+        assert_eq!(eval(&record[2], &witness, &structural), E::from_v(101));
+        assert_eq!(eval(&record[5], &witness, &structural), E::from_v(7));
+        assert_eq!(eval(&record[8], &witness, &structural), E::from_v(9));
+        assert_eq!(eval(&record[12], &witness, &structural), E::from_v(9));
+        assert_eq!(eval(&record[13], &witness, &structural), E::ONE);
+    }
+
     #[test]
     fn fused_signature_has_one_domain_and_only_external_records() {
         let mut cs = ConstraintSystem::<BabyBearExt4>::new(|| {
@@ -793,7 +914,7 @@ mod tests {
             (cb.cs.r_expressions.len(), cb.cs.w_expressions.len()),
             (3, 1)
         );
-        assert_eq!(ROWS, 1 << 22);
+        assert_eq!(ACTIVE_ROWS, ACTIVE_HEADS_PER_SHARD << 22);
     }
 
     #[test]

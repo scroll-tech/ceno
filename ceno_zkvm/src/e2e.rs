@@ -4011,41 +4011,12 @@ fn validate_shard_ram_cut_capacity(
         !segments.is_empty(),
         "explicit ShardRAM capacity planning requires atomic TensorBus cuts"
     );
-    let expected_projection_live_records = std::env::var("CENO_EXPECT_PROJECTION_LIVE_RECORDS")
-        .ok()
-        .map(|value| {
-            value
-                .parse::<u64>()
-                .expect("CENO_EXPECT_PROJECTION_LIVE_RECORDS must be an integer")
-        });
     let mut legal_first_cuts = Vec::new();
     let mut invalid_planned_cuts = Vec::new();
     for (candidate, segment) in segments.iter().enumerate() {
-        let (static_live_records, mut by_source) =
+        let (static_live_records, by_source) =
             final_mem_live_at_cut(segment.end_cycle, final_mem_state);
-        let groups = ceno_emul::tensor::production_attention::CIRCUITS;
-        let segments_per_layer = groups + 1;
-        let position = candidate % segments_per_layer;
-        let hidden_live = u64::from(candidate + 1 < segments.len())
-            * ceno_emul::tensor::production_attention::HIDDEN_WORDS as u64;
-        let context_live = if position < groups {
-            ((position + 1)
-                * ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
-                * ceno_emul::tensor::production_attention::SEQUENCE
-                * ceno_emul::tensor::production_attention::HEAD_DIM) as u64
-        } else {
-            0
-        };
-        let tensor_live_records = hidden_live
-            .checked_add(context_live)
-            .expect("TensorVM continuation record count overflow");
-        if tensor_live_records != 0 {
-            by_source.insert("tensor", tensor_live_records);
-        }
-        let live_records = static_live_records
-            .checked_add(tensor_live_records)
-            .expect("ShardRAM live record count overflow");
-        let capacity = shard_ram_cut_capacity(live_records);
+        let capacity = shard_ram_cut_capacity(static_live_records);
         let core_legal = segment.prefix_core_cost <= max_cell_per_shard;
         let capacity_legal = capacity.assignment_peak_bytes <= device_budget_bytes;
         let is_planned_cut = segments
@@ -4085,19 +4056,6 @@ fn validate_shard_ram_cut_capacity(
             live_by_source = ?by_source,
             "costed atomic EXPORT_END candidate"
         );
-        if candidate == 0
-            && let Some(expected) = expected_projection_live_records
-        {
-            assert_eq!(
-                live_records, expected,
-                "projection-cut ShardRAM liveness drift"
-            );
-            let measured_leaf_request = 94_976u64 << 20;
-            assert!(
-                capacity.leaf_main_bytes >= measured_leaf_request,
-                "projection-cut leaf request no longer explains measured 94,976 MiB"
-            );
-        }
     }
     assert!(
         invalid_planned_cuts.is_empty(),

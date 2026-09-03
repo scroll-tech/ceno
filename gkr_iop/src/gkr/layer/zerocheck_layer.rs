@@ -669,8 +669,8 @@ fn log_common_term_plan_stats<E: ExtensionField>(
     }
 
     debug_assert!(
-        coverage.iter().all(|&count| count == 1),
-        "common term plan must cover every monomial exactly once"
+        coverage.iter().all(|&count| count <= 1),
+        "common term plan must cover every planned monomial exactly once"
     );
 
     let naive_mul_count: usize = term_factor_counts.iter().sum();
@@ -832,4 +832,30 @@ pub fn rlc_zero_expr<E: ExtensionField>(
     assert!(expr_iter.next().is_none() && alpha_pows_iter.next().is_none());
 
     zero_check_exprs
+}
+
+#[cfg(test)]
+mod tests {
+    use ff_ext::GoldilocksExt2;
+
+    use super::*;
+
+    #[test]
+    fn common_term_plan_stats_accepts_builder_residual_monomials() {
+        let terms = [vec![7, 5], vec![7, 4], vec![3]]
+            .into_iter()
+            .map(|witnesses| Term {
+                scalar: Expression::WitIn(0),
+                product: witnesses.into_iter().map(Expression::WitIn).collect(),
+            })
+            .collect_vec();
+        let (plan, residual_terms) =
+            build_common_factored_plan_and_residual_terms::<GoldilocksExt2>(&terms);
+
+        let plan = plan.expect("the first two monomials share a common prefix");
+        assert_eq!(plan.groups.len(), 1);
+        assert_eq!(plan.groups[0].term_indices, vec![0, 1]);
+        assert_eq!(residual_terms[2].product, terms[2].product);
+        log_common_term_plan_stats::<GoldilocksExt2>("mixed-plan", Some(&plan), &terms);
+    }
 }

@@ -9,7 +9,7 @@ use std::{array, marker::PhantomData, sync::Arc};
 use ceno_emul::{
     Change, FullTracer, InsnKind, Platform, StepIndex, StepRecord, SyscallSpec,
     TensorProductionExportEndV2Spec, TensorProductionImportBeginV2Spec,
-    TensorProductionStageV2Spec, WORD_SIZE, WriteOp,
+    TensorProductionStageV2Spec, WORD_SIZE, WriteOp, tensor::TensorProductionFullLayerWitness,
 };
 use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::{
@@ -227,12 +227,21 @@ const fn production_boundary_log_rows(stage: usize, direction: usize, part: usiz
     production_boundary_rows(stage, direction, part).trailing_zeros() as usize
 }
 
+const fn production_boundary_replay_rows(stage: usize, direction: usize, part: usize) -> usize {
+    let rows = production_boundary_rows(stage, direction, part);
+    if stage == 1 {
+        rows / ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
+    } else {
+        rows
+    }
+}
+
 const fn production_boundary_tensor_offset(stage: usize, direction: usize, part: usize) -> usize {
-    use ceno_emul::tensor::production_attention::{CONTEXT_WORDS, HEADS_PER_CIRCUIT, HIDDEN_WORDS};
+    use ceno_emul::tensor::production_attention::{CONTEXT_WORDS, HIDDEN_WORDS};
     match (stage, direction) {
         (0, 0) | (1, 1) | (2, 1) => 0,
         (0, 1) => part * CONTEXT_WORDS,
-        (1, 0) => part * HEADS_PER_CIRCUIT * CONTEXT_WORDS / 32,
+        (1, 0) => part * CONTEXT_WORDS / 32,
         (2, 0) => part * HIDDEN_WORDS,
         _ => panic!("invalid production boundary offset"),
     }
@@ -248,13 +257,18 @@ struct TensorProductionBoundaryStructuralConfig {
 }
 
 #[derive(Debug)]
-pub struct TensorProductionBoundaryOutputConfig<E: ExtensionField> {
-    layer: WitIn,
+struct TensorProductionBoundaryMetadataConfig {
     import_cycle: WitIn,
     tensor_id_lo: WitIn,
     tensor_id_hi: WitIn,
     tensor_version: WitIn,
     base_byte_address: WitIn,
+}
+
+#[derive(Debug)]
+pub struct TensorProductionBoundaryOutputConfig<E: ExtensionField> {
+    layer: WitIn,
+    metadata: Vec<TensorProductionBoundaryMetadataConfig>,
     value: UInt<E>,
     sign: WitIn,
     structural: TensorProductionBoundaryStructuralConfig,
@@ -307,6 +321,22 @@ impl<E: ExtensionField> TensorProductionBoundaryConfig<E> {
         num_structural_witin: usize,
     ) -> Result<ceno_gpu::common::witgen::ProductionAttentionBoundaryOutputColumnMap, ZKVMError>
     {
+        let maps = self.device_output_column_maps(num_witin, num_structural_witin)?;
+        if maps.len() != 1 {
+            return Err(ZKVMError::InvalidWitness(
+                "production boundary expected one metadata slot".into(),
+            ));
+        }
+        Ok(maps[0])
+    }
+
+    #[cfg(feature = "gpu")]
+    pub(crate) fn device_output_column_maps(
+        &self,
+        num_witin: usize,
+        num_structural_witin: usize,
+    ) -> Result<Vec<ceno_gpu::common::witgen::ProductionAttentionBoundaryOutputColumnMap>, ZKVMError>
+    {
         use ceno_gpu::common::witgen::ProductionAttentionBoundaryOutputColumnMap;
 
         self.validate_device_layout(num_structural_witin)?;
@@ -323,49 +353,61 @@ impl<E: ExtensionField> TensorProductionBoundaryConfig<E> {
         }
         let id = |cell: WitIn| cell.id as u32;
         let structural = self.structural();
-        let map = ProductionAttentionBoundaryOutputColumnMap {
-            layer: id(config.layer),
-            import_cycle: id(config.import_cycle),
-            tensor_id_lo: id(config.tensor_id_lo),
-            tensor_id_hi: id(config.tensor_id_hi),
-            tensor_version: id(config.tensor_version),
-            base_byte_address: id(config.base_byte_address),
-            value_limbs: [id(value[0]), id(value[1])],
-            sign: id(config.sign),
-            physical_local_index: structural.physical_local_index.id as u32,
-            prefix: structural.selector.id as u32,
-            num_witin: u32::try_from(num_witin).map_err(|_| {
-                ZKVMError::InvalidWitness("production boundary witness width overflow".into())
-            })?,
-            num_structural_witin: u32::try_from(num_structural_witin).map_err(|_| {
-                ZKVMError::InvalidWitness("production boundary structural width overflow".into())
-            })?,
-        };
-        let mut witin_ids = map
-            .value_limbs
+        let num_witin_u32 = u32::try_from(num_witin).map_err(|_| {
+            ZKVMError::InvalidWitness("production boundary witness width overflow".into())
+        })?;
+        let num_structural_witin_u32 = u32::try_from(num_structural_witin).map_err(|_| {
+            ZKVMError::InvalidWitness("production boundary structural width overflow".into())
+        })?;
+        let maps = config
+            .metadata
             .iter()
-            .copied()
+            .map(|metadata| ProductionAttentionBoundaryOutputColumnMap {
+                layer: id(config.layer),
+                import_cycle: id(metadata.import_cycle),
+                tensor_id_lo: id(metadata.tensor_id_lo),
+                tensor_id_hi: id(metadata.tensor_id_hi),
+                tensor_version: id(metadata.tensor_version),
+                base_byte_address: id(metadata.base_byte_address),
+                value_limbs: [id(value[0]), id(value[1])],
+                sign: id(config.sign),
+                physical_local_index: structural.physical_local_index.id as u32,
+                prefix: structural.selector.id as u32,
+                num_witin: num_witin_u32,
+                num_structural_witin: num_structural_witin_u32,
+            })
+            .collect_vec();
+        let mut witin_ids = maps
+            .iter()
+            .flat_map(|map| {
+                [
+                    map.import_cycle,
+                    map.tensor_id_lo,
+                    map.tensor_id_hi,
+                    map.tensor_version,
+                    map.base_byte_address,
+                ]
+            })
             .chain([
-                map.layer,
-                map.import_cycle,
-                map.tensor_id_lo,
-                map.tensor_id_hi,
-                map.tensor_version,
-                map.base_byte_address,
-                map.sign,
+                id(config.layer),
+                id(value[0]),
+                id(value[1]),
+                id(config.sign),
             ])
             .collect_vec();
         witin_ids.sort_unstable();
-        if num_witin != 9
-            || witin_ids != (0..9).collect_vec()
-            || map.physical_local_index as usize >= num_structural_witin
-            || map.prefix as usize >= num_structural_witin
+        if maps.is_empty()
+            || witin_ids != (0..num_witin as u32).collect_vec()
+            || maps.iter().any(|map| {
+                map.physical_local_index as usize >= num_structural_witin
+                    || map.prefix as usize >= num_structural_witin
+            })
         {
             return Err(ZKVMError::InvalidWitness(
                 "production boundary output columns do not exactly cover the VK".into(),
             ));
         }
-        Ok(map)
+        Ok(maps)
     }
 }
 
@@ -378,6 +420,8 @@ pub struct TensorProductionBoundaryReplayDescriptor {
     pub direction: usize,
     pub part: usize,
     pub group: usize,
+    pub head_start: u32,
+    pub head_count: u32,
     pub step_index: StepIndex,
     pub import_cycle: u64,
     pub tensor_id: u64,
@@ -387,6 +431,120 @@ pub struct TensorProductionBoundaryReplayDescriptor {
     pub values: Arc<[i32]>,
     pub rows: usize,
     pub log_rows: usize,
+}
+
+pub fn validate_production_attention_group(
+    calls: &[&TensorProductionFullLayerWitness],
+) -> Result<(), ZKVMError> {
+    let first = calls.first().ok_or_else(|| {
+        ZKVMError::InvalidWitness("production attention ECALL group is empty".into())
+    })?;
+    let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+    if calls.len() != heads
+        || first.head_start as usize % heads != 0
+        || calls.iter().enumerate().any(|(slot, item)| {
+            item.stage != 1
+                || item.head_count != 1
+                || item.head_start != first.head_start + slot as u32
+                || item.layer != first.layer
+                || item.profile != first.profile
+                || item.input_tensor_id != first.input_tensor_id
+                || item.input_version != first.input_version
+                || item.output_tensor_id != first.output_tensor_id
+                || item.output_version != first.output_version
+                || item.projected_qkv_tensor_id != item.input_tensor_id
+                || item.projected_qkv_version != item.input_version
+                || item.attention_output_tensor_id != item.output_tensor_id
+                || item.attention_output_version != item.output_version
+        })
+    {
+        return Err(ZKVMError::InvalidWitness(
+            "production attention ECALL group is not canonical and adjacent".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_production_boundary_group(
+    descriptors: &[TensorProductionBoundaryReplayDescriptor],
+) -> Result<(), ZKVMError> {
+    let first = descriptors.first().ok_or_else(|| {
+        ZKVMError::InvalidWitness("production boundary descriptor group is empty".into())
+    })?;
+    if (first.stage, first.direction, first.part) == (0, 0, 0) {
+        let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+        let first_end = first
+            .tensor_index_start
+            .checked_add(first.rows)
+            .ok_or_else(|| {
+                ZKVMError::InvalidWitness(
+                    "production HiddenInput broadcast value range overflow".into(),
+                )
+            })?;
+        let first_values = first
+            .values
+            .get(first.tensor_index_start..first_end)
+            .ok_or_else(|| {
+                ZKVMError::InvalidWitness(
+                    "production HiddenInput broadcast value range is incomplete".into(),
+                )
+            })?;
+        if descriptors.len() != heads
+            || first.head_start as usize % heads != 0
+            || descriptors.iter().enumerate().any(|(slot, item)| {
+                let values = item
+                    .tensor_index_start
+                    .checked_add(item.rows)
+                    .and_then(|end| item.values.get(item.tensor_index_start..end));
+                item.stage != first.stage
+                    || item.direction != first.direction
+                    || item.part != first.part
+                    || item.group != first.group
+                    || item.layer != first.layer
+                    || item.rows != first.rows
+                    || item.log_rows != first.log_rows
+                    || item.tensor_index_start != first.tensor_index_start
+                    || item.head_count != 1
+                    || item.head_start != first.head_start + slot as u32
+                    || values != Some(first_values)
+            })
+        {
+            return Err(ZKVMError::InvalidWitness(
+                "production HiddenInput broadcast is not canonical and identical".into(),
+            ));
+        }
+        return Ok(());
+    }
+    if first.stage != 1 {
+        if descriptors.len() != 1 {
+            return Err(ZKVMError::InvalidWitness(
+                "non-attention production boundary descriptor was grouped".into(),
+            ));
+        }
+        return Ok(());
+    }
+    let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+    let expected_start = first.group.checked_mul(heads).ok_or_else(|| {
+        ZKVMError::InvalidWitness("production boundary head group overflow".into())
+    })?;
+    if descriptors.len() != heads
+        || first.head_start as usize != expected_start
+        || descriptors.iter().enumerate().any(|(slot, item)| {
+            item.stage != first.stage
+                || item.direction != first.direction
+                || item.part != first.part
+                || item.group != first.group
+                || item.layer != first.layer
+                || item.rows != first.rows
+                || item.head_count != 1
+                || item.head_start != first.head_start + slot as u32
+        })
+    {
+        return Err(ZKVMError::InvalidWitness(
+            "production attention boundary group is not canonical and adjacent".into(),
+        ));
+    }
+    Ok(())
 }
 
 impl TensorProductionBoundaryReplayDescriptor {
@@ -463,6 +621,8 @@ pub fn collect_production_boundary_replay_descriptors(
                     direction,
                     part,
                     group,
+                    head_start: boundary.head_start,
+                    head_count: boundary.head_count,
                     step_index: index,
                     import_cycle: boundary.import_cycle,
                     tensor_id: boundary.tensor_id,
@@ -480,13 +640,18 @@ pub fn collect_production_boundary_replay_descriptors(
     descriptors.sort_unstable_by_key(|descriptor| (descriptor.step_index, descriptor.part));
     for descriptor in &descriptors {
         if descriptor.rows
-            != production_boundary_rows(descriptor.stage, descriptor.direction, descriptor.part)
+            != production_boundary_replay_rows(
+                descriptor.stage,
+                descriptor.direction,
+                descriptor.part,
+            )
             || descriptor.log_rows
-                != production_boundary_log_rows(
+                != production_boundary_replay_rows(
                     descriptor.stage,
                     descriptor.direction,
                     descriptor.part,
                 )
+                .trailing_zeros() as usize
             || descriptor.tensor_index_start
                 != production_boundary_tensor_offset(
                     descriptor.stage,
@@ -1167,11 +1332,25 @@ impl<
         let log_rows = production_boundary_log_rows(STAGE, DIRECTION, PART);
         assert!(GROUP < ceno_emul::tensor::production_attention::CIRCUITS);
         let layer = cb.create_witin(|| "production_boundary_layer");
-        let import_cycle = cb.create_witin(|| "production_boundary_import_cycle");
-        let tensor_id_lo = cb.create_witin(|| "production_boundary_tensor_id_lo");
-        let tensor_id_hi = cb.create_witin(|| "production_boundary_tensor_id_hi");
-        let tensor_version = cb.create_witin(|| "production_boundary_tensor_version");
-        let base_byte_address = cb.create_witin(|| "production_boundary_base_byte_address");
+        let metadata_slots = if (STAGE, DIRECTION, PART) == (0, 0, 0) {
+            ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
+        } else {
+            1
+        };
+        let metadata = (0..metadata_slots)
+            .map(|slot| TensorProductionBoundaryMetadataConfig {
+                import_cycle: cb
+                    .create_witin(|| format!("production_boundary_import_cycle_{slot}")),
+                tensor_id_lo: cb
+                    .create_witin(|| format!("production_boundary_tensor_id_lo_{slot}")),
+                tensor_id_hi: cb
+                    .create_witin(|| format!("production_boundary_tensor_id_hi_{slot}")),
+                tensor_version: cb
+                    .create_witin(|| format!("production_boundary_tensor_version_{slot}")),
+                base_byte_address: cb
+                    .create_witin(|| format!("production_boundary_base_byte_address_{slot}")),
+            })
+            .collect_vec();
         let value = UInt::new(|| "production_boundary_value", cb)?;
         let sign = cb.create_witin(|| "production_boundary_sign");
         cb.assert_bit(|| "production_boundary_sign_bit", sign.expr())?;
@@ -1185,7 +1364,7 @@ impl<
         let physical_local_index = cb.create_structural_witin(
             || "production_boundary_physical_local_index",
             StructuralWitInType::OuterRepeatingIncrementalSequence {
-                k: log_rows,
+                k: if STAGE == 1 { 18 } else { log_rows },
                 n: log_rows,
             },
         );
@@ -1200,42 +1379,44 @@ impl<
         let global_index = physical_local_index.expr()
             + E::BaseField::from_usize(production_boundary_tensor_offset(STAGE, DIRECTION, PART))
                 .expr();
-        let tensor_record = tensor_space_record(
-            import_cycle.expr(),
-            layer.expr(),
-            tensor_id_lo.expr(),
-            tensor_id_hi.expr(),
-            tensor_version.expr(),
-            global_index,
-            signed_value.clone(),
-        );
         let is_provider_hidden = matches!(
             (STAGE, DIRECTION, PART),
             (0, 0, 0) | (2, 0, 0) | (2, 0, 1) | (2, 1, 0)
         );
-        if is_provider_hidden {
-            cb.write_record(
-                || "production_hidden_witness_local_write",
-                RAMType::Custom,
-                tensor_record.clone(),
-            )?;
-            cb.read_record(
-                || "production_hidden_witness_local_read",
-                RAMType::Custom,
-                tensor_record,
-            )?;
-        } else if DIRECTION == 0 {
-            cb.write_record(
-                || "production_boundary_tensor_write",
-                RAMType::Custom,
-                tensor_record,
-            )?;
-        } else {
-            cb.read_record(
-                || "production_boundary_tensor_read",
-                RAMType::Custom,
-                tensor_record,
-            )?;
+        for (slot, metadata) in metadata.iter().enumerate() {
+            let tensor_record = tensor_space_record(
+                metadata.import_cycle.expr(),
+                layer.expr(),
+                metadata.tensor_id_lo.expr(),
+                metadata.tensor_id_hi.expr(),
+                metadata.tensor_version.expr(),
+                global_index.clone(),
+                signed_value.clone(),
+            );
+            if is_provider_hidden {
+                cb.write_record(
+                    || format!("production_hidden_witness_local_write_{slot}"),
+                    RAMType::Custom,
+                    tensor_record.clone(),
+                )?;
+                cb.read_record(
+                    || format!("production_hidden_witness_local_read_{slot}"),
+                    RAMType::Custom,
+                    tensor_record,
+                )?;
+            } else if DIRECTION == 0 {
+                cb.write_record(
+                    || format!("production_boundary_tensor_write_{slot}"),
+                    RAMType::Custom,
+                    tensor_record,
+                )?;
+            } else {
+                cb.read_record(
+                    || format!("production_boundary_tensor_read_{slot}"),
+                    RAMType::Custom,
+                    tensor_record,
+                )?;
+            }
         }
         let structural = TensorProductionBoundaryStructuralConfig {
             physical_local_index,
@@ -1247,11 +1428,7 @@ impl<
         Ok(TensorProductionBoundaryConfig::Output(
             TensorProductionBoundaryOutputConfig {
                 layer,
-                import_cycle,
-                tensor_id_lo,
-                tensor_id_hi,
-                tensor_version,
-                base_byte_address,
+                metadata,
                 value,
                 sign,
                 structural,
@@ -1310,5 +1487,93 @@ impl<
         Err(ZKVMError::InvalidWitness(
             "production boundary requires deterministic device replay assignment".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod boundary_group_tests {
+    use super::*;
+
+    fn descriptor(slot: usize) -> TensorProductionBoundaryReplayDescriptor {
+        let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+        TensorProductionBoundaryReplayDescriptor {
+            layer: 3,
+            stage: 1,
+            direction: 0,
+            part: 0,
+            group: 2,
+            head_start: (2 * heads + slot) as u32,
+            head_count: 1,
+            step_index: slot,
+            import_cycle: 100 + slot as u64,
+            tensor_id: 200 + slot as u64,
+            tensor_version: 7,
+            base_byte_address: 0,
+            tensor_index_start: 0,
+            values: Arc::from([]),
+            rows: 1 << 18,
+            log_rows: 18,
+        }
+    }
+
+    #[test]
+    fn attention_boundary_group_requires_every_canonical_slot() {
+        let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+        let canonical = (0..heads).map(descriptor).collect::<Vec<_>>();
+        validate_production_boundary_group(&canonical).unwrap();
+
+        let mut missing = canonical.clone();
+        missing.pop();
+        assert!(validate_production_boundary_group(&missing).is_err());
+
+        if heads > 1 {
+            let mut duplicate = canonical.clone();
+            duplicate[1] = duplicate[0].clone();
+            assert!(validate_production_boundary_group(&duplicate).is_err());
+
+            let mut reversed = canonical.clone();
+            reversed.swap(0, 1);
+            assert!(validate_production_boundary_group(&reversed).is_err());
+
+            let mut non_adjacent = canonical.clone();
+            non_adjacent[1].head_start += 1;
+            assert!(validate_production_boundary_group(&non_adjacent).is_err());
+        }
+
+        let mut extra = canonical.clone();
+        extra.push(descriptor(heads));
+        assert!(validate_production_boundary_group(&extra).is_err());
+    }
+
+    #[test]
+    fn attention_boundary_replay_shape_is_one_ordinary_head() {
+        assert_eq!(production_boundary_rows(1, 0, 0), 1 << 19);
+        assert_eq!(production_boundary_log_rows(1, 0, 0), 19);
+        assert_eq!(production_boundary_replay_rows(1, 0, 0), 1 << 18);
+        assert_eq!(
+            production_boundary_replay_rows(1, 0, 0).trailing_zeros(),
+            18
+        );
+    }
+
+    #[test]
+    fn attention_boundary_group_rejects_descriptor_and_head_drift() {
+        let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+        let canonical = (0..heads).map(descriptor).collect::<Vec<_>>();
+        for mutate in [
+            |item: &mut TensorProductionBoundaryReplayDescriptor| item.layer += 1,
+            |item: &mut TensorProductionBoundaryReplayDescriptor| item.part += 1,
+            |item: &mut TensorProductionBoundaryReplayDescriptor| item.group += 1,
+            |item: &mut TensorProductionBoundaryReplayDescriptor| item.head_count += 1,
+            |item: &mut TensorProductionBoundaryReplayDescriptor| item.rows *= 2,
+        ] {
+            let mut invalid = canonical.clone();
+            mutate(&mut invalid[heads - 1]);
+            assert!(validate_production_boundary_group(&invalid).is_err());
+        }
+
+        let mut misaligned = canonical;
+        misaligned[0].head_start += 1;
+        assert!(validate_production_boundary_group(&misaligned).is_err());
     }
 }

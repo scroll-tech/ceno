@@ -613,7 +613,7 @@ impl ChipScheduler {
         let total_tasks = tasks.len();
         let exclusive_task_ids = tasks
             .iter()
-            .filter(|task| task.circuit_name.starts_with("TensorProductionBoundary"))
+            .filter(|task| is_exclusive_production_circuit(&task.circuit_name))
             .map(|task| task.task_id)
             .collect::<std::collections::HashSet<_>>();
 
@@ -1255,6 +1255,13 @@ impl ChipScheduler {
     }
 }
 
+#[cfg(feature = "gpu")]
+pub fn is_exclusive_production_circuit(name: &str) -> bool {
+    name.starts_with("TensorProductionBoundary")
+        || name.starts_with("TensorAttentionQkShiftSoftmax")
+        || name.starts_with("TensorAttentionPv")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1283,6 +1290,21 @@ mod tests {
             scheduler_wait_reason(1, DEFAULT_CHIP_PROVING_LANES),
             SchedulerWaitReason::MemoryLimit
         );
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn fused_pv_and_boundaries_are_exclusive() {
+        for name in [
+            "TensorAttentionQkShiftSoftmax",
+            "TensorAttentionPv",
+            "TensorProductionBoundaryAttentionInputPart0Heads00_01",
+        ] {
+            assert!(is_exclusive_production_circuit(name), "{name}");
+        }
+        for name in ["TensorProjectionDenseQueryHeads00_00", "TensorAttentionQk"] {
+            assert!(!is_exclusive_production_circuit(name), "{name}");
+        }
     }
 
     #[cfg(feature = "gpu")]

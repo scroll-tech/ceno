@@ -21,22 +21,26 @@ pub(crate) fn assign_production_tensor_producer_device<E: ExtensionField>(
     num_witin: usize,
     num_structural_witin: usize,
     steps: &[StepRecord],
-    call: &TensorProductionFullLayerWitness,
+    calls: &[&TensorProductionFullLayerWitness],
     values: &BufferImpl<'static, i32>,
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
 
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
-    let rows = usize::try_from(call.head_count)
-        .ok()
-        .and_then(|heads| heads.checked_mul(ceno_emul::tensor::production_attention::SEQUENCE))
+    let rows = calls
+        .len()
+        .checked_mul(ceno_emul::tensor::production_attention::SEQUENCE)
         .and_then(|words| words.checked_mul(ceno_emul::tensor::production_attention::HEAD_DIM))
         .ok_or_else(|| {
             ZKVMError::InvalidWitness("production tensor producer rows overflow".into())
         })?;
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>()
-        || call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER
-        || call.layer >= 32
+        || calls.is_empty()
+        || calls.iter().any(|call| {
+            call.head_count != 1
+                || call.profile != ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER
+                || call.layer != calls[0].layer
+        })
         || values.len() != rows
         || num_witin != 9
         || num_structural_witin != 5
@@ -72,16 +76,22 @@ pub(crate) fn assign_production_tensor_producer_device<E: ExtensionField>(
     super::log_production_allocation("tensor_producer_before", allocation_bytes, 0);
     let result = hal
         .witgen
-        .witgen_production_attention_tensor_producer(
+        .witgen_production_attention_tensor_producer_slots(
             columns,
             values,
-            call.import_cycle,
-            call.projected_qkv_tensor_id,
-            call.projected_qkv_version,
-            0,
-            call.layer,
+            &calls
+                .iter()
+                .map(|call| {
+                    (
+                        call.import_cycle,
+                        call.projected_qkv_tensor_id,
+                        call.projected_qkv_version,
+                        0,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            calls[0].layer,
             dynamic_lk_ptr,
-            false,
         )
         .map_err(|error| {
             ZKVMError::InvalidWitness(
@@ -130,7 +140,7 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
     num_witin: usize,
     num_structural_witin: usize,
     steps: &[StepRecord],
-    descriptor: TensorProductionBoundaryReplayDescriptor,
+    descriptors: &[TensorProductionBoundaryReplayDescriptor],
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
 
@@ -141,7 +151,18 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
         ));
     }
     config.validate_device_layout(num_structural_witin)?;
-    if num_witin != 9 {
+    let descriptor = descriptors.first().ok_or_else(|| {
+        ZKVMError::InvalidWitness("production boundary descriptor group is empty".into())
+    })?;
+    crate::instructions::riscv::ecall::validate_production_boundary_group(descriptors)?;
+    let is_hidden_broadcast =
+        (descriptor.stage, descriptor.direction, descriptor.part) == (0, 0, 0);
+    let metadata_slots = if is_hidden_broadcast {
+        descriptors.len()
+    } else {
+        1
+    };
+    if num_witin != 4 + 5 * metadata_slots {
         return Err(ZKVMError::InvalidWitness(
             "production boundary width or journal length changed".into(),
         ));
@@ -163,7 +184,17 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
             "production boundary requires shard-owned GPU lookup counters".into(),
         ));
     }
-    let allocation_elems = descriptor.rows.checked_mul(num_witin).ok_or_else(|| {
+    let rows = if is_hidden_broadcast {
+        descriptor.rows
+    } else {
+        descriptor
+            .rows
+            .checked_mul(descriptors.len())
+            .ok_or_else(|| {
+                ZKVMError::InvalidWitness("production boundary grouped rows overflow".into())
+            })?
+    };
+    let allocation_elems = rows.checked_mul(num_witin).ok_or_else(|| {
         ZKVMError::InvalidWitness("production boundary allocation overflow".into())
     })?;
     let allocation_bytes = allocation_elems
@@ -172,28 +203,53 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
             ZKVMError::InvalidWitness("production boundary byte size overflow".into())
         })?;
     super::log_production_allocation("boundary_before", allocation_bytes, 0);
-    let values = &descriptor.values
-        [descriptor.tensor_index_start..descriptor.tensor_index_start + descriptor.rows];
-    let use_virtual_structural = descriptor.log_rows == 23;
-    let columns = config.device_output_column_map(num_witin, num_structural_witin)?;
-    let result = hal
-        .witgen
-        .witgen_production_attention_boundary_output(
-            columns,
-            values,
-            descriptor.import_cycle,
-            descriptor.tensor_id,
-            descriptor.tensor_version,
-            descriptor.base_byte_address,
-            descriptor.layer,
-            dynamic_lk_ptr,
-            false,
-        )
-        .map_err(|error| {
-            ZKVMError::InvalidWitness(
-                format!("production boundary GPU assignment failed: {error}").into(),
+    let use_virtual_structural = descriptor.stage != 1 && descriptor.log_rows == 23;
+    let result = if is_hidden_broadcast {
+        hal.witgen
+            .witgen_production_attention_boundary_output_broadcast(
+                &config.device_output_column_maps(num_witin, num_structural_witin)?,
+                &descriptor.values[descriptor.tensor_index_start
+                    ..descriptor.tensor_index_start + descriptor.rows],
+                &descriptors
+                    .iter()
+                    .map(|item| {
+                        (
+                            item.import_cycle,
+                            item.tensor_id,
+                            item.tensor_version,
+                            item.base_byte_address,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                descriptor.layer,
+                dynamic_lk_ptr,
             )
-        })?;
+    } else {
+        hal.witgen
+            .witgen_production_attention_boundary_output_slots(
+                config.device_output_column_map(num_witin, num_structural_witin)?,
+                &descriptors
+                    .iter()
+                    .map(|item| {
+                        (
+                            &item.values
+                                [item.tensor_index_start..item.tensor_index_start + item.rows],
+                            item.import_cycle,
+                            item.tensor_id,
+                            item.tensor_version,
+                            item.base_byte_address,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                descriptor.layer,
+                dynamic_lk_ptr,
+            )
+    }
+    .map_err(|error| {
+        ZKVMError::InvalidWitness(
+            format!("production boundary GPU assignment failed: {error}").into(),
+        )
+    })?;
     if result.witness.len() != allocation_elems {
         return Err(ZKVMError::InvalidWitness(
             "production boundary device allocation length changed".into(),
@@ -202,7 +258,7 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
     super::log_production_allocation("boundary_after", allocation_bytes, 0);
     let witness = RowMajorMatrix::<E::BaseField>::new_by_rotation_device_backing(
         1,
-        descriptor.log_rows,
+        rows.trailing_zeros() as usize,
         num_witin,
         InstancePaddingStrategy::Default,
         result.witness,
@@ -219,11 +275,11 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
     } else {
         let mut structural = RowMajorMatrix::<E::BaseField>::new_by_rotation(
             1,
-            descriptor.log_rows,
+            rows.trailing_zeros() as usize,
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
-        let padded_rows = 1usize << (descriptor.log_rows + 1);
+        let padded_rows = 1usize << (rows.trailing_zeros() as usize + 1);
         assert_eq!(structural.height(), padded_rows);
         assert_eq!(structural.width(), 5);
         assert_eq!(structural.values.len(), padded_rows * 5);

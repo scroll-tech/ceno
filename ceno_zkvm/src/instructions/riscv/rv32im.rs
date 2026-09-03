@@ -2863,21 +2863,55 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                         witness.insert_opcode_assignment::<$instruction>(assignment, multiplicity);
                     }};
                 }
+                let mut descriptor_groups: Vec<
+                    Vec<
+                        crate::instructions::riscv::ecall::TensorProductionBoundaryReplayDescriptor,
+                    >,
+                > = Vec::new();
                 for descriptor in descriptors {
+                    if descriptor.stage == 1
+                        || (descriptor.stage, descriptor.direction, descriptor.part) == (0, 0, 0)
+                    {
+                        if let Some(group) = descriptor_groups.iter_mut().find(|group| {
+                            let first = &group[0];
+                            first.stage == descriptor.stage
+                                && first.direction == descriptor.direction
+                                && first.part == descriptor.part
+                                && first.group == descriptor.group
+                        }) {
+                            group.push(descriptor);
+                        } else {
+                            descriptor_groups.push(vec![descriptor]);
+                        }
+                    } else {
+                        descriptor_groups.push(vec![descriptor]);
+                    }
+                }
+                for descriptors in descriptor_groups {
+                    let descriptor = &descriptors[0];
+                    if (descriptor.stage == 1
+                        || (descriptor.stage, descriptor.direction, descriptor.part) == (0, 0, 0))
+                        && descriptors.len()
+                            != ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
+                    {
+                        return Err(ZKVMError::InvalidWitness(
+                            "production attention boundary group is incomplete".into(),
+                        ));
+                    }
                     match (descriptor.stage, descriptor.direction, descriptor.part) {
                         (0, 0, 0) => assign_production_boundary!(
-                            descriptor,
+                            &descriptors,
                             TensorProductionBoundaryHiddenInputInstruction<E>,
                             &self.tensor_production_boundary_hidden_input_config
                         ),
                         (2, 0, 0) => {
-                            assign_production_boundary!(descriptor, TensorProductionBoundaryPostInputInstruction<E, 0>, &self.tensor_production_boundary_post_input_configs[0])
+                            assign_production_boundary!(&descriptors, TensorProductionBoundaryPostInputInstruction<E, 0>, &self.tensor_production_boundary_post_input_configs[0])
                         }
                         (2, 0, 1) => {
-                            assign_production_boundary!(descriptor, TensorProductionBoundaryPostInputInstruction<E, 1>, &self.tensor_production_boundary_post_input_configs[1])
+                            assign_production_boundary!(&descriptors, TensorProductionBoundaryPostInputInstruction<E, 1>, &self.tensor_production_boundary_post_input_configs[1])
                         }
                         (2, 1, 0) => assign_production_boundary!(
-                            descriptor,
+                            &descriptors,
                             TensorProductionBoundaryHiddenOutputInstruction<E>,
                             &self.tensor_production_boundary_hidden_output_config
                         ),
@@ -2886,10 +2920,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                                 ($g:expr) => {
                                     if descriptor.group == $g {
                                         match (direction, part) {
-                                            (0, 0) => assign_production_boundary!(descriptor, TensorProductionBoundaryAttentionInputInstruction<E, 0, $g>, &self.tensor_production_boundary_attention_input_configs[$g][0]),
-                                            (0, 1) => assign_production_boundary!(descriptor, TensorProductionBoundaryAttentionInputInstruction<E, 1, $g>, &self.tensor_production_boundary_attention_input_configs[$g][1]),
-                                            (0, 2) => assign_production_boundary!(descriptor, TensorProductionBoundaryAttentionInputInstruction<E, 2, $g>, &self.tensor_production_boundary_attention_input_configs[$g][2]),
-                                            (1, 0) => assign_production_boundary!(descriptor, TensorProductionBoundaryAttentionOutputInstruction<E, $g>, &self.tensor_production_boundary_attention_output_configs[$g]),
+                                            (0, 0) => assign_production_boundary!(&descriptors, TensorProductionBoundaryAttentionInputInstruction<E, 0, $g>, &self.tensor_production_boundary_attention_input_configs[$g][0]),
+                                            (0, 1) => assign_production_boundary!(&descriptors, TensorProductionBoundaryAttentionInputInstruction<E, 1, $g>, &self.tensor_production_boundary_attention_input_configs[$g][1]),
+                                            (0, 2) => assign_production_boundary!(&descriptors, TensorProductionBoundaryAttentionInputInstruction<E, 2, $g>, &self.tensor_production_boundary_attention_input_configs[$g][2]),
+                                            (1, 0) => assign_production_boundary!(&descriptors, TensorProductionBoundaryAttentionOutputInstruction<E, $g>, &self.tensor_production_boundary_attention_output_configs[$g]),
                                             _ => return Err(ZKVMError::InvalidWitness("unexpected attention boundary variant".into())),
                                         }
                                         continue;
@@ -2952,23 +2986,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                             .into(),
                     ));
                 }
-                if attention_records.len() > ceno_emul::tensor::production_attention::CIRCUITS {
+                let heads_per_group = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+                if !attention_records.is_empty() && attention_records.len() != heads_per_group {
                     return Err(ZKVMError::InvalidWitness(
                         format!(
-                            "production stage topology has too many attention calls ({} > {})",
+                            "production stage topology requires exactly {heads_per_group} ordinary attention calls (got {})",
                             attention_records.len(),
-                            ceno_emul::tensor::production_attention::CIRCUITS
                         )
                         .into(),
                     ));
                 }
-                attention_records.sort_unstable_by_key(|&record_index| {
-                    shard_steps[record_index]
-                        .syscall(&shard_ctx.syscall_witnesses)
-                        .and_then(|syscall| syscall.tensor_production_full_layer.as_ref())
-                        .map(|call| call.head_start)
-                        .unwrap_or(u32::MAX)
-                });
                 if !attention_records.is_empty() {
                     let production_hal = gkr_iop::gpu::get_cuda_hal().map_err(|error| {
                         ZKVMError::InvalidWitness(
@@ -2993,74 +3020,70 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                                 "production attention head group overflow".into(),
                             )
                         })?;
-                    for (offset, &record_index) in attention_records.iter().enumerate() {
-                        let step = &shard_steps[record_index];
-                        let call = step
-                            .syscall(&shard_ctx.syscall_witnesses)
-                            .and_then(|syscall| syscall.tensor_production_full_layer.as_ref())
-                            .ok_or_else(|| {
-                                ZKVMError::InvalidWitness(
-                                    "production attention call metadata missing during QK replay"
-                                        .into(),
-                                )
-                            })?;
-                        let projected_bytes = 3
-                            * usize::try_from(call.head_count).unwrap_or_default()
-                            * ceno_emul::tensor::production_attention::SEQUENCE
-                            * ceno_emul::tensor::production_attention::HEAD_DIM
-                            * std::mem::size_of::<i32>();
-                        crate::instructions::gpu::chips::log_production_allocation(
-                            "projected_qkv_before",
-                            projected_bytes,
-                            0,
-                        );
-                        let projected_qkv = production_hal
-                            .witgen
-                            .reconstruct_production_projected_qkv(
-                                call.layer,
-                                call.head_start,
-                                call.head_count,
-                            )
-                            .map_err(|error| {
-                                ZKVMError::InvalidWitness(
-                                    format!(
-                                        "production projected-QKV reconstruction failed: {error}"
-                                    )
+                    let calls = attention_records
+                        .iter()
+                        .map(|&record_index| {
+                            shard_steps[record_index]
+                                .syscall(&shard_ctx.syscall_witnesses)
+                                .and_then(|syscall| syscall.tensor_production_full_layer.as_ref())
+                                .expect("validated production attention call")
+                        })
+                        .collect::<Vec<_>>();
+                    let call = calls[0];
+                    crate::instructions::riscv::ecall::validate_production_attention_group(&calls)?;
+                    let projected_bytes = 3
+                        * heads_per_group
+                        * ceno_emul::tensor::production_attention::SEQUENCE
+                        * ceno_emul::tensor::production_attention::HEAD_DIM
+                        * std::mem::size_of::<i32>();
+                    crate::instructions::gpu::chips::log_production_allocation(
+                        "projected_qkv_before",
+                        projected_bytes,
+                        0,
+                    );
+                    let projected_qkv = production_hal
+                        .witgen
+                        .reconstruct_production_projected_qkv(
+                            call.layer,
+                            call.head_start,
+                            heads_per_group as u32,
+                        )
+                        .map_err(|error| {
+                            ZKVMError::InvalidWitness(
+                                format!("production projected-QKV reconstruction failed: {error}")
                                     .into(),
-                                )
-                            })?;
-                        crate::instructions::gpu::chips::log_production_allocation(
-                            "projected_qkv_after",
-                            projected_bytes,
-                            0,
-                        );
-                        let selected_group = usize::try_from(call.head_start)
-                            .ok()
-                            .and_then(|start| {
-                                start.checked_div(
-                                    ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT,
-                                )
-                            })
-                            .ok_or_else(|| {
-                                ZKVMError::InvalidWitness(
-                                    "production attention head group overflow".into(),
-                                )
-                            })?;
-                        let expected_group = first_group + offset;
-                        if selected_group != expected_group
-                            || selected_group >= ceno_emul::tensor::production_attention::CIRCUITS
-                            || call.head_start as usize
-                                != expected_group
-                                    * ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
-                            || call.head_count as usize
-                                != ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
-                        {
-                            return Err(ZKVMError::InvalidWitness(
+                            )
+                        })?;
+                    crate::instructions::gpu::chips::log_production_allocation(
+                        "projected_qkv_after",
+                        projected_bytes,
+                        0,
+                    );
+                    let selected_group = usize::try_from(call.head_start)
+                        .ok()
+                        .and_then(|start| {
+                            start.checked_div(
+                                ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT,
+                            )
+                        })
+                        .ok_or_else(|| {
+                            ZKVMError::InvalidWitness(
+                                "production attention head group overflow".into(),
+                            )
+                        })?;
+                    let expected_group = first_group;
+                    if selected_group != expected_group
+                        || selected_group >= ceno_emul::tensor::production_attention::CIRCUITS
+                        || call.head_start as usize
+                            != expected_group
+                                * ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
+                    {
+                        return Err(ZKVMError::InvalidWitness(
                             "production attention descriptors are not contiguous aligned groups"
                                 .into(),
-                            ));
-                        }
-                        macro_rules! assign_projection_producers {
+                        ));
+                    }
+                    macro_rules! assign_projection_producers {
                             ($group:expr) => {{
                                 macro_rules! assign_part {
                                     ($part:expr, $values:expr) => {{
@@ -3073,7 +3096,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                                             producer_cs.zkvm_v1_css.num_witin as usize,
                                             producer_cs.zkvm_v1_css.num_structural_witin as usize,
                                             shard_steps,
-                                            call,
+                                            &calls,
                                             $values,
                                         )?;
                                         witness.insert_opcode_assignment::<TensorProductionBoundaryAttentionInputInstruction<E, $part, $group>>(assignment, multiplicity);
@@ -3084,73 +3107,72 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                                 assign_part!(2, &projected_qkv.value);
                             }};
                         }
-                        macro_rules! dispatch_projection_producers {
-                            ($g:expr) => {
-                                if selected_group == $g {
-                                    assign_projection_producers!($g);
-                                }
-                            };
-                        }
-                        production_groups_each!(dispatch_projection_producers);
-                        crate::instructions::gpu::chips::log_production_allocation(
-                            "attention_derived_before",
-                            ((call.head_count as usize) << 22) * std::mem::size_of::<u64>(),
-                            ((call.head_count as usize) << 11) * std::mem::size_of::<i64>(),
-                        );
-                        let attention_derived = production_hal
-                            .witgen
-                            .reconstruct_production_attention_derived(
-                                &projected_qkv,
-                                call.head_start,
-                                call.head_count,
-                            )
-                            .map_err(|error| {
-                                ZKVMError::InvalidWitness(
-                                    format!(
-                                        "production attention-derived reconstruction failed: {error}"
-                                    )
-                                    .into(),
+                    macro_rules! dispatch_projection_producers {
+                        ($g:expr) => {
+                            if selected_group == $g {
+                                assign_projection_producers!($g);
+                            }
+                        };
+                    }
+                    production_groups_each!(dispatch_projection_producers);
+                    crate::instructions::gpu::chips::log_production_allocation(
+                        "attention_derived_before",
+                        (heads_per_group << 22) * std::mem::size_of::<u64>(),
+                        (heads_per_group << 11) * std::mem::size_of::<i64>(),
+                    );
+                    let attention_derived = production_hal
+                        .witgen
+                        .reconstruct_production_attention_derived(
+                            &projected_qkv,
+                            call.head_start,
+                            heads_per_group as u32,
+                        )
+                        .map_err(|error| {
+                            ZKVMError::InvalidWitness(
+                                format!(
+                                    "production attention-derived reconstruction failed: {error}"
                                 )
-                            })?;
-                        crate::instructions::gpu::chips::log_production_allocation(
-                            "attention_derived_after",
-                            ((call.head_count as usize) << 22) * std::mem::size_of::<u64>(),
-                            ((call.head_count as usize) << 11) * std::mem::size_of::<i64>(),
-                        );
-                        let fused_cs = cs
-                            .get_cs(&TensorProductionQkShiftSoftmaxCoreInstruction::<E>::name())
-                            .expect("production fused QK/shift/softmax circuit missing");
-                        let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_softmax::assign_production_qk_shift_softmax_device::<E>(
+                                .into(),
+                            )
+                        })?;
+                    crate::instructions::gpu::chips::log_production_allocation(
+                        "attention_derived_after",
+                        (heads_per_group << 22) * std::mem::size_of::<u64>(),
+                        (heads_per_group << 11) * std::mem::size_of::<i64>(),
+                    );
+                    let fused_cs = cs
+                        .get_cs(&TensorProductionQkShiftSoftmaxCoreInstruction::<E>::name())
+                        .expect("production fused QK/shift/softmax circuit missing");
+                    let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_softmax::assign_production_qk_shift_softmax_device::<E>(
                             &self.tensor_production_qk_shift_softmax_config,
                             shard_ctx,
                             fused_cs.zkvm_v1_css.num_witin as usize,
                             fused_cs.zkvm_v1_css.num_structural_witin as usize,
                             shard_steps,
-                            call,
+                            &calls,
                             &projected_qkv,
                             &attention_derived,
                         )?;
-                        witness.insert_opcode_assignment::<
+                    witness.insert_opcode_assignment::<
                             TensorProductionQkShiftSoftmaxCoreInstruction<E>,
                         >(assignment, multiplicity);
-                        let pv_cs = cs
-                            .get_cs(&TensorProductionPvCoreInstruction::<E>::name())
-                            .expect("production PV circuit missing");
-                        let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_matrix::assign_production_pv_device::<E>(
+                    let pv_cs = cs
+                        .get_cs(&TensorProductionPvCoreInstruction::<E>::name())
+                        .expect("production PV circuit missing");
+                    let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_matrix::assign_production_pv_device::<E>(
                             &self.tensor_production_pv_config,
                             shard_ctx,
                             pv_cs.zkvm_v1_css.num_witin as usize,
                             pv_cs.zkvm_v1_css.num_structural_witin as usize,
                             shard_steps,
-                            call,
+                            &calls,
                             &projected_qkv,
                             &attention_derived,
                         )?;
-                        witness.insert_opcode_assignment::<TensorProductionPvCoreInstruction<E>>(
-                            assignment,
-                            multiplicity,
-                        );
-                    }
+                    witness.insert_opcode_assignment::<TensorProductionPvCoreInstruction<E>>(
+                        assignment,
+                        multiplicity,
+                    );
                 }
             }
         }
@@ -4365,7 +4387,11 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
         #[cfg(not(feature = "llama-tiny"))]
         {
             if stage == 1 {
-                let group = usize::try_from(head_start / head_count).ok()?;
+                let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT as u32;
+                if head_count != 1 || head_start % heads + 1 != heads {
+                    return self.production_stage_chip_sets.first().cloned();
+                }
+                let group = usize::try_from(head_start / heads).ok()?;
                 return self
                     .production_attention_group_chip_sets
                     .get(group)
@@ -4400,7 +4426,11 @@ impl<E: ExtensionField> StepCellExtractor for Rv32imConfig<E> {
         #[cfg(not(feature = "llama-tiny"))]
         {
             if stage == 1 {
-                let group = usize::try_from(head_start / head_count).ok()?;
+                let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT as u32;
+                if head_count != 1 || head_start % heads + 1 != heads {
+                    return self.production_stage_chip_sets.first().cloned();
+                }
+                let group = usize::try_from(head_start / heads).ok()?;
                 return self
                     .production_attention_group_chip_sets
                     .get(group)

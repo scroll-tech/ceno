@@ -25,20 +25,28 @@ pub(crate) fn assign_production_pv_device<E: ExtensionField>(
     num_witin: usize,
     num_structural_witin: usize,
     steps: &[StepRecord],
-    call: &TensorProductionFullLayerWitness,
+    calls: &[&TensorProductionFullLayerWitness],
     projected_qkv: &ProductionProjectedQkv,
     attention_derived: &ProductionAttentionDerived,
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
 
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
-    let head_count = usize::try_from(call.head_count)
-        .map_err(|_| ZKVMError::InvalidWitness("production PV head count overflow".into()))?;
+    let head_count = calls.len();
+    let call = calls
+        .first()
+        .ok_or_else(|| ZKVMError::InvalidWitness("production PV call group is empty".into()))?;
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>()
-        || !matches!(head_count, 1 | 2 | 4)
+        || !head_count.is_power_of_two()
+        || head_count > 32
         || head_count != ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
         || call.head_start as usize >= 32
         || call.head_start as usize % head_count != 0
+        || calls.iter().enumerate().any(|(slot, item)| {
+            item.head_count != 1
+                || item.head_start != call.head_start + slot as u32
+                || item.layer != call.layer
+        })
     {
         return Err(ZKVMError::InvalidWitness(
             "production PV requires the BabyBear GPU backend and a valid group".into(),
@@ -76,14 +84,20 @@ pub(crate) fn assign_production_pv_device<E: ExtensionField>(
         .witgen
         .witgen_production_attention_pv(
             columns,
-            call.head_start,
-            call.head_count,
-            call.import_cycle,
-            call.projected_qkv_tensor_id,
-            call.projected_qkv_version,
-            call.layer,
-            call.attention_output_tensor_id,
-            call.attention_output_version,
+            &calls
+                .iter()
+                .map(|call| {
+                    (
+                        call.head_start,
+                        call.import_cycle,
+                        call.projected_qkv_tensor_id,
+                        call.projected_qkv_version,
+                        call.layer,
+                        call.attention_output_tensor_id,
+                        call.attention_output_version,
+                    )
+                })
+                .collect::<Vec<_>>(),
             &projected_qkv.value,
             &attention_derived.probability,
             dynamic_lk_ptr,

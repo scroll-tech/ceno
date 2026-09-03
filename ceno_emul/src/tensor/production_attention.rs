@@ -101,10 +101,8 @@ impl ProductionStage {
             ),
             Self::Projection | Self::Attention => {
                 ensure!(
-                    matches!(head_count, 1 | 2 | 4)
-                        && head_count == HEADS_PER_CIRCUIT as u32
-                        && head_start % head_count == 0,
-                    "attention stage range is not aligned to the target head count"
+                    head_count == 1,
+                    "production attention stages are ordinary single-head calls"
                 )
             }
         }
