@@ -64,14 +64,50 @@ pub const TENSOR_PRODUCTION_STAGE_PROJECTION: u32 = 0;
 pub const TENSOR_PRODUCTION_STAGE_ATTENTION: u32 = 1;
 pub const TENSOR_PRODUCTION_STAGE_POST_FFN: u32 = 2;
 
-#[cfg(all(feature = "production-heads-1", feature = "production-heads-2"))]
-compile_error!("production-heads-1 and production-heads-2 are mutually exclusive");
+#[cfg(any(
+    all(feature = "production-heads-1", feature = "production-heads-2"),
+    all(feature = "production-heads-1", feature = "production-heads-4"),
+    all(feature = "production-heads-2", feature = "production-heads-4"),
+    all(feature = "production-heads-1", feature = "production-heads-8"),
+    all(feature = "production-heads-2", feature = "production-heads-8"),
+    all(feature = "production-heads-4", feature = "production-heads-8"),
+))]
+compile_error!("production head-count features are mutually exclusive");
 
-#[cfg(feature = "production-heads-1")]
+#[cfg(all(
+    feature = "production-heads-1",
+    not(feature = "production-heads-2"),
+    not(feature = "production-heads-4"),
+    not(feature = "production-heads-8")
+))]
 pub const TENSOR_PRODUCTION_HEADS_PER_STAGE: u32 = 1;
-#[cfg(all(not(feature = "production-heads-1"), feature = "production-heads-2"))]
+#[cfg(all(
+    not(feature = "production-heads-1"),
+    feature = "production-heads-2",
+    not(feature = "production-heads-4"),
+    not(feature = "production-heads-8")
+))]
 pub const TENSOR_PRODUCTION_HEADS_PER_STAGE: u32 = 2;
-#[cfg(not(any(feature = "production-heads-1", feature = "production-heads-2")))]
+#[cfg(all(
+    not(feature = "production-heads-1"),
+    not(feature = "production-heads-2"),
+    feature = "production-heads-4",
+    not(feature = "production-heads-8")
+))]
+pub const TENSOR_PRODUCTION_HEADS_PER_STAGE: u32 = 4;
+#[cfg(all(
+    not(feature = "production-heads-1"),
+    not(feature = "production-heads-2"),
+    not(feature = "production-heads-4"),
+    feature = "production-heads-8"
+))]
+pub const TENSOR_PRODUCTION_HEADS_PER_STAGE: u32 = 8;
+#[cfg(not(any(
+    feature = "production-heads-1",
+    feature = "production-heads-2",
+    feature = "production-heads-4",
+    feature = "production-heads-8"
+)))]
 pub const TENSOR_PRODUCTION_HEADS_PER_STAGE: u32 = 4;
 
 /// Opaque TensorBus value identity. Device pointers never enter the guest ABI.

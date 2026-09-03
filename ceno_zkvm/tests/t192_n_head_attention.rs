@@ -169,9 +169,45 @@ fn generic_geometry_and_matrix_domains_are_exact() {
         fused_structural,
         4,
     );
+    assert_domain::<TensorAttentionQkShiftSoftmax<E, 8>>(
+        "production_fused_physical_coordinate",
+        fused_structural,
+        8,
+    );
     assert_domain::<TensorAttentionPv<E, 1>>("production_pv_physical_coordinate", pv_structural, 1);
     assert_domain::<TensorAttentionPv<E, 2>>("production_pv_physical_coordinate", pv_structural, 2);
     assert_domain::<TensorAttentionPv<E, 4>>("production_pv_physical_coordinate", pv_structural, 4);
+    assert_domain::<TensorAttentionPv<E, 8>>("production_pv_physical_coordinate", pv_structural, 8);
+}
+
+#[cfg(any(feature = "production-heads-4", feature = "production-heads-8"))]
+#[test]
+fn production_head_feature_selects_exact_groups_and_domain() {
+    use ceno_emul::tensor::production_attention::{
+        CIRCUITS, GROUP_SCORE_ROWS, HEADS_PER_CIRCUIT, MATRIX_GROUP_BITS,
+    };
+
+    #[cfg(feature = "production-heads-4")]
+    let expected_heads: usize = 4;
+    #[cfg(feature = "production-heads-8")]
+    let expected_heads: usize = 8;
+    let expected_bits = expected_heads.trailing_zeros() as usize;
+    let expected_rows = expected_heads << 22;
+
+    assert_eq!(HEADS_PER_CIRCUIT, expected_heads);
+    assert_eq!(CIRCUITS, 32 / expected_heads);
+    assert_eq!(MATRIX_GROUP_BITS, expected_bits);
+    assert_eq!(GROUP_SCORE_ROWS, expected_rows);
+
+    for name in [
+        ceno_zkvm::instructions::riscv::ecall::TensorProductionQkShiftSoftmaxCoreInstruction::<E>::name(),
+        ceno_zkvm::instructions::riscv::ecall::TensorProductionPvCoreInstruction::<E>::name(),
+    ] {
+        let matrix = descriptor(&name).expect("active production matrix descriptor");
+        assert_eq!(matrix.output_vars, 22 + expected_bits);
+        assert!(exact_production_domain(expected_rows, matrix));
+        assert!(!exact_production_domain(expected_rows / 2, matrix));
+    }
 }
 
 fn verifier_sequence_eval(witin_type: StructuralWitInType, point: &[E]) -> E {
@@ -240,6 +276,7 @@ fn pv_local_row_prefix_matches_verifier_at_random_points() {
     check::<1>();
     check::<2>();
     check::<4>();
+    check::<8>();
 }
 
 #[test]
@@ -613,8 +650,10 @@ fn fused_pv_and_boundary_scheduling_is_exclusive() {
     for name in [
         TensorAttentionQkShiftSoftmax::<E, 2>::name(),
         TensorAttentionQkShiftSoftmax::<E, 4>::name(),
+        TensorAttentionQkShiftSoftmax::<E, 8>::name(),
         TensorAttentionPv::<E, 2>::name(),
         TensorAttentionPv::<E, 4>::name(),
+        TensorAttentionPv::<E, 8>::name(),
         "TensorProductionBoundaryAttentionInputPart0Heads00_01".into(),
     ] {
         assert!(is_exclusive_production_circuit(&name), "{name}");

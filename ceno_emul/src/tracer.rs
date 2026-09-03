@@ -4598,7 +4598,11 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "production-heads-2")]
+    #[cfg(any(
+        feature = "production-heads-2",
+        feature = "production-heads-4",
+        feature = "production-heads-8"
+    ))]
     #[test]
     fn grouped_attention_annotation_keeps_interstitial_guest_steps() {
         let model = cost_model(vec![ChipCostSpec {
@@ -4651,24 +4655,62 @@ mod tests {
             ShardPlanBuilder::new_with_cost_model(u64::MAX, Cycle::MAX, Some(model.clone()));
         planner.set_tensor_state_plan_mode(TensorStatePlanMode::Collect);
 
-        planner.finish_collected_tensor_state(segment(4, 0));
-        planner.observe_tensor_segment_step(8, InsnKind::ADD, None, 0);
-        planner.finish_collected_tensor_state(segment(12, 1));
+        let heads = crate::tensor::production_attention::HEADS_PER_CIRCUIT;
+        for slot in 0..heads {
+            let cycle = 4 + 8 * slot as u64;
+            planner.finish_collected_tensor_state(segment(cycle, slot as u32));
+            if slot + 1 < heads {
+                planner.observe_tensor_segment_step(cycle + 4, InsnKind::ADD, None, 0);
+            }
+        }
 
         let annotation = planner
             .tensor_state_annotations()
             .first()
             .expect("one grouped annotation");
-        assert_eq!(annotation.head_count, 2);
+        assert_eq!(planner.tensor_state_annotations().len(), 1);
+        assert_eq!(annotation.head_count, heads as u32);
         assert_eq!(
             annotation
                 .steps
                 .iter()
                 .map(|step| step.cycle)
                 .collect::<Vec<_>>(),
-            vec![4, 8, 12]
+            (0..(2 * heads - 1))
+                .map(|index| 4 + 4 * index as u64)
+                .collect::<Vec<_>>()
         );
-        assert_eq!(annotation.total_cells, model.shard_cost(&[3]));
+        assert_eq!(
+            annotation.total_cells,
+            model.shard_cost(&[(2 * heads - 1) as u64])
+        );
+
+        let required = annotation.total_cells;
+        let annotations = Arc::new(vec![annotation.clone()]);
+        let rejected = std::panic::catch_unwind({
+            let model = model.clone();
+            let annotations = annotations.clone();
+            move || {
+                let mut planner =
+                    ShardPlanBuilder::new_with_cost_model(required - 1, Cycle::MAX, Some(model));
+                planner.set_tensor_state_plan_mode(TensorStatePlanMode::Consume(annotations));
+                planner.begin_annotated_tensor_state_segment();
+            }
+        });
+        assert!(
+            rejected.is_err(),
+            "an incomplete group must not be admitted"
+        );
+
+        let mut exact = ShardPlanBuilder::new_with_cost_model(required, Cycle::MAX, Some(model));
+        exact.set_tensor_state_plan_mode(TensorStatePlanMode::Consume(annotations));
+        exact.begin_annotated_tensor_state_segment();
+        for step in annotation.steps.clone() {
+            exact.admit_annotated_tensor_state_step(step);
+        }
+        assert_eq!(exact.current_shard_id(), 0);
+        assert_eq!(exact.admitted_tensor_segments().len(), 1);
+        assert_eq!(exact.admitted_tensor_segments()[0].shard_id, 0);
     }
 
     #[derive(Debug)]

@@ -31,6 +31,8 @@ fn build_elfs() {
     let llama_tiny = std::env::var_os("CARGO_FEATURE_LLAMA_TINY").is_some();
     let production_heads_1 = std::env::var_os("CARGO_FEATURE_PRODUCTION_HEADS_1").is_some();
     let production_heads_2 = std::env::var_os("CARGO_FEATURE_PRODUCTION_HEADS_2").is_some();
+    let production_heads_4 = std::env::var_os("CARGO_FEATURE_PRODUCTION_HEADS_4").is_some();
+    let production_heads_8 = std::env::var_os("CARGO_FEATURE_PRODUCTION_HEADS_8").is_some();
     let resident_block_1 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_1").is_some();
     let resident_block_2 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_2").is_some();
     let resident_block_4 = std::env::var_os("CARGO_FEATURE_RESIDENT_BLOCK_4").is_some();
@@ -46,7 +48,11 @@ fn build_elfs() {
         args.extend(["--features", "llama-tiny"]);
     }
     assert!(
-        !(production_heads_1 && production_heads_2),
+        usize::from(production_heads_1)
+            + usize::from(production_heads_2)
+            + usize::from(production_heads_4)
+            + usize::from(production_heads_8)
+            <= 1,
         "production head-count features are mutually exclusive"
     );
     if production_heads_1 {
@@ -54,6 +60,12 @@ fn build_elfs() {
     }
     if production_heads_2 {
         args.extend(["--features", "production-heads-2"]);
+    }
+    if production_heads_4 {
+        args.extend(["--features", "production-heads-4"]);
+    }
+    if production_heads_8 {
+        args.extend(["--features", "production-heads-8"]);
     }
     if resident_block_1 {
         args.extend(["--features", "resident-block-1"]);
@@ -103,6 +115,12 @@ fn build_elfs() {
         }
         if production_heads_2 {
             ceno_args.extend(["--features", "production-heads-2"]);
+        }
+        if production_heads_4 {
+            ceno_args.extend(["--features", "production-heads-4"]);
+        }
+        if production_heads_8 {
+            ceno_args.extend(["--features", "production-heads-8"]);
         }
         if resident_block_1 {
             ceno_args.extend(["--features", "resident-block-1"]);

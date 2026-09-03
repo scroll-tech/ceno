@@ -69,7 +69,13 @@ use crate::{
     },
 };
 
-#[cfg(all(not(feature = "llama-tiny"), feature = "production-heads-1"))]
+#[cfg(all(
+    not(feature = "llama-tiny"),
+    feature = "production-heads-1",
+    not(feature = "production-heads-2"),
+    not(feature = "production-heads-4"),
+    not(feature = "production-heads-8")
+))]
 macro_rules! production_groups {
     ($m:ident) => {
         [
@@ -111,7 +117,9 @@ macro_rules! production_groups {
 #[cfg(all(
     not(feature = "llama-tiny"),
     not(feature = "production-heads-1"),
-    feature = "production-heads-2"
+    feature = "production-heads-2",
+    not(feature = "production-heads-4"),
+    not(feature = "production-heads-8")
 ))]
 macro_rules! production_groups {
     ($m:ident) => {
@@ -137,7 +145,9 @@ macro_rules! production_groups {
 }
 #[cfg(all(
     not(feature = "llama-tiny"),
-    not(any(feature = "production-heads-1", feature = "production-heads-2"))
+    not(feature = "production-heads-1"),
+    not(feature = "production-heads-2"),
+    not(feature = "production-heads-8")
 ))]
 macro_rules! production_groups {
     ($m:ident) => {
@@ -153,8 +163,26 @@ macro_rules! production_groups {
         ]
     };
 }
+#[cfg(all(
+    not(feature = "llama-tiny"),
+    not(feature = "production-heads-1"),
+    not(feature = "production-heads-2"),
+    not(feature = "production-heads-4"),
+    feature = "production-heads-8"
+))]
+macro_rules! production_groups {
+    ($m:ident) => {
+        [$m!(0), $m!(1), $m!(2), $m!(3)]
+    };
+}
 
-#[cfg(all(not(feature = "llama-tiny"), feature = "production-heads-1"))]
+#[cfg(all(
+    not(feature = "llama-tiny"),
+    feature = "production-heads-1",
+    not(feature = "production-heads-2"),
+    not(feature = "production-heads-4"),
+    not(feature = "production-heads-8")
+))]
 macro_rules! production_groups_each {
     ($m:ident) => {
         $m!(0);
@@ -194,7 +222,9 @@ macro_rules! production_groups_each {
 #[cfg(all(
     not(feature = "llama-tiny"),
     not(feature = "production-heads-1"),
-    feature = "production-heads-2"
+    feature = "production-heads-2",
+    not(feature = "production-heads-4"),
+    not(feature = "production-heads-8")
 ))]
 macro_rules! production_groups_each {
     ($m:ident) => {
@@ -218,7 +248,9 @@ macro_rules! production_groups_each {
 }
 #[cfg(all(
     not(feature = "llama-tiny"),
-    not(any(feature = "production-heads-1", feature = "production-heads-2"))
+    not(feature = "production-heads-1"),
+    not(feature = "production-heads-2"),
+    not(feature = "production-heads-8")
 ))]
 macro_rules! production_groups_each {
     ($m:ident) => {
@@ -230,6 +262,21 @@ macro_rules! production_groups_each {
         $m!(5);
         $m!(6);
         $m!(7);
+    };
+}
+#[cfg(all(
+    not(feature = "llama-tiny"),
+    not(feature = "production-heads-1"),
+    not(feature = "production-heads-2"),
+    not(feature = "production-heads-4"),
+    feature = "production-heads-8"
+))]
+macro_rules! production_groups_each {
+    ($m:ident) => {
+        $m!(0);
+        $m!(1);
+        $m!(2);
+        $m!(3);
     };
 }
 use ceno_emul::{

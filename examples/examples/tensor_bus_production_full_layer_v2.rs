@@ -2,7 +2,8 @@
 //!
 //! `STAGE_HEADS` is the constrained attention `head_count`: build with
 //! `production-heads-1` for one head, `production-heads-2` for two heads, or
-//! neither feature for the default four heads. This selection must match the
+//! `production-heads-4` (the default) for four heads, or `production-heads-8`
+//! for eight heads. This selection must match the
 //! prover registry's `HEADS_PER_CIRCUIT`; it is not an allocator hint or a
 //! runtime tuning variable. Projection and attention are fused per head range
 //! in one TensorBus segment. Q/K/V never receive guest addresses.
@@ -16,13 +17,49 @@ use ceno_rt::tensor::{
 };
 
 const HIDDEN_WORDS: usize = TENSOR_LLAMA2_HIDDEN_WORDS as usize;
-#[cfg(all(feature = "production-heads-1", feature = "production-heads-2"))]
-compile_error!("production-heads-1 and production-heads-2 are mutually exclusive");
-#[cfg(feature = "production-heads-1")]
+#[cfg(any(
+    all(feature = "production-heads-1", feature = "production-heads-2"),
+    all(feature = "production-heads-1", feature = "production-heads-4"),
+    all(feature = "production-heads-2", feature = "production-heads-4"),
+    all(feature = "production-heads-1", feature = "production-heads-8"),
+    all(feature = "production-heads-2", feature = "production-heads-8"),
+    all(feature = "production-heads-4", feature = "production-heads-8"),
+))]
+compile_error!("production head-count features are mutually exclusive");
+#[cfg(all(
+    feature = "production-heads-1",
+    not(feature = "production-heads-2"),
+    not(feature = "production-heads-4"),
+    not(feature = "production-heads-8")
+))]
 const STAGE_HEADS: u32 = 1;
-#[cfg(feature = "production-heads-2")]
+#[cfg(all(
+    not(feature = "production-heads-1"),
+    feature = "production-heads-2",
+    not(feature = "production-heads-4"),
+    not(feature = "production-heads-8")
+))]
 const STAGE_HEADS: u32 = 2;
-#[cfg(not(any(feature = "production-heads-1", feature = "production-heads-2")))]
+#[cfg(all(
+    not(feature = "production-heads-1"),
+    not(feature = "production-heads-2"),
+    feature = "production-heads-4",
+    not(feature = "production-heads-8")
+))]
+const STAGE_HEADS: u32 = 4;
+#[cfg(all(
+    not(feature = "production-heads-1"),
+    not(feature = "production-heads-2"),
+    not(feature = "production-heads-4"),
+    feature = "production-heads-8"
+))]
+const STAGE_HEADS: u32 = 8;
+#[cfg(not(any(
+    feature = "production-heads-1",
+    feature = "production-heads-2",
+    feature = "production-heads-4",
+    feature = "production-heads-8"
+)))]
 const STAGE_HEADS: u32 = 4;
 
 fn main() {
