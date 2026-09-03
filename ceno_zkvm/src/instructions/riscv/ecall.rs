@@ -69,8 +69,8 @@ pub use tensor_production_attention::{
     TensorProductionBoundaryHiddenOutputInstruction, TensorProductionBoundaryPostInputInstruction,
     TensorProductionBoundaryReplayDescriptor, TensorProductionExportAnchorInstruction,
     TensorProductionImportAnchorInstruction, TensorProductionStageAnchorInstruction,
-    collect_production_boundary_replay_descriptors, validate_production_attention_group,
-    validate_production_boundary_group,
+    collect_production_boundary_replay_descriptors, production_boundary_physical_local_index,
+    validate_production_attention_group, validate_production_boundary_group,
 };
 pub use tensor_production_attention_fused::{
     TensorAttentionQkShiftSoftmax, TensorProductionQkShiftSoftmaxCoreConfig,

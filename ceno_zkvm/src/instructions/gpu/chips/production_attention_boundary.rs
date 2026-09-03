@@ -121,9 +121,16 @@ pub(crate) fn assign_production_tensor_producer_device<E: ExtensionField>(
         InstancePaddingStrategy::Default,
     );
     let padded_rows = 1usize << (log_rows + 1);
+    let rows_per_slot = ceno_emul::tensor::production_attention::SEQUENCE
+        * ceno_emul::tensor::production_attention::HEAD_DIM;
     for row in 0..padded_rows {
         let offset = row * num_structural_witin;
-        structural.values[offset] = E::BaseField::from_usize(row & (rows - 1));
+        structural.values[offset] = E::BaseField::from_usize(
+            crate::instructions::riscv::ecall::production_boundary_physical_local_index(
+                row,
+                rows_per_slot,
+            ),
+        );
         structural.values[offset + 4] = E::BaseField::ONE;
     }
     hal.inner.synchronize().map_err(|error| {
@@ -285,7 +292,12 @@ pub(crate) fn assign_production_boundary_device<E: ExtensionField>(
         assert_eq!(structural.values.len(), padded_rows * 5);
         for row in 0..padded_rows {
             let offset = row * 5;
-            structural.values[offset] = E::BaseField::from_usize(row & (descriptor.rows - 1));
+            structural.values[offset] = E::BaseField::from_usize(
+                crate::instructions::riscv::ecall::production_boundary_physical_local_index(
+                    row,
+                    descriptor.rows,
+                ),
+            );
             structural.values[offset + 4] = E::BaseField::ONE;
         }
         tracing::info!(

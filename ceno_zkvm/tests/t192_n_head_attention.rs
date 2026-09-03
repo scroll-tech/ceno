@@ -7,8 +7,12 @@ use ceno_zkvm::{
         Instruction,
         riscv::ecall::{
             TensorAttentionPv, TensorAttentionQkShiftSoftmax,
+            TensorProductionBoundaryAttentionInputInstruction,
+            TensorProductionBoundaryAttentionOutputInstruction,
             TensorProductionBoundaryHiddenInputInstruction,
-            TensorProductionBoundaryReplayDescriptor, validate_production_attention_group,
+            TensorProductionBoundaryHiddenOutputInstruction,
+            TensorProductionBoundaryPostInputInstruction, TensorProductionBoundaryReplayDescriptor,
+            production_boundary_physical_local_index, validate_production_attention_group,
             validate_production_boundary_group,
         },
     },
@@ -20,7 +24,9 @@ use ceno_zkvm::{
 };
 use ff_ext::{BabyBearExt4, ExtensionField, FieldFrom};
 use gkr_iop::utils::{eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec};
-use multilinear_extensions::{Expression, StructuralWitInType, utils::eval_by_expr_with_instance};
+use multilinear_extensions::{
+    Expression, StructuralWitInType, mle::MultilinearExtension, utils::eval_by_expr_with_instance,
+};
 use p3::field::PrimeCharacteristicRing;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
@@ -277,6 +283,88 @@ fn pv_local_row_prefix_matches_verifier_at_random_points() {
     check::<2>();
     check::<4>();
     check::<8>();
+}
+
+#[test]
+fn boundary_local_row_assignment_matches_verifier_at_random_points() {
+    fn check(heads: usize) {
+        let rows_per_head = 1usize << 18;
+        let logical_rows = heads * rows_per_head;
+        let logical_vars = logical_rows.trailing_zeros() as usize;
+        let rotation_vars = 1;
+        let point_vars = logical_vars + rotation_vars;
+        let declared = StructuralWitInType::OuterRepeatingIncrementalSequence {
+            k: 18,
+            n: logical_vars,
+        };
+        assert_eq!(declared.max_len(), logical_rows);
+
+        let assigned = (0..logical_rows * 2)
+            .map(|row| F::from_usize(production_boundary_physical_local_index(row, rows_per_head)))
+            .collect::<Vec<_>>();
+        let old_global_mask = (0..logical_rows * 2)
+            .map(|row| F::from_usize(row & (logical_rows - 1)))
+            .collect::<Vec<_>>();
+        let assigned = MultilinearExtension::<E>::from_evaluations_vec(point_vars, assigned);
+        let old_global_mask =
+            MultilinearExtension::<E>::from_evaluations_vec(point_vars, old_global_mask);
+
+        let mut rng = StdRng::seed_from_u64(0x0192_600d + heads as u64);
+        for _ in 0..4 {
+            let point = (0..point_vars)
+                .map(|_| E::from_v(rng.gen_range(1..1_000_000)))
+                .collect::<Vec<_>>();
+            let expected = verifier_sequence_eval(declared, &point);
+            assert_eq!(assigned.evaluate(&point), expected);
+            if heads > 1 {
+                assert_ne!(old_global_mask.evaluate(&point), expected);
+            }
+        }
+    }
+
+    for heads in [1, 2, 4, 8] {
+        check(heads);
+    }
+}
+
+fn assert_boundary_structural<I: Instruction<E>>(expected_k: usize, expected_n: usize) {
+    let cs = construct::<I>();
+    let local_row = id(
+        &cs.structural_witin_namespace_map,
+        "production_boundary_physical_local_index",
+    );
+    assert!(matches!(
+        cs.structural_witins[local_row].witin_type,
+        StructuralWitInType::OuterRepeatingIncrementalSequence { k, n }
+            if (k, n) == (expected_k, expected_n)
+    ));
+    assert_eq!(cs.num_structural_witin, 5);
+}
+
+#[test]
+fn every_production_boundary_uses_its_exact_local_row_domain() {
+    let attention_vars =
+        18 + ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT.trailing_zeros() as usize;
+    assert_boundary_structural::<TensorProductionBoundaryAttentionInputInstruction<E, 0, 0>>(
+        18,
+        attention_vars,
+    );
+    assert_boundary_structural::<TensorProductionBoundaryAttentionInputInstruction<E, 1, 0>>(
+        18,
+        attention_vars,
+    );
+    assert_boundary_structural::<TensorProductionBoundaryAttentionInputInstruction<E, 2, 0>>(
+        18,
+        attention_vars,
+    );
+    assert_boundary_structural::<TensorProductionBoundaryAttentionOutputInstruction<E, 0>>(
+        18,
+        attention_vars,
+    );
+    assert_boundary_structural::<TensorProductionBoundaryHiddenInputInstruction<E>>(23, 23);
+    assert_boundary_structural::<TensorProductionBoundaryPostInputInstruction<E, 0>>(23, 23);
+    assert_boundary_structural::<TensorProductionBoundaryPostInputInstruction<E, 1>>(23, 23);
+    assert_boundary_structural::<TensorProductionBoundaryHiddenOutputInstruction<E>>(23, 23);
 }
 
 #[test]

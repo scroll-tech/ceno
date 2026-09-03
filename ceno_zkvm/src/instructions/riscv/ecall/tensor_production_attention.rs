@@ -247,6 +247,14 @@ const fn production_boundary_tensor_offset(stage: usize, direction: usize, part:
     }
 }
 
+pub fn production_boundary_physical_local_index(
+    physical_row: usize,
+    rows_per_slot: usize,
+) -> usize {
+    assert!(rows_per_slot.is_power_of_two());
+    physical_row & (rows_per_slot - 1)
+}
+
 #[derive(Debug)]
 struct TensorProductionBoundaryStructuralConfig {
     physical_local_index: StructuralWitIn,
