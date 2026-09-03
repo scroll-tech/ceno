@@ -303,6 +303,8 @@ where
     let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
     let input_num_instances = input.num_instances;
 
+    let main_witness_started = std::time::Instant::now();
+    crate::scheme::gpu::log_gpu_profile_boundary(&task.circuit_name, "main_witness_start", 0);
     let _main_witness_range = nvtx::range!("ceno.phase.main-witness-build");
     let records = info_span!("[ceno] build_main_witness").in_scope(|| {
         build_main_witness::<
@@ -317,6 +319,11 @@ where
             crate::scheme::utils::WitnessBuildStage::Tower,
         )
     });
+    crate::scheme::gpu::log_gpu_profile_boundary(
+        &task.circuit_name,
+        "main_witness_end",
+        main_witness_started.elapsed().as_millis(),
+    );
     if std::env::var_os("CENO_TENSOR_E2E_LOGUP_EXPR_TRACE").is_some()
         && (task.circuit_name.starts_with("TensorProductionBoundary")
             || task.circuit_name == "DYNAMIC_RANGE_20"
@@ -713,6 +720,8 @@ where
     drop(_main_witness_range);
 
     let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+    let tower_started = std::time::Instant::now();
+    crate::scheme::gpu::log_gpu_profile_boundary(&task.circuit_name, "pre_tower", 0);
     let span = entered_span!("prove_tower_relation", profiling_2 = true);
     let _tower_range = nvtx::range!("ceno.phase.tower-build-prove");
     let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
@@ -723,6 +732,11 @@ where
         })?;
     drop(_tower_range);
     exit_span!(span);
+    crate::scheme::gpu::log_gpu_profile_boundary(
+        &task.circuit_name,
+        "post_tower",
+        tower_started.elapsed().as_millis(),
+    );
 
     assert!(
         rt_tower.len() >= num_var_with_rotation,
@@ -1170,16 +1184,28 @@ impl<
             let use_gpu_witness_commit = (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
                 || is_babybear_jagged_pcs::<E, PCS>())
                 && using_gpu_backend;
+            #[cfg(feature = "gpu")]
+            let profile_label = format!("shard_{}", shard_ctx.shard_id);
             #[cfg(not(feature = "gpu"))]
             let _use_gpu_witness_commit = false;
 
             // commit to witness traces in batch
             #[cfg_attr(not(feature = "gpu"), allow(unused_mut))]
-            let (witness_mles, mut witness_data, witin_commit): (
+            #[cfg(feature = "gpu")]
+            let commit_started = std::time::Instant::now();
+            let (witness_mles, witness_data, witin_commit): (
                 Vec<Arc<PB::MultilinearPoly<'_>>>,
                 PB::PcsData,
                 PCS::Commitment,
             ) = {
+                #[cfg(feature = "gpu")]
+                if using_gpu_backend {
+                    crate::scheme::gpu::log_gpu_profile_boundary(
+                        &profile_label,
+                        "commit_start",
+                        0,
+                    );
+                }
                 #[cfg(feature = "gpu")]
                 if use_gpu_witness_commit {
                     info_span!("[ceno] commit_traces").in_scope(|| {
@@ -1205,6 +1231,14 @@ impl<
                     info_span!("[ceno] commit_traces").in_scope(|| self.device.commit_traces(wits_rmms))
                 }
             };
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                crate::scheme::gpu::log_gpu_profile_boundary(
+                    &profile_label,
+                    "commit_end",
+                    commit_started.elapsed().as_millis(),
+                );
+            }
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
 
@@ -1287,11 +1321,14 @@ impl<
 
             #[cfg(feature = "gpu")]
             if using_gpu_backend {
-                let gpu_witness_data: &mut gkr_iop::gpu::GpuPcsData =
-                    unsafe { std::mem::transmute(&mut witness_data) };
-                crate::scheme::gpu::spill_gpu_digest_before_main(gpu_witness_data);
+                crate::scheme::gpu::log_gpu_profile_boundary(
+                    &profile_label,
+                    "main_constraints_start",
+                    0,
+                );
             }
-
+            #[cfg(feature = "gpu")]
+            let main_constraints_started = std::time::Instant::now();
             let main_constraints_span =
                 entered_span!("prove_batched_main_constraints", profiling_1 = true);
             let (main_constraint_proof, main_constraint_results) =
@@ -1303,17 +1340,29 @@ impl<
                     )
                 })?;
 
-            #[cfg(feature = "gpu")]
-            if using_gpu_backend {
-                let gpu_witness_data: &mut gkr_iop::gpu::GpuPcsData =
-                    unsafe { std::mem::transmute(&mut witness_data) };
-                crate::scheme::gpu::restore_gpu_digest_before_open(gpu_witness_data);
-            }
             let (points, evaluations) = collect_main_constraint_openings(main_constraint_results);
             exit_span!(main_constraints_span);
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                crate::scheme::gpu::log_gpu_profile_boundary(
+                    &profile_label,
+                    "main_constraints_end",
+                    main_constraints_started.elapsed().as_millis(),
+                );
+            }
 
             // batch opening pcs
             // generate static info from prover key for expected num variable
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                crate::scheme::gpu::log_gpu_profile_boundary(
+                    &profile_label,
+                    "pcs_opening_start",
+                    0,
+                );
+            }
+            #[cfg(feature = "gpu")]
+            let pcs_opening_started = std::time::Instant::now();
             let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
             let mpcs_opening_proof = info_span!("[ceno] pcs_opening").in_scope(|| {
                 self.device.open(
@@ -1325,6 +1374,14 @@ impl<
                 )
             });
             exit_span!(pcs_opening);
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                crate::scheme::gpu::log_gpu_profile_boundary(
+                    &profile_label,
+                    "pcs_opening_end",
+                    pcs_opening_started.elapsed().as_millis(),
+                );
+            }
 
             let vm_proof = ZKVMProof::new(
                 pi,
@@ -1489,6 +1546,8 @@ impl<
         let input_has_ecc_ops = input.has_ecc_ops;
 
         // build main witness
+        let main_witness_started = std::time::Instant::now();
+        crate::scheme::gpu::log_gpu_profile_boundary(&task.circuit_name, "main_witness_start", 0);
         let records = info_span!("[ceno] build_main_witness").in_scope(|| {
             // ECC and rotation have dedicated witness/eval flows. For tower proving we only
             // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
@@ -1500,7 +1559,14 @@ impl<
                 crate::scheme::utils::WitnessBuildStage::Tower,
             )
         });
+        crate::scheme::gpu::log_gpu_profile_boundary(
+            &task.circuit_name,
+            "main_witness_end",
+            main_witness_started.elapsed().as_millis(),
+        );
 
+        let tower_started = std::time::Instant::now();
+        crate::scheme::gpu::log_gpu_profile_boundary(&task.circuit_name, "pre_tower", 0);
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
         // (internally calls build_tower_witness)
@@ -1510,6 +1576,11 @@ impl<
                     .prove_tower_relation(cs, input, &records, challenges, transcript)
             });
         exit_span!(span);
+        crate::scheme::gpu::log_gpu_profile_boundary(
+            &task.circuit_name,
+            "post_tower",
+            tower_started.elapsed().as_millis(),
+        );
 
         drop(records);
 

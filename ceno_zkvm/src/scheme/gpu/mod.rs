@@ -121,48 +121,6 @@ fn expect_jagged_pcs_data(pcs_data: &GpuPcsData) -> &GpuJaggedPcsData {
     }
 }
 
-pub(crate) fn spill_gpu_digest_before_main(pcs_data: &mut GpuPcsData) {
-    let cuda_hal = get_cuda_hal().expect("CUDA HAL unavailable for digest spill");
-    match pcs_data {
-        GpuPcsData::Basefold(data) => data
-            .spill_digest(
-                cuda_hal
-                    .alloc_elems_on_device(0, false, None)
-                    .expect("failed to allocate empty digest replacement"),
-            )
-            .expect("failed to spill Basefold digest to host"),
-        GpuPcsData::Jagged(data) => data
-            .inner
-            .spill_digest(
-                cuda_hal
-                    .alloc_elems_on_device(0, false, None)
-                    .expect("failed to allocate empty digest replacement"),
-            )
-            .expect("failed to spill Jagged inner Basefold digest to host"),
-    };
-    cuda_hal
-        .inner
-        .synchronize()
-        .expect("digest D2H synchronize failed");
-}
-
-pub(crate) fn restore_gpu_digest_before_open(pcs_data: &mut GpuPcsData) {
-    let cuda_hal = get_cuda_hal().expect("CUDA HAL unavailable for digest restore");
-    match pcs_data {
-        GpuPcsData::Basefold(data) => data
-            .restore_digest(&*cuda_hal)
-            .expect("failed to restore Basefold digest to device"),
-        GpuPcsData::Jagged(data) => data
-            .inner
-            .restore_digest(&*cuda_hal)
-            .expect("failed to restore Jagged inner Basefold digest to device"),
-    };
-    cuda_hal
-        .inner
-        .synchronize()
-        .expect("digest H2D synchronize failed");
-}
-
 fn jagged_trace_layouts<T>(traces: &[witness::RowMajorMatrix<T>]) -> Vec<GpuJaggedTraceLayout>
 where
     T: FieldAlgebra + Default + Sync + Clone + Send + Copy + 'static,
@@ -323,6 +281,32 @@ pub fn log_gpu_device_state(label: &str) {
         mb(max_bytes as usize),
     );
     tracing::info!(target: "ceno_pipeline", "{}", message);
+}
+
+/// Non-assertive memory snapshot for opt-in production-path profiling.
+pub fn log_gpu_profile_boundary(circuit: &str, phase: &str, elapsed_ms: u128) {
+    if std::env::var("CENO_GPU_PROFILE_BOUNDARIES").as_deref() != Ok("1") {
+        return;
+    }
+    let cuda_hal = get_cuda_hal().expect("cuda hal must exist for GPU profiling");
+    let pool = cuda_hal.inner.mem_pool();
+    let pool_used_bytes = pool.get_used_size().unwrap_or(0);
+    let pool_reserved_bytes = pool.get_reserved_size().unwrap_or(0);
+    let pool_booked_bytes = pool.get_booked_total();
+    let (cuda_free_bytes, cuda_total_bytes) = get_cuda_mem_info().unwrap_or((0, 0));
+    tracing::info!(
+        target: "ceno_gpu_profile",
+        circuit,
+        phase,
+        elapsed_ms,
+        pool_used_bytes,
+        pool_reserved_bytes,
+        pool_booked_bytes,
+        cuda_used_bytes = cuda_total_bytes.saturating_sub(cuda_free_bytes),
+        cuda_free_bytes,
+        cuda_total_bytes,
+        "GPU profile boundary"
+    );
 }
 use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};
 use gkr_iop::{
