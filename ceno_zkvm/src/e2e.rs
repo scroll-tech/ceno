@@ -34,6 +34,8 @@ use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
+#[cfg(feature = "gpu")]
+use gkr_iop::gpu::get_cuda_hal;
 use gkr_iop::{RAMType, hal::ProverBackend};
 use itertools::Itertools;
 #[cfg(debug_assertions)]
@@ -144,6 +146,7 @@ pub struct FullMemState<Record> {
 pub(crate) type InitMemState = FullMemState<MemInitRecord>;
 type FinalMemState = FullMemState<MemFinalRecord>;
 
+#[derive(Clone)]
 pub struct EmulationResult<'a> {
     pub exit_code: Option<u32>,
     pub final_mem_state: FinalMemState,
@@ -713,6 +716,7 @@ impl ShardStepSummary {
     }
 }
 
+#[derive(Clone)]
 pub struct ShardContextBuilder {
     pub cur_shard_id: usize,
     next_accesses: Arc<NextCycleAccess>,
@@ -1192,6 +1196,7 @@ struct CompactReplayPipelineInput {
     shard_cycle_boundaries: Arc<Vec<Cycle>>,
     range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
     chunk_capacity: usize,
+    ownership: Option<(usize, usize)>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     aot: Arc<ceno_emul::aot::AotProgram>,
 }
@@ -1200,6 +1205,32 @@ struct CompactReplayPipelineInput {
 struct CompactReplayPipeline {
     ready: std::sync::mpsc::Receiver<CompactReplayShard>,
     recycle: std::sync::mpsc::SyncSender<Vec<ceno_emul::GpuReplayTypedRange>>,
+}
+
+fn worker_owns_shard(ownership: Option<(usize, usize)>, shard_id: usize) -> bool {
+    ownership.is_none_or(|(worker_index, worker_count)| shard_id % worker_count == worker_index)
+}
+
+#[cfg(any(feature = "gpu", test))]
+fn shard_replay_summary_digest(summary: ShardStepSummary) -> [u8; 32] {
+    let mut keccak = Keccak::v256();
+    keccak.update(b"ceno-replay-summary-v1");
+    for value in [
+        u64::try_from(summary.step_count).expect("replay step count exceeds u64"),
+        summary.first_cycle,
+        summary.last_cycle,
+        u64::from(summary.first_pc_before),
+        u64::from(summary.last_pc_after),
+        u64::from(summary.first_heap_before),
+        u64::from(summary.last_heap_after),
+        u64::from(summary.first_hint_before),
+        u64::from(summary.last_hint_after),
+    ] {
+        keccak.update(&value.to_le_bytes());
+    }
+    let mut digest = [0; 32];
+    keccak.finalize(&mut digest);
+    digest
 }
 
 #[cfg(feature = "gpu")]
@@ -1252,8 +1283,9 @@ fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactRe
             );
             replay.vm.tracer_mut().enable_retained_shard_mode();
             let shard_count = replay.shard_step_counts.len();
+            let mut previous_retained = false;
             for shard_id in 0..shard_count {
-                if shard_id != 0 {
+                if previous_retained {
                     let Ok(ranges) = recycle_rx.recv() else {
                         return;
                     };
@@ -1267,18 +1299,24 @@ fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactRe
                     phase = "cpu_replay_start",
                     "compact replay pipeline event"
                 );
+                let owned = worker_owns_shard(input.ownership, shard_id);
                 let shard = replay
-                    .next_shard(false, Some)
+                    .next_shard(!owned, |range| Some(range))
                     .expect("compact replay ended before its shard plan");
+                let replay_digest = shard_replay_summary_digest(shard.summary);
                 tracing::info!(
-                    target: "ceno_pipeline",
+                    target: "ceno_multi_gpu",
                     shard_id,
+                    worker_index = input.ownership.map(|value| value.0),
+                    replay_mode = if owned { "compact" } else { "light" },
+                    replay_digest = ?replay_digest,
                     phase = "cpu_replay_ready",
                     "compact replay pipeline event"
                 );
                 if ready_tx.send(shard).is_err() {
                     return;
                 }
+                previous_retained = owned;
             }
         })
         .expect("failed to spawn compact replay pipeline");
@@ -2160,12 +2198,39 @@ pub fn generate_fixed_traces<E: ExtensionField>(
 
 pub fn generate_witness<'a, E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
-    mut emul_result: EmulationResult<'a>,
+    emul_result: EmulationResult<'a>,
     program: Arc<Program>,
     platform: &Platform,
     init_mem_state: &InitMemState,
     // this is for debug purpose, which only run target shard id and skip all others
     target_shard_id: Option<usize>,
+) -> impl Iterator<
+    Item = (
+        ZKVMWitnesses<E>,
+        ShardContext<'a>,
+        PublicValues,
+        Option<u64>,
+    ),
+> {
+    generate_witness_for_owner(
+        system_config,
+        emul_result,
+        program,
+        platform,
+        init_mem_state,
+        target_shard_id,
+        None,
+    )
+}
+
+fn generate_witness_for_owner<'a, E: ExtensionField>(
+    system_config: &ConstraintSystemConfig<E>,
+    mut emul_result: EmulationResult<'a>,
+    program: Arc<Program>,
+    platform: &Platform,
+    init_mem_state: &InitMemState,
+    target_shard_id: Option<usize>,
+    ownership: Option<(usize, usize)>,
 ) -> impl Iterator<
     Item = (
         ZKVMWitnesses<E>,
@@ -2227,6 +2292,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             shard_cycle_boundaries: emul_result.shard_cycle_boundaries.clone(),
             range_descriptors: emul_result.replay_range_descriptors.clone(),
             chunk_capacity: emul_result.replay_range_capacity,
+            ownership,
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             aot: emul_result.replay_aot_program.clone(),
         })
@@ -2260,7 +2326,11 @@ pub fn generate_witness<'a, E: ExtensionField>(
             instrunction_dispatch_ctx.begin_shard();
             }
             let (mut shard_ctx, shard_summary) = if use_compact_replay {
-                instrunction_dispatch_ctx.begin_compact_ingest();
+                let shard_id = shard_ctx_builder.cur_shard_id;
+                let owned = worker_owns_shard(ownership, shard_id);
+                if owned {
+                    instrunction_dispatch_ctx.begin_compact_ingest();
+                }
                 // Replay and typed arena preparation are CPU-only and may run
                 // one shard ahead. All GPU setup and assignment below remain
                 // on this consumer thread, after the previous proof returned.
@@ -2406,20 +2476,22 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     phase = "gpu_assignment_start",
                     "compact replay pipeline event"
                 );
-                for range in &compact_shard.arenas.ranges {
-                    for (kind, arena) in InsnKind::iter().zip(&range.typed) {
-                        if let Some(arena) = arena {
-                            instrunction_dispatch_ctx.ingest_compact_count(kind, arena.len());
+                if owned {
+                    for range in &compact_shard.arenas.ranges {
+                        for (kind, arena) in InsnKind::iter().zip(&range.typed) {
+                            if let Some(arena) = arena {
+                                instrunction_dispatch_ctx.ingest_compact_count(kind, arena.len());
+                            }
                         }
                     }
+                    for (idx, record) in compact_shard.fallback_steps.iter().enumerate() {
+                        instrunction_dispatch_ctx.ingest_step(idx, record);
+                    }
+                    instrunction_dispatch_ctx.finish_compact_ingest();
                 }
-                for (idx, record) in compact_shard.fallback_steps.iter().enumerate() {
-                    instrunction_dispatch_ctx.ingest_step(idx, record);
-                }
-                instrunction_dispatch_ctx.finish_compact_ingest();
                 let positioned = shard_ctx_builder.position_compact_shard(compact_shard.summary);
                 #[cfg(feature = "gpu")]
-                if !stream_owned_ranges {
+                if owned && !stream_owned_ranges {
                     crate::instructions::gpu::dispatch::install_compact_replay_arenas(
                         compact_shard.arenas,
                     );
@@ -2499,6 +2571,17 @@ pub fn generate_witness<'a, E: ExtensionField>(
             pi.hint_shard_len = (shard_ctx.shard_hint_addr_range.end
                 - shard_ctx.shard_hint_addr_range.start)
                 / (WORD_SIZE as u32);
+
+            if !worker_owns_shard(ownership, shard_ctx.shard_id) {
+                tracing::info!(
+                    target: "ceno_multi_gpu",
+                    worker_index = ownership.map(|value| value.0),
+                    shard_id = shard_ctx.shard_id,
+                    phase = "light_replay_complete",
+                    "unowned shard replayed without retained compact witness arenas"
+                );
+                return Some((zkvm_witness, shard_ctx, pi, None));
+            }
 
 
             if let Some(target_shard_id) = target_shard_id {
@@ -3479,6 +3562,22 @@ pub struct E2ECheckpointResult<E: ExtensionField, PCS: PolynomialCommitmentSchem
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> E2ECheckpointResult<E, PCS> {
+    pub fn deferred(vk: ZKVMVerifyingKey<E, PCS>, next_step: impl FnOnce() + 'static) -> Self {
+        Self {
+            proofs: None,
+            vk: Some(vk),
+            next_step: Some(Box::new(next_step)),
+        }
+    }
+
+    pub fn completed(proofs: Vec<ZKVMProof<E, PCS>>, vk: ZKVMVerifyingKey<E, PCS>) -> Self {
+        Self {
+            proofs: Some(proofs),
+            vk: Some(vk),
+            next_step: None,
+        }
+    }
+
     pub fn next_step(self) {
         if let Some(next_step) = self.next_step {
             next_step();
@@ -3858,6 +3957,547 @@ pub fn run_e2e_proof_with_precompiled_aot<
     )
 }
 
+#[cfg(feature = "gpu")]
+pub struct BaseProofReady<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    pub shard_id: usize,
+    pub proof: ZKVMProof<E, PCS>,
+    pub device_id: usize,
+    diagnostics: BaseWorkerDiagnostics,
+}
+
+#[cfg(feature = "gpu")]
+#[derive(Clone, Copy)]
+struct BaseWorkerDiagnostics {
+    worker_index: usize,
+    device_id: usize,
+    active_shard: Option<usize>,
+    last_completed_shard: Option<usize>,
+    memory_start_free_bytes: usize,
+    memory_current_free_bytes: usize,
+    memory_total_bytes: usize,
+    memory_minimum_free_bytes: usize,
+    queue_state: &'static str,
+}
+
+#[cfg(feature = "gpu")]
+impl BaseWorkerDiagnostics {
+    fn new(worker_index: usize, device_id: usize) -> Self {
+        Self {
+            worker_index,
+            device_id,
+            active_shard: None,
+            last_completed_shard: None,
+            memory_start_free_bytes: 0,
+            memory_current_free_bytes: 0,
+            memory_total_bytes: 0,
+            memory_minimum_free_bytes: 0,
+            queue_state: "initializing",
+        }
+    }
+
+    fn observe_memory(&mut self, free_bytes: usize, total_bytes: usize) {
+        if self.memory_total_bytes == 0 {
+            self.memory_start_free_bytes = free_bytes;
+            self.memory_minimum_free_bytes = free_bytes;
+        } else {
+            self.memory_minimum_free_bytes = self.memory_minimum_free_bytes.min(free_bytes);
+        }
+        self.memory_current_free_bytes = free_bytes;
+        self.memory_total_bytes = total_bytes;
+    }
+
+    fn peak_memory_used_bytes(&self) -> usize {
+        self.memory_total_bytes
+            .saturating_sub(self.memory_minimum_free_bytes)
+    }
+
+    fn describe(&self, error: &str) -> String {
+        format!(
+            "GPU device {} worker {} shard {:?} failed: {}; last_completed_shard={:?} cuda_error_class={} queue_state={} memory_start_free_bytes={} memory_current_free_bytes={} memory_total_bytes={} peak_memory_used_bytes={}",
+            self.device_id,
+            self.worker_index,
+            self.active_shard,
+            error,
+            self.last_completed_shard,
+            classify_cuda_error(error),
+            self.queue_state,
+            self.memory_start_free_bytes,
+            self.memory_current_free_bytes,
+            self.memory_total_bytes,
+            self.peak_memory_used_bytes(),
+        )
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn classify_cuda_error(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("out of memory") || lower.contains("cuda_error_out_of_memory") {
+        "out_of_memory"
+    } else if lower.contains("cuda") {
+        "cuda"
+    } else {
+        "non_cuda"
+    }
+}
+
+#[cfg(feature = "gpu")]
+struct BaseProofCollectorState {
+    seen: Vec<bool>,
+}
+
+#[cfg(feature = "gpu")]
+impl BaseProofCollectorState {
+    fn new(total_shards: usize) -> Self {
+        Self {
+            seen: vec![false; total_shards],
+        }
+    }
+
+    fn accept(
+        &mut self,
+        config: &crate::multi_gpu::MultiGpuConfig,
+        shard_id: usize,
+        device_id: usize,
+    ) -> Result<(), String> {
+        if shard_id >= self.seen.len() {
+            return Err(format!("out-of-range base proof shard {shard_id}"));
+        }
+        let expected_device = config.device_ids[config.owner_index(shard_id)];
+        if device_id != expected_device {
+            return Err(format!(
+                "shard {shard_id} arrived from GPU {device_id}, expected GPU {expected_device}"
+            ));
+        }
+        if std::mem::replace(&mut self.seen[shard_id], true) {
+            return Err(format!("duplicate base proof shard {shard_id}"));
+        }
+        Ok(())
+    }
+
+    fn missing(&self) -> Option<usize> {
+        self.seen.iter().position(|seen| !seen)
+    }
+}
+
+#[cfg(feature = "gpu")]
+enum BaseWorkerEvent<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
+    Ready(BaseProofReady<E, PCS>),
+    Failed(String),
+}
+
+#[cfg(feature = "gpu")]
+#[allow(clippy::too_many_arguments)]
+pub fn run_e2e_multi_gpu_proof_with_precompiled_aot<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+>(
+    pk: Arc<ZKVMProvingKey<E, PCS>>,
+    backend: Arc<gkr_iop::gpu::GpuBackend<E, PCS>>,
+    prepared: &crate::multi_gpu::PreparedMultiGpu,
+    config: &crate::multi_gpu::MultiGpuConfig,
+    init_full_mem: &InitMemState,
+    public_io_digest: [u32; 8],
+    max_steps: usize,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    precompiled_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    precompiled_fulltracer_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
+) -> Result<Vec<ZKVMProof<E, PCS>>, String>
+where
+    PCS::ProverParam: Send + Sync,
+    PCS::VerifierParam: Send + Sync,
+    PCS::Commitment: Send + Sync,
+    PCS::CommitmentWithWitness: Send + Sync,
+    PCS::Proof: Send,
+{
+    config.validate_shape()?;
+    if prepared.workers.len() != config.device_ids.len() {
+        return Err("prepared GPU worker count does not match configuration".to_owned());
+    }
+    let ctx = pk
+        .program_ctx
+        .as_ref()
+        .ok_or("proving key has no program context")?;
+    gkr_iop::gpu::set_thread_cuda_hal(prepared.workers[0].hal.clone());
+    let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+    let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
+    let emulation_result = emulate_program(
+        ctx.program.clone(),
+        max_steps,
+        init_full_mem,
+        public_io_digest,
+        &ctx.platform,
+        &ctx.multi_prover,
+        step_cell_extractor,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        precompiled_aot,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        precompiled_fulltracer_aot,
+    );
+    let total_shards = emulation_result.shard_ctx_builder.total_shards();
+    let exit_code = emulation_result.exit_code;
+    let verifier = Arc::new(ZKVMVerifier::new(pk.get_vk_slow()));
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let started = std::time::Instant::now();
+
+    std::thread::scope(|scope| -> Result<Vec<ZKVMProof<E, PCS>>, String> {
+        let mut handles = Vec::with_capacity(prepared.workers.len());
+        let mut ready_receivers = Vec::with_capacity(prepared.workers.len());
+        for (worker_index, worker) in prepared.workers.iter().enumerate() {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<BaseWorkerEvent<E, PCS>>(1);
+            ready_receivers.push(Some(rx));
+            let hal = worker.hal.clone();
+            let backend = backend.clone();
+            let pk = pk.clone();
+            let emulation_result = emulation_result.clone();
+            let init_full_mem = init_full_mem.clone();
+            let cancelled = cancelled.clone();
+            let device_id = worker.info.logical_ordinal;
+            handles.push(scope.spawn(move || {
+                let worker_started = std::time::Instant::now();
+                let mut diagnostics = BaseWorkerDiagnostics::new(worker_index, device_id);
+                let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let device = gkr_iop::gpu::GpuProver::new(backend, hal);
+                    let memory_start = ceno_gpu::get_cuda_mem_info().unwrap_or((0, 0));
+                    diagnostics.observe_memory(memory_start.0, memory_start.1);
+                    diagnostics.queue_state = "fifo_empty";
+                    let prover = ZKVMProver::new(pk.clone(), device);
+                    let ctx = pk.program_ctx.as_ref().unwrap();
+                    let witnesses = generate_witness_for_owner(
+                        &ctx.system_config,
+                        emulation_result,
+                        ctx.program.clone(),
+                        &ctx.platform,
+                        &init_full_mem,
+                        None,
+                        Some((worker_index, prepared.workers.len())),
+                    );
+                    for (zkvm_witness, shard_ctx, pi, _) in witnesses {
+                        if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                            break;
+                        }
+                        if shard_ctx.shard_id % prepared.workers.len() != worker_index {
+                            continue;
+                        }
+                        let shard_id = shard_ctx.shard_id;
+                        diagnostics.active_shard = Some(shard_id);
+                        tracing::info!(
+                            target: "ceno_multi_gpu",
+                            worker_index,
+                            device_id,
+                            shard_id,
+                            phase = "proof_start",
+                            "multi-GPU base worker event"
+                        );
+                        let proof_started = std::time::Instant::now();
+                        let proof = prover
+                            .create_proof(&shard_ctx, zkvm_witness, pi, Transcript::new(b"riscv"))
+                            .map_err(|error| format!("proof failed: {error:?}"))?;
+                        let proof_elapsed = proof_started.elapsed();
+                        if let Ok((free_bytes, total_bytes)) = ceno_gpu::get_cuda_mem_info() {
+                            diagnostics.observe_memory(free_bytes, total_bytes);
+                        }
+                        let queue_started = std::time::Instant::now();
+                        diagnostics.queue_state = "fifo_send_pending";
+                        tx.send(BaseWorkerEvent::Ready(BaseProofReady {
+                            shard_id,
+                            proof,
+                            device_id,
+                            diagnostics,
+                        }))
+                        .map_err(|_| {
+                            diagnostics.queue_state = "fifo_receiver_closed";
+                            "collector closed while publishing proof".to_owned()
+                        })?;
+                        diagnostics.queue_state = "fifo_empty_or_dequeued";
+                        diagnostics.last_completed_shard = Some(shard_id);
+                        diagnostics.active_shard = None;
+                        tracing::info!(
+                            target: "ceno_multi_gpu",
+                            worker_index,
+                            device_id,
+                            shard_id,
+                            proof_ms = proof_elapsed.as_millis(),
+                            queue_wait_ms = queue_started.elapsed().as_millis(),
+                            queue_depth = 1,
+                            queue_high_water = 1,
+                            phase = "proof_ready",
+                            "multi-GPU base worker event"
+                        );
+                    }
+                    if let Ok((free_bytes, total_bytes)) = ceno_gpu::get_cuda_mem_info() {
+                        diagnostics.observe_memory(free_bytes, total_bytes);
+                    }
+                    tracing::info!(
+                        target: "ceno_multi_gpu",
+                        worker_index,
+                        device_id,
+                        elapsed_ms = worker_started.elapsed().as_millis(),
+                        last_completed_shard = ?diagnostics.last_completed_shard,
+                        queue_state = diagnostics.queue_state,
+                        memory_start_free_bytes = diagnostics.memory_start_free_bytes,
+                        memory_end_free_bytes = diagnostics.memory_current_free_bytes,
+                        memory_total_bytes = diagnostics.memory_total_bytes,
+                        peak_memory_used_bytes = diagnostics.peak_memory_used_bytes(),
+                        transfer_between_devices_bytes = 0,
+                        phase = "worker_complete",
+                        "multi-GPU base worker event"
+                    );
+                    Ok::<(), String>(())
+                }));
+                let result = match run {
+                    Ok(result) => result,
+                    Err(payload) => Err(format!(
+                        "worker panicked: {}",
+                        payload
+                            .downcast_ref::<&str>()
+                            .copied()
+                            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                            .unwrap_or("unknown panic")
+                    )),
+                };
+                if let Err(error) = result {
+                    cancelled.store(true, std::sync::atomic::Ordering::Release);
+                    let error = diagnostics.describe(&error);
+                    let _ = tx.send(BaseWorkerEvent::Failed(error.clone()));
+                    Some(error)
+                } else {
+                    None
+                }
+            }));
+        }
+
+        let mut proofs = (0..total_shards).map(|_| None).collect::<Vec<_>>();
+        let mut collector = BaseProofCollectorState::new(total_shards);
+        let mut received = 0usize;
+        let mut collector_error = None;
+        while received < total_shards && collector_error.is_none() {
+            let mut made_progress = false;
+            for receiver in &mut ready_receivers {
+                let Some(rx) = receiver else { continue };
+                let event = match rx.try_recv() {
+                    Ok(event) => {
+                        made_progress = true;
+                        event
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => continue,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        *receiver = None;
+                        made_progress = true;
+                        continue;
+                    }
+                };
+                let ready = match event {
+                    BaseWorkerEvent::Ready(ready) => ready,
+                    BaseWorkerEvent::Failed(error) => {
+                        collector_error = Some(error);
+                        break;
+                    }
+                };
+                let mut diagnostics = ready.diagnostics;
+                diagnostics.queue_state = "collector_dequeued";
+                if let Err(error) = collector.accept(config, ready.shard_id, ready.device_id) {
+                    collector_error = Some(diagnostics.describe(&error));
+                    break;
+                }
+                let verification_started = std::time::Instant::now();
+                let expect_halt = ready.proof.has_halt(&verifier.vk);
+                let verified = verifier
+                    .verify_single_shard_segment_halt(
+                        ready.proof.clone(),
+                        Transcript::new(b"riscv"),
+                        expect_halt,
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "shard {} independent verification failed: {error:?}",
+                            ready.shard_id
+                        )
+                    });
+                let verified = match verified {
+                    Ok(verified) => verified,
+                    Err(error) => {
+                        collector_error = Some(diagnostics.describe(&error));
+                        break;
+                    }
+                };
+                if !verified {
+                    collector_error = Some(diagnostics.describe(&format!(
+                        "shard {} independent verification returned false",
+                        ready.shard_id
+                    )));
+                    break;
+                }
+                tracing::info!(
+                    target: "ceno_multi_gpu",
+                    shard_id = ready.shard_id,
+                    device_id = ready.device_id,
+                    verification_ms = verification_started.elapsed().as_millis(),
+                    phase = "segment_verified",
+                    "multi-GPU collector event"
+                );
+                let shard_id = ready.shard_id;
+                proofs[shard_id] = Some(ready.proof);
+                received += 1;
+            }
+            if received < total_shards
+                && ready_receivers.iter().all(Option::is_none)
+                && collector_error.is_none()
+            {
+                collector_error = Some(format!(
+                    "GPU device unknown worker unknown shard unknown failed: workers closed after {received}/{total_shards} shards; last_completed_shard=unknown cuda_error_class=non_cuda queue_state=all_fifos_disconnected memory_metrics=unavailable"
+                ));
+            }
+            if !made_progress && collector_error.is_none() {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        if collector_error.is_some() {
+            cancelled.store(true, std::sync::atomic::Ordering::Release);
+        }
+        drop(ready_receivers);
+        let mut join_error = None;
+        for handle in handles {
+            match handle.join() {
+                Ok(Some(error)) if join_error.is_none() => join_error = Some(error),
+                Err(_) if join_error.is_none() => {
+                    join_error = Some(
+                        "GPU device unknown worker unknown shard unknown failed: worker join failed; last_completed_shard=unknown cuda_error_class=non_cuda queue_state=unknown memory_metrics=unavailable"
+                            .to_owned(),
+                    )
+                }
+                _ => {}
+            }
+        }
+        if let Some(error) = collector_error.or(join_error) {
+            return Err(error);
+        }
+        if let Some(shard_id) = collector.missing() {
+            return Err(format!(
+                "GPU device unknown worker unknown shard {shard_id} failed: missing base proof; last_completed_shard=unknown cuda_error_class=non_cuda queue_state=all_workers_joined memory_metrics=unavailable"
+            ));
+        }
+        let proofs = proofs
+            .into_iter()
+            .enumerate()
+            .map(|(shard_id, proof)| {
+                proof.ok_or_else(|| format!("missing base proof shard {shard_id}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        run_e2e_full_trace_verify(&verifier, proofs.clone(), exit_code, max_steps);
+        tracing::info!(
+            target: "ceno_multi_gpu",
+            devices = ?config.device_ids,
+            shards = total_shards,
+            elapsed_ms = started.elapsed().as_millis(),
+            recursion_overlap_ratio = 0.0,
+            device_local_recursion_ratio = 0.0,
+            "Stage 1 multi-GPU base proving complete"
+        );
+        Ok(proofs)
+    })
+}
+
+#[cfg(all(test, feature = "gpu"))]
+mod multi_gpu_collector_tests {
+    use super::{BaseProofCollectorState, BaseWorkerDiagnostics, classify_cuda_error};
+    use crate::multi_gpu::MultiGpuConfig;
+    use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn collector_accepts_out_of_order_round_robin_results() {
+        let config = MultiGpuConfig::new(vec![4, 7]).unwrap();
+        let mut collector = BaseProofCollectorState::new(4);
+        for (shard, device) in [(3, 7), (0, 4), (2, 4), (1, 7)] {
+            collector.accept(&config, shard, device).unwrap();
+        }
+        assert_eq!(collector.missing(), None);
+    }
+
+    #[test]
+    fn collector_rejects_invalid_results_and_reports_missing() {
+        let config = MultiGpuConfig::new(vec![4, 7]).unwrap();
+        let mut collector = BaseProofCollectorState::new(3);
+        assert!(
+            collector
+                .accept(&config, 3, 7)
+                .unwrap_err()
+                .contains("out-of-range")
+        );
+        assert!(
+            collector
+                .accept(&config, 1, 4)
+                .unwrap_err()
+                .contains("expected GPU 7")
+        );
+        collector.accept(&config, 0, 4).unwrap();
+        assert!(
+            collector
+                .accept(&config, 0, 4)
+                .unwrap_err()
+                .contains("duplicate")
+        );
+        assert_eq!(collector.missing(), Some(1));
+    }
+
+    #[test]
+    fn depth_one_fifo_backpressures_and_receiver_drop_cancels_sender() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let (first_sent_tx, first_sent_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            tx.send(1).unwrap();
+            first_sent_tx.send(()).unwrap();
+            done_tx.send(tx.send(2).is_err()).unwrap();
+        });
+        first_sent_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_millis(20)).is_err());
+        drop(rx);
+        assert!(done_rx.recv_timeout(Duration::from_secs(1)).unwrap());
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn worker_failure_diagnostics_include_cuda_queue_shard_and_memory_state() {
+        assert_eq!(
+            classify_cuda_error("CUDA_ERROR_OUT_OF_MEMORY"),
+            "out_of_memory"
+        );
+        assert_eq!(classify_cuda_error("cuda launch failed"), "cuda");
+        assert_eq!(classify_cuda_error("verification failed"), "non_cuda");
+
+        let mut diagnostics = BaseWorkerDiagnostics::new(1, 7);
+        diagnostics.active_shard = Some(3);
+        diagnostics.last_completed_shard = Some(1);
+        diagnostics.queue_state = "fifo_send_pending";
+        diagnostics.observe_memory(12, 20);
+        diagnostics.observe_memory(8, 20);
+        let report = diagnostics.describe("CUDA_ERROR_OUT_OF_MEMORY");
+        for expected in [
+            "GPU device 7 worker 1 shard Some(3)",
+            "last_completed_shard=Some(1)",
+            "cuda_error_class=out_of_memory",
+            "queue_state=fifo_send_pending",
+            "peak_memory_used_bytes=12",
+        ] {
+            assert!(report.contains(expected), "missing {expected} in {report}");
+        }
+    }
+
+    #[test]
+    fn two_device_hal_smoke_test_when_available() {
+        let devices = crate::multi_gpu::discover_cuda_devices().unwrap();
+        if devices.len() < 2 {
+            return;
+        }
+        let prepared = MultiGpuConfig::new(vec![0, 1]).unwrap().prepare(1).unwrap();
+        assert_eq!(prepared.workers.len(), 2);
+        assert_eq!(prepared.workers[0].info.logical_ordinal, 0);
+        assert_eq!(prepared.workers[1].info.logical_ordinal, 1);
+    }
+}
+
 /// Consume assigned witnesses and prove them sequentially. In GPU mode,
 /// `generate_witness` internally prepares one CPU replay shard ahead through a
 /// capacity-one channel. Its iterator performs all GPU assignment work before
@@ -4192,6 +4832,31 @@ mod tests {
         assert!(super::compact_replay_selected(false, false));
         assert!(!super::compact_replay_selected(true, false));
         assert!(!super::compact_replay_selected(false, true));
+    }
+
+    #[test]
+    fn replay_summary_digest_is_independent_of_witness_materialization() {
+        let replay_summary = super::ShardStepSummary {
+            step_count: 17,
+            first_cycle: 4,
+            last_cycle: 68,
+            first_pc_before: 0x1000,
+            last_pc_after: 0x1044,
+            first_heap_before: 0x2000,
+            last_heap_after: 0x2080,
+            first_hint_before: 0x3000,
+            last_hint_after: 0x3020,
+        };
+        let compact_digest = super::shard_replay_summary_digest(replay_summary);
+        let light_digest = super::shard_replay_summary_digest(replay_summary);
+        assert_eq!(compact_digest, light_digest);
+
+        let mut different_state = replay_summary;
+        different_state.last_pc_after += 4;
+        assert_ne!(
+            compact_digest,
+            super::shard_replay_summary_digest(different_state)
+        );
     }
 
     #[test]

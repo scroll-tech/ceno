@@ -12,13 +12,19 @@ use ceno_recursion_v2::{
         warm_child_vk_digest_cache,
     },
 };
+#[cfg(feature = "gpu")]
+use ceno_zkvm::e2e::run_e2e_multi_gpu_proof_with_precompiled_aot;
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 use ceno_zkvm::e2e::{prepare_fulltracer_aot_program, prepare_preflight_aot_program};
+#[cfg(feature = "gpu")]
+use ceno_zkvm::multi_gpu::{MultiGpuConfig, PreparedMultiGpu};
+#[cfg(not(feature = "gpu"))]
+use ceno_zkvm::scheme::create_prover;
 use ceno_zkvm::{
     e2e::{MultiProver, run_e2e_proof_with_precompiled_aot, setup_program},
     scheme::{
-        ZKVMProof, create_backend, create_prover, hal::ProverDevice,
-        mock_prover::LkMultiplicityKey, prover::ZKVMProver, verifier::ZKVMVerifier,
+        ZKVMProof, create_backend, hal::ProverDevice, mock_prover::LkMultiplicityKey,
+        prover::ZKVMProver, verifier::ZKVMVerifier,
     },
     structs::{ZKVMProvingKey, ZKVMVerifyingKey},
 };
@@ -76,6 +82,10 @@ where
     pub app_program: Option<Program>,
     pub platform: Option<Platform>,
     pub multi_prover: Option<MultiProver>,
+    #[cfg(feature = "gpu")]
+    pub multi_gpu_config: Option<MultiGpuConfig>,
+    #[cfg(feature = "gpu")]
+    prepared_multi_gpu: Option<PreparedMultiGpu>,
 
     pub zkvm_pk: Option<Arc<ZKVMProvingKey<E, PCS>>>,
     pub zkvm_vk: Option<ZKVMVerifyingKey<E, PCS>>,
@@ -102,6 +112,10 @@ where
             app_program: None,
             platform: None,
             multi_prover: None,
+            #[cfg(feature = "gpu")]
+            multi_gpu_config: None,
+            #[cfg(feature = "gpu")]
+            prepared_multi_gpu: None,
             zkvm_pk: None,
             zkvm_vk: None,
             zkvm_prover: None,
@@ -124,6 +138,10 @@ where
             app_program: Some(program),
             platform: Some(platform),
             multi_prover: Some(multi_prover),
+            #[cfg(feature = "gpu")]
+            multi_gpu_config: None,
+            #[cfg(feature = "gpu")]
+            prepared_multi_gpu: None,
             zkvm_pk: None,
             zkvm_vk: None,
             zkvm_prover: None,
@@ -146,6 +164,14 @@ where
 
     pub fn set_aggregation_options(&mut self, options: AggregationOptions) {
         self.aggregation_options = Some(options);
+    }
+
+    #[cfg(feature = "gpu")]
+    pub fn set_multi_gpu_config(&mut self, config: MultiGpuConfig) {
+        config
+            .validate_shape()
+            .expect("invalid multi-GPU configuration");
+        self.multi_gpu_config = Some(config);
     }
 
     pub fn aggregation_options(&self) -> AggregationOptions {
@@ -330,12 +356,83 @@ impl<E, PCS, SC, VC> CenoSDK<E, PCS, SC, VC>
 where
     E: ExtensionField + LkMultiplicityKey,
     PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    PCS::ProverParam: Send + Sync,
+    PCS::VerifierParam: Send + Sync,
+    PCS::Commitment: Send + Sync,
+    PCS::CommitmentWithWitness: Send + Sync,
+    PCS::Proof: Send,
 {
     pub fn init_base_prover(&mut self, max_num_variables: usize, level: SecurityLevel) {
         let backend = create_backend(max_num_variables, level);
-        let device = create_prover(backend);
+        let config = self
+            .multi_gpu_config
+            .clone()
+            .unwrap_or_else(|| MultiGpuConfig::new(vec![0]).unwrap());
+        self.multi_gpu_config = Some(config.clone());
+        let requested_max_cells = self
+            .multi_prover
+            .as_ref()
+            .map_or(u64::MAX, |prover| prover.max_cell_per_shard);
+        let prepared = config
+            .prepare(requested_max_cells)
+            .expect("multi-GPU device validation failed");
+        if let Some(multi_prover) = self.multi_prover.as_mut() {
+            multi_prover.max_cell_per_shard = prepared.max_cell_per_shard;
+        }
+        let device = GpuProver::new(backend, prepared.workers[0].hal.clone());
 
         self.set_zkvm_prover(device);
+        self.prepared_multi_gpu = Some(prepared);
+    }
+
+    pub fn generate_multi_gpu_base_proof(
+        &self,
+        hints: CenoStdin,
+        public_io_digest: [u32; 8],
+        max_steps: usize,
+        shard_id: Option<usize>,
+    ) -> Vec<ZKVMProof<E, PCS>> {
+        let config = self
+            .multi_gpu_config
+            .as_ref()
+            .expect("multi-GPU configuration was not initialized");
+        if shard_id.is_some() {
+            return self.generate_base_proof(hints, public_io_digest, max_steps, shard_id);
+        }
+        let prepared = self
+            .prepared_multi_gpu
+            .as_ref()
+            .expect("multi-GPU devices were not prepared");
+        let prover = self
+            .zkvm_prover
+            .as_ref()
+            .expect("ZKVMProver is not initialized");
+        let init_full_mem = prover.setup_init_mem(&Vec::from(&hints));
+        let proofs = run_e2e_multi_gpu_proof_with_precompiled_aot(
+            prover.pk.clone(),
+            prover.device().backend.clone(),
+            prepared,
+            config,
+            &init_full_mem,
+            public_io_digest,
+            max_steps,
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            self.preflight_aot_program.clone(),
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            self.fulltracer_aot_program.clone(),
+        )
+        .unwrap_or_else(|error| panic!("multi-GPU base proving failed: {error}"));
+        let recursion_worker = prepared
+            .workers
+            .iter()
+            .find(|worker| worker.info.logical_ordinal == config.recursion_device)
+            .expect("recursion GPU was not prepared");
+        gkr_iop::gpu::set_thread_cuda_hal(recursion_worker.hal.clone());
+        tracing::info!(
+            recursion_device = config.recursion_device,
+            "bound Stage 1 recursion GPU after base workers"
+        );
+        proofs
     }
 }
 

@@ -314,6 +314,10 @@ impl<
         };
         ctx.setup_init_mem(hints)
     }
+
+    pub fn device(&self) -> &PD {
+        &self.device
+    }
 }
 
 impl<
