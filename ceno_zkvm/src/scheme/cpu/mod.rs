@@ -17,7 +17,10 @@ use crate::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
             matrix_selector_corrections, split_rotation_evals,
         },
-        verifier::{eval_batched_main_frontload_terms, frontload_constant_term_scale},
+        verifier::{
+            eval_batched_main_frontload_mle, eval_batched_main_frontload_terms,
+            frontload_constant_term_scale,
+        },
     },
     structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
@@ -1405,8 +1408,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             )
             .expect("invalid matrix first-layer correction layout")
             {
-                final_claim +=
-                    coefficient * layer_evals[chip.layer.n_witin + chip.layer.n_fixed + wit_id];
+                final_claim += coefficient
+                    * eval_batched_main_frontload_mle(
+                        layer_evals[chip.layer.n_witin + chip.layer.n_fixed + wit_id],
+                        &global_rt,
+                        chip.num_var_with_rotation,
+                    );
             }
         }
         let claimed_sum = recover_sumcheck_claim_from_final(final_claim, &proof, &global_rt);

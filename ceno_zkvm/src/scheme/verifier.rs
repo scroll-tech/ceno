@@ -249,6 +249,17 @@ pub(crate) fn eval_batched_main_frontload_terms<E: ExtensionField>(
     frontload::evaluate(&polys.remove(0), tail_point, &raw_mle_evals)
 }
 
+pub(crate) fn eval_batched_main_frontload_mle<E: ExtensionField>(
+    raw_eval: E,
+    global_in_point: &[E],
+    num_var_with_rotation: usize,
+) -> E {
+    assert!(num_var_with_rotation <= global_in_point.len());
+    global_in_point[num_var_with_rotation..]
+        .iter()
+        .fold(raw_eval, |eval, point| eval * *point)
+}
+
 pub(crate) fn frontload_constant_term_scale<E: ExtensionField>(
     global_num_vars: usize,
     local_num_vars: usize,
@@ -1453,8 +1464,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .map_err(|message| ZKVMError::InvalidProof(message.into()))?
             {
                 got_claim += coefficient
-                    * layer_evals
-                        [pending_layer.layer.n_witin + pending_layer.layer.n_fixed + wit_id];
+                    * eval_batched_main_frontload_mle(
+                        layer_evals
+                            [pending_layer.layer.n_witin + pending_layer.layer.n_fixed + wit_id],
+                        &global_in_point,
+                        pending_layer.pending.num_var_with_rotation,
+                    );
             }
 
             results.push((
@@ -2023,6 +2038,7 @@ impl EccVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ff_ext::{BabyBearExt4, FieldFrom};
 
     #[test]
     fn num_instances_bound_is_exclusive_per_entry() {
@@ -2033,5 +2049,18 @@ mod tests {
 
         let err = validate_num_instances_bound("test", &[MAX_NUM_INSTANCES]).unwrap_err();
         assert!(matches!(err, ZKVMError::InvalidProof(_)));
+    }
+
+    #[test]
+    fn frontloaded_mle_applies_only_missing_variable_tail() {
+        type E = BabyBearExt4;
+        let raw = E::from_v(5);
+        let point = [E::from_v(7), E::from_v(11), E::from_v(13)];
+
+        assert_eq!(eval_batched_main_frontload_mle(raw, &point, 3), raw);
+        assert_eq!(
+            eval_batched_main_frontload_mle(raw, &point, 1),
+            raw * point[1] * point[2]
+        );
     }
 }
