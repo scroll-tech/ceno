@@ -19,8 +19,10 @@ use ceno_zkvm::{
     structs::ProgramParams,
 };
 use ff_ext::{BabyBearExt4, ExtensionField, FieldFrom};
+use gkr_iop::utils::{eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec};
 use multilinear_extensions::{Expression, StructuralWitInType, utils::eval_by_expr_with_instance};
 use p3::field::PrimeCharacteristicRing;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 type E = BabyBearExt4;
 type F = <E as ExtensionField>::BaseField;
@@ -116,8 +118,8 @@ fn pv_structural(cs: &ConstraintSystem<E>, physical: u64) -> Vec<F> {
     set_named(
         names,
         &mut structural,
-        "production_pv_tile",
-        (physical >> 18) & 15,
+        "production_pv_local_row_prefix",
+        physical & ((1 << 22) - 1),
     );
     set_named(names, &mut structural, "physical_index", physical);
     structural
@@ -170,6 +172,74 @@ fn generic_geometry_and_matrix_domains_are_exact() {
     assert_domain::<TensorAttentionPv<E, 1>>("production_pv_physical_coordinate", pv_structural, 1);
     assert_domain::<TensorAttentionPv<E, 2>>("production_pv_physical_coordinate", pv_structural, 2);
     assert_domain::<TensorAttentionPv<E, 4>>("production_pv_physical_coordinate", pv_structural, 4);
+}
+
+fn verifier_sequence_eval(witin_type: StructuralWitInType, point: &[E]) -> E {
+    match witin_type {
+        StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
+            eval_inner_repeated_incremental_vec(k as u64, point)
+        }
+        StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
+            eval_outer_repeated_incremental_vec(k as u64, point)
+        }
+        other => panic!("unexpected verifier-equivalent structural type: {other:?}"),
+    }
+}
+
+#[test]
+fn pv_local_row_prefix_matches_verifier_at_random_points() {
+    fn check<const N: usize>() {
+        let cs = construct::<TensorAttentionPv<E, N>>();
+        let row_bits = 22 + N.trailing_zeros() as usize;
+        let local_row_id = id(
+            &cs.structural_witin_namespace_map,
+            "production_pv_local_row_prefix",
+        );
+        let row_high_id = id(
+            &cs.structural_witin_namespace_map,
+            "production_pv_row_high4_prefix",
+        );
+        let local_row_type = cs.structural_witins[local_row_id].witin_type;
+        assert!(matches!(
+            local_row_type,
+            StructuralWitInType::OuterRepeatingIncrementalSequence { k, n }
+                if (k, n) == (22, row_bits)
+        ));
+        assert_eq!(local_row_type.max_len(), 1 << row_bits);
+
+        let mut rng = StdRng::seed_from_u64(0x0192_4090 + N as u64);
+        for _ in 0..8 {
+            let point = (0..row_bits)
+                .map(|_| E::from_v(rng.gen_range(1..1_000_000)))
+                .collect::<Vec<_>>();
+            let local_row_eval = verifier_sequence_eval(local_row_type, &point);
+            let assigned_local_row_eval = eval_outer_repeated_incremental_vec(22, &point);
+            assert_eq!(local_row_eval, assigned_local_row_eval);
+
+            let row_high_eval =
+                verifier_sequence_eval(cs.structural_witins[row_high_id].witin_type, &point);
+            let assigned_tile_eval = eval_inner_repeated_incremental_vec(18, &point[..22]);
+            assert_eq!(
+                local_row_eval - row_high_eval,
+                assigned_tile_eval * E::from_v(1 << 18),
+            );
+
+            if row_bits > 22 {
+                let mut changed_head = point.clone();
+                for coordinate in &mut changed_head[22..] {
+                    *coordinate += E::ONE;
+                }
+                assert_eq!(
+                    verifier_sequence_eval(local_row_type, &changed_head),
+                    local_row_eval,
+                );
+            }
+        }
+    }
+
+    check::<1>();
+    check::<2>();
+    check::<4>();
 }
 
 #[test]

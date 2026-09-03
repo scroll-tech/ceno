@@ -119,7 +119,7 @@ pub struct TensorProductionPvCoreConfig {
     row_low7: StructuralWitIn,
     row_high4: StructuralWitIn,
     head: StructuralWitIn,
-    tile: StructuralWitIn,
+    local_row_prefix: StructuralWitIn,
     matrix_a_selector: StructuralWitIn,
     matrix_w_selector: StructuralWitIn,
     matrix_output_selector: StructuralWitIn,
@@ -201,7 +201,7 @@ impl TensorProductionPvCoreConfig {
                 structural_id(self.row_low7),
                 structural_id(self.row_high4),
                 structural_id(self.head),
-                structural_id(self.tile),
+                structural_id(self.local_row_prefix),
                 structural_id(self.matrix_a_selector),
                 structural_id(self.matrix_w_selector),
                 structural_id(self.matrix_output_selector),
@@ -520,20 +520,21 @@ impl<E: ExtensionField, const HEADS_PER_SHARD: usize> Instruction<E>
                 n: row_bits,
             },
         );
-        let tile_formula = cb.create_structural_witin(
-            || "production_pv_tile",
-            StructuralWitInType::InnerRepeatingIncrementalSequence {
-                k: 18,
-                n: ROWS_PER_HEAD_BITS,
+        let local_row_prefix = cb.create_structural_witin(
+            || "production_pv_local_row_prefix",
+            StructuralWitInType::OuterRepeatingIncrementalSequence {
+                k: ROWS_PER_HEAD_BITS,
+                n: row_bits,
             },
         );
         let inv_128 = E::BaseField::from_u64(1 << 7).inverse().expr();
         let inv_16384 = E::BaseField::from_u64(1 << 14).inverse().expr();
+        let inv_262144 = E::BaseField::from_u64(1 << 18).inverse().expr();
         let axis = axis_formula.expr();
         let row_low7 = (row_low7_formula.expr() - axis.clone()) * inv_128;
         let row_high4 = (row_high4_formula.expr() - row_low7_formula.expr()) * inv_16384;
         let head = head_formula.expr();
-        let tile = tile_formula.expr();
+        let tile = (local_row_prefix.expr() - row_high4_formula.expr()) * inv_262144;
         let row_high_inverse = cb.create_witin(|| "production_pv_row_high_inverse");
         let row_high_last_inverse = cb.create_witin(|| "production_pv_row_high_last_inverse");
         let tile_inverse = cb.create_witin(|| "production_pv_tile_inverse");
@@ -857,7 +858,7 @@ impl<E: ExtensionField, const HEADS_PER_SHARD: usize> Instruction<E>
             row_low7: row_low7_formula,
             row_high4: row_high4_formula,
             head: head_formula,
-            tile: tile_formula,
+            local_row_prefix,
             matrix_a_selector,
             matrix_w_selector,
             matrix_output_selector,
@@ -1021,7 +1022,11 @@ mod tests {
         set(&mut structural, config.row_low7, physical & 0x3fff);
         set(&mut structural, config.row_high4, physical & 0x3ffff);
         set(&mut structural, config.head, physical >> 22);
-        set(&mut structural, config.tile, (physical >> 18) & 15);
+        set(
+            &mut structural,
+            config.local_row_prefix,
+            physical & ((1 << ROWS_PER_HEAD_BITS) - 1),
+        );
         set(&mut structural, config.physical_index, physical);
         structural
     }
@@ -1113,6 +1118,18 @@ mod tests {
             );
         }
         assert_eq!(ACTIVE_ROWS, ACTIVE_HEADS_PER_SHARD << 22);
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn pv_device_column_map_preserves_exact_width_and_order() {
+        let (_, config) = circuit::<2>();
+        let map = config.device_column_map(55, 10).unwrap();
+        assert_eq!(map.witness, core::array::from_fn(|index| index as u32));
+        assert_eq!(map.structural, [5, 0, 1, 2, 3, 4, 6, 7, 8, 9]);
+        assert_eq!(map.num_witin, 55);
+        assert_eq!(map.num_structural_witin, 10);
+        assert_eq!(map.structural[5], config.local_row_prefix.id as u32);
     }
 
     #[test]
