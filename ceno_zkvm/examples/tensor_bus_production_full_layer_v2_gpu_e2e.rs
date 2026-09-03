@@ -45,6 +45,13 @@ fn rejects(verifier: &ZKVMVerifier<E, Pcs>, proofs: Vec<ZKVMProof<E, Pcs>>) -> b
         .is_err()
 }
 
+fn rejects_single_shard(verifier: &ZKVMVerifier<E, Pcs>, proof: ZKVMProof<E, Pcs>) -> bool {
+    let expect_halt = proof.has_halt(&verifier.vk);
+    verifier
+        .verify_single_shard_segment_halt(proof, BasicTranscript::new(b"riscv"), expect_halt)
+        .is_err()
+}
+
 fn validate_tensor_bus_event_indices() {
     use ceno_emul::{
         SyscallSpec, TensorExportEndV1Spec, TensorImportBeginV1Spec,
@@ -339,10 +346,91 @@ fn run() {
                 bincode::serialized_size(proof).expect("serialize shard-0 chip proof"),
             );
         }
+        let fused_index = circuit_index(&vk, "TensorAttentionQkShiftSoftmax");
         let verifier = ZKVMVerifier::new(vk);
         run_e2e_single_shard_debug_verify(&verifier, proofs[0].clone(), None, MAX_STEPS);
+
+        let mut product_tamper = proofs[0].clone();
+        product_tamper
+            .chip_proofs
+            .get_mut(&fused_index)
+            .expect("fused chip proof missing")
+            .matrix_reduction
+            .as_mut()
+            .expect("fused matrix reduction missing")
+            .sumcheck_proof[0]
+            .evaluations[0] += E::ONE;
+        assert!(
+            rejects_single_shard(&verifier, product_tamper),
+            "fused matrix-product tamper verified"
+        );
+
+        for (label, output_index) in [("quotient", 0), ("remainder", 1)] {
+            let mut tampered = proofs[0].clone();
+            tampered
+                .chip_proofs
+                .get_mut(&fused_index)
+                .expect("fused chip proof missing")
+                .matrix_reduction
+                .as_mut()
+                .expect("fused matrix reduction missing")
+                .output_evals[output_index] += E::ONE;
+            assert!(
+                rejects_single_shard(&verifier, tampered),
+                "fused {label} tamper verified"
+            );
+        }
+
+        for (label, tamper_read) in [("read", true), ("write", false)] {
+            let mut omitted = proofs[0].clone();
+            let omitted_groups = if tamper_read {
+                &mut omitted
+                    .chip_proofs
+                    .get_mut(&fused_index)
+                    .expect("fused chip proof missing")
+                    .r_out_evals
+            } else {
+                &mut omitted
+                    .chip_proofs
+                    .get_mut(&fused_index)
+                    .expect("fused chip proof missing")
+                    .w_out_evals
+            };
+            assert!(
+                omitted_groups.pop().is_some(),
+                "fused {label} group missing"
+            );
+            assert!(
+                rejects_single_shard(&verifier, omitted),
+                "fused {label}-record omission verified"
+            );
+
+            let mut tampered = proofs[0].clone();
+            let output_groups = if tamper_read {
+                &mut tampered
+                    .chip_proofs
+                    .get_mut(&fused_index)
+                    .expect("fused chip proof missing")
+                    .r_out_evals
+            } else {
+                &mut tampered
+                    .chip_proofs
+                    .get_mut(&fused_index)
+                    .expect("fused chip proof missing")
+                    .w_out_evals
+            };
+            *output_groups
+                .first_mut()
+                .expect("fused record output group missing")
+                .first_mut()
+                .expect("fused record output evaluation missing") += E::ONE;
+            assert!(
+                rejects_single_shard(&verifier, tampered),
+                "fused {label}-record tamper verified"
+            );
+        }
         println!(
-            "production target-shard independent segment verification: shard={target_shard_id} proof_bytes={proof_bytes} commitment_bytes={commitment_bytes} opening_bytes={opening_bytes} result=Ok(true)"
+            "production target-shard independent segment verification: shard={target_shard_id} proof_bytes={proof_bytes} commitment_bytes={commitment_bytes} opening_bytes={opening_bytes} result=Ok(true) fused_product_tamper=reject fused_quotient_tamper=reject fused_remainder_tamper=reject fused_read_record_omission=reject fused_write_record_omission=reject fused_read_record_tamper=reject fused_write_record_tamper=reject"
         );
         return;
     }
@@ -359,12 +447,10 @@ fn run() {
         "TensorProductionBoundaryPostFfnOutputPart0".to_string(),
     ];
     names.extend([
-        "TensorAttentionQk".to_string(),
-        "TensorAttentionShift".to_string(),
-        "TensorAttentionSoftmax".to_string(),
+        "TensorAttentionQkShiftSoftmax".to_string(),
         "TensorAttentionPv".to_string(),
     ]);
-    let expected_circuits = 9;
+    let expected_circuits = 7;
     assert_eq!(
         names.len(),
         expected_circuits,
@@ -374,8 +460,8 @@ fn run() {
     let tensor_bus_index = circuit_index(&vk, "TensorBusCircuit");
     let import_anchor_index = circuit_index(&vk, "TensorProductionImportBeginAnchor");
     let export_anchor_index = circuit_index(&vk, "TensorProductionExportEndAnchor");
-    let qk_index = circuit_index(&vk, "TensorAttentionQk");
-    let softmax_index = circuit_index(&vk, "TensorAttentionSoftmax");
+    let qk_index = circuit_index(&vk, "TensorAttentionQkShiftSoftmax");
+    let softmax_index = qk_index;
     let pv_index = circuit_index(&vk, "TensorAttentionPv");
     names.sort_by_key(|name| circuit_index(&vk, name));
     let indices = names

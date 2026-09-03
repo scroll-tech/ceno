@@ -82,7 +82,10 @@ pub fn descriptor(circuit_name: &str) -> Option<MatrixReductionDescriptor> {
         return Some(MatrixReductionDescriptor::production_projection());
     }
     let heads = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
-    if circuit_name == "TensorAttentionQk" {
+    if matches!(
+        circuit_name,
+        "TensorAttentionQk" | "TensorAttentionQkShiftSoftmax"
+    ) {
         Some(MatrixReductionDescriptor::production(
             MatrixReductionKind::ProductionQk,
             16,
@@ -619,7 +622,11 @@ mod tests {
         assert_eq!((projection.output_vars, projection.sumcheck_vars), (23, 12));
         let head_vars =
             ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT.trailing_zeros() as usize;
-        for name in ["TensorAttentionQk", "TensorAttentionPv"] {
+        for name in [
+            "TensorAttentionQk",
+            "TensorAttentionQkShiftSoftmax",
+            "TensorAttentionPv",
+        ] {
             let descriptor = descriptor(name).expect("valid production descriptor");
             assert_eq!(descriptor.output_vars, 22 + head_vars);
             assert_eq!(descriptor.sumcheck_vars, 11 + head_vars);

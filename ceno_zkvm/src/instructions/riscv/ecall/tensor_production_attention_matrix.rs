@@ -1,4 +1,4 @@
-//! Exact four-head QK and K128-tiled PV matrix Cores.
+//! Exact K128-tiled production PV matrix Core.
 //!
 //! PV tiles the reduction axis because BabyBear satisfies
 //! `p = 1920 * 2^20 + 1`: a full-K centered-Q20 relation would admit distinct
@@ -37,10 +37,8 @@ const SEQUENCE: u64 = 2048;
 const HEAD_DIM: u64 = 128;
 const HEADS_PER_CORE: u64 = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT as u64;
 const CONTEXT_WORDS: u64 = 1 << 23;
-const SCORE_VERSION_OFFSET: u64 = 1;
 const PROBABILITY_VERSION_OFFSET: u64 = 2;
 const ATTENTION_CALL_VERSION: u64 = 9;
-const Q16_SCALE: u64 = 1 << 16;
 const Q20_SCALE: u64 = 1 << 20;
 const Q20_HALF: u64 = 1 << 19;
 const PV_STATE_VERSION: u64 = 10;
@@ -68,113 +66,8 @@ fn tensor_space_record<E: ExtensionField>(
     ]
 }
 
-pub struct TensorProductionQkCoreInstruction<E>(PhantomData<E>);
 pub struct TensorProductionPvCoreInstruction<E>(PhantomData<E>);
 
-#[derive(Debug)]
-pub struct TensorProductionQkCoreConfig {
-    // Stable A/W/Q/R offsets consumed by the matrix reduction.
-    pub(crate) a: WitIn,
-    pub(crate) w: WitIn,
-    pub(crate) q: WitIn,
-    pub(crate) remainder: WitIn,
-    a_low7: WitIn,
-    a_sign: WitIn,
-    w_low7: WitIn,
-    w_sign: WitIn,
-    axis_active: WitIn,
-    axis_high_inverse: WitIn,
-    row_active: WitIn,
-    row_high_inverse: WitIn,
-    import_cycle: WitIn,
-    input_id_lo: WitIn,
-    input_id_hi: WitIn,
-    input_version: WitIn,
-    layer: WitIn,
-    head_start: WitIn,
-    output_id_lo: WitIn,
-    output_id_hi: WitIn,
-    output_version: WitIn,
-    call_row_inverse: WitIn,
-    axis_low7: StructuralWitIn,
-    axis_high4: StructuralWitIn,
-    row_low7: StructuralWitIn,
-    row_high4: StructuralWitIn,
-    physical_index: StructuralWitIn,
-    matrix_a_selector: StructuralWitIn,
-    matrix_w_selector: StructuralWitIn,
-    matrix_output_selector: StructuralWitIn,
-    selector: StructuralWitIn,
-}
-
-impl TensorProductionQkCoreConfig {
-    #[cfg(feature = "gpu")]
-    pub(crate) fn device_column_map(
-        &self,
-        num_witin: usize,
-        num_structural_witin: usize,
-    ) -> Result<ceno_gpu::common::witgen::ProductionAttentionQkColumnMap, ZKVMError> {
-        use ceno_gpu::common::witgen::ProductionAttentionQkColumnMap;
-
-        let id = |cell: WitIn| cell.id as u32;
-        let structural_id = |cell: StructuralWitIn| cell.id as u32;
-        let map = ProductionAttentionQkColumnMap {
-            witness: [
-                id(self.a),
-                id(self.w),
-                id(self.q),
-                id(self.remainder),
-                id(self.a_low7),
-                id(self.a_sign),
-                id(self.w_low7),
-                id(self.w_sign),
-                id(self.axis_active),
-                id(self.axis_high_inverse),
-                id(self.row_active),
-                id(self.row_high_inverse),
-                id(self.import_cycle),
-                id(self.input_id_lo),
-                id(self.input_id_hi),
-                id(self.input_version),
-                id(self.layer),
-                id(self.head_start),
-                id(self.output_id_lo),
-                id(self.output_id_hi),
-                id(self.output_version),
-                id(self.call_row_inverse),
-            ],
-            structural: [
-                structural_id(self.physical_index),
-                structural_id(self.axis_low7),
-                structural_id(self.axis_high4),
-                structural_id(self.row_low7),
-                structural_id(self.row_high4),
-                structural_id(self.matrix_a_selector),
-                structural_id(self.matrix_w_selector),
-                structural_id(self.matrix_output_selector),
-                structural_id(self.selector),
-            ],
-            num_witin: u32::try_from(num_witin).map_err(|_| {
-                ZKVMError::InvalidWitness("production QK witness width overflow".into())
-            })?,
-            num_structural_witin: u32::try_from(num_structural_witin).map_err(|_| {
-                ZKVMError::InvalidWitness("production QK structural width overflow".into())
-            })?,
-        };
-        if num_witin != 22
-            || num_structural_witin != 9
-            || map.witness != core::array::from_fn(|index| index as u32)
-            || map.structural != [4, 0, 1, 2, 3, 5, 6, 7, 8]
-        {
-            return Err(ZKVMError::InvalidWitness(
-                "production QK device columns do not exactly cover the VK".into(),
-            ));
-        }
-        Ok(map)
-    }
-}
-
-#[derive(Debug)]
 pub struct TensorProductionPvCoreConfig {
     // Stable A/W/Q/R offsets consumed by the matrix reduction.
     pub(crate) a: WitIn,
@@ -413,22 +306,6 @@ fn zero_indicator<E: ExtensionField>(
     )?)
 }
 
-fn signed_byte<E: ExtensionField>(
-    cb: &mut CircuitBuilder<E>,
-    name: &'static str,
-    value: WitIn,
-    low7: WitIn,
-    sign: WitIn,
-) -> Result<(), ZKVMError> {
-    bit(cb, name, sign)?;
-    dynamic_range(cb, name, low7, 7)?;
-    Ok(cb.require_equal(
-        || name,
-        value.expr(),
-        low7.expr() - sign.expr() * E::BaseField::from_u32(128).expr(),
-    )?)
-}
-
 fn signed_u64_limbs<E: ExtensionField>(
     cb: &mut CircuitBuilder<E>,
     name: &'static str,
@@ -466,35 +343,6 @@ fn conditional_rlc<E: ExtensionField>(
     cb.rlc_chip_record(record.to_vec()) * selector.clone() + E::BaseField::ONE.expr() - selector
 }
 
-fn attention_call_record<E: ExtensionField>(
-    import_cycle: Expression<E>,
-    input_id_lo: Expression<E>,
-    input_id_hi: Expression<E>,
-    input_version: Expression<E>,
-    output_id_lo: Expression<E>,
-    output_id_hi: Expression<E>,
-    output_version: Expression<E>,
-    layer: Expression<E>,
-    head_start: Expression<E>,
-) -> Vec<Expression<E>> {
-    vec![
-        CustomRWTag::TensorState.expr::<E>(),
-        E::BaseField::from_u64(ATTENTION_CALL_VERSION).expr(),
-        import_cycle,
-        input_id_lo,
-        input_id_hi,
-        input_version,
-        output_id_lo,
-        output_id_hi,
-        output_version,
-        E::BaseField::from_u32(ceno_emul::tensor::TENSOR_PROFILE_LLAMA2_7B_FULL_LAYER).expr(),
-        layer,
-        E::BaseField::ONE.expr(),
-        head_start,
-        E::BaseField::from_u64(HEADS_PER_CORE).expr(),
-    ]
-}
-
 fn add_matrix_layer<E: ExtensionField, C>(
     cb: &mut CircuitBuilder<E>,
     name: String,
@@ -530,278 +378,6 @@ fn add_matrix_layer<E: ExtensionField, C>(
     chip.final_out_evals = (0..ordinary_output_count + 4).collect();
     chip.add_layer(layer);
     Ok((config, chip.gkr_circuit()))
-}
-
-impl<E: ExtensionField> Instruction<E> for TensorProductionQkCoreInstruction<E> {
-    type InstructionConfig = TensorProductionQkCoreConfig;
-    type InsnType = InsnKind;
-
-    fn inst_kinds() -> &'static [InsnKind] {
-        &[]
-    }
-
-    fn name() -> String {
-        "TensorAttentionQk".into()
-    }
-
-    fn construct_circuit(
-        cb: &mut CircuitBuilder<E>,
-        _: &ProgramParams,
-    ) -> Result<Self::InstructionConfig, ZKVMError> {
-        let a = cb.create_witin(|| "production_qk_a");
-        let w = cb.create_witin(|| "production_qk_w");
-        let q = cb.create_witin(|| "production_qk_q");
-        let remainder = cb.create_witin(|| "production_qk_remainder");
-        let a_low7 = cb.create_witin(|| "production_qk_a_low7");
-        let a_sign = cb.create_witin(|| "production_qk_a_sign");
-        let w_low7 = cb.create_witin(|| "production_qk_w_low7");
-        let w_sign = cb.create_witin(|| "production_qk_w_sign");
-        signed_byte(cb, "production_qk_a_signed_byte", a, a_low7, a_sign)?;
-        signed_byte(cb, "production_qk_w_signed_byte", w, w_low7, w_sign)?;
-        cb.require_zero(
-            || "production_qk_quotient",
-            q.expr() * (q.expr() + E::BaseField::ONE.expr()),
-        )?;
-        dynamic_range(cb, "production_qk_remainder_u16", remainder, 16)?;
-
-        assert_eq!(HEAD_GROUP_BITS, 0, "production QK formula map is heads-1");
-        let axis_low7_formula = cb.create_structural_witin(
-            || "production_qk_axis_low7_prefix",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 7, n: ROW_BITS },
-        );
-        let axis_high4_formula = cb.create_structural_witin(
-            || "production_qk_axis_high4_prefix",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 11, n: ROW_BITS },
-        );
-        let row_low7_formula = cb.create_structural_witin(
-            || "production_qk_row_low7_prefix",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 18, n: ROW_BITS },
-        );
-        let row_high4_formula = cb.create_structural_witin(
-            || "production_qk_row_high4_prefix",
-            StructuralWitInType::OuterRepeatingIncrementalSequence { k: 22, n: ROW_BITS },
-        );
-        let inv_128 = E::BaseField::from_u64(1 << 7).inverse().expr();
-        let inv_2048 = E::BaseField::from_u64(1 << 11).inverse().expr();
-        let inv_262144 = E::BaseField::from_u64(1 << 18).inverse().expr();
-        let axis_low7 = axis_low7_formula.expr();
-        let axis_high4 = (axis_high4_formula.expr() - axis_low7_formula.expr()) * inv_128;
-        let row_low7 = (row_low7_formula.expr() - axis_high4_formula.expr()) * inv_2048;
-        let row_high4 = (row_high4_formula.expr() - row_low7_formula.expr()) * inv_262144;
-        let axis_active = cb.create_witin(|| "production_qk_axis_active");
-        let axis_high_inverse = cb.create_witin(|| "production_qk_axis_high_inverse");
-        let row_active = cb.create_witin(|| "production_qk_row_active");
-        let row_high_inverse = cb.create_witin(|| "production_qk_row_high_inverse");
-        zero_indicator(
-            cb,
-            "production_qk_axis_active_exact",
-            axis_high4.clone(),
-            axis_active,
-            axis_high_inverse,
-        )?;
-        zero_indicator(
-            cb,
-            "production_qk_row_active_exact",
-            row_high4.clone(),
-            row_active,
-            row_high_inverse,
-        )?;
-        cb.require_zero(
-            || "production_qk_a_padding",
-            (E::BaseField::ONE.expr() - axis_active.expr()) * a.expr(),
-        )?;
-        cb.require_zero(
-            || "production_qk_w_padding",
-            (E::BaseField::ONE.expr() - row_active.expr()) * w.expr(),
-        )?;
-
-        let physical_index = cb.create_structural_witin(
-            || "production_qk_physical_index",
-            StructuralWitInType::OuterRepeatingIncrementalSequence {
-                k: ROW_BITS,
-                n: ROW_BITS,
-            },
-        );
-        let matrix_a_selector = cb.create_placeholder_structural_witin(|| "matrix_a_selector");
-        let matrix_w_selector = cb.create_placeholder_structural_witin(|| "matrix_w_selector");
-        let matrix_output_selector =
-            cb.create_placeholder_structural_witin(|| "matrix_output_selector");
-        let selector = cb.create_placeholder_structural_witin(|| "selector");
-        let axis: Expression<E> = axis_low7.clone() + axis_high4.clone() * 128;
-        let row: Expression<E> = row_low7.clone() + row_high4.clone() * 128;
-        cb.require_equal(
-            || "production_qk_physical_coordinate",
-            physical_index.expr(),
-            axis.clone() + row.clone() * SEQUENCE,
-        )?;
-
-        let import_cycle = cb.create_witin(|| "production_qk_import_cycle");
-        let input_id_lo = cb.create_witin(|| "production_qk_input_id_lo");
-        let input_id_hi = cb.create_witin(|| "production_qk_input_id_hi");
-        let input_version = cb.create_witin(|| "production_qk_input_version");
-        let layer = cb.create_witin(|| "production_qk_layer");
-        let head_start = cb.create_witin(|| "production_qk_head_start");
-        let output_id_lo = cb.create_witin(|| "production_qk_output_id_lo");
-        let output_id_hi = cb.create_witin(|| "production_qk_output_id_hi");
-        let output_version = cb.create_witin(|| "production_qk_output_version");
-        let call_row_inverse = cb.create_witin(|| "production_qk_call_row_inverse");
-        let call_row = derived_zero_indicator(
-            cb,
-            "production_qk_call_row_exact",
-            physical_index.expr(),
-            call_row_inverse,
-        )?;
-        {
-            let call_record = attention_call_record(
-                import_cycle.expr(),
-                input_id_lo.expr(),
-                input_id_hi.expr(),
-                input_version.expr(),
-                output_id_lo.expr(),
-                output_id_hi.expr(),
-                output_version.expr(),
-                layer.expr(),
-                head_start.expr(),
-            );
-            cb.read_rlc_record(
-                || "production_attention_call_once",
-                conditional_type(call_row.clone()),
-                call_record.clone(),
-                conditional_rlc(cb, call_row, &call_record),
-            )?;
-        }
-        let group_words = HEADS_PER_CORE * SEQUENCE * HEAD_DIM;
-        let q_index = row.clone() * HEAD_DIM + axis_low7.clone();
-        let k_index =
-            E::BaseField::from_u64(group_words).expr() + axis.clone() * HEAD_DIM + row_low7.clone();
-        let score_index = (head_start.expr() * SEQUENCE + row) * SEQUENCE + axis;
-        let q_record = tensor_space_record(
-            import_cycle.expr(),
-            layer.expr(),
-            input_id_lo.expr(),
-            input_id_hi.expr(),
-            input_version.expr(),
-            q_index,
-            a.expr(),
-        );
-        cb.read_rlc_record(
-            || "production_qk_q_read",
-            conditional_type(axis_active.expr()),
-            q_record.clone(),
-            conditional_rlc(cb, axis_active.expr(), &q_record),
-        )?;
-        let k_record = tensor_space_record(
-            import_cycle.expr(),
-            layer.expr(),
-            input_id_lo.expr(),
-            input_id_hi.expr(),
-            input_version.expr(),
-            k_index,
-            w.expr(),
-        );
-        cb.read_rlc_record(
-            || "production_qk_k_read",
-            conditional_type(row_active.expr()),
-            k_record.clone(),
-            conditional_rlc(cb, row_active.expr(), &k_record),
-        )?;
-        cb.write_record(
-            || "production_qk_score_write",
-            RAMType::Custom,
-            tensor_space_record(
-                import_cycle.expr(),
-                layer.expr(),
-                output_id_lo.expr(),
-                output_id_hi.expr(),
-                output_version.expr() + SCORE_VERSION_OFFSET,
-                score_index,
-                q.expr() * Q16_SCALE + remainder.expr(),
-            ),
-        )?;
-        Ok(TensorProductionQkCoreConfig {
-            a,
-            w,
-            q,
-            remainder,
-            a_low7,
-            a_sign,
-            w_low7,
-            w_sign,
-            axis_active,
-            axis_high_inverse,
-            row_active,
-            row_high_inverse,
-            import_cycle,
-            input_id_lo,
-            input_id_hi,
-            input_version,
-            layer,
-            head_start,
-            output_id_lo,
-            output_id_hi,
-            output_version,
-            call_row_inverse,
-            axis_low7: axis_low7_formula,
-            axis_high4: axis_high4_formula,
-            row_low7: row_low7_formula,
-            row_high4: row_high4_formula,
-            physical_index,
-            matrix_a_selector,
-            matrix_w_selector,
-            matrix_output_selector,
-            selector,
-        })
-    }
-
-    fn build_gkr_iop_circuit(
-        cb: &mut CircuitBuilder<E>,
-        params: &ProgramParams,
-    ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
-        let config = Self::construct_circuit(cb, params)?;
-        assert_eq!(
-            cb.cs.num_witin as usize, 22,
-            "production QK witness width changed"
-        );
-        assert_eq!(
-            cb.cs.num_structural_witin as usize, 9,
-            "production QK structural width changed"
-        );
-        assert_eq!(
-            cb.cs.r_expressions.len() + cb.cs.r_table_expressions.len(),
-            3,
-            "production QK read record count changed"
-        );
-        assert_eq!(
-            cb.cs.w_expressions.len() + cb.cs.w_table_expressions.len(),
-            1,
-            "production QK write record count changed"
-        );
-        assert_eq!(
-            cb.cs.lk_expressions.len() + cb.cs.lk_table_expressions.len(),
-            3,
-            "production QK Dynamic-range record count changed"
-        );
-        let columns = [config.a, config.w, config.q, config.remainder];
-        let selectors = [
-            config.matrix_a_selector,
-            config.matrix_w_selector,
-            config.matrix_output_selector,
-            config.selector,
-        ];
-        add_matrix_layer(cb, Self::name(), config, columns, selectors)
-    }
-
-    fn assign_instance(
-        _: &Self::InstructionConfig,
-        _: &mut ShardContext,
-        _: &mut [E::BaseField],
-        _: &mut LkMultiplicity,
-        _: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        Err(ZKVMError::InvalidWitness(
-            "production QK requires deterministic device replay".into(),
-        ))
-    }
 }
 
 fn pv_state_record<E: ExtensionField>(
@@ -1388,15 +964,9 @@ mod tests {
     }
 
     #[test]
-    fn qk_and_pv_have_one_descriptor_independent_signature() {
-        let qk = signature::<TensorProductionQkCoreInstruction<E>>();
+    fn pv_has_one_descriptor_independent_signature() {
         let pv = signature::<TensorProductionPvCoreInstruction<E>>();
         for (layer, head) in [(0, 0), (0, 31), (31, 7)] {
-            assert_eq!(
-                qk,
-                ("TensorAttentionQk".into(), 22, 9, 3, 1),
-                "QK signature changed for descriptor layer={layer} head={head}"
-            );
             assert_eq!(
                 pv,
                 ("TensorAttentionPv".into(), 55, 10, 4, 3),
@@ -1409,20 +979,6 @@ mod tests {
     #[test]
     fn layer_and_head_are_part_of_constrained_record_identities() {
         let constant = |value| <E as ExtensionField>::BaseField::from_u64(value).expr();
-        let call = attention_call_record(
-            constant(3),
-            constant(4),
-            constant(5),
-            constant(6),
-            constant(7),
-            constant(8),
-            constant(9),
-            constant(10),
-            constant(11),
-        );
-        assert_eq!(eval_constant(&call[10]), E::from_v(10));
-        assert_eq!(eval_constant(&call[12]), E::from_v(11));
-
         let tensor = tensor_space_record(
             constant(3),
             constant(10),

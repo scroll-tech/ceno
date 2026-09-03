@@ -343,6 +343,7 @@ where
             || task.circuit_name == "ShardRamCircuit"
             || task.circuit_name == "TensorAttentionPv"
             || task.circuit_name == "TensorAttentionQk"
+            || task.circuit_name == "TensorAttentionQkShiftSoftmax"
             || task.circuit_name == "TensorAttentionSoftmax"
             || task.circuit_name == "TensorProductionExportEndAnchor"
             || task.circuit_name == "TensorProductionImportBeginAnchor"
@@ -422,6 +423,7 @@ where
                     | "ShardRamEcTreeCircuit"
                     | "TensorAttentionPv"
                     | "TensorAttentionQk"
+                    | "TensorAttentionQkShiftSoftmax"
                     | "TensorBusCircuit"
             ))
     {
@@ -1820,6 +1822,7 @@ impl<
             #[cfg(feature = "gpu")]
             if [
                 "TensorAttentionQk",
+                "TensorAttentionQkShiftSoftmax",
                 "TensorAttentionPv",
                 "TensorAttentionShift",
                 "TensorAttentionSoftmax",

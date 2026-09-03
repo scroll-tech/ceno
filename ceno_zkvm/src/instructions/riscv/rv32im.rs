@@ -11,8 +11,7 @@ use crate::instructions::riscv::ecall::{
     TensorProductionBoundaryHiddenInputInstruction,
     TensorProductionBoundaryHiddenOutputInstruction, TensorProductionBoundaryPostInputInstruction,
     TensorProductionExportAnchorInstruction, TensorProductionImportAnchorInstruction,
-    TensorProductionPvCoreInstruction, TensorProductionQkCoreInstruction,
-    TensorProductionShiftCoreInstruction, TensorProductionSoftmaxCoreInstruction,
+    TensorProductionPvCoreInstruction, TensorProductionQkShiftSoftmaxCoreInstruction,
     TensorProductionStageAnchorInstruction, collect_production_boundary_replay_descriptors,
 };
 #[cfg(feature = "u16limb_circuit")]
@@ -521,15 +520,8 @@ pub struct Rv32imConfig<E: ExtensionField> {
     #[cfg(not(feature = "llama-tiny"))]
     pub tensor_production_boundary_hidden_output_config:
         <TensorProductionBoundaryHiddenOutputInstruction<E> as Instruction<E>>::InstructionConfig,
-    #[cfg(not(feature = "llama-tiny"))]
-    pub tensor_production_qk_config:
-        <TensorProductionQkCoreInstruction<E> as Instruction<E>>::InstructionConfig,
-    #[cfg(not(feature = "llama-tiny"))]
-    pub tensor_production_shift_config:
-        <TensorProductionShiftCoreInstruction<E> as Instruction<E>>::InstructionConfig,
-    #[cfg(not(feature = "llama-tiny"))]
-    pub tensor_production_softmax_config:
-        <TensorProductionSoftmaxCoreInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub tensor_production_qk_shift_softmax_config:
+        <TensorProductionQkShiftSoftmaxCoreInstruction<E> as Instruction<E>>::InstructionConfig,
     #[cfg(not(feature = "llama-tiny"))]
     pub tensor_production_pv_config:
         <TensorProductionPvCoreInstruction<E> as Instruction<E>>::InstructionConfig,
@@ -1138,15 +1130,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         #[cfg(not(feature = "llama-tiny"))]
         let tensor_production_boundary_hidden_output_config =
             cs.register_opcode_circuit::<TensorProductionBoundaryHiddenOutputInstruction<E>>();
-        #[cfg(not(feature = "llama-tiny"))]
-        let tensor_production_qk_config =
-            cs.register_opcode_circuit::<TensorProductionQkCoreInstruction<E>>();
-        #[cfg(not(feature = "llama-tiny"))]
-        let tensor_production_softmax_config =
-            cs.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E>>();
-        #[cfg(not(feature = "llama-tiny"))]
-        let tensor_production_shift_config =
-            cs.register_opcode_circuit::<TensorProductionShiftCoreInstruction<E>>();
+        let tensor_production_qk_shift_softmax_config =
+            cs.register_opcode_circuit::<TensorProductionQkShiftSoftmaxCoreInstruction<E>>();
         #[cfg(not(feature = "llama-tiny"))]
         let tensor_production_pv_config =
             cs.register_opcode_circuit::<TensorProductionPvCoreInstruction<E>>();
@@ -1217,9 +1202,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         #[cfg(not(feature = "llama-tiny"))]
         {
             let production_matrix_names = [
-                TensorProductionQkCoreInstruction::<E>::name(),
-                TensorProductionShiftCoreInstruction::<E>::name(),
-                TensorProductionSoftmaxCoreInstruction::<E>::name(),
+                TensorProductionQkShiftSoftmaxCoreInstruction::<E>::name(),
                 TensorProductionPvCoreInstruction::<E>::name(),
             ];
             for name in production_matrix_names {
@@ -1957,7 +1940,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .copied()
                 .into_iter()
                 .collect::<Vec<_>>();
-            assert_eq!(production_matrix_chips.len(), 4);
+            assert_eq!(production_matrix_chips.len(), 2);
             let attention_chips = anchor
                 .iter()
                 .copied()
@@ -2097,12 +2080,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             tensor_production_boundary_post_input_configs,
             #[cfg(not(feature = "llama-tiny"))]
             tensor_production_boundary_hidden_output_config,
-            #[cfg(not(feature = "llama-tiny"))]
-            tensor_production_qk_config,
-            #[cfg(not(feature = "llama-tiny"))]
-            tensor_production_shift_config,
-            #[cfg(not(feature = "llama-tiny"))]
-            tensor_production_softmax_config,
+            tensor_production_qk_shift_softmax_config,
             #[cfg(not(feature = "llama-tiny"))]
             tensor_production_pv_config,
             tensor_matmul_ecall_config,
@@ -2328,17 +2306,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         );
         #[cfg(not(feature = "llama-tiny"))]
         {
-            fixed.register_opcode_circuit::<TensorProductionQkCoreInstruction<E>>(
+            fixed.register_opcode_circuit::<TensorProductionQkShiftSoftmaxCoreInstruction<E>>(
                 cs,
-                &self.tensor_production_qk_config,
-            );
-            fixed.register_opcode_circuit::<TensorProductionShiftCoreInstruction<E>>(
-                cs,
-                &self.tensor_production_shift_config,
-            );
-            fixed.register_opcode_circuit::<TensorProductionSoftmaxCoreInstruction<E>>(
-                cs,
-                &self.tensor_production_softmax_config,
+                &self.tensor_production_qk_shift_softmax_config,
             );
             fixed.register_opcode_circuit::<TensorProductionPvCoreInstruction<E>>(
                 cs,
@@ -3147,57 +3117,22 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                             ((call.head_count as usize) << 22) * std::mem::size_of::<u64>(),
                             ((call.head_count as usize) << 11) * std::mem::size_of::<i64>(),
                         );
-                        let qk_cs = cs
-                            .get_cs(&TensorProductionQkCoreInstruction::<E>::name())
-                            .expect("production QK circuit missing");
-                        let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_matrix::assign_production_qk_device::<E>(
-                            &self.tensor_production_qk_config,
+                        let fused_cs = cs
+                            .get_cs(&TensorProductionQkShiftSoftmaxCoreInstruction::<E>::name())
+                            .expect("production fused QK/shift/softmax circuit missing");
+                        let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_softmax::assign_production_qk_shift_softmax_device::<E>(
+                            &self.tensor_production_qk_shift_softmax_config,
                             shard_ctx,
-                            qk_cs.zkvm_v1_css.num_witin as usize,
-                            qk_cs.zkvm_v1_css.num_structural_witin as usize,
-                            shard_steps,
-                            call,
-                            &projected_qkv,
-                        )?;
-                        witness.insert_opcode_assignment::<TensorProductionQkCoreInstruction<E>>(
-                            assignment,
-                            multiplicity,
-                        );
-                        let shift_cs = cs
-                            .get_cs(&TensorProductionShiftCoreInstruction::<E>::name())
-                            .expect("production shift circuit missing");
-                        let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_softmax::assign_production_shift_device::<E>(
-                            &self.tensor_production_shift_config,
-                            shard_ctx,
-                            shift_cs.zkvm_v1_css.num_witin as usize,
-                            shift_cs.zkvm_v1_css.num_structural_witin as usize,
-                            shard_steps,
-                            call,
-                            &attention_derived,
-                        )?;
-                        witness
-                            .insert_opcode_assignment::<TensorProductionShiftCoreInstruction<E>>(
-                                assignment,
-                                multiplicity,
-                            );
-                        let softmax_cs = cs
-                            .get_cs(&TensorProductionSoftmaxCoreInstruction::<E>::name())
-                            .expect("production softmax circuit missing");
-                        let (assignment, multiplicity) = crate::instructions::gpu::chips::production_attention_softmax::assign_production_softmax_device::<E>(
-                            &self.tensor_production_softmax_config,
-                            shard_ctx,
-                            softmax_cs.zkvm_v1_css.num_witin as usize,
-                            softmax_cs.zkvm_v1_css.num_structural_witin as usize,
+                            fused_cs.zkvm_v1_css.num_witin as usize,
+                            fused_cs.zkvm_v1_css.num_structural_witin as usize,
                             shard_steps,
                             call,
                             &projected_qkv,
                             &attention_derived,
                         )?;
-                        witness
-                            .insert_opcode_assignment::<TensorProductionSoftmaxCoreInstruction<E>>(
-                                assignment,
-                                multiplicity,
-                            );
+                        witness.insert_opcode_assignment::<
+                            TensorProductionQkShiftSoftmaxCoreInstruction<E>,
+                        >(assignment, multiplicity);
                         let pv_cs = cs
                             .get_cs(&TensorProductionPvCoreInstruction::<E>::name())
                             .expect("production PV circuit missing");
