@@ -19,6 +19,7 @@ pub enum ZKVMError {
     FixedTraceNotFound(Box<str>),
     VerifyError(Box<str>),
     PCSError(Error),
+    MockProvingComplete,
 }
 
 impl From<UtilError> for ZKVMError {

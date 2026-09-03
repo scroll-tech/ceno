@@ -34,6 +34,7 @@ pub mod cpu;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 pub mod hal;
+pub mod matrix_reduction;
 pub mod prover;
 pub mod scheduler;
 pub mod septic_curve;
@@ -72,7 +73,22 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub tower_proof: TowerProofs<E>,
     pub ecc_proof: Option<EccQuarkProof<E>>,
 
+    /// Optional circuit-owned matrix relation replayed inside this chip's
+    /// existing forked transcript. This does not alter tower/main sumcheck.
+    pub matrix_reduction: Option<MatrixReductionProof<E>>,
+
     pub num_instances: [usize; 2],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct MatrixReductionProof<E: ExtensionField> {
+    pub output_evals: [E; 2],
+    pub sumcheck_proof: Vec<IOPProverMessage<E>>,
+    pub final_evals: [E; 2],
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -110,7 +126,7 @@ impl PublicValues {
     pub fn iter_field<'a, Base: PrimeCharacteristicRing + 'a>(
         &'a self,
     ) -> impl Iterator<Item = Base> + 'a {
-        [
+        let fields = [
             Base::from_u32(self.exit_code & 0xffff),
             Base::from_u32((self.exit_code >> 16) & 0xffff),
             Base::from_u32(self.init_pc),
@@ -122,15 +138,17 @@ impl PublicValues {
             Base::from_u32(self.heap_shard_len),
             Base::from_u32(self.hint_start_addr),
             Base::from_u32(self.hint_shard_len),
-        ]
-        .into_iter()
-        .chain(self.shard_rw_sum.iter().map(|value| Base::from_u32(*value)))
-        .chain(self.public_io_digest.iter().flat_map(|word| {
-            [
-                Base::from_u32(word & 0xffff),
-                Base::from_u32((word >> 16) & 0xffff),
-            ]
-        }))
+        ];
+        let fields = fields
+            .into_iter()
+            .chain(self.shard_rw_sum.iter().map(|value| Base::from_u32(*value)))
+            .chain(self.public_io_digest.iter().flat_map(|word| {
+                [
+                    Base::from_u32(word & 0xffff),
+                    Base::from_u32((word >> 16) & 0xffff),
+                ]
+            }));
+        fields
     }
 
     #[allow(clippy::too_many_arguments)]

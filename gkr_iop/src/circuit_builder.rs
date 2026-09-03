@@ -164,6 +164,11 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub rotations: Vec<(Expression<E>, Expression<E>)>,
     pub rotation_params: Option<RotationParams<E>>,
 
+    /// Optional physical extent for Prefix selectors whose logical witness is
+    /// represented by a rotating instance.  This is set only by circuits that
+    /// explicitly own such a boundary.
+    pub prefix_selector_num_instances: Option<usize>,
+
     // alpha, beta challenge for chip record
     pub chip_record_alpha: Expression<E>,
     pub chip_record_beta: Expression<E>,
@@ -217,6 +222,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             max_non_lc_degree: 0,
             rotations: vec![],
             rotation_params: None,
+            prefix_selector_num_instances: None,
             chip_record_alpha: Expression::Challenge(0, 1, E::ONE, E::ZERO),
             chip_record_beta: Expression::Challenge(1, 1, E::ONE, E::ZERO),
 
@@ -1346,6 +1352,12 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         };
         assert!(self.cs.rotation_params.is_none());
         self.cs.rotation_params = Some(params);
+    }
+
+    pub fn set_prefix_selector_num_instances(&mut self, num_instances: usize) {
+        assert!(num_instances.is_power_of_two() && num_instances > 0);
+        assert!(self.cs.prefix_selector_num_instances.is_none());
+        self.cs.prefix_selector_num_instances = Some(num_instances);
     }
 
     pub fn rotate_and_assert_eq(&mut self, a: Expression<E>, b: Expression<E>) {

@@ -1,18 +1,70 @@
 use super::rv32im::EmuContext;
 use crate::{
-    PC_STEP_SIZE, Program, WORD_SIZE,
+    Cycle, PC_STEP_SIZE, Program, WORD_SIZE,
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     dense_addr_space::PackedMemory,
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
+    tensor::{
+        TensorWitnessProvider,
+        bus::{TensorBusMeta, TensorBusRecord, TensorBusSegment, TensorHandle},
+    },
     tracer::{Change, FullTracer, NativeTraceStep, PreflightTracer, Tracer},
 };
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, ensure};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
 
 pub struct HaltState {
     pub exit_code: u32,
+}
+
+#[cfg(feature = "tensor-cuda")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TensorBusResidentPhase {
+    Imported,
+    Attention,
+    Ffn,
+}
+
+#[cfg(feature = "tensor-cuda")]
+struct TensorBusResidentSession {
+    provider: crate::tensor::resident::TinyResidentCudaProvider,
+    witness: crate::tensor::resident::TinyResidentDeviceWitness,
+    handle: TensorHandle,
+    phase: TensorBusResidentPhase,
+}
+
+#[cfg(feature = "tensor-cuda")]
+struct TensorProductionFullLayerSession {
+    provider: crate::tensor::production_attention_cuda::ProductionFullLayerCudaProvider,
+    witness: crate::tensor::production_attention_cuda::ProductionStageDeviceWitness,
+    handle: TensorHandle,
+    layer: u32,
+    stage: crate::tensor::production_attention::ProductionStage,
+    head_start: u32,
+    head_count: u32,
+    executed: bool,
+    output: Option<Vec<i32>>,
+}
+
+#[cfg(all(feature = "tensor-cuda", target_os = "linux"))]
+fn process_rss_bytes() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status.lines().find_map(|line| {
+                let kib = line.strip_prefix("VmRSS:")?.trim();
+                let kib = kib.strip_suffix("kB")?.trim().parse::<u64>().ok()?;
+                kib.checked_mul(1024)
+            })
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(all(feature = "tensor-cuda", not(target_os = "linux")))]
+fn process_rss_bytes() -> u64 {
+    0
 }
 
 /// An implementation of the machine state and of the side-effects of operations.
@@ -29,6 +81,19 @@ pub struct VMState<T: Tracer = FullTracer> {
     // Termination.
     halt_state: Option<HaltState>,
     committed_public_io: Option<[Word; 8]>,
+    tensor_witness_provider: Option<Arc<dyn TensorWitnessProvider>>,
+    tensor_bus_segment: Option<TensorBusSegment>,
+    /// Descriptor-bound hint window selected by the first internal resident
+    /// operation.  This is routing metadata only until per-tile hint-read AIR
+    /// is introduced; all operations in one segment must nevertheless agree.
+    tensor_bus_hint_base: Option<u32>,
+    tensor_bus_import_cycle: Option<Cycle>,
+    #[cfg(feature = "tensor-cuda")]
+    tensor_bus_resident: Option<TensorBusResidentSession>,
+    #[cfg(feature = "tensor-cuda")]
+    tensor_production_full_layer: Option<TensorProductionFullLayerSession>,
+    next_tensor_bus_segment_id: u64,
+    completed_tensor_bus_records: Vec<TensorBusRecord>,
     tracer: T,
 }
 
@@ -138,6 +203,16 @@ impl<T: Tracer> VMState<T> {
                 .waddr(),
             ),
             registers: [0; VM_REG_COUNT],
+            tensor_witness_provider: None,
+            tensor_bus_segment: None,
+            tensor_bus_hint_base: None,
+            tensor_bus_import_cycle: None,
+            #[cfg(feature = "tensor-cuda")]
+            tensor_bus_resident: None,
+            #[cfg(feature = "tensor-cuda")]
+            tensor_production_full_layer: None,
+            next_tensor_bus_segment_id: 1,
+            completed_tensor_bus_records: Vec::new(),
             halt_state: None,
             committed_public_io: None,
             tracer: T::with_next_accesses(&platform, config, next_accesses),
@@ -173,6 +248,544 @@ impl<T: Tracer> VMState<T> {
     /// The last digest passed to the guest public-I/O commit syscall.
     pub fn committed_public_io(&self) -> Option<[Word; 8]> {
         self.committed_public_io
+    }
+
+    /// Install the deterministic, read-only source used by tensor ecalls.
+    pub fn set_tensor_witness_provider(&mut self, provider: Arc<dyn TensorWitnessProvider>) {
+        self.tensor_witness_provider = Some(provider);
+    }
+
+    pub(crate) fn tensor_witness_provider(&self) -> Option<&dyn TensorWitnessProvider> {
+        self.tensor_witness_provider.as_deref()
+    }
+
+    fn tensor_bus_begin(&mut self, segment_id: u64) -> Result<()> {
+        if self.tensor_bus_segment.is_some() {
+            return Err(anyhow!("TensorBus segment is already active"));
+        }
+        self.tensor_bus_segment = Some(TensorBusSegment::begin(segment_id)?);
+        Ok(())
+    }
+
+    pub(crate) fn tensor_bus_import_begin(
+        &mut self,
+        meta: TensorBusMeta,
+        words: Vec<i32>,
+        import_cycle: Cycle,
+    ) -> Result<(TensorHandle, Vec<TensorBusRecord>)> {
+        let segment_id = self.next_tensor_bus_segment_id;
+        self.next_tensor_bus_segment_id = self
+            .next_tensor_bus_segment_id
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("TensorBus segment id overflow"))?;
+        self.tensor_bus_begin(segment_id)?;
+        self.tensor_bus_import_cycle = Some(import_cycle);
+        self.tensor_bus_import(meta, words)
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_bus_resident_import(
+        &mut self,
+        handle: TensorHandle,
+        words: &[i32],
+    ) -> Result<()> {
+        use crate::tensor::resident::{RESIDENT_WORDS, TinyResidentCudaProvider};
+
+        ensure!(
+            self.tensor_bus_resident.is_none(),
+            "TensorBus CUDA segment is already active"
+        );
+        ensure!(
+            words.len() == RESIDENT_WORDS,
+            "TensorBus CUDA input length mismatch"
+        );
+        let provider = TinyResidentCudaProvider::new(0)?;
+        let witness = provider.import(words)?;
+        self.tensor_bus_resident = Some(TensorBusResidentSession {
+            provider,
+            witness,
+            handle,
+            phase: TensorBusResidentPhase::Imported,
+        });
+        Ok(())
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_bus_resident_apply(
+        &mut self,
+        input: TensorHandle,
+        output: TensorHandle,
+        operator: u32,
+    ) -> Result<()> {
+        let session = self
+            .tensor_bus_resident
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus CUDA operator is outside a segment"))?;
+        ensure!(
+            session.handle == input,
+            "TensorBus CUDA handle continuity mismatch"
+        );
+        match (session.phase, operator) {
+            (TensorBusResidentPhase::Imported, crate::tensor::TENSOR_HANDLE_ATTENTION_V1) => {
+                session.provider.attention(&mut session.witness)?;
+                session.phase = TensorBusResidentPhase::Attention;
+            }
+            (TensorBusResidentPhase::Attention, crate::tensor::TENSOR_HANDLE_FFN_V1) => {
+                session.provider.ffn(&mut session.witness)?;
+                session.phase = TensorBusResidentPhase::Ffn;
+            }
+            (TensorBusResidentPhase::Ffn, crate::tensor::TENSOR_HANDLE_ATTENTION_V1) => {
+                session.provider.attention(&mut session.witness)?;
+                session.phase = TensorBusResidentPhase::Attention;
+            }
+            _ => anyhow::bail!("TensorBus CUDA operator order mismatch"),
+        }
+        session.handle = output;
+        Ok(())
+    }
+
+    #[cfg(all(feature = "tensor-cuda", feature = "llama-tiny"))]
+    pub(crate) fn tensor_bus_resident_apply_v2(
+        &mut self,
+        input: TensorHandle,
+        output: TensorHandle,
+        operator: u32,
+        layer: u32,
+    ) -> Result<Option<crate::tensor::TensorLlamaTinyLayerWitness>> {
+        let session = self
+            .tensor_bus_resident
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus CUDA operator is outside a segment"))?;
+        ensure!(
+            session.handle == input,
+            "TensorBus CUDA handle continuity mismatch"
+        );
+        match (session.phase, operator) {
+            (TensorBusResidentPhase::Imported, crate::tensor::TENSOR_HANDLE_ATTENTION_V1) => {
+                let snapshot = session
+                    .provider
+                    .matmul_2x2(&mut session.witness, true, layer)?;
+                session.phase = TensorBusResidentPhase::Attention;
+                session.handle = output;
+                return Ok(snapshot);
+            }
+            (TensorBusResidentPhase::Attention, crate::tensor::TENSOR_HANDLE_FFN_V1) => {
+                let snapshot = session
+                    .provider
+                    .matmul_2x2(&mut session.witness, false, layer)?;
+                session.phase = TensorBusResidentPhase::Ffn;
+                session.handle = output;
+                return Ok(snapshot);
+            }
+            (TensorBusResidentPhase::Ffn, crate::tensor::TENSOR_HANDLE_ATTENTION_V1) => {
+                let snapshot = session
+                    .provider
+                    .matmul_2x2(&mut session.witness, true, layer)?;
+                session.phase = TensorBusResidentPhase::Attention;
+                session.handle = output;
+                return Ok(snapshot);
+            }
+            _ => anyhow::bail!("TensorBus CUDA v2 operator order mismatch"),
+        }
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_bus_resident_export(&mut self, handle: TensorHandle) -> Result<Vec<i32>> {
+        let mut session = self
+            .tensor_bus_resident
+            .take()
+            .ok_or_else(|| anyhow!("TensorBus CUDA export is outside a segment"))?;
+        ensure!(
+            session.handle == handle,
+            "TensorBus CUDA export handle mismatch"
+        );
+        ensure!(
+            session.phase == TensorBusResidentPhase::Ffn,
+            "TensorBus CUDA export before FFN"
+        );
+        let output = session.provider.export(&mut session.witness)?;
+        let metrics = session.witness.metrics();
+        tracing::info!(
+            h2d_bytes = metrics.h2d_bytes,
+            d2h_bytes = metrics.d2h_bytes,
+            intermediate_h2d_bytes = metrics.intermediate_h2d_bytes,
+            intermediate_d2h_bytes = metrics.intermediate_d2h_bytes,
+            peak_device_bytes = metrics.peak_device_bytes,
+            attention_launches = metrics.attention_launches,
+            ffn_launches = metrics.ffn_launches,
+            "TensorBus resident CUDA segment exported"
+        );
+        Ok(output)
+    }
+
+    pub(crate) fn tensor_bus_import(
+        &mut self,
+        meta: TensorBusMeta,
+        words: Vec<i32>,
+    ) -> Result<(TensorHandle, Vec<TensorBusRecord>)> {
+        let segment = self
+            .tensor_bus_segment
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus import is outside a segment"))?;
+        let start = segment.records().len();
+        let handle = segment.import(meta, words)?;
+        Ok((handle, segment.records()[start..].to_vec()))
+    }
+
+    #[cfg(not(feature = "tensor-cuda"))]
+    pub(crate) fn tensor_bus_export_end(
+        &mut self,
+        handle: TensorHandle,
+    ) -> Result<(Vec<i32>, Vec<TensorBusRecord>)> {
+        let (words, records) = self.tensor_bus_export(handle)?;
+        self.tensor_bus_end()?;
+        Ok((words, records))
+    }
+
+    pub(crate) fn tensor_bus_export(
+        &mut self,
+        handle: TensorHandle,
+    ) -> Result<(Vec<i32>, Vec<TensorBusRecord>)> {
+        let segment = self
+            .tensor_bus_segment
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus export is outside a segment"))?;
+        let start = segment.records().len();
+        let words = segment.export(handle)?;
+        let records = segment.records()[start..].to_vec();
+        Ok((words, records))
+    }
+
+    pub(crate) fn tensor_bus_current_import_cycle(&self) -> Result<Cycle> {
+        self.tensor_bus_import_cycle
+            .ok_or_else(|| anyhow!("TensorBus segment import cycle is unavailable"))
+    }
+
+    pub(crate) fn tensor_bus_apply<F>(
+        &mut self,
+        input: TensorHandle,
+        meta: TensorBusMeta,
+        operator: u32,
+        hint_base: u32,
+        transform: F,
+    ) -> Result<(TensorHandle, Vec<TensorBusRecord>)>
+    where
+        F: FnOnce(&[i32]) -> Result<Vec<i32>>,
+    {
+        ensure!(
+            self.platform.hints.contains(&hint_base),
+            "TensorBus hint base is outside the guest hint region"
+        );
+        match self.tensor_bus_hint_base {
+            Some(active) => ensure!(
+                active == hint_base,
+                "TensorBus resident operators changed hint base within a segment"
+            ),
+            None => self.tensor_bus_hint_base = Some(hint_base),
+        }
+        let segment = self
+            .tensor_bus_segment
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus operator is outside a segment"))?;
+        let start = segment.records().len();
+        let handle = segment.apply(input, meta, operator, transform)?;
+        Ok((handle, segment.records()[start..].to_vec()))
+    }
+
+    pub(crate) fn tensor_bus_apply_v2<F>(
+        &mut self,
+        input: TensorHandle,
+        meta: TensorBusMeta,
+        operator: u32,
+        transform: F,
+    ) -> Result<(
+        TensorHandle,
+        Vec<TensorBusRecord>,
+        Vec<i32>,
+        Vec<i32>,
+        Cycle,
+    )>
+    where
+        F: FnOnce(&[i32]) -> Result<Vec<i32>>,
+    {
+        let import_cycle = self
+            .tensor_bus_import_cycle
+            .ok_or_else(|| anyhow!("TensorBus v2 operator is outside a segment"))?;
+        let segment = self
+            .tensor_bus_segment
+            .as_mut()
+            .ok_or_else(|| anyhow!("TensorBus operator is outside a segment"))?;
+        let start = segment.records().len();
+        let (handle, input_words, output_words) =
+            segment.apply_with_values(input, meta, operator, transform)?;
+        Ok((
+            handle,
+            segment.records()[start..].to_vec(),
+            input_words,
+            output_words,
+            import_cycle,
+        ))
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_production_stage_import(
+        &mut self,
+        handle: TensorHandle,
+        layer: u32,
+        stage: crate::tensor::production_attention::ProductionStage,
+        head_start: u32,
+        head_count: u32,
+        input: &[i32],
+    ) -> Result<()> {
+        ensure!(
+            self.tensor_production_full_layer.is_none(),
+            "production full-layer CUDA segment is already active"
+        );
+        let provider =
+            crate::tensor::production_attention_cuda::ProductionFullLayerCudaProvider::new(0)?;
+        let started = std::time::Instant::now();
+        let witness = provider.import_stage(stage, head_start, head_count, input)?;
+        let metrics = witness.metrics();
+        self.tensor_production_full_layer = Some(TensorProductionFullLayerSession {
+            provider,
+            witness,
+            handle,
+            layer,
+            stage,
+            head_start,
+            head_count,
+            executed: false,
+            output: None,
+        });
+        let session = self.tensor_production_full_layer.as_ref().unwrap();
+        let provider_id = format!("{:p}", &session.provider);
+        let witness_id = format!("{:p}", &session.witness);
+        let thread_id = format!("{:?}", std::thread::current().id());
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "production_provider_import_stage",
+            %provider_id,
+            %witness_id,
+            %thread_id,
+            ?stage,
+            head_start,
+            head_count,
+            input_words = input.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            activation_h2d_bytes = metrics.activation_h2d_bytes,
+            "production provider import_stage complete"
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_production_stage_execute(
+        &mut self,
+        input: TensorHandle,
+        import_cycle: u64,
+        layer: u32,
+        stage: crate::tensor::production_attention::ProductionStage,
+        head_start: u32,
+        head_count: u32,
+    ) -> Result<(
+        Vec<i32>,
+        Vec<crate::tensor::production_attention::ProductionFullLayerOperationRecord>,
+    )> {
+        let session = self
+            .tensor_production_full_layer
+            .as_mut()
+            .ok_or_else(|| anyhow!("production full-layer CUDA operator is outside a segment"))?;
+        ensure!(session.handle == input, "production stage handle mismatch");
+        if session.stage == crate::tensor::production_attention::ProductionStage::Projection
+            && stage == crate::tensor::production_attention::ProductionStage::Attention
+            && session.executed
+        {
+            session.provider.transition_to_attention(
+                &mut session.witness,
+                head_start,
+                head_count,
+            )?;
+            session.stage = stage;
+            session.executed = false;
+            session.output = None;
+        }
+        ensure!(
+            (
+                session.layer,
+                session.stage,
+                session.head_start,
+                session.head_count
+            ) == (layer, stage, head_start, head_count),
+            "production stage descriptor changed within its atomic segment"
+        );
+        ensure!(!session.executed, "production stage executed twice");
+        let execute_started = std::time::Instant::now();
+        session
+            .provider
+            .execute_stage(&mut session.witness, layer)?;
+        let execute_metrics = session.witness.metrics();
+        let provider_id = format!("{:p}", &session.provider);
+        let witness_id = format!("{:p}", &session.witness);
+        let thread_id = format!("{:?}", std::thread::current().id());
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "production_provider_execute_stage",
+            %provider_id,
+            %witness_id,
+            %thread_id,
+            ?stage,
+            head_start,
+            head_count,
+            elapsed_ms = execute_started.elapsed().as_millis(),
+            qk_launches = execute_metrics.qk_launches,
+            softmax_launches = execute_metrics.softmax_launches,
+            pv_launches = execute_metrics.pv_launches,
+            rms_launches = execute_metrics.rms_launches,
+            projection_tile_launches = execute_metrics.projection_tile_launches,
+            rope_launches = execute_metrics.rope_launches,
+            residual_launches = execute_metrics.residual_launches,
+            swiglu_launches = execute_metrics.swiglu_launches,
+            "production provider execute_stage complete"
+        );
+        let mut records = session.witness.operation_records().to_vec();
+        for record in &mut records {
+            record.import_cycle = import_cycle;
+        }
+        session.executed = true;
+        let export_started = std::time::Instant::now();
+        let values = session.provider.export_stage(&mut session.witness)?;
+        let thread_id = format!("{:?}", std::thread::current().id());
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "production_provider_export_stage",
+            %provider_id,
+            %witness_id,
+            %thread_id,
+            ?stage,
+            head_start,
+            head_count,
+            output_words = values.len(),
+            elapsed_ms = export_started.elapsed().as_millis(),
+            "production provider export_stage complete"
+        );
+        session.output = Some(values.clone());
+        Ok((values, records))
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_production_stage_bind_output(
+        &mut self,
+        output: TensorHandle,
+    ) -> Result<()> {
+        let session = self
+            .tensor_production_full_layer
+            .as_mut()
+            .ok_or_else(|| anyhow!("production stage CUDA operator is outside a segment"))?;
+        ensure!(
+            session.executed,
+            "production stage output precedes execution"
+        );
+        session.handle = output;
+        Ok(())
+    }
+
+    #[cfg(feature = "tensor-cuda")]
+    pub(crate) fn tensor_production_stage_export(
+        &mut self,
+        handle: TensorHandle,
+    ) -> Result<Vec<i32>> {
+        let mut session = self
+            .tensor_production_full_layer
+            .take()
+            .ok_or_else(|| anyhow!("production full-layer CUDA export is outside a segment"))?;
+        ensure!(
+            session.handle == handle,
+            "production full-layer export handle mismatch"
+        );
+        ensure!(
+            session.executed,
+            "production full-layer export precedes execution"
+        );
+        let output = session
+            .output
+            .take()
+            .ok_or_else(|| anyhow!("production stage output was not materialized"))?;
+        let metrics = session.witness.metrics();
+        let provider_id = format!("{:p}", &session.provider);
+        let witness_id = format!("{:p}", &session.witness);
+        let thread_id = format!("{:?}", std::thread::current().id());
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "production_provider_metrics",
+            %provider_id,
+            %witness_id,
+            %thread_id,
+            setup_h2d_bytes = metrics.setup_h2d_bytes,
+            activation_h2d_bytes = metrics.activation_h2d_bytes,
+            activation_d2h_bytes = metrics.activation_d2h_bytes,
+            intermediate_h2d_bytes = metrics.intermediate_h2d_bytes,
+            intermediate_d2h_bytes = metrics.intermediate_d2h_bytes,
+            qk_launches = metrics.qk_launches,
+            softmax_launches = metrics.softmax_launches,
+            pv_launches = metrics.pv_launches,
+            rms_launches = metrics.rms_launches,
+            projection_tile_launches = metrics.projection_tile_launches,
+            rope_launches = metrics.rope_launches,
+            residual_launches = metrics.residual_launches,
+            swiglu_launches = metrics.swiglu_launches,
+            allocated_bytes = metrics.allocated_bytes,
+            high_water_bytes = metrics.high_water_bytes,
+            minimum_free_bytes = metrics.minimum_free_bytes,
+            "production stage CUDA segment exported"
+        );
+        drop(session);
+        let (cuda_free_bytes, cuda_total_bytes) =
+            cudarc::driver::result::mem_get_info().unwrap_or_default();
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "production_provider_drop",
+            %provider_id,
+            %witness_id,
+            %thread_id,
+            rss_bytes = process_rss_bytes(),
+            cuda_used_bytes = cuda_total_bytes.saturating_sub(cuda_free_bytes),
+            cuda_free_bytes,
+            cuda_total_bytes,
+            "production provider session dropped"
+        );
+        Ok(output)
+    }
+
+    pub(crate) fn tensor_bus_end(&mut self) -> Result<()> {
+        let started = std::time::Instant::now();
+        let segment = self
+            .tensor_bus_segment
+            .take()
+            .ok_or_else(|| anyhow!("TensorBus segment is not active"))?;
+        let records = segment.end()?;
+        let record_count = records.len();
+        self.completed_tensor_bus_records.extend(records);
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "tensor_bus_record_assembly",
+            record_count,
+            completed_record_count = self.completed_tensor_bus_records.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "TensorBus record assembly complete"
+        );
+        self.tensor_bus_hint_base = None;
+        self.tensor_bus_import_cycle = None;
+        #[cfg(feature = "tensor-cuda")]
+        ensure!(
+            self.tensor_bus_resident.is_none(),
+            "TensorBus CUDA segment was not exported"
+        );
+        #[cfg(feature = "tensor-cuda")]
+        ensure!(
+            self.tensor_production_full_layer.is_none(),
+            "production full-layer CUDA segment was not exported"
+        );
+        Ok(())
     }
 
     pub fn tracer(&self) -> &T {
@@ -318,6 +931,20 @@ impl<T: Tracer> VMState<T> {
 
     fn apply_syscall(&mut self, mut effects: SyscallEffects) -> Result<()> {
         let cycle = self.tracer.cycle() + T::SUBCYCLE_MEM;
+        let memory_op_count = effects.iter_mem_values().count();
+        let memory_apply_started = std::time::Instant::now();
+        for range in effects.iter_mem_access_ranges() {
+            for addr in range.clone() {
+                let value = self.peek_memory(addr);
+                let previous_cycle = self
+                    .memory
+                    .access(addr, cycle, Some(value))
+                    .unwrap_or_else(|| panic!("addr {addr:?} outside dense memory layout"))
+                    .1;
+                self.tracer
+                    .store_memory(addr, Change::new(value, value), previous_cycle);
+            }
+        }
         for op in effects.iter_mem_ops_mut() {
             let addr = op.addr;
             let previous_cycle = if self.tracer.track_memory_accesses() {
@@ -333,6 +960,13 @@ impl<T: Tracer> VMState<T> {
             };
             op.previous_cycle = previous_cycle;
         }
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "vm_apply_syscall_memory_ops",
+            mem_ops = memory_op_count,
+            elapsed_ms = memory_apply_started.elapsed().as_millis(),
+            "VM syscall memory operations applied"
+        );
 
         for (idx, value) in effects.iter_reg_values() {
             self.registers[idx as usize] = value;

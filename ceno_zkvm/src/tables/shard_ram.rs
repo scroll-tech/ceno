@@ -43,10 +43,13 @@ use crate::{instructions::riscv::constants::UInt, scheme::constants::SEPTIC_EXTE
 
 pub(crate) const Y6_LO_TOP_BYTE_LT_BOUND: u64 = 60;
 
-fn shard_ram_ec_point_record<E: ExtensionField>(x: &[WitIn], y: &[WitIn]) -> Vec<Expression<E>> {
+fn shard_ram_ec_point_record<E: ExtensionField>(
+    x: impl IntoIterator<Item = Expression<E>>,
+    y: &[WitIn],
+) -> Vec<Expression<E>> {
     [CustomRWTag::ShardRamEcPoint.expr::<E>()]
         .into_iter()
-        .chain(x.iter().map(|w| w.expr()))
+        .chain(x)
         .chain(y.iter().map(|w| w.expr()))
         .collect()
 }
@@ -193,6 +196,8 @@ pub struct ShardRamConfig<E: ExtensionField> {
     // s.t. local offline memory checking can cancel out
     // serves as propagating local write to global.
     pub(crate) is_global_write: WitIn,
+    // Aliases the first seven final Poseidon output columns; these are not
+    // separately allocated witnesses.
     pub(crate) x: Vec<WitIn>,
     pub(crate) y: Vec<WitIn>,
     // Byte limbs of `y6_lo`, the helper that binds `y[SEPTIC_EXTENSION_DEGREE - 1]`
@@ -204,9 +209,6 @@ pub struct ShardRamConfig<E: ExtensionField> {
 impl<E: ExtensionField> ShardRamConfig<E> {
     // TODO: make `WIDTH`, `HALF_FULL_ROUNDS`, `PARTIAL_ROUNDS` generic parameters
     pub fn configure(cb: &mut CircuitBuilder<E>) -> Result<Self, CircuitBuilderError> {
-        let x: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
-            .map(|i| cb.create_witin(|| format!("x{}", i)))
-            .collect();
         let y: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
             .map(|i| cb.create_witin(|| format!("y{}", i)))
             .collect();
@@ -226,6 +228,16 @@ impl<E: ExtensionField> ShardRamConfig<E> {
 
         let rc = <E::BaseField as PoseidonField>::get_default_perm_rc().into();
         let perm_config = Poseidon2Config::construct(cb, rc);
+        let poseidon_output = perm_config.output();
+        let x = poseidon_output
+            .iter()
+            .take(SEPTIC_EXTENSION_DEGREE)
+            .map(|expr| match expr {
+                Expression::WitIn(id) => WitIn { id: *id },
+                _ => panic!("Poseidon2 final output must be a witness column"),
+            })
+            .collect_vec();
+        assert_eq!(x.len(), SEPTIC_EXTENSION_DEGREE);
 
         let mut input = vec![];
         input.push(addr.expr());
@@ -270,7 +282,13 @@ impl<E: ExtensionField> ShardRamConfig<E> {
             cb.rlc_chip_record(record),
         )?;
 
-        let ec_point_record = shard_ram_ec_point_record(&x, &y);
+        let ec_point_record = shard_ram_ec_point_record(
+            poseidon_output
+                .iter()
+                .take(SEPTIC_EXTENSION_DEGREE)
+                .cloned(),
+            &y,
+        );
         cb.read_record(
             || "shard_ram_ec_point_in",
             RAMType::Custom,
@@ -282,13 +300,10 @@ impl<E: ExtensionField> ShardRamConfig<E> {
             ec_point_record,
         )?;
 
-        // enforces x = poseidon2([addr, ram_type, value[0], value[1], shard, global_clk, nonce, 0, ..., 0])
+        // The EC x-coordinate is the first seven Poseidon2 outputs directly.
         for (input_expr, hasher_input) in input.into_iter().zip_eq(perm_config.inputs().into_iter())
         {
             cb.require_equal(|| "poseidon2 input", input_expr, hasher_input)?;
-        }
-        for (xi, hasher_output) in x.iter().zip(perm_config.output().into_iter()) {
-            cb.require_equal(|| "x = poseidon2's output", xi.expr(), hasher_output)?;
         }
 
         // Bind the sign of y[SEPTIC_EXTENSION_DEGREE - 1] (call it y6) to
@@ -367,7 +382,7 @@ impl<E: ExtensionField> ShardRamEcTreeConfig<E> {
             .map(|i| cb.create_witin(|| format!("slope{i}")))
             .collect();
 
-        let ec_point_record = shard_ram_ec_point_record(&x, &y);
+        let ec_point_record = shard_ram_ec_point_record(x.iter().map(|w| w.expr()), &y);
         cb.read_record(
             || "shard_ram_ec_point_in",
             RAMType::Custom,
@@ -461,10 +476,9 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
         let ECPoint { nonce, point } = &input.ec_point;
         set_val!(instance, config.nonce, *nonce as u64);
         config
-            .x
+            .y
             .iter()
-            .chain(config.y.iter())
-            .zip_eq((point.x.deref()).iter().chain((point.y.deref()).iter()))
+            .zip_eq(point.y.deref().iter())
             .for_each(|(witin, fe)| {
                 instance[witin.id as usize] = *fe;
             });
@@ -1611,6 +1625,7 @@ mod tests {
                 .unwrap();
         let num_witin = cb.cs.num_witin as usize;
         let num_structural = cb.cs.num_structural_witin as usize;
+        assert_eq!(num_witin, 364, "ShardRAM leaf witness width");
         // Pass a concrete challenge so `assert_with_expected_errors` routes
         // through `run_with_challenge`; the no-challenge `run` path drops
         // `structural_witin` and ShardRam relies on `selector_zero` to gate
@@ -1646,6 +1661,12 @@ mod tests {
                 &honest,
             )
             .unwrap();
+            for (x_col, expected) in config.x.iter().zip_eq(ec.point.x.iter()) {
+                assert_eq!(
+                    honest_witness[0][0][x_col.id as usize], *expected,
+                    "EC x must be the matching final Poseidon output"
+                );
+            }
             MockProver::<E>::assert_satisfied_raw(&cb, honest_witness, &[], Some(challenge), None);
 
             // Tampered row: negate the EC point. `assign_instance` re-derives

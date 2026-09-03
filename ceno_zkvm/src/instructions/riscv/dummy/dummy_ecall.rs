@@ -157,10 +157,10 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
 
 #[derive(Debug)]
 pub struct LargeEcallConfig<E: ExtensionField> {
-    dummy_insn: DummyConfig<E>,
+    pub(crate) dummy_insn: DummyConfig<E>,
 
-    reg_writes: Vec<(UInt<E>, WriteRD<E>)>,
+    pub(crate) reg_writes: Vec<(UInt<E>, WriteRD<E>)>,
 
-    start_addr: Option<WitIn>,
-    mem_writes: Vec<(WitIn, Change<UInt<E>>, WriteMEM)>,
+    pub(crate) start_addr: Option<WitIn>,
+    pub(crate) mem_writes: Vec<(WitIn, Change<UInt<E>>, WriteMEM)>,
 }

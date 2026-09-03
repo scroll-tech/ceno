@@ -13,11 +13,15 @@ use crate::{
             DeviceProvingKey, MainSumcheckEvals, ProofInput, RotationProverOutput, TowerProverSpec,
         },
         utils::{
-            GkrOutputStageMask, assign_group_evals, derive_ecc_bridge_claims,
-            extract_ecc_quark_witness_inputs, first_layer_output_group_stage_masks,
-            first_layer_selector_contexts, split_rotation_evals,
+            GkrOutputStageMask, assign_group_evals, assign_matrix_group_evals,
+            derive_ecc_bridge_claims, extract_ecc_quark_witness_inputs,
+            first_layer_output_group_stage_masks, first_layer_selector_contexts,
+            matrix_selector_corrections, split_rotation_evals,
         },
-        verifier::eval_batched_main_frontload_terms,
+        verifier::{
+            eval_batched_main_frontload_mle, eval_batched_main_frontload_terms,
+            frontload_constant_term_scale,
+        },
     },
     structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
@@ -122,18 +126,34 @@ fn expect_jagged_pcs_data(pcs_data: &GpuPcsData) -> &GpuJaggedPcsData {
 
 fn jagged_trace_layouts<T>(traces: &[witness::RowMajorMatrix<T>]) -> Vec<GpuJaggedTraceLayout>
 where
-    T: FieldAlgebra + Default + Sync + Clone + Send + Copy,
+    T: FieldAlgebra + Default + Sync + Clone + Send + Copy + 'static,
 {
     let mut first_poly_idx = 0usize;
+    let mut first_flat_elem = 0usize;
     traces
         .iter()
         .map(|trace| {
+            let physical_rows = jagged_trace_physical_rows(trace);
+            let flat_elems = physical_rows
+                .checked_mul(trace.width())
+                .expect("Jagged trace flat range overflow");
+            let column_flat_ranges = (0..trace.width())
+                .map(|column| {
+                    let start = first_flat_elem + column * physical_rows;
+                    start..start + physical_rows
+                })
+                .collect();
             let layout = GpuJaggedTraceLayout {
                 first_poly_idx,
                 num_polys: trace.width(),
                 num_vars: trace.num_vars(),
+                first_flat_elem,
+                physical_rows,
+                flat_range: first_flat_elem..first_flat_elem + flat_elems,
+                column_flat_ranges,
             };
             first_poly_idx += trace.width();
+            first_flat_elem += flat_elems;
             layout
         })
         .collect()
@@ -237,7 +257,7 @@ pub fn log_gpu_pool_usage(label: &str) {
         mb(used_bytes as usize),
         mb(reserved_bytes as usize),
     );
-    tracing::info!("{}", message);
+    tracing::info!(target: "ceno_pipeline", "{}", message);
 }
 
 pub fn log_gpu_device_state(label: &str) {
@@ -263,7 +283,33 @@ pub fn log_gpu_device_state(label: &str) {
         mb(booked_bytes as usize),
         mb(max_bytes as usize),
     );
-    tracing::info!("{}", message);
+    tracing::info!(target: "ceno_pipeline", "{}", message);
+}
+
+/// Non-assertive memory snapshot for opt-in production-path profiling.
+pub fn log_gpu_profile_boundary(circuit: &str, phase: &str, elapsed_ms: u128) {
+    if std::env::var("CENO_GPU_PROFILE_BOUNDARIES").as_deref() != Ok("1") {
+        return;
+    }
+    let cuda_hal = get_cuda_hal().expect("cuda hal must exist for GPU profiling");
+    let pool = cuda_hal.inner.mem_pool();
+    let pool_used_bytes = pool.get_used_size().unwrap_or(0);
+    let pool_reserved_bytes = pool.get_reserved_size().unwrap_or(0);
+    let pool_booked_bytes = pool.get_booked_total();
+    let (cuda_free_bytes, cuda_total_bytes) = get_cuda_mem_info().unwrap_or((0, 0));
+    tracing::info!(
+        target: "ceno_gpu_profile",
+        circuit,
+        phase,
+        elapsed_ms,
+        pool_used_bytes,
+        pool_reserved_bytes,
+        pool_booked_bytes,
+        cuda_used_bytes = cuda_total_bytes.saturating_sub(cuda_free_bytes),
+        cuda_free_bytes,
+        cuda_total_bytes,
+        "GPU profile boundary"
+    );
 }
 use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};
 use gkr_iop::{
@@ -1430,10 +1476,34 @@ where
         preprocessed.cumulative_heights.clone(),
         preprocessed.reshape_log_height,
     );
+    let q_bytes = preprocessed
+        .q_device_evals
+        .as_ref()
+        .map(Buffer::len)
+        .unwrap_or(preprocessed.q_host_evals.len())
+        * std::mem::size_of::<BB31Base>();
     let (q_evals, q_host_evals) = jagged_q_storage(
         cuda_hal,
         preprocessed.q_host_evals,
         preprocessed.q_device_evals,
+    );
+    match get_gpu_cache_level() {
+        CacheLevel::None => {
+            assert!(q_evals.is_none(), "cache-none Jagged retained device q'");
+            assert!(q_host_evals.is_some(), "cache-none Jagged lost host q'");
+        }
+        CacheLevel::Trace | CacheLevel::Full => {
+            assert!(q_evals.is_some(), "cache-full Jagged lost flat device q'");
+            assert!(q_host_evals.is_none(), "cache-full Jagged retained host q'");
+        }
+    }
+    tracing::info!(
+        target: "ceno_pipeline",
+        q_bytes,
+        device_owner = q_evals.is_some(),
+        host_owner = q_host_evals.is_some(),
+        segmented_owners = 0usize,
+        "Jagged flat q' ownership retained"
     );
     (
         GpuPcsData::Jagged(GpuJaggedPcsData {
@@ -1473,7 +1543,11 @@ where
         .map(|rmm| ceil_log2(rmm.height()))
         .max()
         .unwrap();
-    if max_poly_size_log2 > prover.backend.max_poly_size_log2 {
+    let is_jagged_pcs = is_babybear_jagged_pcs::<E, PCS>();
+    // Jagged commits one flat q' after reshaping it to the inner PCS message
+    // height. Individual source polynomials may therefore be taller than the
+    // trimmed inner PCS, while direct Basefold polynomials may not.
+    if !is_jagged_pcs && max_poly_size_log2 > prover.backend.max_poly_size_log2 {
         panic!(
             "max_poly_size_log2 {} > max_poly_size_log2 backend {}",
             max_poly_size_log2, prover.backend.max_poly_size_log2
@@ -1482,7 +1556,6 @@ where
 
     let is_basefold_pcs = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()
         == std::mem::size_of::<PCS::CommitmentWithWitness>();
-    let is_jagged_pcs = is_babybear_jagged_pcs::<E, PCS>();
     if !is_basefold_pcs && !is_jagged_pcs {
         panic!("GPU commitment data is not compatible with the PCS");
     }
@@ -1552,9 +1625,55 @@ where
             .min(ceil_log2(total_size.max(1)));
         let (preprocessed, inner_pcs_data) =
             jagged_batch_commit_from_host(&cuda_hal, &traces_bb31, reshape_log_height, true);
+        cuda_hal
+            .inner
+            .synchronize()
+            .expect("synchronize flat Jagged commitment construction");
+        let transient_used_bytes = cuda_hal
+            .inner
+            .mem_pool()
+            .get_used_size()
+            .expect("query flat Jagged commitment transient bytes");
+        let flat_q_bytes = preprocessed
+            .q_device_evals
+            .as_ref()
+            .map(Buffer::len)
+            .unwrap_or(preprocessed.q_host_evals.len())
+            * std::mem::size_of::<BB31Base>();
+        let source_bytes = total_size * std::mem::size_of::<BB31Base>();
+        tracing::info!(
+            target: "ceno_pipeline",
+            flat_q_bytes,
+            source_bytes,
+            transient_used_bytes,
+            "Jagged flat q' commitment constructed"
+        );
         for trace in &mut traces_bb31 {
             trace.clear_device_backing();
         }
+        assert!(
+            traces_bb31.iter().all(|trace| !trace.has_device_backing()),
+            "Jagged source trace backing survived flat commitment construction"
+        );
+        cuda_hal
+            .inner
+            .synchronize()
+            .expect("synchronize Jagged source trace release");
+        let retained_used_bytes = cuda_hal
+            .inner
+            .mem_pool()
+            .get_used_size()
+            .expect("query retained flat Jagged bytes");
+        tracing::info!(
+            target: "ceno_pipeline",
+            flat_q_bytes,
+            source_bytes,
+            transient_used_bytes,
+            retained_used_bytes,
+            source_backings = 0usize,
+            segmented_owners = 0usize,
+            "Jagged source traces released after flat commitment"
+        );
         let (pcs_data, commit) =
             finish_jagged_commit::<E, PCS>(&cuda_hal, preprocessed, inner_pcs_data, trace_layouts);
         return (vec![], pcs_data, commit);
@@ -1598,6 +1717,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
     ) {
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
             panic!("GPU backend only supports BabyBear base field");
+        }
+
+        let trace_ownership_debug = std::env::var_os("CENO_GPU_TRACE_OWNERSHIP").is_some();
+        if trace_ownership_debug {
+            for (physical_trace_idx, (circuit_idx, trace)) in traces.iter().enumerate() {
+                tracing::info!(
+                    target: "ceno_gpu::basefold_ownership",
+                    physical_trace_idx,
+                    circuit_idx,
+                    logical_rows = trace.num_instances(),
+                    physical_rows = trace.height(),
+                    width = trace.width(),
+                    query_dim = trace.num_vars(),
+                    "[basefold ownership] commit trace range/view"
+                );
+            }
         }
 
         let span = entered_span!("[gpu] init pp", profiling_2 = true);
@@ -1856,6 +1991,12 @@ where
     let num_vars = num_vars.unwrap_or(layout.num_vars);
     let elem_size = std::mem::size_of::<BB31Base>();
     let logical_len = 1usize << num_vars;
+    if !matches!(get_gpu_cache_level(), CacheLevel::None) {
+        assert!(
+            pcs_data.q_evals.is_some() && pcs_data.q_host_evals.is_none(),
+            "cache-full Jagged witness extraction requires the sole retained flat q' device owner"
+        );
+    }
 
     (0..layout.num_polys)
         .map(|col_idx| {
@@ -1869,6 +2010,19 @@ where
             let gpu_buffer = if let Some(q_evals) = &pcs_data.q_evals {
                 let start = start_elem * elem_size;
                 let end = start + len * elem_size;
+                assert!(
+                    end <= q_evals.len() * elem_size,
+                    "Jagged witness flat q' subrange exceeds committed ordering"
+                );
+                tracing::debug!(
+                    target: "ceno_pipeline",
+                    trace_idx,
+                    col_idx,
+                    start_elem,
+                    len,
+                    num_vars,
+                    "Jagged witness MLE is an exact flat q' subrange view"
+                );
                 q_evals.owned_subrange(start..end)
             } else if let Some(q_host) = pcs_data.q_host_evals.as_ref() {
                 let cuda_hal = get_cuda_hal().unwrap();
@@ -2078,7 +2232,7 @@ where
 }
 
 pub fn extract_witness_mles_for_trace_rmm<'a, E>(
-    witness_rmm: witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    witness_rmm: &witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
 ) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
 where
     E: ExtensionField,
@@ -2258,7 +2412,6 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
 
     let active_row_vars = input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
     let active_rows = 1usize << active_row_vars;
-
     let interleave_group_to_chunks = |group: &[ArcMultilinearExtensionGpu<'static, E>],
                                       num_limbs: usize,
                                       default: BB31Ext,
@@ -2627,6 +2780,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             num_var_with_rotation: usize,
             pi: Vec<Either<E::BaseField, E>>,
             alpha_start: usize,
+            grouped_claim_evals: Vec<Vec<E>>,
         }
 
         struct HostCommonGroup {
@@ -2687,6 +2841,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                             )
                         });
                 }
+            } else if job.circuit_name.starts_with("TensorProductionBoundary") {
+                assert!(
+                    job.structural_rmm.is_none(),
+                    "boundary main retained structural RMM"
+                );
+                let expected = [
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX_23,
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO,
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO,
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO,
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_ONE,
+                ];
+                assert!(
+                    job.input
+                        .structural_witness
+                        .iter()
+                        .zip(expected)
+                        .all(|(mle, kind)| mle.virtual_formula_kind() == Some(kind))
+                );
             }
         }
         let mut selector_eqs_by_chip = Vec::with_capacity(jobs.len());
@@ -2746,6 +2919,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 );
             }
 
+            if let Some(claims) = job.matrix_claims.as_ref() {
+                assign_matrix_group_evals(first_layer, &mut out_evals, claims)
+                    .expect("invalid matrix first-layer groups");
+            }
+
             if let Some(ecc_proof) = job.ecc_proof.as_ref() {
                 let Some(
                     [
@@ -2798,15 +2976,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 .out_sel_and_eval_exprs
                 .iter()
                 .map(|(_, out_eval_exprs)| {
-                    out_eval_exprs
+                    let evals = out_eval_exprs
+                        .iter()
+                        .map(|out_eval| out_eval.evaluate(&out_evals, &job.challenges).eval)
+                        .collect_vec();
+                    let point = out_eval_exprs
                         .first()
-                        .map(|out_eval| out_eval.evaluate(&out_evals, &job.challenges).point)
+                        .map(|out_eval| out_eval.evaluate(&out_evals, &job.challenges).point);
+                    (evals, point)
                 })
                 .collect_vec();
             let selector_eq_pairs = first_layer
                 .out_sel_and_eval_exprs
                 .iter()
-                .zip(eval_and_dedup_points.iter())
+                .zip(eval_and_dedup_points.iter().map(|(_, point)| point))
                 .zip(selector_ctxs.iter())
                 .filter_map(|(((sel_type, _), point), selector_ctx)| {
                     let eq = gkr_iop::gkr::layer::gpu::utils::build_eq_x_r_with_sel_gpu(
@@ -2848,6 +3031,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 num_var_with_rotation,
                 pi: job.input.pi.clone(),
                 alpha_start: total_exprs,
+                grouped_claim_evals: eval_and_dedup_points
+                    .into_iter()
+                    .map(|(evals, _)| evals)
+                    .collect(),
             });
             total_mles += num_mles;
             total_exprs += first_layer.exprs.len();
@@ -2890,6 +3077,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             )
             .collect_vec();
             let common_plan = chip.layer.main_sumcheck_expression_common_factored.as_ref();
+            let full_monomial_terms = chip
+                .layer
+                .main_sumcheck_expression_monomial_terms
+                .as_ref()
+                .unwrap();
             let monomial_terms = match (
                 common_plan,
                 chip.layer
@@ -2901,18 +3093,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     panic!("common factoring plan present without residual monomials")
                 }
                 (None, Some(terms)) => terms,
-                (None, None) => chip
-                    .layer
-                    .main_sumcheck_expression_monomial_terms
-                    .as_ref()
-                    .unwrap(),
+                (None, None) => full_monomial_terms,
             };
+            assert_eq!(
+                monomial_terms.len(),
+                full_monomial_terms.len(),
+                "factored and full main monomial layouts must match"
+            );
             let term_start = term_coefficients.len();
-            for term in monomial_terms {
-                let scalar =
+            for (term_idx, term) in monomial_terms.iter().enumerate() {
+                let mut scalar =
                     eval_by_expr_constant(&chip.pi, &main_sumcheck_challenges, &term.scalar)
                         .map_either(E::from, |v| v)
                         .into_inner();
+                if full_monomial_terms[term_idx].product.is_empty() {
+                    scalar *= frontload_constant_term_scale::<E>(
+                        max_num_variables,
+                        chip.num_var_with_rotation,
+                    );
+                }
                 term_coefficients.push(scalar);
                 let indices = term
                     .product
@@ -2933,6 +3132,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     mle_size_info.push((0, 0));
                 }
             }
+            let correction_term_indices = matrix_selector_corrections(
+                chip.layer,
+                &chip.grouped_claim_evals,
+                &alpha_pows[chip.alpha_start..chip.alpha_start + chip.layer.exprs.len()],
+            )
+            .expect("invalid matrix first-layer correction layout")
+            .into_iter()
+            .map(|(wit_id, coefficient)| {
+                let mle_idx = chip.mle_start + chip.layer.n_witin + chip.layer.n_fixed + wit_id;
+                let term_idx = term_coefficients.len();
+                term_coefficients.push(coefficient);
+                mle_indices_per_term.push(vec![mle_idx]);
+                let num_vars = all_witins_gpu[mle_idx].mle.num_vars();
+                mle_size_info.push((num_vars, num_vars));
+                u32::try_from(term_idx).expect("term index exceeds supported range for GPU plan")
+            })
+            .collect_vec();
             let mut covered_terms = vec![false; monomial_terms.len()];
             if let Some(common_plan) = common_plan {
                 for group in &common_plan.groups {
@@ -2984,6 +3200,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     );
                 }
             }
+            uncovered_terms.extend(correction_term_indices);
             if !uncovered_terms.is_empty() {
                 common_groups.push(HostCommonGroup {
                     num_vars: chip.num_var_with_rotation,
@@ -3032,6 +3249,33 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             common_scalar_offsets,
             common_scalar_indices: vec![],
         };
+        if std::env::var("CENO_GPU_SUMCHECK_PLAN_DIAGNOSTICS")
+            .map(|value| value != "0")
+            .unwrap_or(false)
+        {
+            eprintln!(
+                "[gpu-main-plan] jobs={} chips={} mles={} terms={} max_vars={} max_degree={} groups={}",
+                jobs.len(),
+                chip_data.len(),
+                all_witins_gpu.len(),
+                term_coefficients.len(),
+                max_num_variables,
+                max_degree,
+                common_term_plan.term_offsets.len().saturating_sub(1),
+            );
+            for (group, offsets) in common_term_plan.term_offsets.windows(2).enumerate() {
+                let mle_offsets = &common_term_plan.common_mle_offsets[group..=group + 1];
+                eprintln!(
+                    "[gpu-main-plan-group] group={} nv={} terms={}..{} common_mles={}..{}",
+                    group,
+                    common_groups[group].num_vars,
+                    offsets[0],
+                    offsets[1],
+                    mle_offsets[0],
+                    mle_offsets[1],
+                );
+            }
+        }
         let term_coefficients_gl64: Vec<BB31Ext> =
             unsafe { std::mem::transmute(term_coefficients) };
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
@@ -3086,6 +3330,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     .as_ref()
                     .unwrap(),
             );
+            for (wit_id, coefficient) in matrix_selector_corrections(
+                chip.layer,
+                &chip.grouped_claim_evals,
+                &alpha_pows[chip.alpha_start..chip.alpha_start + chip.layer.exprs.len()],
+            )
+            .expect("invalid matrix first-layer correction layout")
+            {
+                final_claim += coefficient
+                    * eval_batched_main_frontload_mle(
+                        layer_evals[chip.layer.n_witin + chip.layer.n_fixed + wit_id],
+                        &global_rt,
+                        chip.num_var_with_rotation,
+                    );
+            }
         }
         let claimed_sum = recover_sumcheck_claim_from_final(final_claim, &proof, &global_rt);
 
@@ -3356,6 +3614,10 @@ where
                         .q_host_evals
                         .as_ref()
                         .expect("Jagged q' host backing missing");
+                    assert!(
+                        start + group_elems <= q_host.len(),
+                        "Jagged host q' opening group exceeds padded host backing"
+                    );
                     cuda_hal
                         .alloc_elems_from_host(&q_host[start..start + group_elems], None)
                         .map_err(|e| {
@@ -3405,8 +3667,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
             panic!("GPU backend only supports BabyBear base field");
         }
 
+        // This log deliberately stays at the Ceno-to-PCS boundary.  It
+        // records the main/tower-produced input before rounds are consumed.
+        let trace_ownership_debug = std::env::var_os("CENO_GPU_TRACE_OWNERSHIP").is_some();
+        if trace_ownership_debug {
+            for (opening_idx, (point, groups)) in points.iter().zip(&evals).enumerate() {
+                tracing::info!(
+                    target: "ceno_gpu::basefold_ownership",
+                    opening_idx,
+                    query_dim = point.len(),
+                    witness_mles = groups.first().map_or(0, Vec::len),
+                    fixed_mles = groups.get(1).map_or(0, Vec::len),
+                    group_count = groups.len(),
+                    "[basefold ownership] main/tower opening input"
+                );
+            }
+        }
+
         let mut rounds = vec![];
-        rounds.push((&witness_data, {
+        let witness_round = {
             evals
                 .iter_mut()
                 .zip(&points)
@@ -3419,7 +3698,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
                     }
                 })
                 .collect_vec()
-        }));
+        };
+        rounds.push((&witness_data, witness_round));
         if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
             rounds.push((fixed_data, {
                 evals
@@ -3448,8 +3728,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
         > = unsafe { std::mem::transmute(prover_param) };
         let rounds_gl64: Vec<_> = rounds
             .iter()
-            .map(|(commitment, point_eval_pairs)| {
+            .enumerate()
+            .map(|(round_idx, (commitment, point_eval_pairs))| {
                 let commitment_gl64 = expect_basefold_pcs_data(commitment);
+                if trace_ownership_debug {
+                    let (leaves, trace, rmms) = commitment_gl64.data_source();
+                    tracing::info!(
+                        target: "ceno_gpu::basefold_ownership",
+                        round_idx,
+                        commitment_origin = if round_idx == 0 { "witness" } else { "fixed" },
+                        trace_count = commitment_gl64.num_traces(),
+                        opening_count = point_eval_pairs.len(),
+                        cache_level = ?get_gpu_cache_level(),
+                        has_leaves = leaves,
+                        has_trace = trace,
+                        has_rmms = rmms,
+                        log2_max_codeword_size = commitment_gl64.log2_max_codeword_size,
+                        "[basefold ownership] Ceno opening round boundary"
+                    );
+                }
                 let point_eval_pairs_gl64: Vec<_> = point_eval_pairs
                     .iter()
                     .map(|(point, evals)| {
@@ -3637,29 +3934,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         task: &mut crate::scheme::scheduler::ChipTask<'_, GpuBackend<E, PCS>>,
         pcs_data: &<GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
     ) {
-        let num_vars =
-            task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
-
-        // Deferred witness extraction: extract from committed pcs_data just-in-time
-        if let Some(trace_idx) = task.witness_trace_idx {
-            task.input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
-                extract_witness_mles_for_trace::<E, PCS>(
-                    pcs_data,
-                    trace_idx,
-                    task.num_witin,
-                    num_vars,
-                )
-            });
-        }
-
-        // Deferred structural witness transport: CPU -> GPU just-in-time
-        if let Some(rmm) = task.structural_rmm.as_ref() {
-            let num_structural_witin = task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize;
-            task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
-                .in_scope(|| {
-                    transport_structural_witness_to_gpu::<E>(rmm, num_structural_witin, num_vars)
-                });
-        }
+        crate::scheme::prover::prepare_gpu_chip_input(task, pcs_data);
     }
 }
 

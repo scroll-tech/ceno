@@ -13,12 +13,14 @@ version.workspace = true
 anyhow.workspace = true
 ceno_rt = { path = "../ceno_rt" }
 ceno_syscall.workspace = true
+cudarc = { workspace = true, optional = true, features = ["nvrtc"] }
 elf = "0.7"
 ff_ext.workspace = true
 halo2curves-axiom = { version = "=0.7.2", features = ["asm"] }
 itertools.workspace = true
 libloading = { version = "0.8", optional = true }
 multilinear_extensions.workspace = true
+p3.workspace = true
 num.workspace = true
 num-derive.workspace = true
 num-traits.workspace = true
@@ -46,4 +48,8 @@ typenum.workspace = true
 aot-x86_64 = ["dep:libloading", "dep:tempfile"]
 default = ["forbid_overflow"]
 forbid_overflow = []
+llama-tiny = ["ceno_rt/llama-tiny"]
+production-heads-1 = ["ceno_rt/production-heads-1"]
+production-heads-2 = ["ceno_rt/production-heads-2"]
+tensor-cuda = ["dep:cudarc"]
 u16limb_circuit = []

@@ -221,6 +221,7 @@ pub struct MainConstraintJob<'a, PB: ProverBackend> {
     pub rt_tower: Point<PB::E>,
     pub main_out_evals: Vec<PB::E>,
     pub rotation: Option<RotationProverOutput<PB::E>>,
+    pub matrix_claims: Option<crate::scheme::matrix_reduction::MatrixOpeningClaims<PB::E>>,
     pub ecc_proof: Option<EccQuarkProof<PB::E>>,
     pub challenges: [PB::E; 2],
     pub cs: &'a ComposedConstrainSystem<PB::E>,

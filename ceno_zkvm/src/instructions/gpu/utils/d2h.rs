@@ -17,8 +17,11 @@ use ceno_gpu::{
     },
 };
 use ff_ext::ExtensionField;
-use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
-use rustc_hash::FxHashMap;
+use gkr_iop::{
+    RAMType,
+    tables::LookupTable,
+    utils::lk_multiplicity::{Multiplicity, MultiplicityRaw},
+};
 use tracing::info_span;
 use witness::{DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix};
 
@@ -213,7 +216,7 @@ pub(crate) fn gpu_compact_ec_d2h(
 pub(crate) fn gpu_lk_counters_to_multiplicity(
     counters: LkResult,
 ) -> Result<Multiplicity<u64>, ZKVMError> {
-    let mut tables: [FxHashMap<u64, usize>; 8] = Default::default();
+    let mut tables: MultiplicityRaw<u64> = Default::default();
 
     // Dynamic: D2H + direct FxHashMap construction (no LkMultiplicity)
     info_span!("lk_dynamic_d2h").in_scope(|| {
@@ -240,6 +243,16 @@ pub(crate) fn gpu_lk_counters_to_multiplicity(
             (LookupTable::Xor, &counters.xor_table),
             (LookupTable::Ltu, &counters.ltu_table),
             (LookupTable::Pow, &counters.pow_table),
+            (LookupTable::LlamaSoftmaxExp3, &counters.llama_softmax_exp3),
+            (LookupTable::LlamaSoftmaxExp4, &counters.llama_softmax_exp4),
+            (
+                LookupTable::LlamaProductionSoftmaxExpMiddle,
+                &counters.llama_production_softmax_middle,
+            ),
+            (
+                LookupTable::LlamaProductionSoftmaxExpHigh,
+                &counters.llama_production_softmax_high,
+            ),
         ];
         for &(table, ref buf_opt) in dense {
             if let Some(buf) = buf_opt {

@@ -71,6 +71,7 @@ pub fn extract_shard_ram_column_map<E: ExtensionField>(
     let mut x = [0u32; 7];
     let mut y = [0u32; 7];
     for i in 0..7 {
+        // Leaf x aliases the matching final Poseidon output column.
         x[i] = config.x[i].id as u32;
         y[i] = config.y[i].id as u32;
     }
@@ -969,7 +970,7 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     use crate::{
         instructions::gpu::{
             chips::shard_ram::{
-                gpu_batch_continuation_ec_on_device, try_gpu_assign_shard_ram_ec_tree_from_device,
+                shard_ram_record_to_gpu_with_ordinal, try_gpu_assign_shard_ram_ec_tree_from_device,
             },
             dispatch::take_shared_device_buffers,
         },
@@ -1231,12 +1232,68 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
             ))
         })?;
 
-    // 5. GPU batch EC on device for continuation records
-    let (cont_ec_buf, cont_n_writes, cont_n_reads) = info_span!("gpu_batch_ec_on_device")
-        .in_scope(|| {
-            gpu_batch_continuation_ec_on_device(&write_record_pairs, &read_record_pairs)
-        })?;
+    // 5. Preserve FullTracer's already-canonical continuation order on the
+    // host. Reserve the emitted range now so the final backward merge cannot
+    // reallocate this multi-gigabyte vector. EC points are computed only after
+    // the exact merged order is known, directly into its sole device owner.
+    let cont_n_writes = write_record_pairs.len();
+    let cont_n_reads = read_record_pairs.len();
     let cont_total = cont_n_writes + cont_n_reads;
+    let raw_total = cont_total
+        .checked_add(ec_count)
+        .ok_or_else(|| ZKVMError::InvalidWitness("ShardRAM record count overflow".into()))?;
+    let record_u32s = std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>() / 4;
+    debug_assert_eq!(record_u32s, 30, "GpuShardRamRecord layout changed");
+    let rw_trace_sources = if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some() {
+        use ceno_emul::InsnKind;
+        use strum::IntoEnumIterator;
+
+        const PRIORITY_U32_OFFSET: usize = 4;
+        const ORDINAL_U32_OFFSET: usize = 6;
+        let emitted = shared
+            .ec_buf
+            .to_vec_n(ec_count * record_u32s)
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(format!("ShardRAM trace metadata D2H: {e}").into())
+            })?;
+        let mut sources = std::collections::BTreeMap::<u64, (u64, String)>::new();
+        for record in emitted.chunks_exact(record_u32s) {
+            let priority = u64::from(record[PRIORITY_U32_OFFSET])
+                | (u64::from(record[PRIORITY_U32_OFFSET + 1]) << 32);
+            let ordinal = u64::from(record[ORDINAL_U32_OFFSET])
+                | (u64::from(record[ORDINAL_U32_OFFSET + 1]) << 32);
+            let producer_order = (priority >> 30) as u32;
+            let source = InsnKind::iter()
+                .find(|kind| *kind as u32 == producer_order)
+                .map(|kind| kind.to_string())
+                .unwrap_or_else(|| format!("InsnKind({producer_order})"));
+            if sources
+                .get(&ordinal)
+                .is_none_or(|(winner_priority, _)| priority > *winner_priority)
+            {
+                sources.insert(ordinal, (priority, source));
+            }
+        }
+        for (_, name, ordinal) in write_record_pairs.iter().chain(read_record_pairs.iter()) {
+            sources.insert(*ordinal, (1u64 << 63, (*name).to_string()));
+        }
+        Some(sources)
+    } else {
+        None
+    };
+    let continuation_records = info_span!("gpu_pack_ordered_continuation", n = cont_total)
+        .in_scope(|| {
+            let mut records = Vec::with_capacity(raw_total);
+            records.extend(
+                write_record_pairs
+                    .iter()
+                    .chain(read_record_pairs.iter())
+                    .map(|(record, _name, ordinal)| {
+                        shard_ram_record_to_gpu_with_ordinal(record, *ordinal)
+                    }),
+            );
+            records
+        });
 
     tracing::info!(
         "[GPU full pipeline] batch EC on device: {} writes + {} reads = {} continuation records",
@@ -1268,15 +1325,56 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
             .map_err(|_| ZKVMError::InvalidWitness("legacy bucket limit exceeds u32".into()))?,
     };
 
+    // The canonical GPU records no longer borrow these source tuples. Release
+    // their large host allocation before H2D, then return free glibc pages so
+    // the ShardRAM fix does not merely trade VRAM pressure for retained RSS.
+    let rss_before_source_drop = crate::e2e::process_rss_bytes();
+    drop(write_record_pairs);
+    drop(read_record_pairs);
+    let allocator_released = crate::e2e::trim_process_allocator_pages();
+    tracing::info!(
+        target: "ceno_pipeline",
+        phase = "gpu_shard_ram_host_source_release",
+        rss_before_bytes = rss_before_source_drop,
+        rss_after_bytes = crate::e2e::process_rss_bytes(),
+        allocator_released,
+        "released host continuation source tuples"
+    );
+
+    if crate::scheme::gpu::should_log_gpu_memory() {
+        const KEY_BYTES: usize = 24;
+        const RECORD_BYTES: usize =
+            std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>();
+        let padded_records = ec_count
+            .checked_add(cont_total)
+            .and_then(|total| total.checked_next_power_of_two())
+            .ok_or_else(|| ZKVMError::InvalidWitness("ShardRAM finalizer size overflow".into()))?;
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "gpu_shard_ram_finalizer_plan",
+            emitted_records = ec_count,
+            continuation_records = cont_total,
+            total_records = ec_count + cont_total,
+            padded_records,
+            retained_emitted_bytes = shared.ec_buf.len() * std::mem::size_of::<u32>(),
+            retained_continuation_bytes = 0,
+            canonical_output_bytes = (ec_count + cont_total) * RECORD_BYTES,
+            avoided_sort_key_bytes = padded_records * KEY_BYTES,
+            avoided_sort_scratch_bytes = padded_records * KEY_BYTES,
+            avoided_padded_output_bytes = padded_records * RECORD_BYTES,
+            "GPU ShardRAM finalizer allocation plan"
+        );
+        crate::scheme::gpu::log_gpu_device_state("shard_ram_before_finalize");
+    }
+
     // 6. Exactly one deterministic finalization feeds both consumers.
     let (partitioned_buf, num_writes, total_records, finalized_segments) =
         info_span!("gpu_merge_finalize").in_scope(|| {
             hal.witgen
-                .merge_and_finalize_records(
+                .merge_and_finalize_records_with_host_continuation(
                     &shared.ec_buf,
                     ec_count,
-                    &cont_ec_buf,
-                    cont_total,
+                    continuation_records,
                     &finalization_expectations,
                     None,
                 )
@@ -1304,9 +1402,12 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         total_records - num_writes,
     );
 
-    let record_u32s = std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>() / 4;
     // GpuShardRamRecord (#[repr(C)]) layout — derived from shard_ram_record_to_gpu
-    debug_assert_eq!(record_u32s, 30, "GpuShardRamRecord layout changed");
+    const ADDR_U32_OFFSET: usize = 0;
+    const RAM_TYPE_U32_OFFSET: usize = 1;
+    const VALUE_U32_OFFSET: usize = 2;
+    const ORDINAL_U32_OFFSET: usize = 6;
+    const LOCAL_CLK_U32_OFFSET: usize = 10;
     const IS_TO_WRITE_SET_U32_OFFSET: usize = 14;
     const POINT_Y6_U32_OFFSET: usize = 29;
 
@@ -1322,6 +1423,66 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
             })?
     };
     debug_assert_eq!(host_data.len(), total_records * record_u32s);
+    if let Some(sources) = rw_trace_sources {
+        assert_eq!(
+            sources.len(),
+            total_records,
+            "ShardRAM trace metadata does not cover each finalized row exactly once"
+        );
+        let mut read_row = 0usize;
+        let mut write_row = 0usize;
+        for (physical_row, record) in host_data.chunks_exact(record_u32s).enumerate() {
+            let ordinal = u64::from(record[ORDINAL_U32_OFFSET])
+                | (u64::from(record[ORDINAL_U32_OFFSET + 1]) << 32);
+            let is_local_read = record[IS_TO_WRITE_SET_U32_OFFSET] != 0;
+            let (direction, direction_row) = if is_local_read {
+                let row = read_row;
+                read_row += 1;
+                ("read", row)
+            } else {
+                let row = write_row;
+                write_row += 1;
+                ("write", row)
+            };
+            let (priority, source) = sources
+                .get(&ordinal)
+                .map(|(priority, source)| (*priority, source.as_str()))
+                .expect("finalized ShardRAM row is missing source metadata");
+            let producer_row = (priority >> 2) & ((1u64 << 28) - 1);
+            let slot = priority & 3;
+            let endpoint_key = matches!(
+                source,
+                "ADDI" | "SW" | "current_shard_external_read"
+            )
+            .then(|| {
+                (
+                    record[RAM_TYPE_U32_OFFSET],
+                    record[ADDR_U32_OFFSET],
+                    record[VALUE_U32_OFFSET],
+                    u64::from(record[LOCAL_CLK_U32_OFFSET])
+                        | (u64::from(record[LOCAL_CLK_U32_OFFSET + 1]) << 32),
+                )
+            });
+            tracing::info!(
+                target: "ceno_gpu::tensor_shard_ram_row",
+                shard_id = shard_ctx.shard_id,
+                physical_row,
+                direction,
+                direction_row,
+                source,
+                ordinal,
+                priority,
+                producer_row,
+                slot,
+                endpoint_key = ?endpoint_key,
+                "Gate-5 ShardRAM logical-row source metadata"
+            );
+        }
+        assert_eq!(
+            [read_row, write_row],
+            [num_writes, total_records - num_writes]
+        );
+    }
 
     // 6.5. Derive ShardRam's per-row y6_lo byte / LTU lookup multiplicity
     // from the partitioned device buffer. Mirrors the per-row CPU push in

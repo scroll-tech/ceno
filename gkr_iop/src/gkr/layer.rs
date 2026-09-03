@@ -101,6 +101,10 @@ pub struct Layer<E: ExtensionField> {
     // refer https://hackmd.io/HAAj1JTQQiKfu0SIwOJDRw?view#Rotation
     pub rotation_exprs: RotateExprs<E>,
     pub ecc_bridge_group_indices: Option<[usize; ECC_BRIDGE_OPENING_COUNT]>,
+    /// Optional first-layer identity groups used by the Tensor MatMul reduction:
+    /// A at its reduction point, W at its reduction point, and Q/R at their
+    /// shared output point.
+    pub matrix_selector_group_indices: Option<[usize; 3]>,
     pub rotation_cyclic_group_log2: usize,
     pub rotation_cyclic_subgroup_size: usize,
 
@@ -177,6 +181,7 @@ impl<E: ExtensionField> Layer<E> {
                     out_sel_and_eval_exprs,
                     rotation_exprs: (rotation_eq, rotation_exprs),
                     ecc_bridge_group_indices: None,
+                    matrix_selector_group_indices: None,
                     rotation_cyclic_group_log2,
                     rotation_cyclic_subgroup_size,
                     expr_names,
@@ -187,7 +192,11 @@ impl<E: ExtensionField> Layer<E> {
                     rotation_sumcheck_expression_monomial_terms: None,
                     rotation_sumcheck_expression: None,
                 };
+                let static_build_start = std::time::Instant::now();
                 <Self as ZerocheckLayer<E>>::build_static_expression(&mut layer);
+                crate::setup_profile::record_static_layer_build_ns(
+                    static_build_start.elapsed().as_nanos() as u64,
+                );
                 layer
             }
             LayerType::Linear => unimplemented!(""),
@@ -831,6 +840,64 @@ impl<E: ExtensionField> Layer<E> {
 
     pub fn ecc_bridge_group_indices(&self) -> Option<[usize; ECC_BRIDGE_OPENING_COUNT]> {
         self.ecc_bridge_group_indices
+    }
+
+    /// Attach transcript-derived identity claims to an already-built one-layer
+    /// circuit. The four new output slots are inserted immediately before the
+    /// committed/fixed input slots so the circuit's existing output numbering
+    /// remains stable.
+    pub fn add_matrix_identity_groups(
+        &mut self,
+        selectors: [Expression<E>; 3],
+        expressions: [Expression<E>; 4],
+    ) -> [usize; 3] {
+        assert!(
+            self.matrix_selector_group_indices.is_none(),
+            "matrix identity groups already attached"
+        );
+        let output_count = *self
+            .in_eval_expr
+            .first()
+            .expect("matrix identity groups require committed inputs");
+        self.in_eval_expr.iter_mut().for_each(|idx| *idx += 4);
+
+        let first_group = self.out_sel_and_eval_exprs.len();
+        self.out_sel_and_eval_exprs.push((
+            SelectorType::Whole(selectors[0].clone()),
+            vec![EvalExpression::Single(output_count)],
+        ));
+        self.out_sel_and_eval_exprs.push((
+            SelectorType::Whole(selectors[1].clone()),
+            vec![EvalExpression::Single(output_count + 1)],
+        ));
+        self.out_sel_and_eval_exprs.push((
+            SelectorType::Whole(selectors[2].clone()),
+            vec![
+                EvalExpression::Single(output_count + 2),
+                EvalExpression::Single(output_count + 3),
+            ],
+        ));
+        self.exprs.extend(expressions);
+        self.expr_names.extend([
+            "matrix_identity/a".to_string(),
+            "matrix_identity/w".to_string(),
+            "matrix_identity/q".to_string(),
+            "matrix_identity/r".to_string(),
+        ]);
+        self.max_expr_degree = self
+            .exprs
+            .iter()
+            .map(Expression::degree)
+            .max()
+            .expect("matrix layer expressions must be non-empty");
+        let indices = [first_group, first_group + 1, first_group + 2];
+        self.matrix_selector_group_indices = Some(indices);
+        <Self as ZerocheckLayer<E>>::build_static_expression(self);
+        indices
+    }
+
+    pub fn matrix_selector_group_indices(&self) -> Option<[usize; 3]> {
+        self.matrix_selector_group_indices
     }
 }
 

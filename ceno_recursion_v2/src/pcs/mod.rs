@@ -51,10 +51,12 @@ use crate::{
         PcsCommitmentRootMessage, PcsEqProductBus, PcsEqProductMessage, PcsFinalMessageBus,
         PcsFinalMessageMessage, PcsFoldChallengeBus, PcsFoldChallengeMessage, PcsJaggedAssistHBus,
         PcsJaggedAssistHMessage, PcsJaggedAssistQBus, PcsJaggedAssistQMessage, PcsJaggedFEvalBus,
-        PcsJaggedFEvalMessage, PcsOpeningEvalBus, PcsOpeningEvalMessage, PcsQuerySampleBus,
-        PcsQuerySampleMessage, PcsSuffixProductBus, PcsSuffixProductMessage, PcsSumcheckInputBus,
-        PcsSumcheckInputMessage, PcsSumcheckOutputBus, PcsSumcheckOutputMessage,
-        PcsTranscriptExtBus, PcsTranscriptExtMessage, TranscriptBus, TranscriptBusMessage,
+        PcsJaggedFEvalMessage, PcsOpeningEvalBus, PcsOpeningEvalMessage, PcsOpeningPointBus,
+        PcsOpeningPointMessage, PcsQuerySampleBus, PcsQuerySampleMessage,
+        PcsSemanticOpeningEvalBus, PcsSuffixProductBus, PcsSuffixProductMessage,
+        PcsSumcheckInputBus, PcsSumcheckInputMessage, PcsSumcheckOutputBus,
+        PcsSumcheckOutputMessage, PcsTranscriptExtBus, PcsTranscriptExtMessage, TranscriptBus,
+        TranscriptBusMessage,
     },
     system::{
         AirModule, GlobalCtxCpu, PcsBaseInputLeafHashRecord, PcsBaseInputMerkleRecord,
@@ -101,6 +103,8 @@ pub struct PcsModule {
     batch_alpha_bus: PcsBatchAlphaBus,
     jagged_f_eval_bus: PcsJaggedFEvalBus,
     opening_eval_bus: PcsOpeningEvalBus,
+    opening_point_bus: PcsOpeningPointBus,
+    semantic_opening_eval_bus: PcsSemanticOpeningEvalBus,
     eq_product_bus: PcsEqProductBus,
     suffix_product_bus: PcsSuffixProductBus,
     jagged_assist_h_bus: PcsJaggedAssistHBus,
@@ -223,7 +227,9 @@ fn push_suffix_product_records(
     term_idx: usize,
     start_coord_idx: usize,
     point: &[RecursionField],
+    commit_kind: PcsOpeningCommitKind,
 ) -> RecursionField {
+    let has_main_global = round_idx == 0 || commit_kind == PcsOpeningCommitKind::Fixed;
     let mut acc = RecursionField::ONE;
     let factor_count = point.len().saturating_sub(start_coord_idx);
     let row_count = factor_count.max(1);
@@ -248,10 +254,25 @@ fn push_suffix_product_records(
             is_first: step_idx == 0,
             is_last: step_idx + 1 == row_count,
             has_factor,
+            has_main_global,
+            commit_kind,
             point: point_value,
             acc_in,
             acc_out: acc,
         });
+        if has_factor && !has_main_global {
+            preflight.pcs.opening_points.push(PcsOpeningPointRecord {
+                proof_idx: 0,
+                pcs_round_idx: round_idx,
+                opening_idx: 0,
+                coord_idx,
+                global_round_idx: 0,
+                has_main_global: false,
+                has_matrix_point: true,
+                is_zero_tail: false,
+                value: point_value,
+            });
+        }
     }
     acc
 }
@@ -316,6 +337,7 @@ fn jagged_backward_step(
 fn push_jagged_assist_h_records(
     preflight: &mut Preflight,
     round_idx: usize,
+    commit_kind: PcsOpeningCommitKind,
     point: &[RecursionField],
     rho: &[RecursionField],
     assist_point: &[RecursionField],
@@ -342,6 +364,7 @@ fn push_jagged_assist_h_records(
             proof_idx: 0,
             round_idx,
             sumcheck_idx,
+            commit_kind,
             step_idx,
             robp_idx,
             is_first: step_idx == 0,
@@ -355,6 +378,19 @@ fn push_jagged_assist_h_records(
             val_in,
             val_out: val,
         });
+        if has_z_row && round_idx > 0 && commit_kind == PcsOpeningCommitKind::Witin {
+            preflight.pcs.opening_points.push(PcsOpeningPointRecord {
+                proof_idx: 0,
+                pcs_round_idx: round_idx,
+                opening_idx: 0,
+                coord_idx: robp_idx,
+                global_round_idx: 0,
+                has_main_global: false,
+                has_matrix_point: true,
+                is_zero_tail: false,
+                value: z_row,
+            });
+        }
     }
     val[0]
 }
@@ -612,6 +648,8 @@ impl PcsModule {
             batch_alpha_bus: bus_inventory.pcs_batch_alpha_bus,
             jagged_f_eval_bus: bus_inventory.pcs_jagged_f_eval_bus,
             opening_eval_bus: bus_inventory.pcs_opening_eval_bus,
+            opening_point_bus: bus_inventory.pcs_opening_point_bus,
+            semantic_opening_eval_bus: bus_inventory.pcs_semantic_opening_eval_bus,
             eq_product_bus: bus_inventory.pcs_eq_product_bus,
             suffix_product_bus: bus_inventory.pcs_suffix_product_bus,
             jagged_assist_h_bus: bus_inventory.pcs_jagged_assist_h_bus,
@@ -665,7 +703,12 @@ impl PcsModule {
                 )
             })
             .collect_vec();
-        rounds.push((2usize, proof.witin_commit.clone(), witin_openings));
+        rounds.push((
+            2usize,
+            proof.witin_commit.clone(),
+            witin_openings,
+            PcsOpeningCommitKind::Witin,
+        ));
 
         let fixed_openings = preflight
             .pcs
@@ -684,10 +727,20 @@ impl PcsModule {
             .collect_vec();
         if proof.public_values.shard_id == 0 {
             if let Some(fixed_commit) = child_vk.fixed_commit.as_ref() {
-                rounds.push((0usize, fixed_commit.clone(), fixed_openings));
+                rounds.push((
+                    0usize,
+                    fixed_commit.clone(),
+                    fixed_openings,
+                    PcsOpeningCommitKind::Fixed,
+                ));
             }
         } else if let Some(fixed_commit) = child_vk.fixed_no_omc_init_commit.as_ref() {
-            rounds.push((1usize, fixed_commit.clone(), fixed_openings));
+            rounds.push((
+                1usize,
+                fixed_commit.clone(),
+                fixed_openings,
+                PcsOpeningCommitKind::Fixed,
+            ));
         }
 
         if rounds.len() != proof.opening_proof.rounds.len() {
@@ -699,22 +752,19 @@ impl PcsModule {
         }
 
         let mut inner_rounds = Vec::with_capacity(rounds.len());
-        for (round_idx, ((commitment_kind, comm, openings), round_proof)) in rounds
+        for (round_idx, ((commitment_kind, comm, openings, commit_kind), round_proof)) in rounds
             .into_iter()
             .zip(proof.opening_proof.rounds.iter())
             .enumerate()
         {
-            let commit_kind = if round_idx == 0 {
-                PcsOpeningCommitKind::Witin
-            } else {
-                PcsOpeningCommitKind::Fixed
-            };
             let term_sources = preflight
                 .pcs
                 .opening_evals
                 .iter()
                 .enumerate()
-                .filter(|(_, record)| record.commit_kind == commit_kind)
+                .filter(|(_, record)| {
+                    record.pcs_round_idx == round_idx && record.commit_kind == commit_kind
+                })
                 .map(|(record_idx, record)| {
                     (
                         record_idx,
@@ -879,7 +929,18 @@ impl PcsModule {
                 sumcheck_idx: round_idx * 2,
                 point_round_base: 0,
             });
-            let tail_product = push_suffix_product_records(preflight, round_idx, i, s_i, point);
+            let tail_product = push_suffix_product_records(
+                preflight,
+                round_idx,
+                i,
+                s_i,
+                point,
+                if commitment_kind == 2 {
+                    PcsOpeningCommitKind::Witin
+                } else {
+                    PcsOpeningCommitKind::Fixed
+                },
+            );
             if eq_product != eq_col[i] {
                 bail!("jagged eq product replay mismatch");
             }
@@ -1073,8 +1134,19 @@ impl PcsModule {
                 }
             }
         }
-        let h_at_rho_star =
-            push_jagged_assist_h_records(preflight, round_idx, point, &rho, &assist_point, n_robp);
+        let h_at_rho_star = push_jagged_assist_h_records(
+            preflight,
+            round_idx,
+            if commitment_kind == 2 {
+                PcsOpeningCommitKind::Witin
+            } else {
+                PcsOpeningCommitKind::Fixed
+            },
+            point,
+            &rho,
+            &assist_point,
+            n_robp,
+        );
         let native_h_at_rho_star = evaluate_g(&z_row_padded, &rho_padded, &rho_star_c, &rho_star_d);
         if h_at_rho_star != native_h_at_rho_star {
             bail!("jagged assist h replay mismatch");
@@ -1347,6 +1419,7 @@ impl AirModule for PcsModule {
             }) as AirRef<_>,
             Arc::new(PcsOpeningPointAir {
                 main_global_point_bus: self.main_global_point_bus,
+                opening_point_bus: self.opening_point_bus,
             }) as AirRef<_>,
             Arc::new(PcsBasefoldFinalPointAir {
                 fold_challenge_bus: self.fold_challenge_bus,
@@ -1355,6 +1428,7 @@ impl AirModule for PcsModule {
             Arc::new(PcsOpeningEvalAir {
                 main_eval_bus: self.main_eval_bus,
                 opening_eval_bus: self.opening_eval_bus,
+                semantic_opening_eval_bus: self.semantic_opening_eval_bus,
             }) as AirRef<_>,
             Arc::new(PcsEqProductAir {
                 transcript_ext_bus: self.transcript_ext_bus,
@@ -1363,10 +1437,12 @@ impl AirModule for PcsModule {
             }) as AirRef<_>,
             Arc::new(PcsSuffixProductAir {
                 main_global_point_bus: self.main_global_point_bus,
+                opening_point_bus: self.opening_point_bus,
                 suffix_product_bus: self.suffix_product_bus,
             }) as AirRef<_>,
             Arc::new(PcsJaggedAssistHAir {
                 main_global_point_bus: self.main_global_point_bus,
+                opening_point_bus: self.opening_point_bus,
                 fold_challenge_bus: self.fold_challenge_bus,
                 jagged_assist_h_bus: self.jagged_assist_h_bus,
             }) as AirRef<_>,
@@ -1764,6 +1840,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         opening_points.sort_by_key(|record| {
             (
                 record.proof_idx,
+                record.pcs_round_idx,
                 record.opening_idx,
                 record.coord_idx,
                 record.global_round_idx,
@@ -1782,6 +1859,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         opening_evals.sort_by_key(|record| {
             (
                 record.proof_idx,
+                record.pcs_round_idx,
                 record.opening_idx,
                 record.commit_kind.as_usize(),
                 record.eval_idx,
@@ -2662,14 +2740,21 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsCommitPhaseMerkleAir {
 pub struct PcsOpeningPointCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
+    pub pcs_round_idx: T,
     pub opening_idx: T,
     pub coord_idx: T,
     pub global_round_idx: T,
+    pub has_main_global: T,
+    pub has_matrix_point: T,
+    pub is_zero_tail: T,
+    pub round_is_zero: T,
+    pub round_idx_inv: T,
     pub value: [T; D_EF],
 }
 
 pub struct PcsOpeningPointAir {
     pub main_global_point_bus: MainGlobalPointBus,
+    pub opening_point_bus: PcsOpeningPointBus,
 }
 
 impl<F: Field> BaseAir<F> for PcsOpeningPointAir {
@@ -2687,6 +2772,29 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsOpeningPointAir {
         let local_row = main.row_slice(0).expect("main row exists");
         let local: &PcsOpeningPointCols<AB::Var> = (*local_row).borrow();
         builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.has_main_global);
+        builder.assert_bool(local.has_matrix_point);
+        builder.assert_bool(local.is_zero_tail);
+        builder.assert_bool(local.round_is_zero);
+        builder
+            .when(local.is_enabled)
+            .assert_zero(local.pcs_round_idx * local.round_is_zero);
+        builder.when(local.is_enabled).assert_eq(
+            local.pcs_round_idx * local.round_idx_inv,
+            AB::Expr::ONE - local.round_is_zero,
+        );
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.has_main_global, local.round_is_zero);
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.has_matrix_point, AB::Expr::ONE - local.round_is_zero);
+        builder
+            .when(local.is_enabled)
+            .assert_zero(local.is_zero_tail);
+        builder
+            .when_ne(local.is_enabled, AB::Expr::ONE)
+            .assert_zero(local.has_main_global + local.has_matrix_point + local.is_zero_tail);
         self.main_global_point_bus.lookup_key(
             builder,
             local.proof_idx,
@@ -2694,8 +2802,22 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsOpeningPointAir {
                 round_idx: local.global_round_idx.into(),
                 value: local.value.map(Into::into),
             },
-            local.is_enabled,
+            local.is_enabled * local.has_main_global,
         );
+        self.opening_point_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            PcsOpeningPointMessage {
+                pcs_round_idx: local.pcs_round_idx.into(),
+                opening_idx: local.opening_idx.into(),
+                coord_idx: local.coord_idx.into(),
+                value: local.value.map(Into::into),
+            },
+            local.is_enabled * local.has_matrix_point,
+        );
+        for limb in local.value {
+            builder.when(local.is_zero_tail).assert_zero(limb);
+        }
     }
 }
 
@@ -2761,11 +2883,16 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsBasefoldFinalPointAir {
 pub struct PcsOpeningEvalCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
+    pub pcs_round_idx: T,
     pub opening_idx: T,
     pub commit_kind: T,
     pub eval_idx: T,
     pub main_idx: T,
     pub main_eval_idx: T,
+    pub has_main_eval: T,
+    pub has_matrix_eval: T,
+    pub round_is_zero: T,
+    pub round_idx_inv: T,
     pub value: [T; D_EF],
     pub raw_value: [T; D_EF],
 }
@@ -2773,6 +2900,7 @@ pub struct PcsOpeningEvalCols<T> {
 pub struct PcsOpeningEvalAir {
     pub main_eval_bus: MainEvalBus,
     pub opening_eval_bus: PcsOpeningEvalBus,
+    pub semantic_opening_eval_bus: PcsSemanticOpeningEvalBus,
 }
 
 impl<F: Field> BaseAir<F> for PcsOpeningEvalAir {
@@ -2790,6 +2918,25 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsOpeningEvalAir {
         let local_row = main.row_slice(0).expect("main row exists");
         let local: &PcsOpeningEvalCols<AB::Var> = (*local_row).borrow();
         builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.has_main_eval);
+        builder.assert_bool(local.has_matrix_eval);
+        builder.assert_bool(local.commit_kind);
+        builder.assert_bool(local.round_is_zero);
+        builder.assert_bool(local.has_main_eval + local.has_matrix_eval);
+        builder
+            .when(local.is_enabled)
+            .assert_zero(local.pcs_round_idx * local.round_is_zero);
+        builder.when(local.is_enabled).assert_eq(
+            local.pcs_round_idx * local.round_idx_inv,
+            AB::Expr::ONE - local.round_is_zero,
+        );
+        builder.when(local.is_enabled).assert_eq(
+            local.has_main_eval,
+            local.commit_kind + (AB::Expr::ONE - local.commit_kind) * local.round_is_zero,
+        );
+        builder
+            .when_ne(local.is_enabled, AB::Expr::ONE)
+            .assert_zero(local.has_main_eval + local.has_matrix_eval);
         self.main_eval_bus.lookup_key(
             builder,
             local.proof_idx,
@@ -2798,12 +2945,25 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsOpeningEvalAir {
                 eval_idx: local.main_eval_idx.into(),
                 value: local.value.map(Into::into),
             },
-            local.is_enabled,
+            local.has_main_eval,
+        );
+        self.semantic_opening_eval_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            PcsOpeningEvalMessage {
+                pcs_round_idx: local.pcs_round_idx.into(),
+                opening_idx: local.opening_idx.into(),
+                commit_kind: local.commit_kind.into(),
+                eval_idx: local.eval_idx.into(),
+                value: local.value.map(Into::into),
+            },
+            local.has_matrix_eval,
         );
         self.opening_eval_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
             PcsOpeningEvalMessage {
+                pcs_round_idx: local.pcs_round_idx.into(),
                 opening_idx: local.opening_idx.into(),
                 commit_kind: local.commit_kind.into(),
                 eval_idx: local.eval_idx.into(),
@@ -3010,6 +3170,10 @@ pub struct PcsSuffixProductCols<T> {
     pub is_first: T,
     pub is_last: T,
     pub has_factor: T,
+    pub has_main_global: T,
+    pub commit_kind: T,
+    pub round_is_zero: T,
+    pub round_idx_inv: T,
     pub point: [T; D_EF],
     pub acc_in: [T; D_EF],
     pub acc_out: [T; D_EF],
@@ -3017,6 +3181,7 @@ pub struct PcsSuffixProductCols<T> {
 
 pub struct PcsSuffixProductAir {
     pub main_global_point_bus: MainGlobalPointBus,
+    pub opening_point_bus: PcsOpeningPointBus,
     pub suffix_product_bus: PcsSuffixProductBus,
 }
 
@@ -3045,6 +3210,20 @@ where
         builder.assert_bool(local.is_first);
         builder.assert_bool(local.is_last);
         builder.assert_bool(local.has_factor);
+        builder.assert_bool(local.has_main_global);
+        builder.assert_bool(local.commit_kind);
+        builder.assert_bool(local.round_is_zero);
+        builder
+            .when(local.is_enabled)
+            .assert_zero(local.round_idx * local.round_is_zero);
+        builder.when(local.is_enabled).assert_eq(
+            local.round_idx * local.round_idx_inv,
+            AB::Expr::ONE - local.round_is_zero,
+        );
+        builder.assert_eq(
+            local.has_main_global,
+            local.commit_kind + (AB::Expr::ONE - local.commit_kind) * local.round_is_zero,
+        );
         builder
             .when(local.is_enabled * local.is_first)
             .assert_zero(local.step_idx);
@@ -3097,6 +3276,14 @@ where
         builder
             .when_transition()
             .when(continues.clone())
+            .assert_eq(next.has_main_global, local.has_main_global);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.commit_kind, local.commit_kind);
+        builder
+            .when_transition()
+            .when(continues.clone())
             .assert_eq(next.coord_idx, local.coord_idx + AB::Expr::ONE);
         builder
             .when_transition()
@@ -3115,7 +3302,18 @@ where
                 round_idx: local.coord_idx.into(),
                 value: local.point.map(Into::into),
             },
-            local.is_enabled * local.has_factor,
+            local.is_enabled * local.has_factor * local.has_main_global,
+        );
+        self.opening_point_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsOpeningPointMessage {
+                pcs_round_idx: local.round_idx.into(),
+                opening_idx: AB::Expr::ZERO,
+                coord_idx: local.coord_idx.into(),
+                value: local.point.map(Into::into),
+            },
+            local.is_enabled * local.has_factor * (AB::Expr::ONE - local.has_main_global),
         );
         self.suffix_product_bus.add_key_with_lookups(
             builder,
@@ -3137,6 +3335,9 @@ pub struct PcsJaggedAssistHCols<T> {
     pub proof_idx: T,
     pub round_idx: T,
     pub sumcheck_idx: T,
+    pub commit_kind: T,
+    pub round_is_zero: T,
+    pub round_idx_inv: T,
     pub step_idx: T,
     pub robp_idx: T,
     pub is_first: T,
@@ -3153,6 +3354,7 @@ pub struct PcsJaggedAssistHCols<T> {
 
 pub struct PcsJaggedAssistHAir {
     pub main_global_point_bus: MainGlobalPointBus,
+    pub opening_point_bus: PcsOpeningPointBus,
     pub fold_challenge_bus: PcsFoldChallengeBus,
     pub jagged_assist_h_bus: PcsJaggedAssistHBus,
 }
@@ -3183,6 +3385,15 @@ where
         builder.assert_bool(local.is_last);
         builder.assert_bool(local.has_z_row);
         builder.assert_bool(local.has_rho);
+        builder.assert_bool(local.commit_kind);
+        builder.assert_bool(local.round_is_zero);
+        builder
+            .when(local.is_enabled)
+            .assert_zero(local.round_idx * local.round_is_zero);
+        builder.when(local.is_enabled).assert_eq(
+            local.round_idx * local.round_idx_inv,
+            AB::Expr::ONE - local.round_is_zero,
+        );
         builder.when(local.is_enabled).assert_eq(
             local.sumcheck_idx,
             local.round_idx + local.round_idx + AB::Expr::ONE,
@@ -3403,6 +3614,10 @@ where
         builder
             .when_transition()
             .when(continues.clone())
+            .assert_eq(next.commit_kind, local.commit_kind);
+        builder
+            .when_transition()
+            .when(continues.clone())
             .assert_eq(next.step_idx, local.step_idx + AB::Expr::ONE);
         builder
             .when_transition()
@@ -3416,6 +3631,8 @@ where
             );
         }
 
+        let has_main_global =
+            local.commit_kind + (AB::Expr::ONE - local.commit_kind) * local.round_is_zero;
         self.main_global_point_bus.lookup_key(
             builder,
             local.proof_idx,
@@ -3423,7 +3640,18 @@ where
                 round_idx: local.robp_idx.into(),
                 value: local.z_row.map(Into::into),
             },
-            local.is_enabled * local.has_z_row,
+            local.is_enabled * local.has_z_row * has_main_global.clone(),
+        );
+        self.opening_point_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsOpeningPointMessage {
+                pcs_round_idx: local.round_idx.into(),
+                opening_idx: AB::Expr::ZERO,
+                coord_idx: local.robp_idx.into(),
+                value: local.z_row.map(Into::into),
+            },
+            local.is_enabled * local.has_z_row * (AB::Expr::ONE - has_main_global),
         );
         self.fold_challenge_bus.lookup_key(
             builder,
@@ -4888,6 +5116,7 @@ where
             builder,
             local.proof_idx,
             PcsOpeningEvalMessage {
+                pcs_round_idx: local.round_idx.into(),
                 opening_idx: local.opening_idx.into(),
                 commit_kind: local.commit_kind.into(),
                 eval_idx: local.eval_idx.into(),
@@ -6136,9 +6365,19 @@ impl RowMajorChip<F> for PcsOpeningPointTraceGenerator {
             let cols: &mut PcsOpeningPointCols<F> = row.borrow_mut();
             cols.is_enabled = F::ONE;
             cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.pcs_round_idx = F::from_usize(record.pcs_round_idx);
             cols.opening_idx = F::from_usize(record.opening_idx);
             cols.coord_idx = F::from_usize(record.coord_idx);
             cols.global_round_idx = F::from_usize(record.global_round_idx);
+            cols.has_main_global = F::from_bool(record.has_main_global);
+            cols.has_matrix_point = F::from_bool(record.has_matrix_point);
+            cols.is_zero_tail = F::from_bool(record.is_zero_tail);
+            cols.round_is_zero = F::from_bool(record.pcs_round_idx == 0);
+            cols.round_idx_inv = if record.pcs_round_idx == 0 {
+                F::ZERO
+            } else {
+                F::from_usize(record.pcs_round_idx).inverse()
+            };
             cols.value = ext_limbs(record.value);
         }
         Some(RowMajorMatrix::new(trace, width))
@@ -6188,11 +6427,20 @@ impl RowMajorChip<F> for PcsOpeningEvalTraceGenerator {
             let cols: &mut PcsOpeningEvalCols<F> = row.borrow_mut();
             cols.is_enabled = F::ONE;
             cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.pcs_round_idx = F::from_usize(record.pcs_round_idx);
             cols.opening_idx = F::from_usize(record.opening_idx);
             cols.commit_kind = F::from_usize(record.commit_kind.as_usize());
             cols.eval_idx = F::from_usize(record.eval_idx);
             cols.main_idx = F::from_usize(record.main_idx);
             cols.main_eval_idx = F::from_usize(record.main_eval_idx);
+            cols.has_main_eval = F::from_bool(record.has_main_eval);
+            cols.has_matrix_eval = F::from_bool(record.has_matrix_eval);
+            cols.round_is_zero = F::from_bool(record.pcs_round_idx == 0);
+            cols.round_idx_inv = if record.pcs_round_idx == 0 {
+                F::ZERO
+            } else {
+                F::from_usize(record.pcs_round_idx).inverse()
+            };
             cols.value = ext_limbs(record.value);
             cols.raw_value = ext_limbs(record.raw_value);
         }
@@ -6266,6 +6514,14 @@ impl RowMajorChip<F> for PcsSuffixProductTraceGenerator {
                 cols.is_first = F::from_bool(record.is_first);
                 cols.is_last = F::from_bool(record.is_last);
                 cols.has_factor = F::from_bool(record.has_factor);
+                cols.has_main_global = F::from_bool(record.has_main_global);
+                cols.commit_kind = F::from_usize(record.commit_kind.as_usize());
+                cols.round_is_zero = F::from_bool(record.round_idx == 0);
+                cols.round_idx_inv = if record.round_idx == 0 {
+                    F::ZERO
+                } else {
+                    F::from_usize(record.round_idx).inverse()
+                };
                 cols.point = ext_limbs(record.point);
                 cols.acc_in = ext_limbs(record.acc_in);
                 cols.acc_out = ext_limbs(record.acc_out);
@@ -6292,6 +6548,13 @@ impl RowMajorChip<F> for PcsJaggedAssistHTraceGenerator {
             cols.proof_idx = F::from_usize(record.proof_idx);
             cols.round_idx = F::from_usize(record.round_idx);
             cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+            cols.commit_kind = F::from_usize(record.commit_kind.as_usize());
+            cols.round_is_zero = F::from_bool(record.round_idx == 0);
+            cols.round_idx_inv = if record.round_idx == 0 {
+                F::ZERO
+            } else {
+                F::from_usize(record.round_idx).inverse()
+            };
             cols.step_idx = F::from_usize(record.step_idx);
             cols.robp_idx = F::from_usize(record.robp_idx);
             cols.is_first = F::from_bool(record.is_first);

@@ -7,7 +7,7 @@ use crate::{
         DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, HintsTable,
         LocalFinalCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, RegTable,
         RegTableInitCircuit, ShardRamCircuit, ShardRamEcTreeCircuit, StackInitCircuit, StackTable,
-        StaticMemInitCircuit, StaticMemTable, TableCircuit,
+        StaticMemInitCircuit, StaticMemTable, TableCircuit, TensorBusCircuit,
     },
 };
 use ceno_emul::{Addr, IterAddresses, WORD_SIZE, Word};
@@ -32,6 +32,7 @@ pub struct MmuConfig<E: ExtensionField> {
     pub ram_bus_circuit: <ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     /// EC accumulation tree for cross-shard read/write points.
     pub ram_bus_ec_tree_circuit: <ShardRamEcTreeCircuit<E> as TableCircuit<E>>::TableConfig,
+    pub tensor_bus_circuit: <TensorBusCircuit<E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
 
@@ -47,6 +48,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         let local_final_circuit = cs.register_table_circuit::<LocalFinalCircuit<E>>();
         let ram_bus_circuit = cs.register_table_circuit::<ShardRamCircuit<E>>();
         let ram_bus_ec_tree_circuit = cs.register_table_circuit::<ShardRamEcTreeCircuit<E>>();
+        let tensor_bus_circuit = cs.register_table_circuit::<TensorBusCircuit<E>>();
 
         Self {
             reg_init_config,
@@ -57,6 +59,7 @@ impl<E: ExtensionField> MmuConfig<E> {
             local_final_circuit,
             ram_bus_circuit,
             ram_bus_ec_tree_circuit,
+            tensor_bus_circuit,
             params: cs.params.clone(),
         }
     }
@@ -212,6 +215,17 @@ impl<E: ExtensionField> MmuConfig<E> {
                 &self.ram_bus_ec_tree_circuit,
             )
         })?;
+        {
+            let events = crate::tables::events_from_syscalls(
+                shard_ctx.syscall_witnesses.as_ref(),
+                shard_ctx,
+            );
+            witness.assign_table_circuit::<TensorBusCircuit<E>>(
+                cs,
+                &self.tensor_bus_circuit,
+                &events,
+            )?;
+        }
         Ok(())
     }
 

@@ -11,12 +11,16 @@ use crate::{
         hal::{DeviceProvingKey, EccQuarkProver, ProofInput, TowerProverSpec},
         septic_curve::{SepticExtension, SepticPoint, SymbolicSepticExtension},
         utils::{
-            GkrOutputStageMask, assign_group_evals, derive_ecc_bridge_claims,
-            extract_ecc_quark_witness_inputs, first_layer_output_group_stage_masks,
-            first_layer_selector_contexts, infer_tower_logup_witness, infer_tower_product_witness,
-            interleaving_mles_to_mles, split_rotation_evals,
+            GkrOutputStageMask, assign_group_evals, assign_matrix_group_evals,
+            derive_ecc_bridge_claims, extract_ecc_quark_witness_inputs,
+            first_layer_output_group_stage_masks, first_layer_selector_contexts,
+            infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
+            matrix_selector_corrections, split_rotation_evals,
         },
-        verifier::eval_batched_main_frontload_terms,
+        verifier::{
+            eval_batched_main_frontload_mle, eval_batched_main_frontload_terms,
+            frontload_constant_term_scale,
+        },
     },
     structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
@@ -1063,6 +1067,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             num_var_with_rotation: usize,
             pi: Vec<E>,
             alpha_start: usize,
+            grouped_claim_evals: Vec<Vec<E>>,
         }
 
         if jobs.is_empty() {
@@ -1138,6 +1143,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 );
             }
 
+            if let Some(claims) = job.matrix_claims.as_ref() {
+                assign_matrix_group_evals(first_layer, &mut out_evals, claims)
+                    .expect("invalid matrix first-layer groups");
+            }
+
             if let Some(ecc_proof) = job.ecc_proof.as_ref() {
                 let Some(
                     [
@@ -1192,15 +1202,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 .out_sel_and_eval_exprs
                 .iter()
                 .map(|(_, out_eval_exprs)| {
-                    out_eval_exprs
+                    let evals = out_eval_exprs
+                        .iter()
+                        .map(|out_eval| out_eval.evaluate(&out_evals, &job.challenges).eval)
+                        .collect_vec();
+                    let point = out_eval_exprs
                         .first()
-                        .map(|out_eval| out_eval.evaluate(&out_evals, &job.challenges).point)
+                        .map(|out_eval| out_eval.evaluate(&out_evals, &job.challenges).point);
+                    (evals, point)
                 })
                 .collect_vec();
             let selector_eq_pairs = first_layer
                 .out_sel_and_eval_exprs
                 .iter()
-                .zip(eval_and_dedup_points.iter())
+                .zip(eval_and_dedup_points.iter().map(|(_, point)| point))
                 .zip(selector_ctxs.iter())
                 .filter_map(|(((sel_type, _), point), selector_ctx)| {
                     let eq = sel_type.compute(point.as_ref()?, selector_ctx)?;
@@ -1246,6 +1261,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     .map(|v| v.map_either(E::from, |v| v).into_inner())
                     .collect_vec(),
                 alpha_start: total_exprs,
+                grouped_claim_evals: eval_and_dedup_points
+                    .into_iter()
+                    .map(|(evals, _)| evals)
+                    .collect(),
             });
             total_exprs += first_layer.exprs.len();
         }
@@ -1312,6 +1331,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 if scalar_is_zero {
                     continue;
                 }
+                let scalar = scalar.map_either(E::from, |value| value).into_inner();
+                let scalar = if product.is_empty() {
+                    scalar
+                        * frontload_constant_term_scale::<E>(
+                            max_num_variables,
+                            chip.num_var_with_rotation,
+                        )
+                } else {
+                    scalar
+                };
                 let product = product
                     .iter()
                     .map(|expr| {
@@ -1322,8 +1351,24 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     })
                     .collect_vec();
                 global_terms.push(Term {
-                    scalar: Expression::Constant(scalar),
+                    scalar: Expression::Constant(Either::Right(scalar)),
                     product,
+                });
+            }
+            for (wit_id, coefficient) in matrix_selector_corrections(
+                chip.layer,
+                &chip.grouped_claim_evals,
+                &alpha_pows[chip.alpha_start..chip.alpha_start + chip.layer.exprs.len()],
+            )
+            .expect("invalid matrix first-layer correction layout")
+            {
+                global_terms.push(Term {
+                    scalar: Expression::Constant(Either::Right(coefficient)),
+                    product: vec![
+                        global_mle_exprs
+                            [chip.mle_start + chip.layer.n_witin + chip.layer.n_fixed + wit_id]
+                            .clone(),
+                    ],
                 });
             }
         }
@@ -1356,6 +1401,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     .as_ref()
                     .unwrap(),
             );
+            for (wit_id, coefficient) in matrix_selector_corrections(
+                chip.layer,
+                &chip.grouped_claim_evals,
+                &alpha_pows[chip.alpha_start..chip.alpha_start + chip.layer.exprs.len()],
+            )
+            .expect("invalid matrix first-layer correction layout")
+            {
+                final_claim += coefficient
+                    * eval_batched_main_frontload_mle(
+                        layer_evals[chip.layer.n_witin + chip.layer.n_fixed + wit_id],
+                        &global_rt,
+                        chip.num_var_with_rotation,
+                    );
+            }
         }
         let claimed_sum = recover_sumcheck_claim_from_final(final_claim, &proof, &global_rt);
         transcript.append_field_element_exts(&global_evals);
@@ -1421,10 +1480,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
         fixed_data: Option<Arc<PCS::CommitmentWithWitness>>,
         points: Vec<Point<E>>,
         mut evals: Vec<Vec<Vec<E>>>, // where each inner vec![wit_evals, fixed_evals]
-        transcript: &mut impl Transcript<E>,
+        transcript: &mut (impl Transcript<E> + 'static),
     ) -> PCS::Proof {
         let mut rounds = vec![];
-        rounds.push((&witness_data, {
+        let witness_round = {
             evals
                 .iter_mut()
                 .zip(&points)
@@ -1437,7 +1496,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBac
                     }
                 })
                 .collect_vec()
-        }));
+        };
+        rounds.push((&witness_data, witness_round));
         if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
             rounds.push((fixed_data, {
                 evals

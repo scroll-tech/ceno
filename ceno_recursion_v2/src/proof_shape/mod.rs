@@ -55,6 +55,17 @@ pub struct AirMetadata {
     write_op_vars: usize,
     logup_op_vars: usize,
     selectors: Vec<SelectorMetadata>,
+    num_main_exprs: usize,
+    matrix_corrections: Vec<MatrixCorrectionMetadata>,
+}
+
+#[derive(Clone)]
+struct MatrixCorrectionMetadata {
+    correction_idx: usize,
+    alpha_offset: usize,
+    eval_idx: usize,
+    matrix_kind: usize,
+    matrix_idx: usize,
 }
 
 #[derive(Clone)]
@@ -78,6 +89,7 @@ enum SelectorContextMode {
 pub struct ProofShapeModule {
     // Verifying key fields
     per_air: Vec<AirMetadata>,
+    matrix_reduction_air_idx: Option<usize>,
 
     // Buses (inventory for external, others are internal)
     bus_inventory: BusInventory,
@@ -105,11 +117,16 @@ impl ProofShapeModule {
         let num_airs = child_vk.circuit_vks.len();
         let idx_encoder = Arc::new(Encoder::new(num_airs, 2, true));
         let per_air = extract_air_metadata_from_vk(child_vk);
+        let matrix_reduction_air_idx = child_vk
+            .circuit_index_to_name
+            .iter()
+            .find_map(|(idx, name)| (name == "TensorBatchedMatMulCore").then_some(*idx));
         let public_values_start_tidx = TranscriptLabel::Riscv.field_len() + VK_DIGEST_LEN * D_EF;
 
         let range_bus = bus_inventory.range_checker_bus;
         Self {
             per_air,
+            matrix_reduction_air_idx,
             bus_inventory,
             range_bus,
             permutation_bus: ProofShapePermutationBus::new(b.new_bus_idx()),
@@ -256,6 +273,16 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
                     panic!("failed to extract selector metadata for air {idx}: {err}")
                 })
                 .unwrap_or_default();
+            let (num_main_exprs, matrix_corrections) = child_vk
+                .circuit_index_to_name
+                .get(&idx)
+                .and_then(|name| child_vk.circuit_vks.get(name))
+                .map(|circuit_vk| matrix_correction_metadata(circuit_vk.get_cs()))
+                .transpose()
+                .unwrap_or_else(|err| {
+                    panic!("failed to extract matrix correction metadata for air {idx}: {err}")
+                })
+                .unwrap_or_default();
             let num_read_count = usize::from(raw_read_count > 0);
             let num_write_count = usize::from(raw_write_count > 0);
             let num_logup_count = usize::from(raw_logup_count > 0);
@@ -272,6 +299,8 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
                 write_op_vars: grouped_op_vars(raw_write_count),
                 logup_op_vars: grouped_op_vars(raw_logup_count),
                 selectors,
+                num_main_exprs,
+                matrix_corrections,
             }
         })
         .collect_vec()
@@ -300,6 +329,11 @@ fn selector_metadata_from_circuit(
         point_sources[slope] = 5;
         point_sources[x3] = 6;
         point_sources[y3] = 6;
+    }
+    if let Some([a, w, output]) = first_layer.matrix_selector_group_indices() {
+        point_sources[a] = 7;
+        point_sources[w] = 8;
+        point_sources[output] = 9;
     }
     let cs = &composed_cs.zkvm_v1_css;
     let distinct_rw_selectors =
@@ -339,6 +373,70 @@ fn selector_metadata_from_circuit(
             })
         })
         .collect()
+}
+
+fn matrix_correction_metadata(
+    composed_cs: &ceno_zkvm::structs::ComposedConstrainSystem<RecursionField>,
+) -> Result<(usize, Vec<MatrixCorrectionMetadata>)> {
+    let Some(circuit) = composed_cs.gkr_circuit.as_ref() else {
+        return Ok((0, Vec::new()));
+    };
+    let layer = circuit
+        .layers
+        .first()
+        .ok_or_else(|| eyre!("empty gkr circuit layer"))?;
+    let Some(groups @ [a, w, output]) = layer.matrix_selector_group_indices() else {
+        return Ok((layer.exprs.len(), Vec::new()));
+    };
+    if w != a + 1 || output != w + 1 {
+        bail!("matrix first-layer groups are not consecutive");
+    }
+    let structural_offset = layer.n_witin + layer.n_fixed;
+    let mut records = Vec::with_capacity(4);
+    for (group, expected_len, matrix_kind, matrix_base_idx) in [
+        (
+            groups[0],
+            1usize,
+            crate::main::matrix_reduction::FINAL_EVAL,
+            0usize,
+        ),
+        (
+            groups[1],
+            1usize,
+            crate::main::matrix_reduction::FINAL_EVAL,
+            1usize,
+        ),
+        (
+            groups[2],
+            2usize,
+            crate::main::matrix_reduction::OUTPUT_EVAL,
+            0usize,
+        ),
+    ] {
+        let (selector, evals) = &layer.out_sel_and_eval_exprs[group];
+        if evals.len() != expected_len {
+            bail!("matrix first-layer group length mismatch");
+        }
+        let gkr_iop::selector::SelectorType::Whole(Expression::StructuralWitIn(wit_id, _)) =
+            selector
+        else {
+            bail!("matrix first-layer selector must be a whole structural witness");
+        };
+        let alpha_offset = layer.out_sel_and_eval_exprs[..group]
+            .iter()
+            .map(|(_, evals)| evals.len())
+            .sum::<usize>();
+        for offset in 0..expected_len {
+            records.push(MatrixCorrectionMetadata {
+                correction_idx: records.len(),
+                alpha_offset: alpha_offset + offset,
+                eval_idx: structural_offset + *wit_id as usize,
+                matrix_kind,
+                matrix_idx: matrix_base_idx + offset,
+            });
+        }
+    }
+    Ok((layer.exprs.len(), records))
 }
 
 fn selector_shape_metadata(
@@ -469,6 +567,10 @@ impl AirModule for ProofShapeModule {
             main_selector_sparse_index_shape_bus: self
                 .bus_inventory
                 .main_selector_sparse_index_shape_bus,
+            matrix_reduction_presence_bus: self.bus_inventory.matrix_reduction_presence_bus,
+            matrix_reduction_air_idx: self.matrix_reduction_air_idx,
+            main_expression_count_bus: self.bus_inventory.main_expression_count_bus,
+            main_matrix_correction_shape_bus: self.bus_inventory.main_matrix_correction_shape_bus,
         };
         let pvs_air = PublicValuesAir {
             public_values_bus: self.bus_inventory.public_values_bus,

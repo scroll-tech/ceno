@@ -331,6 +331,7 @@ impl TowerModule {
                 tower_replay,
                 rotation_replay: None,
                 ecc_replay: None,
+                matrix_reduction_replay: None,
             });
         }
     }

@@ -28,6 +28,29 @@ pub struct ForkedTranscriptBusMessage<T> {
 
 define_typed_per_proof_permutation_bus!(ForkedTranscriptBus, ForkedTranscriptBusMessage);
 
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MatrixReductionPresenceMessage<T> {
+    pub air_idx: T,
+    pub fork_id: T,
+    pub log_height: T,
+    pub final_sample_tidx: T,
+}
+
+define_typed_per_proof_permutation_bus!(MatrixReductionPresenceBus, MatrixReductionPresenceMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MatrixReductionValueMessage<T> {
+    pub air_idx: T,
+    pub kind: T,
+    pub idx: T,
+    pub tidx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(MatrixReductionValueBus, MatrixReductionValueMessage);
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum LookupChallengeKind {
@@ -115,6 +138,49 @@ pub struct MainGlobalClaimMessage<T> {
 }
 
 define_typed_per_proof_permutation_bus!(MainGlobalClaimBus, MainGlobalClaimMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainInitialClaimMessage<T> {
+    pub claimed_sum: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(MainInitialClaimBus, MainInitialClaimMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainAlphaPowMessage<T> {
+    pub air_idx: T,
+    pub alpha_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(MainAlphaPowBus, MainAlphaPowMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainExpressionCountMessage<T> {
+    pub air_idx: T,
+    pub num_exprs: T,
+}
+
+define_typed_per_proof_permutation_bus!(MainExpressionCountBus, MainExpressionCountMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainMatrixCorrectionShapeMessage<T> {
+    pub air_idx: T,
+    pub correction_idx: T,
+    pub alpha_idx: T,
+    pub eval_idx: T,
+    pub matrix_kind: T,
+    pub matrix_idx: T,
+}
+
+define_typed_per_proof_permutation_bus!(
+    MainMatrixCorrectionShapeBus,
+    MainMatrixCorrectionShapeMessage
+);
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
@@ -461,6 +527,7 @@ define_typed_per_proof_lookup_bus!(PcsJaggedFEvalBus, PcsJaggedFEvalMessage);
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct PcsOpeningEvalMessage<T> {
+    pub pcs_round_idx: T,
     pub opening_idx: T,
     pub commit_kind: T,
     pub eval_idx: T,
@@ -468,6 +535,18 @@ pub struct PcsOpeningEvalMessage<T> {
 }
 
 define_typed_per_proof_lookup_bus!(PcsOpeningEvalBus, PcsOpeningEvalMessage);
+define_typed_per_proof_lookup_bus!(PcsSemanticOpeningEvalBus, PcsOpeningEvalMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsOpeningPointMessage<T> {
+    pub pcs_round_idx: T,
+    pub opening_idx: T,
+    pub coord_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(PcsOpeningPointBus, PcsOpeningPointMessage);
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]

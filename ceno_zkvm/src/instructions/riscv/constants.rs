@@ -20,7 +20,6 @@ pub const HINT_LENGTH_IDX: usize = HINT_START_ADDR_IDX + 1;
 pub const SHARD_RW_SUM_IDX: usize = HINT_LENGTH_IDX + 1;
 pub const PUBIO_DIGEST_IDX: usize = SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE * 2;
 pub const PUBIO_DIGEST_U16_LIMBS: usize = 8 * UINT_LIMBS;
-
 pub const LIMB_BITS: usize = 16;
 pub const LIMB_MASK: u32 = 0xFFFF;
 

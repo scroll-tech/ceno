@@ -8,13 +8,16 @@ mod dense_addr_space;
 mod platform;
 pub use platform::{CENO_PLATFORM, Platform};
 
+pub mod tensor;
+
 mod tracer;
 pub use tracer::{
     Change, ChipCostSpec, FullTracer, FullTracerConfig, GpuReplayChunk, GpuReplayFallbackRecord,
     GpuReplayStep, GpuReplayTracer, GpuReplayTracerConfig, LatestAccesses, MemOp, NextAccessEvent,
     NextAccessPair, NextAccessTape, NextCycleAccess, PreflightTracer, PreflightTracerConfig,
     ReadOp, ReplayChunk, ReplayEngine, ReplayStopReason, SHARD_COST_BUCKETS, ShardCostModel,
-    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
+    ShardPlanBuilder, StepCellExtractor, StepIndex, StepRecord, TensorSegmentPlan,
+    TensorStateSegmentAnnotation, Tracer, WriteOp,
 };
 
 mod compact_journal;
@@ -30,8 +33,9 @@ mod gpu_replay;
 mod gpu_typed_ingress;
 pub use gpu_replay::{GpuReplayRoutingError, GpuReplayShardArenas, GpuReplayTypedRange};
 pub use gpu_typed_ingress::{
-    CONTINUATION_ADDRESS_SEND_BOUND, GpuReplayRangeDescriptor, GpuShardPreview, GpuTypedKindSpec,
-    GpuTypedLayout, GpuTypedSoaArena, MAX_SPARSE_ADDRESS_SENDS_PER_STEP, gpu_typed_kind_spec,
+    CONTINUATION_ADDRESS_SEND_BOUND, GpuReplayFallbackInterval, GpuReplayRangeDescriptor,
+    GpuShardPreview, GpuTypedKindSpec, GpuTypedLayout, GpuTypedSoaArena,
+    MAX_SPARSE_ADDRESS_SENDS_PER_STEP, gpu_typed_kind_spec,
 };
 
 mod vm_state;
@@ -51,6 +55,8 @@ pub use elf::Program;
 pub mod disassemble;
 
 mod syscalls;
+#[cfg(feature = "llama-tiny")]
+pub use syscalls::tensor::TensorBatchedMatMul2x2V1Spec;
 pub use syscalls::{
     BLS12381_ADD, BLS12381_DECOMPRESS, BLS12381_DOUBLE, BN254_ADD, BN254_DOUBLE, BN254_FP_ADD,
     BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL, KECCAK_PERMUTE, KECCAK_XORIN, PubIoCommitSpec,
@@ -73,6 +79,17 @@ pub use syscalls::{
         Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec,
     },
     sha256::{SHA_EXTEND_WORDS, Sha256ExtendSpec},
+    tensor::{
+        ATTENTION_REDUCED_PROFILE_V1, ATTENTION_RESCALE_SHIFT_Q20_V1,
+        ATTENTION_SOFTMAX_TABLE_COMMITMENT_V1, ATTENTION_SOFTMAX_TABLE_REDUCED_V1,
+        BLOCK_REDUCED_PROFILE_V1, FFN_TABLE_COMMITMENT_V1, FFN_TABLE_REDUCED_V1,
+        TENSOR_BUS_FIXED_TRANSFER_WORDS, TENSOR_SIGNATURE_2X3X2, TensorAttentionBlockReducedV1Spec,
+        TensorAttentionReducedV1Spec, TensorExportEndV1Spec, TensorFfnBlockReducedV1Spec,
+        TensorHandleAttentionV1Spec, TensorHandleFfnV1Spec, TensorImportBeginV1Spec,
+        TensorMatMulHiddenV1Spec, TensorMatMulIntermediateV1Spec, TensorMatMulV1Spec,
+        TensorProductionExportEndV2Spec, TensorProductionImportBeginV2Spec,
+        TensorProductionStageV2Spec, TensorRmsLookupV1Spec,
+    },
     uint256::{UINT256_WORDS_FIELD_ELEMENT, Uint256MulSpec},
 };
 

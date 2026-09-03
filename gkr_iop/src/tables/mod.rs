@@ -15,6 +15,12 @@ pub enum LookupTable {
     Ltu,         // a <(usign) b where a, b are bytes and the result is 0/1.
     Pow,         // a ** b where a is 2 and b is 5-bit value
     Instruction, // Decoded instruction from the fixed program.
+    LlamaSoftmaxExp3,
+    LlamaSoftmaxExp4,
+    LlamaProductionSoftmaxExpMiddle,
+    LlamaProductionSoftmaxExpHigh,
+    LlamaRmsInv,
+    LlamaSwiGlu,
 }
 
 /// Use this trait as parameter to OpsTableCircuit.

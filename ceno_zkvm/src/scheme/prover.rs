@@ -1,11 +1,15 @@
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 #[cfg(feature = "gpu")]
 use gkr_iop::error::BackendError;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     hal::ProverBackend,
 };
-use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    marker::PhantomData,
+    sync::{Arc, Mutex},
+};
 
 #[cfg(feature = "gpu")]
 use std::collections::HashMap;
@@ -84,7 +88,7 @@ where
 }
 
 #[cfg(feature = "gpu")]
-fn prepare_gpu_chip_input<E, PCS>(
+pub(crate) fn prepare_gpu_chip_input<E, PCS>(
     task: &mut ChipTask<'_, gkr_iop::gpu::GpuBackend<E, PCS>>,
     pcs_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData,
 ) where
@@ -105,7 +109,123 @@ fn prepare_gpu_chip_input<E, PCS>(
         });
     }
 
-    if let Some(rmm) = task.structural_rmm.as_ref() {
+    let virtual_production_boundary = task.structural_rmm.as_ref().is_some_and(|rmm| {
+        task.circuit_name.starts_with("TensorProductionBoundary") && rmm.width() == 0
+    });
+    if virtual_production_boundary {
+        use multilinear_extensions::StructuralWitInType;
+        let structural = &task.pk.get_cs().zkvm_v1_css.structural_witins;
+        assert_eq!(
+            structural.len(),
+            5,
+            "production boundary structural width changed"
+        );
+        let formula_num_vars = match structural[0].witin_type {
+            StructuralWitInType::OuterRepeatingIncrementalSequence { k, n } => {
+                assert_eq!(
+                    k, n,
+                    "production boundary index must span its formula domain"
+                );
+                n
+            }
+            other => panic!("production boundary index formula changed: {other:?}"),
+        };
+        assert_eq!(
+            formula_num_vars, 23,
+            "production boundary formula domain changed"
+        );
+        assert_eq!(
+            structural[0].witin_type.max_len(),
+            1usize << formula_num_vars,
+            "production boundary structural height changed"
+        );
+        assert!(
+            num_vars >= formula_num_vars,
+            "production boundary task domain is smaller than its structural formula"
+        );
+        assert!(
+            structural[1..]
+                .iter()
+                .all(|w| matches!(w.witin_type, StructuralWitInType::Empty))
+        );
+        assert_eq!(
+            structural.iter().map(|w| w.id as usize).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4],
+            "production boundary structural ordering changed"
+        );
+        let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+        let kinds = [
+            ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX_23,
+            ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO,
+            ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO,
+            ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO,
+            ceno_gpu::GPU_VIRTUAL_FORMULA_ONE,
+        ];
+        task.input.structural_witness = kinds
+            .into_iter()
+            .map(|kind| {
+                Arc::new(gkr_iop::gpu::MultilinearExtensionGpu::from_virtual_formula(
+                    &cuda_hal, num_vars, kind,
+                ))
+            })
+            .collect();
+        assert!(
+            task.input
+                .structural_witness
+                .iter()
+                .zip(kinds)
+                .all(|(mle, kind)| mle.virtual_formula_kind() == Some(kind))
+        );
+        for row in [
+            0usize,
+            1,
+            2,
+            3,
+            (1usize << 22) + 3,
+            (1usize << 23) - 1,
+            (1usize << 23) + 3,
+            (1usize << 24) - 1,
+        ] {
+            let point = (0..num_vars)
+                .map(|bit| E::from_u64(((row >> bit) & 1) as u64))
+                .collect::<Vec<_>>();
+            let expected = [
+                E::from_usize(row & ((1usize << formula_num_vars) - 1)),
+                E::ZERO,
+                E::ZERO,
+                E::ZERO,
+                E::ONE,
+            ];
+            let actual = task
+                .input
+                .structural_witness
+                .iter()
+                .map(|mle| mle.evaluate(&point))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual, expected,
+                "production boundary formula differs from dense oracle at row {row}"
+            );
+        }
+        let rmm = task
+            .structural_rmm
+            .take()
+            .expect("boundary structural marker missing");
+        assert_eq!(rmm.width(), 0, "boundary retained dense structural columns");
+        assert!(
+            !rmm.has_device_backing(),
+            "boundary retained structural device backing"
+        );
+        tracing::info!(
+            circuit = %task.circuit_name,
+            task_num_vars = num_vars,
+            formula_num_vars,
+            rows = 1usize << formula_num_vars,
+            formulas = "[row mod 2^23,0,0,0,1]",
+            dense_bytes_elided = 5usize * (1usize << num_vars) * std::mem::size_of::<E::BaseField>(),
+            "production boundary structural formulas active"
+        );
+    } else if let Some(rmm) = task.structural_rmm.as_ref() {
         let _range = nvtx::range!("ceno.phase.structural-transfer");
         let num_structural_witin = task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize;
         task.input.structural_witness =
@@ -117,6 +237,53 @@ fn prepare_gpu_chip_input<E, PCS>(
                 )
             });
     }
+}
+
+#[cfg(feature = "gpu")]
+fn prove_production_matrix_reduction<E, PCS>(
+    input: &ProofInput<'_, gkr_iop::gpu::GpuBackend<E, PCS>>,
+    descriptor: crate::scheme::matrix_reduction::MatrixReductionDescriptor,
+    transcript: &mut impl Transcript<E>,
+) -> Result<
+    (
+        crate::scheme::MatrixReductionProof<E>,
+        crate::scheme::matrix_reduction::MatrixOpeningClaims<E>,
+    ),
+    ZKVMError,
+>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+{
+    type ProductionE = ff_ext::BabyBearExt4;
+    if std::any::TypeId::of::<E>() != std::any::TypeId::of::<ProductionE>() {
+        return Err(ZKVMError::InvalidWitness(
+            "production matrix reduction requires BabyBearExt4".into(),
+        ));
+    }
+    let witness = unsafe {
+        &*(&input.witness[..] as *const [Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>]
+            as *const [Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, ProductionE>>])
+    };
+    let production = crate::scheme::matrix_reduction::prove_production(
+        witness,
+        descriptor,
+        crate::scheme::gpu::expect_basic_transcript(transcript),
+    )?;
+    let production = std::mem::ManuallyDrop::new(production);
+    Ok(unsafe {
+        std::ptr::read(
+            (&*production
+                as *const (
+                    crate::scheme::MatrixReductionProof<ProductionE>,
+                    crate::scheme::matrix_reduction::MatrixOpeningClaims<ProductionE>,
+                ))
+                .cast::<(
+                    crate::scheme::MatrixReductionProof<E>,
+                    crate::scheme::matrix_reduction::MatrixOpeningClaims<E>,
+                )>(),
+        )
+    })
 }
 
 #[cfg(feature = "gpu")]
@@ -136,6 +303,8 @@ where
     let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
     let input_num_instances = input.num_instances;
 
+    let main_witness_started = std::time::Instant::now();
+    crate::scheme::gpu::log_gpu_profile_boundary(&task.circuit_name, "main_witness_start", 0);
     let _main_witness_range = nvtx::range!("ceno.phase.main-witness-build");
     let records = info_span!("[ceno] build_main_witness").in_scope(|| {
         build_main_witness::<
@@ -150,9 +319,411 @@ where
             crate::scheme::utils::WitnessBuildStage::Tower,
         )
     });
+    crate::scheme::gpu::log_gpu_profile_boundary(
+        &task.circuit_name,
+        "main_witness_end",
+        main_witness_started.elapsed().as_millis(),
+    );
+    if std::env::var_os("CENO_TENSOR_E2E_LOGUP_EXPR_TRACE").is_some()
+        && (task.circuit_name.starts_with("TensorProductionBoundary")
+            || task.circuit_name == "DYNAMIC_RANGE_20"
+            || task.circuit_name == "ADD"
+            || task.circuit_name == "ADDI"
+            || task.circuit_name == "ANDI"
+            || task.circuit_name == "AUIPC"
+            || task.circuit_name == "BEQ"
+            || task.circuit_name == "BLTU"
+            || task.circuit_name == "BNE"
+            || task.circuit_name == "JALR"
+            || task.circuit_name == "LUI"
+            || task.circuit_name == "LW"
+            || task.circuit_name == "OR"
+            || task.circuit_name == "SLTIU"
+            || task.circuit_name == "SW"
+            || task.circuit_name == "ShardRamCircuit"
+            || task.circuit_name == "TensorAttentionPv"
+            || task.circuit_name == "TensorAttentionQk"
+            || task.circuit_name == "TensorAttentionQkShiftSoftmax"
+            || task.circuit_name == "TensorAttentionSoftmax"
+            || task.circuit_name == "TensorProductionExportEndAnchor"
+            || task.circuit_name == "TensorProductionImportBeginAnchor"
+            || task.circuit_name == "TensorProductionStageAnchor")
+    {
+        let cs = &cs.zkvm_v1_css;
+        let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+        let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+        let lookup_offset = num_reads + num_writes;
+        if cs.lk_table_expressions.is_empty() {
+            for (expression_index, record) in records[lookup_offset..]
+                .iter()
+                .take(cs.lk_expressions.len())
+                .enumerate()
+            {
+                let denominators = record.inner_to_mle().get_ext_field_vec().to_vec();
+                let contribution = p3::field::batch_multiplicative_inverse(&denominators)
+                    .into_iter()
+                    .sum::<E>();
+                tracing::info!(
+                    target: "ceno_gpu::tensor_logup_expression",
+                    circuit = %task.circuit_name,
+                    expression_index,
+                    namespace = ?cs.lk_expressions_namespace_map.get(expression_index),
+                    rows = denominators.len(),
+                    contribution = ?contribution,
+                    "Gate-5 direct lookup expression contribution"
+                );
+            }
+        } else {
+            let table_lookups = cs.lk_table_expressions.len();
+            for expression_index in 0..table_lookups {
+                let numerators = records[lookup_offset + expression_index]
+                    .inner_to_mle()
+                    .get_ext_field_vec()
+                    .to_vec();
+                let denominators = records[lookup_offset + table_lookups + expression_index]
+                    .inner_to_mle()
+                    .get_ext_field_vec()
+                    .to_vec();
+                assert_eq!(numerators.len(), denominators.len());
+                let inverses = p3::field::batch_multiplicative_inverse(&denominators);
+                let contribution = numerators
+                    .into_iter()
+                    .zip(inverses)
+                    .map(|(numerator, inverse)| numerator * inverse)
+                    .sum::<E>();
+                tracing::info!(
+                    target: "ceno_gpu::tensor_logup_expression",
+                    circuit = %task.circuit_name,
+                    expression_index,
+                    namespace = ?cs.lk_expressions_namespace_map.get(expression_index),
+                    rows = denominators.len(),
+                    contribution = ?contribution,
+                    "Gate-5 direct lookup table expression contribution"
+                );
+            }
+        }
+    }
+    // Gate-5's frozen hidden-K4096 E2E has one physical row per syscall
+    // circuit.  Copy just its already-materialized tower-facing record MLEs
+    // under an opt-in flag so a raw custom-record producer can be compared to
+    // its tile/finalize consumer before the grouped GPU product tower hides
+    // the individual record identities.  This is diagnostic-only D2H; it is
+    // never used by proof construction.
+    if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some()
+        && (task.circuit_name.starts_with("TensorProduction")
+            || matches!(
+                task.circuit_name.as_str(),
+                "ADDI"
+                    | "BNE"
+                    | "ECALL_STATE_CONTINUATION"
+                    | "LUI"
+                    | "LocalRAMTableFinal"
+                    | "SW"
+                    | "ShardRamCircuit"
+                    | "ShardRamEcTreeCircuit"
+                    | "TensorAttentionPv"
+                    | "TensorAttentionQk"
+                    | "TensorAttentionQkShiftSoftmax"
+                    | "TensorBusCircuit"
+            ))
+    {
+        let cs = &cs.zkvm_v1_css;
+        let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+        let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+        if matches!(task.circuit_name.as_str(), "ADDI" | "SW") {
+            use gkr_iop::gpu::gpu_prover::{Buffer, GpuFieldType};
+            let populated_rows = input_num_instances.iter().sum::<usize>();
+            let copy_witness_column = |column: usize| -> Vec<E::BaseField> {
+                assert!(column < input.witness.len());
+                let GpuFieldType::Base(poly) = input.witness[column].inner() else {
+                    panic!("producer-key diagnostic requires base-field witness columns");
+                };
+                let values = poly
+                    .evaluations()
+                    .to_vec_n(populated_rows)
+                    .expect("producer-key diagnostic witness D2H failed");
+                // GPU proving supports BabyBear here, so its base element is E::BaseField.
+                unsafe { std::mem::transmute::<Vec<_>, Vec<E::BaseField>>(values) }
+            };
+            let scalar =
+                |column: &[E::BaseField], row: usize| -> u64 { column[row].to_canonical_u64() };
+            let factor_for_key = |key: [u64; 5]| -> E {
+                let mut factor = challenges[0];
+                let mut beta_power = E::ONE;
+                for item in key {
+                    factor += E::from_u64(item) * beta_power;
+                    beta_power *= challenges[1];
+                }
+                factor
+            };
+            let endpoint = |direction: &str, namespace_suffix: &str| {
+                let (offset, namespaces): (usize, Vec<&String>) = if direction == "read" {
+                    (
+                        0,
+                        cs.r_expressions_namespace_map
+                            .iter()
+                            .chain(cs.r_table_expressions_namespace_map.iter())
+                            .collect(),
+                    )
+                } else {
+                    (
+                        num_reads,
+                        cs.w_expressions_namespace_map
+                            .iter()
+                            .chain(cs.w_table_expressions_namespace_map.iter())
+                            .collect(),
+                    )
+                };
+                let relative_idx = namespaces
+                    .iter()
+                    .position(|namespace| namespace.ends_with(namespace_suffix))
+                    .unwrap_or_else(|| panic!("missing producer endpoint {namespace_suffix}"));
+                (offset + relative_idx, namespaces[relative_idx].as_str())
+            };
+            let emit_key = |direction: &str,
+                            namespace_suffix: &str,
+                            physical_row: usize,
+                            key: [u64; 5]| {
+                let (record_idx, namespace) = endpoint(direction, namespace_suffix);
+                let factor = records[record_idx].inner_to_mle().get_ext_field_vec()[physical_row];
+                assert_eq!(
+                    factor_for_key(key),
+                    factor,
+                    "producer raw key does not reproduce namespace row factor: circuit={} direction={direction} namespace={namespace} row={physical_row}",
+                    task.circuit_name
+                );
+                let value = key[2] | (key[3] << 16);
+                tracing::info!(
+                    target: "ceno_gpu::tensor_producer_key",
+                    circuit = %task.circuit_name,
+                    direction,
+                    namespace,
+                    physical_row,
+                    slot = namespace_suffix,
+                    ram_type = key[0],
+                    addr = key[1],
+                    value,
+                    local_clk = key[4],
+                    factor = ?factor,
+                    "Gate-5 producer ordered endpoint key"
+                );
+            };
+
+            if task.circuit_name == "SW" {
+                assert_eq!(input.witness.len(), 23, "SW witness layout changed");
+                assert_eq!(populated_rows, 32, "target31 SW row count changed");
+                // StoreConfig allocation IDs: prev_mem_val=4..5, aligned
+                // mem_addr=8..9, mem_prev_ts=20. SW has no address low bits.
+                let mem_prev_ts = copy_witness_column(20);
+                let prev_mem_lo = copy_witness_column(4);
+                let prev_mem_hi = copy_witness_column(5);
+                let mem_addr_lo = copy_witness_column(8);
+                let mem_addr_hi = copy_witness_column(9);
+                for row in 0..populated_rows {
+                    emit_key(
+                        "read",
+                        "/write_memory/read_record",
+                        row,
+                        [
+                            crate::structs::RAMType::Memory as u64,
+                            scalar(&mem_addr_lo, row) | (scalar(&mem_addr_hi, row) << 16),
+                            scalar(&prev_mem_lo, row),
+                            scalar(&prev_mem_hi, row),
+                            scalar(&mem_prev_ts, row),
+                        ],
+                    );
+                }
+            } else {
+                assert_eq!(input.witness.len(), 18, "ADDI witness layout changed");
+                assert_eq!(populated_rows, 15, "target31 ADDI row count changed");
+                // ADDI config allocation IDs: rs1=0..1, imm/sign=2..3,
+                // carries=4..5, ts=7, rd id/prev_ts/prev_value=12..15.
+                let ts = copy_witness_column(7);
+                let rd_id = copy_witness_column(12);
+                let rd_prev_ts = copy_witness_column(13);
+                let rd_prev_lo = copy_witness_column(14);
+                let rd_prev_hi = copy_witness_column(15);
+                let rs1_lo = copy_witness_column(0);
+                let rs1_hi = copy_witness_column(1);
+                let imm = copy_witness_column(2);
+                let imm_sign = copy_witness_column(3);
+                let carry_lo = copy_witness_column(4);
+                let carry_hi = copy_witness_column(5);
+                let raw_key = |row: usize, write: bool| -> [u64; 5] {
+                    let value = if write {
+                        let lo = scalar(&rs1_lo, row) + scalar(&imm, row)
+                            - (scalar(&carry_lo, row) << 16);
+                        let hi = scalar(&rs1_hi, row)
+                            + scalar(&imm_sign, row) * 0xffff
+                            + scalar(&carry_lo, row)
+                            - (scalar(&carry_hi, row) << 16);
+                        assert!(lo <= u16::MAX as u64 && hi <= u16::MAX as u64);
+                        [lo, hi]
+                    } else {
+                        [scalar(&rd_prev_lo, row), scalar(&rd_prev_hi, row)]
+                    };
+                    [
+                        crate::structs::RAMType::Register as u64,
+                        scalar(&rd_id, row),
+                        value[0],
+                        value[1],
+                        if write {
+                            scalar(&ts, row) + ceno_emul::FullTracer::SUBCYCLE_RD
+                        } else {
+                            scalar(&rd_prev_ts, row)
+                        },
+                    ]
+                };
+                for row in [0usize, 1, 2, 3, 4, 5, 12] {
+                    emit_key("read", "/write_rd/read_record", row, raw_key(row, false));
+                }
+                for row in 0..5 {
+                    emit_key("write", "/write_rd/write_record", row, raw_key(row, true));
+                }
+            }
+        }
+        if task.circuit_name == "ShardRamCircuit" {
+            assert_eq!([num_reads, num_writes], [2, 2]);
+            for (direction, populated_rows, record_indices) in [
+                ("read", 0..input_num_instances[0], [0, 1]),
+                (
+                    "write",
+                    input_num_instances[0]..input_num_instances.iter().sum(),
+                    [num_reads, num_reads + 1],
+                ),
+            ] {
+                let first = records[record_indices[0]].inner_to_mle();
+                let second = records[record_indices[1]].inner_to_mle();
+                let first_factors = first.get_ext_field_vec();
+                let second_factors = second.get_ext_field_vec();
+                assert_eq!(first_factors.len(), second_factors.len());
+                let grouped_product = first_factors.iter().copied().product::<E>()
+                    * second_factors.iter().copied().product::<E>();
+                let populated_product = populated_rows
+                    .clone()
+                    .map(|physical_row| first_factors[physical_row] * second_factors[physical_row])
+                    .product::<E>();
+                assert_eq!(
+                    populated_product, grouped_product,
+                    "ShardRam combined populated-row factors do not reproduce both grouped record products"
+                );
+                for (direction_row, physical_row) in populated_rows.enumerate() {
+                    tracing::info!(
+                        target: "ceno_gpu::tensor_shard_ram_row",
+                        circuit = %task.circuit_name,
+                        direction,
+                        direction_row,
+                        physical_row,
+                        factor = ?(first_factors[physical_row] * second_factors[physical_row]),
+                        "Gate-5 ShardRAM combined logical-row compressed factor"
+                    );
+                }
+            }
+        }
+        for (record_idx, record) in records.iter().take(num_reads + num_writes).enumerate() {
+            let (direction, namespace) = if record_idx < num_reads {
+                (
+                    "read",
+                    cs.r_expressions_namespace_map.get(record_idx).or_else(|| {
+                        cs.r_table_expressions_namespace_map
+                            .get(record_idx - cs.r_expressions.len())
+                    }),
+                )
+            } else {
+                let write_idx = record_idx - num_reads;
+                (
+                    "write",
+                    cs.w_expressions_namespace_map.get(write_idx).or_else(|| {
+                        cs.w_table_expressions_namespace_map
+                            .get(write_idx - cs.w_expressions.len())
+                    }),
+                )
+            };
+            let record_mle = record.inner_to_mle();
+            let factors = record_mle.get_ext_field_vec();
+            let product = factors.iter().copied().product::<E>();
+            if task.circuit_name == "ShardRamCircuit" && matches!(record_idx, 0 | 2) {
+                let populated_rows = if direction == "read" {
+                    0..input_num_instances[0]
+                } else {
+                    input_num_instances[0]..input_num_instances.iter().sum()
+                };
+                let populated_product = populated_rows
+                    .clone()
+                    .map(|physical_row| factors[physical_row])
+                    .product::<E>();
+                assert_eq!(
+                    populated_product, product,
+                    "ShardRam ordinary populated-row factors do not reproduce grouped record product"
+                );
+                for (direction_row, physical_row) in populated_rows.enumerate() {
+                    tracing::info!(
+                        target: "ceno_gpu::tensor_shard_ram_row",
+                        circuit = %task.circuit_name,
+                        record_idx,
+                        direction,
+                        direction_row,
+                        physical_row,
+                        factor = ?factors[physical_row],
+                        "Gate-5 ShardRAM ordinary logical-row compressed factor"
+                    );
+                }
+            }
+            let is_ram_endpoint = namespace.is_some_and(|namespace| match task.circuit_name.as_str() {
+                "ADDI" | "BNE" | "LUI" => {
+                    namespace.contains("/read_rs1/")
+                        || namespace.contains("/read_rs2/")
+                        || namespace.contains("/write_rd/")
+                }
+                "SW" => {
+                    namespace.contains("/read_rs1/")
+                        || namespace.contains("/read_rs2/")
+                        || namespace.contains("/write_memory/")
+                }
+                "LocalRAMTableFinal" => namespace.ends_with("/final_table"),
+                _ => false,
+            });
+            if is_ram_endpoint {
+                let populated_rows = 0..input_num_instances.iter().sum();
+                let populated_product = populated_rows
+                    .clone()
+                    .map(|physical_row| factors[physical_row])
+                    .product::<E>();
+                assert_eq!(
+                    populated_product, product,
+                    "producer endpoint populated-row factors do not reproduce grouped record product"
+                );
+                for physical_row in populated_rows {
+                    tracing::info!(
+                        target: "ceno_gpu::tensor_producer_row",
+                        circuit = %task.circuit_name,
+                        record_idx,
+                        direction,
+                        namespace = ?namespace,
+                        physical_row,
+                        factor = ?factors[physical_row],
+                        "Gate-5 producer logical-row compressed factor"
+                    );
+                }
+            }
+            tracing::info!(
+                target: "ceno_gpu::tensor_record_path",
+                circuit = %task.circuit_name,
+                circuit_idx = task.circuit_idx,
+                logical_instances = ?input_num_instances,
+                record_idx,
+                direction,
+                namespace = ?namespace,
+                product = ?product,
+                "Gate-5 compact individual tower record MLE product"
+            );
+        }
+    }
     drop(_main_witness_range);
 
     let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+    let tower_started = std::time::Instant::now();
+    crate::scheme::gpu::log_gpu_profile_boundary(&task.circuit_name, "pre_tower", 0);
     let span = entered_span!("prove_tower_relation", profiling_2 = true);
     let _tower_range = nvtx::range!("ceno.phase.tower-build-prove");
     let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
@@ -163,6 +734,11 @@ where
         })?;
     drop(_tower_range);
     exit_span!(span);
+    crate::scheme::gpu::log_gpu_profile_boundary(
+        &task.circuit_name,
+        "post_tower",
+        tower_started.elapsed().as_millis(),
+    );
 
     assert!(
         rt_tower.len() >= num_var_with_rotation,
@@ -197,12 +773,44 @@ where
             cs, input, &rt_main, challenges, transcript,
         )
     })?;
+    let matrix_reduction = match crate::scheme::matrix_reduction::descriptor(&task.circuit_name) {
+        Some(descriptor)
+            if descriptor.kind == crate::scheme::matrix_reduction::MatrixReductionKind::Tiny =>
+        {
+            Some(crate::scheme::matrix_reduction::prove(
+                &input.witness,
+                input_num_instances.iter().sum(),
+                descriptor.columns,
+                transcript,
+            )?)
+        }
+        Some(descriptor) => Some(prove_production_matrix_reduction::<E, PCS>(
+            input, descriptor, transcript,
+        )?),
+        None => None,
+    };
     drop(_rotation_range);
     exit_span!(span);
 
     let mut main_input = input.clone();
     main_input.witness.clear();
-    main_input.structural_witness.clear();
+    let virtual_production_boundary = task.circuit_name.starts_with("TensorProductionBoundary")
+        && main_input.structural_witness.len() == 5
+        && main_input
+            .structural_witness
+            .iter()
+            .all(|mle| mle.virtual_formula_kind().is_some());
+    if !virtual_production_boundary {
+        main_input.structural_witness.clear();
+    } else {
+        assert_eq!(main_input.structural_witness.len(), 5);
+        assert!(
+            main_input
+                .structural_witness
+                .iter()
+                .all(|mle| mle.virtual_formula_kind().is_some())
+        );
+    }
     let structural_rmm = task.structural_rmm.take();
 
     Ok((
@@ -216,6 +824,7 @@ where
             rotation_proof: rotation.clone().map(|r| r.proof),
             tower_proof,
             ecc_proof: ecc_proof.clone(),
+            matrix_reduction: matrix_reduction.as_ref().map(|(proof, _)| proof.clone()),
             num_instances: input_num_instances,
         },
         MainConstraintJob {
@@ -228,6 +837,7 @@ where
             rt_tower: rt_main,
             main_out_evals: Vec::new(),
             rotation,
+            matrix_claims: matrix_reduction.map(|(_, claims)| claims),
             ecc_proof,
             challenges: *challenges,
             cs,
@@ -238,14 +848,34 @@ where
 pub type ZkVMCpuProver<E, PCS> =
     ZKVMProver<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>;
 
+struct DevicePkLifecycle<PB: ProverBackend> {
+    first: Option<DeviceProvingKey<'static, PB>>,
+    non_first: Option<DeviceProvingKey<'static, PB>>,
+    entered_non_first: bool,
+}
+
+fn clone_device_pk<PB: ProverBackend>(
+    key: &DeviceProvingKey<'static, PB>,
+) -> DeviceProvingKey<'static, PB> {
+    DeviceProvingKey {
+        fixed_mles: key.fixed_mles.clone(),
+        pcs_data: key.pcs_data.clone(),
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn gpu_pool_used_bytes() -> Option<u64> {
+    let hal = gkr_iop::gpu::get_cuda_hal().ok()?;
+    hal.inner.mem_pool().get_used_size().ok()
+}
+
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, PD>
 {
     pub pk: Arc<ZKVMProvingKey<E, PCS>>,
     vk_digest: [E; VK_DIGEST_LEN],
     device: PD,
     // device_pk might be none if there is no fixed commitment
-    device_first_shard_pk: Option<DeviceProvingKey<'static, PB>>,
-    device_non_first_shard_pk: Option<DeviceProvingKey<'static, PB>>,
+    device_pk_lifecycle: Mutex<DevicePkLifecycle<PB>>,
     _marker: PhantomData<PB>,
 }
 
@@ -269,42 +899,96 @@ impl<
             pk,
             vk_digest,
             device,
-            device_first_shard_pk,
-            device_non_first_shard_pk: None,
+            device_pk_lifecycle: Mutex::new(DevicePkLifecycle {
+                first: device_first_shard_pk,
+                non_first: None,
+                entered_non_first: false,
+            }),
             _marker: PhantomData,
         }
     }
 
     pub fn new(pk: Arc<ZKVMProvingKey<E, PCS>>, device: PD) -> Self {
         let vk_digest = pk.compute_vk_digest::<RV32imMemStateConfig>();
-        let (device_first_shard_pk, device_non_first_shard_pk) =
-            if pk.as_ref().has_fixed_commitment() {
-                (
-                    Some(device.transport_proving_key(true, pk.clone())),
-                    Some(device.transport_proving_key(false, pk.clone())),
-                )
-            } else {
-                (None, None)
-            };
+        #[cfg(feature = "gpu")]
+        let pool_before = gpu_pool_used_bytes();
+        let device_first_shard_pk = pk
+            .as_ref()
+            .has_fixed_commitment()
+            .then(|| device.transport_proving_key(true, pk.clone()));
+        #[cfg(feature = "gpu")]
+        if let (Some(before), Some(after)) = (pool_before, gpu_pool_used_bytes()) {
+            tracing::info!(
+                target: "ceno_pipeline",
+                key = "first",
+                before_bytes = before,
+                after_bytes = after,
+                constructed_bytes = after.saturating_sub(before),
+                "constructed one fixed device proving key"
+            );
+        }
 
         ZKVMProver {
             pk,
             vk_digest,
             device,
-            device_first_shard_pk,
-            device_non_first_shard_pk,
+            device_pk_lifecycle: Mutex::new(DevicePkLifecycle {
+                first: device_first_shard_pk,
+                non_first: None,
+                entered_non_first: false,
+            }),
             _marker: PhantomData,
         }
     }
 
-    pub fn get_device_proving_key(
+    fn device_proving_key_for_shard(
         &self,
         shard_ctx: &ShardContext,
-    ) -> Option<&DeviceProvingKey<'static, PB>> {
+    ) -> Option<DeviceProvingKey<'static, PB>> {
+        if !self.pk.as_ref().has_fixed_commitment() {
+            return None;
+        }
+        let mut lifecycle = self.device_pk_lifecycle.lock().unwrap();
         if shard_ctx.is_first_shard() {
-            self.device_first_shard_pk.as_ref()
+            assert!(
+                !lifecycle.entered_non_first,
+                "first-shard fixed key requested after entering non-first shards"
+            );
+            Some(clone_device_pk(lifecycle.first.as_ref().expect(
+                "first shard is missing its fixed device proving key",
+            )))
         } else {
-            self.device_non_first_shard_pk.as_ref()
+            if !lifecycle.entered_non_first {
+                let first = lifecycle
+                    .first
+                    .take()
+                    .expect("non-first transition is missing the first-shard fixed key");
+                drop(first);
+                #[cfg(feature = "gpu")]
+                let pool_before = gpu_pool_used_bytes();
+                let non_first = self.device.transport_proving_key(false, self.pk.clone());
+                #[cfg(feature = "gpu")]
+                if let (Some(before), Some(after)) = (pool_before, gpu_pool_used_bytes()) {
+                    tracing::info!(
+                        target: "ceno_pipeline",
+                        key = "non_first",
+                        shard_id = shard_ctx.shard_id,
+                        before_bytes = before,
+                        after_bytes = after,
+                        constructed_bytes = after.saturating_sub(before),
+                        "released first fixed key and constructed non-first fixed key"
+                    );
+                }
+                lifecycle.non_first = Some(non_first);
+                lifecycle.entered_non_first = true;
+            }
+            assert!(
+                lifecycle.first.is_none(),
+                "first-shard fixed key survived the non-first transition"
+            );
+            Some(clone_device_pk(lifecycle.non_first.as_ref().expect(
+                "non-first shard is missing its fixed device proving key",
+            )))
         }
     }
 
@@ -336,7 +1020,10 @@ impl<
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
         mut transcript: impl ForkableTranscript<E> + 'static,
-    ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
+    ) -> Result<ZKVMProof<E, PCS>, ZKVMError>
+    where
+        E: crate::scheme::mock_prover::LkMultiplicityKey,
+    {
         #[cfg(feature = "gpu")]
         {
             crate::instructions::gpu::cache::release_all_shard_gpu_caches();
@@ -344,8 +1031,9 @@ impl<
         }
 
         // Pre-extract fixed_mles before entering the tracing scope to avoid lifetime issues with std::thread::scope
-        let fixed_mles_preload = self
-            .get_device_proving_key(shard_ctx)
+        let device_pk = self.device_proving_key_for_shard(shard_ctx);
+        let fixed_mles_preload = device_pk
+            .as_ref()
             .map(|dpk| dpk.fixed_mles.clone())
             .unwrap_or_default();
 
@@ -385,6 +1073,10 @@ impl<
             let mut wits_rmms = BTreeMap::new();
             #[cfg(feature = "gpu")]
             let mut gpu_witness_traces = BTreeMap::new();
+
+            let mock_lk_mlts = std::env::var_os("MOCK_PROVING")
+                .is_some()
+                .then(|| witnesses.lk_mlts().clone());
 
             // Extract chip metadata before consuming witnesses.
             // We reuse this for both transcript appends and task construction.
@@ -494,16 +1186,28 @@ impl<
             let use_gpu_witness_commit = (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
                 || is_babybear_jagged_pcs::<E, PCS>())
                 && using_gpu_backend;
+            #[cfg(feature = "gpu")]
+            let profile_label = format!("shard_{}", shard_ctx.shard_id);
             #[cfg(not(feature = "gpu"))]
             let _use_gpu_witness_commit = false;
 
             // commit to witness traces in batch
             #[cfg_attr(not(feature = "gpu"), allow(unused_mut))]
+            #[cfg(feature = "gpu")]
+            let commit_started = std::time::Instant::now();
             let (witness_mles, witness_data, witin_commit): (
                 Vec<Arc<PB::MultilinearPoly<'_>>>,
                 PB::PcsData,
                 PCS::Commitment,
             ) = {
+                #[cfg(feature = "gpu")]
+                if using_gpu_backend {
+                    crate::scheme::gpu::log_gpu_profile_boundary(
+                        &profile_label,
+                        "commit_start",
+                        0,
+                    );
+                }
                 #[cfg(feature = "gpu")]
                 if use_gpu_witness_commit {
                     info_span!("[ceno] commit_traces").in_scope(|| {
@@ -529,6 +1233,14 @@ impl<
                     info_span!("[ceno] commit_traces").in_scope(|| self.device.commit_traces(wits_rmms))
                 }
             };
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                crate::scheme::gpu::log_gpu_profile_boundary(
+                    &profile_label,
+                    "commit_end",
+                    commit_started.elapsed().as_millis(),
+                );
+            }
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
 
@@ -560,6 +1272,35 @@ impl<
             );
             exit_span!(build_tasks_span);
 
+            #[cfg(feature = "gpu")]
+            if let Some(lk_mlts) = mock_lk_mlts {
+                assert_eq!(
+                    std::any::TypeId::of::<PB>(),
+                    std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>(),
+                    "exact GPU MLE MockProver requires the GPU backend"
+                );
+                let gpu_tasks = tasks
+                    .into_iter()
+                    .map(cast_gpu_chip_task::<E, PCS, PB>)
+                    .collect();
+                let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                    unsafe { std::mem::transmute(&witness_data) };
+                let ctx = self
+                    .pk
+                    .program_ctx
+                    .as_ref()
+                    .expect("MockProver requires the E2E program context");
+                crate::scheme::mock_prover::MockProver::assert_satisfied_gpu_tasks::<PCS>(
+                    ctx.zkvm_fixed_traces.clone(),
+                    &lk_mlts,
+                    gpu_tasks,
+                    gpu_witness_data,
+                    &ctx.program,
+                );
+                tracing::info!("Mock proving passed");
+                return Err(ZKVMError::MockProvingComplete);
+            }
+
             // Phase 2: Execute chip proof tasks
             // GPU concurrent: memory-aware backfilling with standalone impl.
             // Sequential (GPU + CPU): unified path via self.create_chip_proof.
@@ -580,6 +1321,16 @@ impl<
                 transcript.append_field_element_ext(&sample);
             }
 
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                crate::scheme::gpu::log_gpu_profile_boundary(
+                    &profile_label,
+                    "main_constraints_start",
+                    0,
+                );
+            }
+            #[cfg(feature = "gpu")]
+            let main_constraints_started = std::time::Instant::now();
             let main_constraints_span =
                 entered_span!("prove_batched_main_constraints", profiling_1 = true);
             let (main_constraint_proof, main_constraint_results) =
@@ -590,24 +1341,49 @@ impl<
                         &mut transcript,
                     )
                 })?;
-            let (points, evaluations) =
-                Self::collect_main_constraint_results(main_constraint_results);
+
+            let (points, evaluations) = collect_main_constraint_openings(main_constraint_results);
             exit_span!(main_constraints_span);
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                crate::scheme::gpu::log_gpu_profile_boundary(
+                    &profile_label,
+                    "main_constraints_end",
+                    main_constraints_started.elapsed().as_millis(),
+                );
+            }
 
             // batch opening pcs
             // generate static info from prover key for expected num variable
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                crate::scheme::gpu::log_gpu_profile_boundary(
+                    &profile_label,
+                    "pcs_opening_start",
+                    0,
+                );
+            }
+            #[cfg(feature = "gpu")]
+            let pcs_opening_started = std::time::Instant::now();
             let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
             let mpcs_opening_proof = info_span!("[ceno] pcs_opening").in_scope(|| {
                 self.device.open(
                     witness_data,
-                    self.get_device_proving_key(shard_ctx)
-                        .map(|dpk| dpk.pcs_data.clone()),
+                    device_pk.as_ref().map(|dpk| dpk.pcs_data.clone()),
                     points,
                     evaluations,
                     &mut transcript,
                 )
             });
             exit_span!(pcs_opening);
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                crate::scheme::gpu::log_gpu_profile_boundary(
+                    &profile_label,
+                    "pcs_opening_end",
+                    pcs_opening_started.elapsed().as_millis(),
+                );
+            }
 
             let vm_proof = ZKVMProof::new(
                 pi,
@@ -657,10 +1433,14 @@ impl<
                     .map(|task| {
                         let gpu_task: &ChipTask<'_, gkr_iop::gpu::GpuBackend<E, PCS>> =
                             unsafe { std::mem::transmute(task) };
-                        let structural_cached_on_device = gpu_task
-                            .structural_rmm
-                            .as_ref()
-                            .is_some_and(|rmm| rmm.has_device_backing());
+                        let structural_cached_on_device =
+                            gpu_task.structural_rmm.as_ref().is_some_and(|rmm| {
+                                (gpu_task
+                                    .circuit_name
+                                    .starts_with("TensorProductionBoundary")
+                                    && rmm.width() == 0)
+                                    || rmm.has_device_backing()
+                            });
                         let reservation = estimate_chip_proof_reservations::<E, PCS>(
                             gpu_task.pk.get_cs(),
                             &gpu_task.input,
@@ -768,6 +1548,8 @@ impl<
         let input_has_ecc_ops = input.has_ecc_ops;
 
         // build main witness
+        let main_witness_started = std::time::Instant::now();
+        crate::scheme::gpu::log_gpu_profile_boundary(&task.circuit_name, "main_witness_start", 0);
         let records = info_span!("[ceno] build_main_witness").in_scope(|| {
             // ECC and rotation have dedicated witness/eval flows. For tower proving we only
             // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
@@ -779,7 +1561,14 @@ impl<
                 crate::scheme::utils::WitnessBuildStage::Tower,
             )
         });
+        crate::scheme::gpu::log_gpu_profile_boundary(
+            &task.circuit_name,
+            "main_witness_end",
+            main_witness_started.elapsed().as_millis(),
+        );
 
+        let tower_started = std::time::Instant::now();
+        crate::scheme::gpu::log_gpu_profile_boundary(&task.circuit_name, "pre_tower", 0);
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
         // (internally calls build_tower_witness)
@@ -789,6 +1578,12 @@ impl<
                     .prove_tower_relation(cs, input, &records, challenges, transcript)
             });
         exit_span!(span);
+        crate::scheme::gpu::log_gpu_profile_boundary(
+            &task.circuit_name,
+            "post_tower",
+            tower_started.elapsed().as_millis(),
+        );
+
         drop(records);
 
         assert!(
@@ -809,6 +1604,38 @@ impl<
             self.device
                 .prove_rotation(cs, input, &rt_main, challenges, transcript)
         })?;
+
+        let matrix_reduction = match crate::scheme::matrix_reduction::descriptor(&task.circuit_name)
+        {
+            Some(descriptor)
+                if descriptor.kind
+                    == crate::scheme::matrix_reduction::MatrixReductionKind::Tiny =>
+            {
+                Some(crate::scheme::matrix_reduction::prove(
+                    &input.witness,
+                    input_num_instances.iter().sum(),
+                    descriptor.columns,
+                    transcript,
+                )?)
+            }
+            Some(descriptor) => {
+                if std::any::TypeId::of::<PB>()
+                    != std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+                {
+                    return Err(ZKVMError::InvalidWitness(
+                        "production matrix reduction has no CPU prover path".into(),
+                    ));
+                }
+                let gpu_input = unsafe {
+                    &*(input as *const ProofInput<'_, PB>
+                        as *const ProofInput<'_, gkr_iop::gpu::GpuBackend<E, PCS>>)
+                };
+                Some(prove_production_matrix_reduction::<E, PCS>(
+                    gpu_input, descriptor, transcript,
+                )?)
+            }
+            None => None,
+        };
         exit_span!(span);
 
         #[cfg(feature = "gpu")]
@@ -818,7 +1645,12 @@ impl<
                 == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
             {
                 input.witness.clear();
-                input.structural_witness.clear();
+                let virtual_production_boundary =
+                    task.circuit_name.starts_with("TensorProductionBoundary")
+                        && task.structural_rmm.is_none();
+                if !virtual_production_boundary {
+                    input.structural_witness.clear();
+                }
             }
             input
         };
@@ -850,6 +1682,7 @@ impl<
                 rotation_proof: rotation.clone().map(|r| r.proof),
                 tower_proof,
                 ecc_proof: ecc_proof.clone(),
+                matrix_reduction: matrix_reduction.as_ref().map(|(proof, _)| proof.clone()),
                 num_instances: input_num_instances,
             },
             MainConstraintJob {
@@ -862,6 +1695,7 @@ impl<
                 rt_tower: rt_main,
                 main_out_evals: Vec::new(),
                 rotation,
+                matrix_claims: matrix_reduction.map(|(_, claims)| claims),
                 ecc_proof,
                 challenges: *challenges,
                 cs,
@@ -985,6 +1819,45 @@ impl<
                 std::mem::transmute::<ProofInput<'_, PB>, ProofInput<'static, PB>>(input_temp)
             };
 
+            #[cfg(feature = "gpu")]
+            if [
+                "TensorAttentionQk",
+                "TensorAttentionQkShiftSoftmax",
+                "TensorAttentionPv",
+                "TensorAttentionShift",
+                "TensorAttentionSoftmax",
+            ]
+            .contains(&circuit_name.as_str())
+            {
+                let trace_rows = witness_trace_rows[this_idx].unwrap_or_else(|| {
+                    panic!("{circuit_name}: production TensorVM trace rows are missing")
+                });
+                assert_eq!(
+                    cs.rotation_vars().unwrap_or(0),
+                    0,
+                    "{circuit_name}: production TensorVM Core unexpectedly became rotating"
+                );
+                assert_eq!(
+                    num_instances,
+                    [trace_rows, 0],
+                    "{circuit_name}: production TensorVM logical instances differ from committed trace rows"
+                );
+                let task_num_vars = input.log2_num_instances();
+                assert_eq!(
+                    trace_rows,
+                    1usize << task_num_vars,
+                    "{circuit_name}: production TensorVM committed and deferred logical domains differ"
+                );
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    circuit = %circuit_name,
+                    trace_rows,
+                    logical_instances = num_instances[0],
+                    task_num_vars,
+                    "production TensorVM pre-scheduler domain validated"
+                );
+            }
+
             // Estimate memory for this task
             #[cfg(feature = "gpu")]
             let estimated_memory = {
@@ -996,9 +1869,13 @@ impl<
                 );
                 let gpu_input: &ProofInput<'_, gkr_iop::gpu::GpuBackend<E, PCS>> =
                     unsafe { std::mem::transmute(&input) };
-                let structural_cached_on_device = task_structural_rmm
-                    .as_ref()
-                    .is_some_and(|rmm| rmm.has_device_backing());
+                // Production boundaries use validated formula MLEs and have no
+                // structural device allocation. Their empty RMM is a marker, not
+                // an uncached dense structural matrix.
+                let structural_cached_on_device = task_structural_rmm.as_ref().is_some_and(|rmm| {
+                    (circuit_name.starts_with("TensorProductionBoundary") && rmm.width() == 0)
+                        || rmm.has_device_backing()
+                });
                 estimate_chip_proof_memory::<E, PCS>(
                     cs,
                     gpu_input,
@@ -1011,7 +1888,26 @@ impl<
             let estimated_memory = 0u64; // CPU path doesn't need memory tracking
 
             #[cfg(feature = "gpu")]
-            let booked_memory = estimated_memory;
+            let booked_memory = if circuit_name.starts_with("TensorProductionBoundary") {
+                let boundary_kind = if circuit_name.contains("ProjectionInput") {
+                    "projection_input"
+                } else if circuit_name.contains("ProjectionOutput") {
+                    "projection_output"
+                } else {
+                    "other"
+                };
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    circuit = %circuit_name,
+                    boundary_kind,
+                    estimated_bytes = estimated_memory,
+                    booked_bytes = estimated_memory,
+                    "production boundary exclusive estimator booking"
+                );
+                estimated_memory
+            } else {
+                estimated_memory
+            };
             #[cfg(not(feature = "gpu"))]
             let booked_memory = estimated_memory;
 
@@ -1076,25 +1972,41 @@ impl<
 
         (chip_proofs, main_constraint_jobs)
     }
+}
 
-    fn collect_main_constraint_results(
-        results: Vec<MainConstraintResult<E>>,
-    ) -> (Vec<Point<E>>, Vec<Vec<Vec<E>>>) {
-        let mut points = Vec::new();
-        let mut evaluations = Vec::new();
-        for result in results {
-            if !result.opening_evals.wits_in_evals.is_empty()
-                || !result.opening_evals.fixed_in_evals.is_empty()
-            {
-                points.push(result.input_opening_point);
-                evaluations.push(vec![
-                    result.opening_evals.wits_in_evals,
-                    result.opening_evals.fixed_in_evals,
-                ]);
+/// Preserve the main-sumcheck producer order while converting its output into
+/// the paired point/evaluation input consumed by PCS opening.  This seam is
+/// deliberately standalone so small PCS tests can exercise the same routing
+/// without constructing the full RV registry.
+pub(crate) fn collect_main_constraint_openings<E: ExtensionField>(
+    results: Vec<MainConstraintResult<E>>,
+) -> (Vec<Point<E>>, Vec<Vec<Vec<E>>>) {
+    let trace_ownership_debug = std::env::var_os("CENO_GPU_TRACE_OWNERSHIP").is_some();
+    let mut points = Vec::new();
+    let mut evaluations = Vec::new();
+    for result in results {
+        if !result.opening_evals.wits_in_evals.is_empty()
+            || !result.opening_evals.fixed_in_evals.is_empty()
+        {
+            if trace_ownership_debug {
+                tracing::info!(
+                    target: "ceno_gpu::basefold_ownership",
+                    opening_idx = points.len(),
+                    circuit_idx = result.circuit_idx,
+                    query_dim = result.input_opening_point.len(),
+                    witness_mles = result.opening_evals.wits_in_evals.len(),
+                    fixed_mles = result.opening_evals.fixed_in_evals.len(),
+                    "[basefold ownership] main/tower result source"
+                );
             }
+            points.push(result.input_opening_point);
+            evaluations.push(vec![
+                result.opening_evals.wits_in_evals,
+                result.opening_evals.fixed_in_evals,
+            ]);
         }
-        (points, evaluations)
     }
+    (points, evaluations)
 }
 
 /// TowerProofs

@@ -170,6 +170,18 @@ pub(crate) fn first_layer_selector_contexts<E: ExtensionField>(
 ) -> Vec<SelectorContext> {
     let cs = &composed_cs.zkvm_v1_css;
     let total_num_instances = num_instances.iter().sum();
+    let prefix_extent = composed_cs.zkvm_v1_css.prefix_selector_num_instances;
+    if let Some(extent) = prefix_extent {
+        assert!(extent.is_power_of_two() && extent > 0);
+        assert!(extent <= (1usize << num_vars));
+        if let Some(rotation_vars) = composed_cs.rotation_vars() {
+            assert_eq!(
+                extent,
+                1usize << rotation_vars,
+                "prefix selector extent must equal the rotating physical domain"
+            );
+        }
+    }
     let first_layer = circuit.layers.first().expect("empty gkr circuit layer");
     let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, circuit);
     let distinct_rw_selectors =
@@ -192,7 +204,12 @@ pub(crate) fn first_layer_selector_contexts<E: ExtensionField>(
                 }
             }
 
-            SelectorContext::new(0, total_num_instances, num_vars)
+            let active_instances = if matches!(selector, SelectorType::Prefix(_)) {
+                prefix_extent.unwrap_or(total_num_instances)
+            } else {
+                total_num_instances
+            };
+            SelectorContext::new(0, active_instances, num_vars)
         })
         .collect_vec()
 }
@@ -376,6 +393,96 @@ pub(crate) fn assign_group_evals<E: ExtensionField>(
         };
         out_evals[*index] = PointAndEval::new(point.clone(), *eval);
     }
+}
+
+pub(crate) fn assign_matrix_group_evals<E: ExtensionField>(
+    layer: &gkr_iop::gkr::layer::Layer<E>,
+    out_evals: &mut [PointAndEval<E>],
+    claims: &crate::scheme::matrix_reduction::MatrixOpeningClaims<E>,
+) -> Result<(), &'static str> {
+    let Some([a_group, w_group, output_group]) = layer.matrix_selector_group_indices() else {
+        return Err("matrix claims expected but first-layer groups are missing");
+    };
+    let [a_eval, w_eval, q_eval, r_eval] = claims.expected_evals;
+    assign_group_evals(
+        out_evals,
+        &layer.out_sel_and_eval_exprs[a_group].1,
+        &[a_eval],
+        &claims.points[0],
+    );
+    assign_group_evals(
+        out_evals,
+        &layer.out_sel_and_eval_exprs[w_group].1,
+        &[w_eval],
+        &claims.points[1],
+    );
+    assign_group_evals(
+        out_evals,
+        &layer.out_sel_and_eval_exprs[output_group].1,
+        &[q_eval, r_eval],
+        &claims.points[2],
+    );
+    Ok(())
+}
+
+/// Return the four MatMul-local selector corrections in A/W/Q/R order.
+/// Each coefficient multiplies the structural selector MLE at the claim point.
+pub(crate) fn matrix_selector_corrections<E: ExtensionField>(
+    layer: &gkr_iop::gkr::layer::Layer<E>,
+    grouped_evals: &[Vec<E>],
+    alpha_pows: &[E],
+) -> Result<Vec<(usize, E)>, &'static str> {
+    let Some(groups @ [a_group, w_group, output_group]) = layer.matrix_selector_group_indices()
+    else {
+        return Ok(Vec::new());
+    };
+    if grouped_evals.len() != layer.out_sel_and_eval_exprs.len() {
+        return Err("first-layer claim group count mismatch");
+    }
+    if alpha_pows.len() != layer.exprs.len() {
+        return Err("first-layer alpha count mismatch");
+    }
+    if w_group != a_group + 1
+        || output_group != w_group + 1
+        || output_group >= layer.out_sel_and_eval_exprs.len()
+    {
+        return Err("matrix first-layer groups are not consecutive");
+    }
+    if layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .map(|(_, evals)| evals.len())
+        .sum::<usize>()
+        != alpha_pows.len()
+    {
+        return Err("first-layer group and alpha counts differ");
+    }
+
+    let expected_lengths = [1usize, 1, 2];
+    let mut corrections = Vec::with_capacity(4);
+    for (group, expected_len) in groups.into_iter().zip(expected_lengths) {
+        let (selector, eval_exprs) = &layer.out_sel_and_eval_exprs[group];
+        if eval_exprs.len() != expected_len || grouped_evals[group].len() != expected_len {
+            return Err("matrix first-layer group length mismatch");
+        }
+        let SelectorType::Whole(Expression::StructuralWitIn(wit_id, _)) = selector else {
+            return Err("matrix first-layer selector must be a whole structural witness");
+        };
+        if *wit_id as usize >= layer.n_structural_witin {
+            return Err("matrix first-layer structural witness index is out of range");
+        }
+        let expression_offset = layer.out_sel_and_eval_exprs[..group]
+            .iter()
+            .map(|(_, evals)| evals.len())
+            .sum::<usize>();
+        for (offset, claim) in grouped_evals[group].iter().enumerate() {
+            corrections.push((
+                *wit_id as usize,
+                -alpha_pows[expression_offset + offset] * *claim,
+            ));
+        }
+    }
+    Ok(corrections)
 }
 
 /// Wrapper that asserts a shared reference is safe to send across threads.

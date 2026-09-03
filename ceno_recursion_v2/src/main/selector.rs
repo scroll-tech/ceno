@@ -17,8 +17,8 @@ use crate::{
         MainGlobalPointMessage, MainSelectorPointBus, MainSelectorPointMessage,
         MainSelectorResultBus, MainSelectorResultMessage, MainSelectorShapeBus,
         MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
-        MainSelectorSparseIndexShapeMessage, TowerMainPointBus, TowerMainPointMessage,
-        TranscriptBus, TranscriptBusMessage,
+        MainSelectorSparseIndexShapeMessage, MatrixReductionValueBus, MatrixReductionValueMessage,
+        TowerMainPointBus, TowerMainPointMessage, TranscriptBus, TranscriptBusMessage,
     },
     system::{
         MainSelectorEvalRecord, MainSelectorKind, MainSelectorPointDeriveKind,
@@ -124,6 +124,9 @@ pub struct MainSelectorPointCols<T> {
     pub is_ecc_xy: T,
     pub is_ecc_slope: T,
     pub is_ecc_x3y3: T,
+    pub is_matrix_a: T,
+    pub is_matrix_w: T,
+    pub is_matrix_output: T,
     pub lookup_count: T,
     pub fork_id: T,
     pub has_transcript: T,
@@ -138,6 +141,9 @@ pub struct MainSelectorPointCols<T> {
     pub derive_one_minus: T,
     pub derive_zero: T,
     pub derive_one: T,
+    pub matrix_kind: T,
+    pub matrix_idx: T,
+    pub matrix_tidx: T,
     pub value: [T; D_EF],
 }
 
@@ -754,6 +760,7 @@ pub struct MainSelectorPointAir {
     pub transcript_bus: TranscriptBus,
     pub forked_transcript_bus: ForkedTranscriptBus,
     pub ecc_rt_bus: EccRtBus,
+    pub matrix_value_bus: MatrixReductionValueBus,
 }
 
 impl<F: Field> BaseAir<F> for MainSelectorPointAir {
@@ -779,6 +786,9 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
         builder.assert_bool(local.is_ecc_xy);
         builder.assert_bool(local.is_ecc_slope);
         builder.assert_bool(local.is_ecc_x3y3);
+        builder.assert_bool(local.is_matrix_a);
+        builder.assert_bool(local.is_matrix_w);
+        builder.assert_bool(local.is_matrix_output);
         builder.assert_bool(local.has_transcript);
         builder.assert_bool(local.has_ecc_rt);
         builder.assert_bool(local.has_source);
@@ -793,7 +803,10 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
                 + local.is_rotation_origin
                 + local.is_ecc_xy
                 + local.is_ecc_slope
-                + local.is_ecc_x3y3,
+                + local.is_ecc_x3y3
+                + local.is_matrix_a
+                + local.is_matrix_w
+                + local.is_matrix_output,
         );
         builder.when(local.is_enabled).assert_eq(
             local.source_kind,
@@ -802,7 +815,10 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
                 + local.is_rotation_origin * AB::Expr::from_usize(3)
                 + local.is_ecc_xy * AB::Expr::from_usize(4)
                 + local.is_ecc_slope * AB::Expr::from_usize(5)
-                + local.is_ecc_x3y3 * AB::Expr::from_usize(6),
+                + local.is_ecc_x3y3 * AB::Expr::from_usize(6)
+                + local.is_matrix_a * AB::Expr::from_usize(7)
+                + local.is_matrix_w * AB::Expr::from_usize(8)
+                + local.is_matrix_output * AB::Expr::from_usize(9),
         );
         builder
             .when(local.has_transcript)
@@ -819,6 +835,9 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
             .when(local.is_tower_main + local.is_rotation_origin)
             .assert_zero(local.has_source);
         builder.when(local.has_ecc_rt).assert_zero(local.has_source);
+        builder
+            .when(local.is_matrix_a + local.is_matrix_w + local.is_matrix_output)
+            .assert_zero(local.has_source + local.has_transcript + local.has_ecc_rt);
         builder
             .when(
                 local.is_tower_main
@@ -896,6 +915,18 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
                 value: local.value.map(Into::into),
             },
             local.is_enabled * local.has_ecc_rt,
+        );
+        self.matrix_value_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            MatrixReductionValueMessage {
+                air_idx: local.air_idx.into(),
+                kind: local.matrix_kind.into(),
+                idx: local.matrix_idx.into(),
+                tidx: local.matrix_tidx.into(),
+                value: local.value.map(Into::into),
+            },
+            local.is_enabled * (local.is_matrix_a + local.is_matrix_w + local.is_matrix_output),
         );
         for i in 0..D_EF {
             let one_coeff = if i == 0 {
@@ -1147,6 +1178,10 @@ fn fill_point_cols(record: &MainSelectorPointRecord, cols: &mut MainSelectorPoin
     cols.is_ecc_xy = F::from_bool(record.source_kind == MainSelectorPointSourceKind::EccXY);
     cols.is_ecc_slope = F::from_bool(record.source_kind == MainSelectorPointSourceKind::EccSlope);
     cols.is_ecc_x3y3 = F::from_bool(record.source_kind == MainSelectorPointSourceKind::EccX3Y3);
+    cols.is_matrix_a = F::from_bool(record.source_kind == MainSelectorPointSourceKind::MatrixA);
+    cols.is_matrix_w = F::from_bool(record.source_kind == MainSelectorPointSourceKind::MatrixW);
+    cols.is_matrix_output =
+        F::from_bool(record.source_kind == MainSelectorPointSourceKind::MatrixOutput);
     cols.lookup_count = F::from_usize(record.lookup_count);
     cols.fork_id = F::from_usize(record.fork_id);
     cols.has_transcript = F::from_bool(record.has_transcript);
@@ -1167,6 +1202,9 @@ fn fill_point_cols(record: &MainSelectorPointRecord, cols: &mut MainSelectorPoin
         F::from_bool(record.derive_kind == MainSelectorPointDeriveKind::OneMinus);
     cols.derive_zero = F::from_bool(record.derive_kind == MainSelectorPointDeriveKind::Zero);
     cols.derive_one = F::from_bool(record.derive_kind == MainSelectorPointDeriveKind::One);
+    cols.matrix_kind = F::from_usize(record.matrix_kind);
+    cols.matrix_idx = F::from_usize(record.matrix_idx);
+    cols.matrix_tidx = F::from_usize(record.matrix_tidx);
     cols.value = record
         .value
         .as_basis_coefficients_slice()
@@ -2069,6 +2107,9 @@ pub(crate) fn selector_point_source_code(kind: MainSelectorPointSourceKind) -> u
         MainSelectorPointSourceKind::EccXY => 4,
         MainSelectorPointSourceKind::EccSlope => 5,
         MainSelectorPointSourceKind::EccX3Y3 => 6,
+        MainSelectorPointSourceKind::MatrixA => 7,
+        MainSelectorPointSourceKind::MatrixW => 8,
+        MainSelectorPointSourceKind::MatrixOutput => 9,
     }
 }
 

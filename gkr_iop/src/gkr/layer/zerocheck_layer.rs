@@ -112,6 +112,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(std::iter::repeat(sel_type), out_eval.iter()))
             .collect();
+        let selector_monomialize_start = std::time::Instant::now();
         self.exprs_with_selector_out_eval_monomial_form = self
             .exprs
             .iter()
@@ -143,6 +144,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 )
             })
             .collect::<Vec<_>>();
+        crate::setup_profile::record_selector_monomialize_ns(
+            selector_monomialize_start.elapsed().as_nanos() as u64,
+        );
 
         // Build the concrete main-sumcheck polynomial by batching smaller sumchecks.
         // For each selector group g with expressions expr_{g,0..k-1}, define:
@@ -181,7 +185,13 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         tracing::trace!("{} main sumcheck degree: {}", self.name, zero_expr.degree());
         self.main_sumcheck_expression = Some(zero_expr);
         if let Some(expr) = self.main_sumcheck_expression.as_ref() {
+            let main_monomialize_start = std::time::Instant::now();
+            let main_extract_start = std::time::Instant::now();
             let mut monomial_terms = expr.get_monomial_terms();
+            crate::setup_profile::record_main_monomial_extract_ns(
+                main_extract_start.elapsed().as_nanos() as u64,
+            );
+            let main_finalize_start = std::time::Instant::now();
             normalize_monomial_term_products(&mut monomial_terms);
             monomial_terms.sort_by(|a, b| compare_monomials(a, b));
             log_monomial_term_stats(&self.name, &monomial_terms);
@@ -195,6 +205,12 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             log_common_term_plan_stats(&self.name, common_plan.as_ref(), &monomial_terms);
             self.main_sumcheck_expression_common_factored = common_plan;
             self.main_sumcheck_expression_monomial_terms_excluded_shared = Some(residual_terms);
+            crate::setup_profile::record_main_monomialize_ns(
+                main_monomialize_start.elapsed().as_nanos() as u64,
+            );
+            crate::setup_profile::record_main_monomial_finalize_ns(
+                main_finalize_start.elapsed().as_nanos() as u64,
+            );
         }
         tracing::trace!(
             "{} main sumcheck monomial terms count: {}",

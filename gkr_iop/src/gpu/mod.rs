@@ -9,7 +9,7 @@ use multilinear_extensions::{
     macros::{entered_span, exit_span},
     mle::{FieldType, MultilinearExtension, Point},
 };
-use p3::field::TwoAdicField;
+use p3::field::{PrimeCharacteristicRing, TwoAdicField};
 use std::sync::Arc;
 use witness::RowMajorMatrix;
 
@@ -282,7 +282,29 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
 
     /// Evaluate polynomial at given point
     pub fn evaluate(&self, point: &[E]) -> E {
-        self.inner_to_mle().evaluate(point)
+        match &self.mle {
+            GpuFieldType::VirtualExt(leaf)
+                if leaf.real_ops == ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX =>
+            {
+                crate::utils::eval_outer_repeated_incremental_vec(leaf.num_vars as u64, point)
+            }
+            GpuFieldType::VirtualExt(leaf)
+                if leaf.real_ops == ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX_23 =>
+            {
+                crate::utils::eval_outer_repeated_incremental_vec(23, point)
+            }
+            GpuFieldType::VirtualExt(leaf)
+                if leaf.real_ops == ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO =>
+            {
+                E::ZERO
+            }
+            GpuFieldType::VirtualExt(leaf)
+                if leaf.real_ops == ceno_gpu::GPU_VIRTUAL_FORMULA_ONE =>
+            {
+                E::ONE
+            }
+            _ => self.inner_to_mle().evaluate(point),
+        }
     }
 
     /// Create GPU version from CPU version of MultilinearExtension
@@ -340,6 +362,74 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         Self {
             mle: GpuFieldType::Ext(mle_gpu),
             _phantom: PhantomData,
+        }
+    }
+
+    /// Build a descriptor-only MLE for an exact formula over `2^num_vars`
+    /// rows. The one-word metadata buffers are never evaluation backing.
+    pub fn from_virtual_formula(
+        cuda_hal: &CudaHalBB31,
+        num_vars: usize,
+        formula: u32,
+    ) -> MultilinearExtensionGpu<'static, E> {
+        assert!(matches!(
+            formula,
+            ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX
+                | ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO
+                | ceno_gpu::GPU_VIRTUAL_FORMULA_ONE
+                | ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX_23
+        ));
+        let stream = get_thread_stream();
+        let input_ptrs = cuda_hal
+            .alloc_ptrs_from_host(&[std::ptr::null()], stream.as_ref())
+            .expect("formula MLE pointer metadata allocation failed");
+        let input_lens = cuda_hal
+            .alloc_u32_from_host(&[0], stream.as_ref())
+            .expect("formula MLE length metadata allocation failed");
+        let one = BB31Ext::ONE;
+        let zero = BB31Ext::ZERO;
+        let default = if formula == ceno_gpu::GPU_VIRTUAL_FORMULA_ONE {
+            &one
+        } else {
+            &zero
+        };
+        let default = unsafe {
+            std::slice::from_raw_parts(
+                (default as *const BB31Ext).cast::<u8>(),
+                std::mem::size_of::<BB31Ext>(),
+            )
+            .to_vec()
+        };
+        MultilinearExtensionGpu {
+            mle: GpuFieldType::VirtualExt(ceno_gpu::GpuVirtualInterleavedExt {
+                input_ptrs,
+                input_lens,
+                real_ops: formula,
+                padded_ops: 1,
+                row_offset: 0,
+                valid_rows: 1u32 << num_vars,
+                compact_rows: 1u32 << num_vars,
+                num_vars,
+                default,
+            }),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn virtual_formula_kind(&self) -> Option<u32> {
+        match &self.mle {
+            GpuFieldType::VirtualExt(leaf)
+                if matches!(
+                    leaf.real_ops,
+                    ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX
+                        | ceno_gpu::GPU_VIRTUAL_FORMULA_ZERO
+                        | ceno_gpu::GPU_VIRTUAL_FORMULA_ONE
+                        | ceno_gpu::GPU_VIRTUAL_FORMULA_INDEX_23
+                ) =>
+            {
+                Some(leaf.real_ops)
+            }
+            _ => None,
         }
     }
 
@@ -413,6 +503,14 @@ pub struct GpuJaggedTraceLayout {
     pub first_poly_idx: usize,
     pub num_polys: usize,
     pub num_vars: usize,
+    /// Canonical compact q' offset of this source's first column.
+    pub first_flat_elem: usize,
+    /// Physical entries contributed by each source column.
+    pub physical_rows: usize,
+    /// Canonical compact q' range occupied by this source.
+    pub flat_range: std::ops::Range<usize>,
+    /// Exact canonical compact q' range for every source column.
+    pub column_flat_ranges: Vec<std::ops::Range<usize>>,
 }
 
 pub struct GpuJaggedPcsData {

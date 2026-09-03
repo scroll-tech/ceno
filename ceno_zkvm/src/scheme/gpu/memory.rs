@@ -46,6 +46,49 @@ const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 10 * 1024 * 1024; // reserved head
 const SHARD_RAM_TOWER_PROVE_TOLERANCE_BYTES: usize = 16 * 1024 * 1024;
 const HEAVY_TOWER_SPLIT_THRESHOLD_BYTES: usize = 4 * 1024 * 1024 * 1024;
 
+/// Memory estimates are scheduler reservations, not arithmetic witness values.
+/// If their exact sum exceeds `usize`, retain the conservative meaning of the
+/// estimate instead of panicking in debug builds or wrapping in release builds.
+/// `usize::MAX` makes the request unschedulable on the current host/device,
+/// which is the only safe interpretation of an unrepresentable byte count.
+fn saturating_memory_estimate_sum(context: &'static str, terms: &[usize]) -> usize {
+    let mut total = 0usize;
+    for &term in terms {
+        match total.checked_add(term) {
+            Some(next) => total = next,
+            None => {
+                tracing::warn!(
+                    context,
+                    partial_bytes = total,
+                    next_term_bytes = term,
+                    "GPU memory estimate overflow; saturating reservation"
+                );
+                return usize::MAX;
+            }
+        }
+    }
+    total
+}
+
+fn saturating_memory_estimate_product(context: &'static str, terms: &[usize]) -> usize {
+    let mut total = 1usize;
+    for &term in terms {
+        match total.checked_mul(term) {
+            Some(next) => total = next,
+            None => {
+                tracing::warn!(
+                    context,
+                    partial_bytes = total,
+                    next_term = term,
+                    "GPU memory estimate overflow; saturating reservation"
+                );
+                return usize::MAX;
+            }
+        }
+    }
+    total
+}
+
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
 /// - Over-estimate (estimated > actual): diff must be <= `ESTIMATION_SAFETY_MARGIN_BYTES`
@@ -232,12 +275,21 @@ pub(crate) fn estimate_chip_proof_reservations<
     // Runtime keeps the main witness resident during tower proving. Borrowed
     // tower inputs are compact views into that witness, not another allocation.
     let tower_input_backing_bytes = main_witness_bytes;
-    let tower_prove_stage_bytes =
-        tower_input_backing_bytes + tower_input_non_borrowed_bytes + tower_prove_local_bytes;
+    let tower_prove_stage_bytes = saturating_memory_estimate_sum(
+        "chip_proof.tower_prove_stage",
+        &[
+            tower_input_backing_bytes,
+            tower_input_non_borrowed_bytes,
+            tower_prove_local_bytes,
+        ],
+    );
 
     // Main constraints are proved in the shard-level batched stage, not in the
     // chip-local scheduler reservation.
-    let tower_build_stage_bytes = main_witness_bytes + tower_build_bytes;
+    let tower_build_stage_bytes = saturating_memory_estimate_sum(
+        "chip_proof.tower_build_stage",
+        &[main_witness_bytes, tower_build_bytes],
+    );
     let stage_peak_usage_bytes = trace_est
         .trace_temporary_bytes
         .max(tower_build_stage_bytes)
@@ -245,11 +297,22 @@ pub(crate) fn estimate_chip_proof_reservations<
         .max(ecc_quark_temporary_bytes)
         .max(rotation_temporary_bytes);
     let resident_bytes = trace_est.trace_resident_bytes;
-    let total_usage_bytes =
-        resident_bytes + stage_peak_usage_bytes + ESTIMATION_SAFETY_MARGIN_BYTES;
-    let post_tower_bytes = resident_bytes
-        + ecc_quark_temporary_bytes.max(rotation_temporary_bytes)
-        + ESTIMATION_SAFETY_MARGIN_BYTES;
+    let total_usage_bytes = saturating_memory_estimate_sum(
+        "chip_proof.total",
+        &[
+            resident_bytes,
+            stage_peak_usage_bytes,
+            ESTIMATION_SAFETY_MARGIN_BYTES,
+        ],
+    );
+    let post_tower_bytes = saturating_memory_estimate_sum(
+        "chip_proof.post_tower",
+        &[
+            resident_bytes,
+            ecc_quark_temporary_bytes.max(rotation_temporary_bytes),
+            ESTIMATION_SAFETY_MARGIN_BYTES,
+        ],
+    );
     let reservations = split_chip_reservation(total_usage_bytes, post_tower_bytes);
 
     let to_mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
@@ -707,8 +770,20 @@ fn split_aware_internal_live_bytes(
     if round >= group.num_vars {
         return 0;
     }
-    let total_bytes = internal_layer_elems.iter().sum::<usize>() * elem_size;
-    let top_layer_bytes = internal_layer_elems.first().copied().unwrap_or(0) * elem_size;
+    let total_bytes = saturating_memory_estimate_product(
+        "tower_prove.split_total",
+        &[
+            saturating_memory_estimate_sum("tower_prove.split_elems", internal_layer_elems),
+            elem_size,
+        ],
+    );
+    let top_layer_bytes = saturating_memory_estimate_product(
+        "tower_prove.split_top",
+        &[
+            internal_layer_elems.first().copied().unwrap_or(0),
+            elem_size,
+        ],
+    );
     if round + 1 == group.num_vars && should_split_heavy_tower(total_bytes, top_layer_bytes) {
         top_layer_bytes
     } else {
@@ -719,7 +794,9 @@ fn split_aware_internal_live_bytes(
 fn compact_split_elems(group: VirtualTowerGroup, num_fanin: usize) -> usize {
     compact_split_lengths_for_estimate(group.num_vars, group.occupied_len, num_fanin)
         .into_iter()
-        .sum()
+        .fold(0usize, |total, elems| {
+            saturating_memory_estimate_sum("tower_prove.compact_split", &[total, elems])
+        })
 }
 
 fn estimate_precise_build_tower_memory(
@@ -731,14 +808,34 @@ fn estimate_precise_build_tower_memory(
     const PTR_BYTES: usize = std::mem::size_of::<*const c_void>();
     const U32_BYTES: usize = std::mem::size_of::<u32>();
 
-    let prod_tower_buffer_bytes = prod_groups
-        .iter()
-        .map(|group| estimate_prod_compact_internal_elems(*group, NUM_FANIN) * elem_size)
-        .sum();
+    let prod_tower_buffer_bytes = prod_groups.iter().fold(0usize, |total, group| {
+        saturating_memory_estimate_sum(
+            "tower_build.prod_tower_buffers",
+            &[
+                total,
+                saturating_memory_estimate_product(
+                    "tower_build.prod_tower_buffer",
+                    &[
+                        estimate_prod_compact_internal_elems(*group, NUM_FANIN),
+                        elem_size,
+                    ],
+                ),
+            ],
+        )
+    });
     let logup_tower_buffer_bytes = logup_group
         .map(|group| {
-            estimate_logup_compact_internal_elems(group, NUM_FANIN_LOGUP, has_logup_numerator)
-                * elem_size
+            saturating_memory_estimate_product(
+                "tower_build.logup_tower_buffer",
+                &[
+                    estimate_logup_compact_internal_elems(
+                        group,
+                        NUM_FANIN_LOGUP,
+                        has_logup_numerator,
+                    ),
+                    elem_size,
+                ],
+            )
         })
         .unwrap_or(0);
 
@@ -753,7 +850,14 @@ fn estimate_precise_build_tower_memory(
         0
     };
     let aux_buffer_bytes = prod_aux_buffer_bytes.max(logup_aux_buffer_bytes);
-    let total_bytes = prod_tower_buffer_bytes + logup_tower_buffer_bytes + aux_buffer_bytes;
+    let total_bytes = saturating_memory_estimate_sum(
+        "tower_build.total",
+        &[
+            prod_tower_buffer_bytes,
+            logup_tower_buffer_bytes,
+            aux_buffer_bytes,
+        ],
+    );
 
     PreciseBuildTowerEstimate {
         prod_tower_buffer_bytes,
@@ -784,10 +888,35 @@ fn estimate_precise_prove_tower_memory(
         .map(|group| estimate_prod_compact_internal_layer_elems(*group, NUM_FANIN))
         .collect::<Vec<_>>();
     for (group, internal_layers) in prod_groups.iter().zip(&prod_internal_layers) {
-        let compact_internal_elems = internal_layers.iter().sum::<usize>();
+        let compact_internal_elems =
+            saturating_memory_estimate_sum("tower_prove.prod_internal_elems", internal_layers);
         let compact_input_elems = compact_split_elems(*group, NUM_FANIN);
-        prod_tower_buffer_bytes += (compact_internal_elems + compact_input_elems) * elem_size;
-        prod_borrowed_input_bytes += compact_input_elems * elem_size;
+        prod_tower_buffer_bytes = saturating_memory_estimate_sum(
+            "tower_prove.prod_tower_buffers",
+            &[
+                prod_tower_buffer_bytes,
+                saturating_memory_estimate_product(
+                    "tower_prove.prod_tower_buffer",
+                    &[
+                        saturating_memory_estimate_sum(
+                            "tower_prove.prod_tower_elems",
+                            &[compact_internal_elems, compact_input_elems],
+                        ),
+                        elem_size,
+                    ],
+                ),
+            ],
+        );
+        prod_borrowed_input_bytes = saturating_memory_estimate_sum(
+            "tower_prove.prod_borrowed_inputs",
+            &[
+                prod_borrowed_input_bytes,
+                saturating_memory_estimate_product(
+                    "tower_prove.prod_borrowed_input",
+                    &[compact_input_elems, elem_size],
+                ),
+            ],
+        );
     }
 
     let logup_internal_layers = logup_group.map(|group| {
@@ -804,7 +933,9 @@ fn estimate_precise_prove_tower_memory(
         .map(|group| {
             let compact_internal_elems = logup_internal_layers
                 .as_ref()
-                .map(|(_, layers)| layers.iter().sum::<usize>())
+                .map(|(_, layers)| {
+                    saturating_memory_estimate_sum("tower_prove.logup_internal_elems", layers)
+                })
                 .unwrap_or_else(|| {
                     estimate_logup_compact_internal_elems(
                         group,
@@ -818,22 +949,48 @@ fn estimate_precise_prove_tower_memory(
             } else {
                 NUM_FANIN_LOGUP
             };
-            let borrowed_input_elems = numerator_input_elems + denominator_input_elems;
+            let borrowed_input_elems = saturating_memory_estimate_sum(
+                "tower_prove.logup_borrowed_elems",
+                &[numerator_input_elems, denominator_input_elems],
+            );
             (
-                (compact_internal_elems + borrowed_input_elems) * elem_size,
-                borrowed_input_elems * elem_size,
+                saturating_memory_estimate_product(
+                    "tower_prove.logup_tower_buffer",
+                    &[
+                        saturating_memory_estimate_sum(
+                            "tower_prove.logup_tower_elems",
+                            &[compact_internal_elems, borrowed_input_elems],
+                        ),
+                        elem_size,
+                    ],
+                ),
+                saturating_memory_estimate_product(
+                    "tower_prove.logup_borrowed_input",
+                    &[borrowed_input_elems, elem_size],
+                ),
             )
         })
         .unwrap_or((0, 0));
 
     let has_tower = !prod_groups.is_empty() || logup_group.is_some();
     let eq_mle_buffer_bytes = if has_tower && max_round_index > 0 {
-        (1usize << (log_num_fanin * max_round_index)) * elem_size
+        1usize
+            .checked_shl(log_num_fanin.saturating_mul(max_round_index) as u32)
+            .map(|elems| {
+                saturating_memory_estimate_product("tower_prove.eq_mle", &[elems, elem_size])
+            })
+            .unwrap_or(usize::MAX)
     } else {
         0
     };
-    let tower_input_live_bytes = prod_tower_buffer_bytes + logup_tower_buffer_bytes;
-    let borrowed_input_bytes = prod_borrowed_input_bytes + logup_borrowed_input_bytes;
+    let tower_input_live_bytes = saturating_memory_estimate_sum(
+        "tower_prove.input_live",
+        &[prod_tower_buffer_bytes, logup_tower_buffer_bytes],
+    );
+    let borrowed_input_bytes = saturating_memory_estimate_sum(
+        "tower_prove.borrowed_inputs",
+        &[prod_borrowed_input_bytes, logup_borrowed_input_bytes],
+    );
     let full_tower_entry_peak = tower_input_live_bytes;
     let local_tower_entry_peak = tower_input_live_bytes.saturating_sub(borrowed_input_bytes);
 
@@ -861,12 +1018,24 @@ fn estimate_precise_prove_tower_memory(
             .map(|(group, layers)| {
                 split_aware_internal_live_bytes(round, *group, layers, elem_size)
             })
-            .sum::<usize>();
+            .fold(0usize, |total, bytes| {
+                saturating_memory_estimate_sum("tower_prove.prod_live", &[total, bytes])
+            });
         let prod_borrowed_live_bytes = prod_groups
             .iter()
             .filter(|group| round <= group.num_vars)
-            .map(|group| compact_split_elems(*group, NUM_FANIN) * elem_size)
-            .sum::<usize>();
+            .map(|group| {
+                saturating_memory_estimate_product(
+                    "tower_prove.prod_borrowed_live",
+                    &[compact_split_elems(*group, NUM_FANIN), elem_size],
+                )
+            })
+            .fold(0usize, |total, bytes| {
+                saturating_memory_estimate_sum(
+                    "tower_prove.prod_borrowed_live_total",
+                    &[total, bytes],
+                )
+            });
 
         let (logup_live_bytes, logup_borrowed_live_bytes) = logup_group
             .filter(|group| round <= group.num_vars)
@@ -883,24 +1052,56 @@ fn estimate_precise_prove_tower_memory(
                 } else {
                     NUM_FANIN_LOGUP
                 };
-                let borrowed = (numerator_input_elems + denominator_input_elems) * elem_size;
+                let borrowed = saturating_memory_estimate_product(
+                    "tower_prove.logup_borrowed_live",
+                    &[
+                        saturating_memory_estimate_sum(
+                            "tower_prove.logup_borrowed_live_elems",
+                            &[numerator_input_elems, denominator_input_elems],
+                        ),
+                        elem_size,
+                    ],
+                );
                 (internal, borrowed)
             })
             .unwrap_or((0, 0));
 
         let round_eq_mle_buffer_bytes = if has_tower {
-            (1usize << (log_num_fanin * round)) * elem_size
+            1usize
+                .checked_shl(log_num_fanin.saturating_mul(round) as u32)
+                .map(|elems| {
+                    saturating_memory_estimate_product(
+                        "tower_prove.round_eq_mle",
+                        &[elems, elem_size],
+                    )
+                })
+                .unwrap_or(usize::MAX)
         } else {
             0
         };
-        let round_points_buffer = (log_num_fanin * round) * elem_size;
-        let local_round_bytes = prod_live_bytes
-            + logup_live_bytes
-            + round_eq_mle_buffer_bytes
-            + round_points_buffer
-            + round_sumcheck_estimate.total_bytes;
-        round_peak = round_peak
-            .max(local_round_bytes + prod_borrowed_live_bytes + logup_borrowed_live_bytes);
+        let round_points_buffer = saturating_memory_estimate_product(
+            "tower_prove.round_points",
+            &[log_num_fanin, round, elem_size],
+        );
+        let local_round_bytes = saturating_memory_estimate_sum(
+            "tower_prove.local_round",
+            &[
+                prod_live_bytes,
+                logup_live_bytes,
+                round_eq_mle_buffer_bytes,
+                round_points_buffer,
+                round_sumcheck_estimate.total_bytes,
+            ],
+        );
+        let round_peak_bytes = saturating_memory_estimate_sum(
+            "tower_prove.round_peak",
+            &[
+                local_round_bytes,
+                prod_borrowed_live_bytes,
+                logup_borrowed_live_bytes,
+            ],
+        );
+        round_peak = round_peak.max(round_peak_bytes);
         local_round_peak = local_round_peak.max(local_round_bytes);
     }
 
@@ -1015,8 +1216,14 @@ fn estimate_tower_stage_components_for_rows<E: ExtensionField>(
         .and_then(|circuit| circuit.layers.first())
         .is_some_and(|layer| layer.name == "ShardRamCircuit_main");
     let shard_ram_tower_batch_overhead = is_shard_ram.then_some(10 * 1024 * 1024).unwrap_or(0);
-    let build_bytes =
-        build_est.total_bytes + interleaved_input_bytes + shard_ram_tower_batch_overhead;
+    let build_bytes = saturating_memory_estimate_sum(
+        "tower_components.build",
+        &[
+            build_est.total_bytes,
+            interleaved_input_bytes,
+            shard_ram_tower_batch_overhead,
+        ],
+    );
     let prove_est = estimate_precise_prove_tower_memory(
         &prod_groups,
         logup_group,
@@ -1042,16 +1249,35 @@ fn estimate_tower_stage_components_for_rows<E: ExtensionField>(
             to_mb(prove_est.local_total_bytes),
             to_mb(prove_est.prod_tower_buffer_bytes),
             to_mb(prove_est.logup_tower_buffer_bytes),
-            to_mb(prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes),
+            to_mb(saturating_memory_estimate_sum(
+                "tower_components.debug_borrowed",
+                &[
+                    prove_est.prod_borrowed_input_bytes,
+                    prove_est.logup_borrowed_input_bytes,
+                ],
+            )),
             to_mb(prove_est.eq_mle_buffer_bytes),
             to_mb(prove_est.sumcheck_total_bytes),
         );
     }
-    let base_tower_input_live_bytes =
-        prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
-    let tower_input_live_bytes = base_tower_input_live_bytes + interleaved_input_bytes;
-    let borrowed_input_bytes =
-        prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes;
+    let base_tower_input_live_bytes = saturating_memory_estimate_sum(
+        "tower_components.input_live",
+        &[
+            prove_est.prod_tower_buffer_bytes,
+            prove_est.logup_tower_buffer_bytes,
+        ],
+    );
+    let tower_input_live_bytes = saturating_memory_estimate_sum(
+        "tower_components.input_live_with_metadata",
+        &[base_tower_input_live_bytes, interleaved_input_bytes],
+    );
+    let borrowed_input_bytes = saturating_memory_estimate_sum(
+        "tower_components.borrowed_input",
+        &[
+            prove_est.prod_borrowed_input_bytes,
+            prove_est.logup_borrowed_input_bytes,
+        ],
+    );
     let prove_local_bytes = prove_est
         .local_total_bytes
         .saturating_sub(base_tower_input_live_bytes.saturating_sub(borrowed_input_bytes));
@@ -1209,6 +1435,20 @@ mod reservation_tests {
     fn equal_phase_and_whole_reservations_release_nothing() {
         let reservation = split_chip_reservation(4_000, 4_000);
         assert_eq!(reservation.releasable_bytes, 0);
+    }
+
+    #[test]
+    fn overflowed_memory_estimate_saturates_to_unschedulable_capacity() {
+        assert_eq!(
+            saturating_memory_estimate_sum("test", &[usize::MAX - 7, 8]),
+            usize::MAX,
+            "an unrepresentable scheduler reservation must never wrap"
+        );
+        assert_eq!(
+            saturating_memory_estimate_sum("test", &[11, 13, 17]),
+            41,
+            "ordinary estimates retain their exact byte total"
+        );
     }
 
     #[test]

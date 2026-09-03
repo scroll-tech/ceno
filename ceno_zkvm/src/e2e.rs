@@ -4,12 +4,8 @@ use crate::{
         DummyExtraConfig, InstructionDispatchBuilder, MemPadder, MmuConfig, Rv32imConfig,
     },
     scheme::{
-        PublicValues, ZKVMProof,
-        constants::SEPTIC_EXTENSION_DEGREE,
-        hal::ProverDevice,
-        mock_prover::{LkMultiplicityKey, MockProver},
-        prover::ZKVMProver,
-        septic_curve::SepticPoint,
+        PublicValues, ZKVMProof, constants::SEPTIC_EXTENSION_DEGREE, hal::ProverDevice,
+        mock_prover::LkMultiplicityKey, prover::ZKVMProver, septic_curve::SepticPoint,
         verifier::ZKVMVerifier,
     },
     structs::{
@@ -27,7 +23,7 @@ use ceno_emul::{
     NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, RegIdx,
     ReplayChunk, ReplayEngine, ReplayStopReason, StepCellExtractor, StepIndex, StepRecord,
     SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
-    host_utils::read_all_messages,
+    host_utils::read_all_messages, tensor::TensorWitnessProvider,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -40,6 +36,7 @@ use itertools::Itertools;
 use itertools::{MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
+use p3::matrix::Matrix;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 #[cfg(debug_assertions)]
@@ -150,6 +147,12 @@ pub struct EmulationResult<'a> {
     pub pi: PublicValues,
     pub shard_ctx_builder: ShardContextBuilder,
     pub shard_cycle_boundaries: Arc<Vec<Cycle>>,
+    /// Planner-estimated cell cost for each finalized shard.  Exposed so
+    /// benchmark runners can document capacity-based shard admission.
+    pub predicted_shard_costs: Arc<Vec<u64>>,
+    /// Complete TensorBus regions atomically admitted by preflight.
+    pub admitted_tensor_segments: Arc<Vec<ceno_emul::TensorSegmentPlan>>,
+    pub direct_fallback_spans: Arc<Vec<ceno_emul::GpuReplayFallbackInterval>>,
     pub replay_range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
     pub replay_shard_previews: Arc<Vec<ceno_emul::GpuShardPreview>>,
     pub replay_range_capacity: usize,
@@ -205,6 +208,11 @@ pub struct MultiProver {
     pub max_provers: usize,
     pub max_cell_per_shard: u64,
     pub max_cycle_per_shard: Cycle,
+    pub tensor_segment_inner_repetitions: Option<usize>,
+    /// Explicit capacity available to the complete ShardRAM assignment.  When
+    /// set, post-preflight planning rejects impossible atomic cuts before GPU
+    /// witness allocation.
+    pub shard_ram_device_budget_bytes: Option<u64>,
 }
 
 impl MultiProver {
@@ -220,7 +228,21 @@ impl MultiProver {
             max_provers,
             max_cell_per_shard,
             max_cycle_per_shard,
+            tensor_segment_inner_repetitions: None,
+            shard_ram_device_budget_bytes: None,
         }
+    }
+
+    pub fn with_tensor_segment_inner_repetitions(mut self, repetitions: usize) -> Self {
+        assert!(repetitions > 0);
+        self.tensor_segment_inner_repetitions = Some(repetitions);
+        self
+    }
+
+    pub fn with_shard_ram_device_budget_bytes(mut self, bytes: u64) -> Self {
+        assert!(bytes > 0, "ShardRAM device budget must be nonzero");
+        self.shard_ram_device_budget_bytes = Some(bytes);
+        self
     }
 }
 
@@ -231,6 +253,8 @@ impl Default for MultiProver {
             max_provers: 1,
             max_cell_per_shard: u64::MAX,
             max_cycle_per_shard: DEFAULT_MAX_CYCLE_PER_SHARDS,
+            tensor_segment_inner_repetitions: None,
+            shard_ram_device_budget_bytes: None,
         }
     }
 }
@@ -256,6 +280,22 @@ pub struct ShardContext<'a> {
     /// Syscall witnesses for StepRecord::syscall() lookups.
     /// Borrowed from the tracer — no per-shard Vec clone.
     pub syscall_witnesses: Arc<Vec<SyscallWitness>>,
+    /// Runtime-only private tensor source; intentionally not journaled.
+    pub tensor_proof_context: Option<Arc<TensorProofContext>>,
+}
+
+pub struct TensorProofContext {
+    provider: Arc<dyn TensorWitnessProvider>,
+}
+
+impl TensorProofContext {
+    pub fn new(provider: Arc<dyn TensorWitnessProvider>) -> Self {
+        Self { provider }
+    }
+
+    pub fn provider(&self) -> &dyn TensorWitnessProvider {
+        self.provider.as_ref()
+    }
 }
 
 impl<'a> Default for ShardContext<'a> {
@@ -286,6 +326,7 @@ impl<'a> Default for ShardContext<'a> {
             shard_heap_addr_range: CENO_PLATFORM.heap.clone(),
             shard_hint_addr_range: CENO_PLATFORM.hints.clone(),
             syscall_witnesses: Arc::new(Vec::new()),
+            tensor_proof_context: None,
         }
     }
 }
@@ -329,6 +370,7 @@ impl<'a> ShardContext<'a> {
             shard_heap_addr_range: self.shard_heap_addr_range.clone(),
             shard_hint_addr_range: self.shard_hint_addr_range.clone(),
             syscall_witnesses: self.syscall_witnesses.clone(),
+            tensor_proof_context: self.tensor_proof_context.clone(),
         }
     }
 
@@ -362,6 +404,7 @@ impl<'a> ShardContext<'a> {
                     shard_heap_addr_range: self.shard_heap_addr_range.clone(),
                     shard_hint_addr_range: self.shard_hint_addr_range.clone(),
                     syscall_witnesses: self.syscall_witnesses.clone(),
+                    tensor_proof_context: self.tensor_proof_context.clone(),
                 })
                 .collect_vec(),
             _ => panic!("invalid type"),
@@ -724,6 +767,7 @@ pub struct ShardContextBuilder {
     #[allow(dead_code)]
     replay_shard_previews: Arc<Vec<ceno_emul::GpuShardPreview>>,
     max_cycle: Cycle,
+    tensor_proof_context: Option<Arc<TensorProofContext>>,
 }
 
 impl Default for ShardContextBuilder {
@@ -738,6 +782,7 @@ impl Default for ShardContextBuilder {
             shard_cycle_boundaries: Arc::new(vec![FullTracer::SUBCYCLES_PER_INSN]),
             replay_shard_previews: Arc::new(Vec::new()),
             max_cycle: 0,
+            tensor_proof_context: None,
         }
     }
 }
@@ -764,7 +809,12 @@ impl ShardContextBuilder {
             shard_cycle_boundaries,
             replay_shard_previews,
             max_cycle,
+            tensor_proof_context: None,
         }
+    }
+
+    pub fn set_tensor_proof_context(&mut self, context: Arc<TensorProofContext>) {
+        self.tensor_proof_context = Some(context);
     }
 
     pub fn shard_cycle_boundaries(&self) -> Arc<Vec<Cycle>> {
@@ -773,6 +823,10 @@ impl ShardContextBuilder {
 
     pub fn next_accesses(&self) -> Arc<NextCycleAccess> {
         self.next_accesses.clone()
+    }
+
+    fn tensor_proof_context(&self) -> Option<Arc<TensorProofContext>> {
+        self.tensor_proof_context.clone()
     }
 
     pub fn total_shards(&self) -> usize {
@@ -797,6 +851,7 @@ impl ShardContextBuilder {
             platform: self.platform.clone(),
             shard_heap_addr_range: preview.heap_start..preview.heap_end,
             shard_hint_addr_range: preview.hint_start..preview.hint_end,
+            tensor_proof_context: self.tensor_proof_context.clone(),
             ..Default::default()
         }
     }
@@ -881,6 +936,7 @@ impl ShardContextBuilder {
             platform: self.platform.clone(),
             shard_heap_addr_range: summary.first_heap_before..summary.last_heap_after,
             shard_hint_addr_range: summary.first_hint_before..summary.last_hint_after,
+            tensor_proof_context: self.tensor_proof_context.clone(),
             ..Default::default()
         };
         self.prev_shard_cycle_range
@@ -944,6 +1000,7 @@ impl StepReplay {
         full_tracer_config: FullTracerConfig,
         next_accesses: Arc<NextCycleAccess>,
         shard_cycle_boundaries: Arc<Vec<Cycle>>,
+        tensor_proof_context: Option<Arc<TensorProofContext>>,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))] aot: Arc<
             ceno_emul::aot::AotProgram,
         >,
@@ -984,6 +1041,9 @@ impl StepReplay {
             full_tracer_config,
             Some(next_accesses),
         );
+        if let Some(context) = tensor_proof_context {
+            vm.set_tensor_witness_provider(context.provider.clone());
+        }
         for record in init_mem_state.hints.iter() {
             vm.init_memory(record.addr.into(), record.value);
         }
@@ -1191,7 +1251,9 @@ struct CompactReplayPipelineInput {
     next_accesses: Arc<NextCycleAccess>,
     shard_cycle_boundaries: Arc<Vec<Cycle>>,
     range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
+    tensor_intervals: Arc<Vec<ceno_emul::GpuReplayFallbackInterval>>,
     chunk_capacity: usize,
+    tensor_proof_context: Option<Arc<TensorProofContext>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     aot: Arc<ceno_emul::aot::AotProgram>,
 }
@@ -1226,6 +1288,42 @@ fn recycle_compact_replay_owners(
     }
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn process_rss_bytes() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status.lines().find_map(|line| {
+                let kib = line.strip_prefix("VmRSS:")?.trim();
+                let kib = kib.strip_suffix("kB")?.trim().parse::<u64>().ok()?;
+                kib.checked_mul(1024)
+            })
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn process_rss_bytes() -> u64 {
+    0
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu", not(feature = "jemalloc")))]
+pub(crate) fn trim_process_allocator_pages() -> bool {
+    unsafe extern "C" {
+        fn malloc_trim(pad: usize) -> std::ffi::c_int;
+    }
+
+    // SAFETY: `malloc_trim` has no pointer arguments and is safe to call while
+    // other threads use glibc's allocator. A zero pad asks glibc to return all
+    // currently releasable free pages while preserving live allocations.
+    unsafe { malloc_trim(0) != 0 }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu", not(feature = "jemalloc"))))]
+pub(crate) fn trim_process_allocator_pages() -> bool {
+    false
+}
+
 #[cfg(feature = "gpu")]
 fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactReplayPipeline {
     // One prepared shard may wait while the current shard is proving. The
@@ -1246,7 +1344,9 @@ fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactRe
                 input.next_accesses,
                 input.shard_cycle_boundaries,
                 input.range_descriptors,
+                input.tensor_intervals,
                 input.chunk_capacity,
+                input.tensor_proof_context,
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
                 input.aot,
             );
@@ -1264,18 +1364,28 @@ fn spawn_compact_replay_pipeline(input: CompactReplayPipelineInput) -> CompactRe
                 tracing::info!(
                     target: "ceno_pipeline",
                     shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
                     phase = "cpu_replay_start",
                     "compact replay pipeline event"
                 );
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "cpu_replay_start_shard_{shard_id}"
+                ));
                 let shard = replay
                     .next_shard(false, Some)
                     .expect("compact replay ended before its shard plan");
                 tracing::info!(
                     target: "ceno_pipeline",
                     shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
                     phase = "cpu_replay_ready",
                     "compact replay pipeline event"
                 );
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "cpu_replay_ready_shard_{shard_id}"
+                ));
                 if ready_tx.send(shard).is_err() {
                     return;
                 }
@@ -1330,6 +1440,44 @@ fn checked_compact_covered_steps(ordinary_rows: u64, fallback_rows: usize) -> us
         .expect("covered step count overflow")
 }
 
+/// Validates the compact-only syscall journal at its ownership boundaries.
+///
+/// Ordinary instructions are represented by typed arenas, while ecalls stay in
+/// `fallback_steps`; consequently their `StepRecord::syscall_index` values must
+/// address exactly the Vec moved out of `GpuReplayTracer`.  Keep this check
+/// beside the transfer rather than in a Tensor chip: it applies to every
+/// compact replay ecall and makes a lost/remapped journal fail before circuit
+/// assignment or PCS setup.
+fn compact_syscall_journal_codes(
+    fallback_steps: &[StepRecord],
+    syscall_witnesses: &[SyscallWitness],
+) -> Vec<(u32, u32)> {
+    let mut entries = fallback_steps
+        .iter()
+        .filter_map(|step| {
+            let syscall_index = step.syscall_index()?;
+            let code = step
+                .rs1()
+                .expect("syscall witness must belong to an ecall with rs1")
+                .value;
+            Some((syscall_index, code))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_unstable_by_key(|(index, _)| *index);
+    assert_eq!(
+        entries.len(),
+        syscall_witnesses.len(),
+        "compact replay syscall journal count differs from fallback steps"
+    );
+    for (expected, (actual, _)) in entries.iter().enumerate() {
+        assert_eq!(
+            *actual, expected as u32,
+            "compact replay syscall indices must be dense and ordered"
+        );
+    }
+    entries
+}
+
 impl CompactStepReplay {
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -1339,7 +1487,9 @@ impl CompactStepReplay {
         next_accesses: Arc<NextCycleAccess>,
         shard_cycle_boundaries: Arc<Vec<Cycle>>,
         range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
+        tensor_intervals: Arc<Vec<ceno_emul::GpuReplayFallbackInterval>>,
         chunk_capacity: usize,
+        tensor_proof_context: Option<Arc<TensorProofContext>>,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))] aot: Arc<
             ceno_emul::aot::AotProgram,
         >,
@@ -1358,8 +1508,13 @@ impl CompactStepReplay {
             GpuReplayTracerConfig { chunk_capacity },
             Some(next_accesses),
         );
+        if let Some(context) = tensor_proof_context {
+            vm.set_tensor_witness_provider(context.provider.clone());
+        }
         vm.tracer_mut()
             .install_range_descriptors(range_descriptors.clone());
+        vm.tracer_mut()
+            .install_tensor_fallback_intervals(tensor_intervals);
         for record in &init_mem_state.hints {
             vm.init_memory(record.addr.into(), record.value);
         }
@@ -1381,6 +1536,7 @@ impl CompactStepReplay {
             ceno_emul::GpuReplayTypedRange,
         ) -> Option<ceno_emul::GpuReplayTypedRange>,
     ) -> Option<CompactReplayShard> {
+        let shard_started = std::time::Instant::now();
         let expected_steps = *self.shard_step_counts.get(self.shard_id)?;
         let expected_range_count = self.range_descriptors[self.next_range_descriptor..]
             .iter()
@@ -1417,8 +1573,34 @@ impl CompactStepReplay {
                         target_arch = "x86_64",
                         target_os = "linux"
                     ))]
+                    tracing::info!(
+                        target: "ceno_pipeline",
+                        phase = "compact_replay_aot_chunk_begin",
+                        shard_id = self.shard_id,
+                        executed,
+                        max_steps,
+                        pc = self.vm.get_pc().0,
+                        "compact replay AOT chunk begin"
+                    );
+                    #[cfg(all(
+                        feature = "aot-x86_64",
+                        target_arch = "x86_64",
+                        target_os = "linux"
+                    ))]
                     let ran = match self.aot.run_to_halt(&mut self.vm, max_steps) {
-                        Ok(result) => result.executed_steps,
+                        Ok(result) => {
+                            tracing::info!(
+                                target: "ceno_pipeline",
+                                phase = "compact_replay_aot_chunk_return",
+                                shard_id = self.shard_id,
+                                executed,
+                                max_steps,
+                                ran = result.executed_steps,
+                                pc = self.vm.get_pc().0,
+                                "compact replay AOT chunk returned"
+                            );
+                            result.executed_steps
+                        }
                         Err(err) => panic!(
                             "AOT compact replay failed at pc={:#010x}: {err:?}",
                             self.vm.get_pc().0
@@ -1558,7 +1740,8 @@ impl CompactStepReplay {
                 )
             })
             .collect::<Vec<_>>();
-        let fallback_steps = fallback.into_iter().map(|record| record.record).collect();
+        let fallback_steps: Vec<StepRecord> =
+            fallback.into_iter().map(|record| record.record).collect();
 
         let covered_steps = checked_compact_covered_steps(ordinary_rows, fallback_meta.len());
         assert_eq!(covered_steps, expected_steps);
@@ -1576,6 +1759,25 @@ impl CompactStepReplay {
             last_hint_after: self.vm.tracer().max_hint_addr_access().0,
         };
         let syscall_witnesses = self.vm.tracer_mut().take_syscall_witnesses();
+        let syscall_codes = compact_syscall_journal_codes(&fallback_steps, &syscall_witnesses);
+        tracing::info!(
+            shard_id = self.shard_id,
+            syscall_witnesses = syscall_witnesses.len(),
+            ?syscall_codes,
+            "compact replay syscall journal retained"
+        );
+        tracing::info!(
+            target: "ceno_pipeline",
+            shard_id = self.shard_id,
+            thread_id = ?std::thread::current().id(),
+            phase = "cpu_replay_next_shard_complete",
+            expected_steps,
+            ordinary_rows,
+            fallback_steps = fallback_steps.len(),
+            typed_bytes,
+            elapsed_ms = shard_started.elapsed().as_millis(),
+            "compact replay next_shard complete"
+        );
         self.shard_id += 1;
         Some(CompactReplayShard {
             arenas,
@@ -1594,6 +1796,204 @@ pub struct FullTraceReplayReport {
     pub syscall_witnesses: usize,
     pub exit_code: Option<u32>,
     pub committed_public_io: Option<[u32; 8]>,
+}
+
+/// Exact production TensorState balance observed during a FullTracer replay.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductionTensorStateAuditReport {
+    pub replayed_shards: usize,
+    pub boundary_variants: Vec<(u32, usize, usize, usize, usize)>,
+    pub attention_head_ranges: Vec<(u32, u32)>,
+    pub stable_writes: u64,
+    pub stable_reads: u64,
+    pub bulk_boundary_value_mem_ops: u64,
+    pub static_tensor_continuation_records: Vec<u64>,
+}
+
+#[derive(Clone)]
+struct ProductionBoundaryAuditSlice {
+    values: Arc<[i32]>,
+    start: usize,
+    rows: usize,
+}
+
+impl ProductionBoundaryAuditSlice {
+    fn words(&self) -> &[i32] {
+        &self.values[self.start..self.start + self.rows]
+    }
+}
+
+/// Replay a production layer and prove that every stable logical slot has one
+/// matching local write/read, while no Hidden or Context boundary owns bulk RAM.
+pub fn audit_production_tensor_state_replay(
+    mut emul_result: EmulationResult<'_>,
+    program: Arc<Program>,
+    platform: &Platform,
+    init_mem_state: &InitMemState,
+) -> ProductionTensorStateAuditReport {
+    use crate::instructions::riscv::ecall::collect_production_boundary_replay_descriptors;
+
+    let expected_steps = emul_result.executed_steps;
+    let mut shard_ctx_builder = std::mem::take(&mut emul_result.shard_ctx_builder);
+    let expected_shards = shard_ctx_builder.total_shards();
+    let mut step_iter = StepReplay::new(
+        platform.clone(),
+        program,
+        init_mem_state,
+        expected_steps,
+        expected_shards,
+        emul_result.full_tracer_config,
+        shard_ctx_builder.next_accesses(),
+        emul_result.shard_cycle_boundaries,
+        shard_ctx_builder.tensor_proof_context(),
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        emul_result.replay_aot_program,
+    );
+    let mut replayed_steps = 0usize;
+    let mut replayed_shards = 0usize;
+    let mut variants = Vec::new();
+    let mut slices = BTreeMap::new();
+
+    while let Some((mut shard_ctx, summary)) =
+        shard_ctx_builder.position_next_shard(&mut step_iter, |_, _| {})
+    {
+        replayed_steps += summary.step_count;
+        replayed_shards += 1;
+        shard_ctx.syscall_witnesses = Arc::new(step_iter.take_syscall_witnesses());
+        let steps = step_iter.shard_steps();
+        let indices = steps
+            .iter()
+            .enumerate()
+            .filter_map(|(index, step)| {
+                step.syscall(&shard_ctx.syscall_witnesses)
+                    .and_then(|syscall| syscall.tensor_production_boundary.as_ref())
+                    .map(|_| index)
+            })
+            .collect::<Vec<_>>();
+        let descriptors =
+            collect_production_boundary_replay_descriptors(&shard_ctx, steps, &indices)
+                .expect("production boundary replay descriptors failed validation");
+        for descriptor in descriptors {
+            assert_eq!(descriptor.layer, 0, "oracle expects exactly layer zero");
+            let key = (
+                descriptor.stage as u32,
+                descriptor.direction,
+                descriptor.part,
+                descriptor.group,
+            );
+            assert!(
+                slices
+                    .insert(
+                        key,
+                        ProductionBoundaryAuditSlice {
+                            values: descriptor.values,
+                            start: descriptor.tensor_index_start,
+                            rows: descriptor.rows,
+                        },
+                    )
+                    .is_none(),
+                "duplicate production boundary variant {key:?}"
+            );
+            variants.push((
+                descriptor.layer,
+                descriptor.stage,
+                descriptor.direction,
+                descriptor.part,
+                descriptor.group,
+            ));
+        }
+        for syscall in shard_ctx
+            .syscall_witnesses
+            .iter()
+            .filter(|syscall| syscall.tensor_production_boundary.is_some())
+        {
+            assert_eq!(
+                syscall.mem_ops.len(),
+                8 + 4,
+                "logical production boundary retained bulk RAM operations"
+            );
+        }
+    }
+    assert_eq!(
+        replayed_steps, expected_steps,
+        "oracle replay step mismatch"
+    );
+    assert_eq!(
+        replayed_shards, expected_shards,
+        "oracle replay shard mismatch"
+    );
+
+    let heads_per_group = ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT;
+    let groups = ceno_emul::tensor::production_attention::CIRCUITS;
+    let hidden_words = ceno_emul::tensor::production_attention::HIDDEN_WORDS;
+    let group_words = heads_per_group
+        * ceno_emul::tensor::production_attention::SEQUENCE
+        * ceno_emul::tensor::production_attention::HEAD_DIM;
+    let mut expected_variants = vec![
+        (0, 0, 0, 0, 0),
+        (0, 0, 1, 0, 0),
+        (0, 0, 1, 1, 0),
+        (0, 0, 1, 2, 0),
+    ];
+    for group in 0..groups {
+        expected_variants.extend([
+            (0, 1, 0, 0, group),
+            (0, 1, 0, 1, group),
+            (0, 1, 0, 2, group),
+            (0, 1, 1, 0, group),
+        ]);
+    }
+    expected_variants.extend([(0, 2, 0, 0, 0), (0, 2, 0, 1, 0), (0, 2, 1, 0, 0)]);
+    assert_eq!(
+        variants, expected_variants,
+        "production boundary variant sequence changed"
+    );
+
+    let hidden_write = slices.get(&(0, 0, 0, 0)).unwrap().words();
+    let hidden_read = slices.get(&(2, 0, 0, 0)).unwrap().words();
+    assert_eq!(
+        hidden_write, hidden_read,
+        "Hidden stable slots do not balance"
+    );
+    for part in 0..3 {
+        let projection = slices.get(&(0, 1, part, 0)).unwrap().words();
+        assert_eq!(projection.len(), hidden_words);
+        for group in 0..groups {
+            let attention = slices.get(&(1, 0, part, group)).unwrap().words();
+            let start = group * group_words;
+            assert_eq!(
+                attention,
+                &projection[start..start + group_words],
+                "Q/K/V stable slot mismatch for part {part}, group {group}"
+            );
+        }
+    }
+    assert_eq!(
+        slices.get(&(2, 0, 1, 0)).unwrap().words().len(),
+        hidden_words
+    );
+    let attention_head_ranges = (0..groups)
+        .map(|group| ((group * heads_per_group) as u32, heads_per_group as u32))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        attention_head_ranges
+            .iter()
+            .flat_map(|&(start, count)| start..start + count)
+            .collect::<Vec<_>>(),
+        (0..32).collect::<Vec<_>>(),
+        "attention heads are not covered exactly once"
+    );
+    let stable_records = 5 * hidden_words as u64;
+    let static_tensor_continuation_records = Vec::new();
+    ProductionTensorStateAuditReport {
+        replayed_shards,
+        boundary_variants: variants,
+        attention_head_ranges,
+        stable_writes: stable_records,
+        stable_reads: stable_records,
+        bulk_boundary_value_mem_ops: 0,
+        static_tensor_continuation_records,
+    }
 }
 
 /// Replay every preflight shard with FullTracer without assigning circuit witnesses.
@@ -1625,6 +2025,7 @@ pub fn replay_full_trace(
         emul_result.full_tracer_config,
         shard_ctx_builder.next_accesses(),
         emul_result.shard_cycle_boundaries,
+        shard_ctx_builder.tensor_proof_context(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         emul_result.replay_aot_program,
     );
@@ -1673,6 +2074,7 @@ pub fn emulate_program<'a>(
     platform: &Platform,
     multi_prover: &MultiProver,
     step_cell_extractor: Arc<dyn StepCellExtractor>,
+    tensor_proof_context: Option<Arc<TensorProofContext>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     precompiled_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -1704,22 +2106,11 @@ pub fn emulate_program<'a>(
         multi_prover.max_cell_per_shard,
         multi_prover.max_cycle_per_shard,
     )
-    .with_step_cell_extractor(step_cell_extractor)
-    .with_replay_range_capacity(replay_range_capacity);
+    .with_step_cell_extractor(step_cell_extractor.clone())
+    .with_replay_range_capacity(replay_range_capacity)
+    .with_tensor_segment_inner_repetitions(multi_prover.tensor_segment_inner_repetitions);
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let aot_tracer_config = tracer_config.clone();
-    let preflight_program = program.clone();
-    let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
-        .in_scope(move || {
-            VMState::new_with_tracer_config(platform.clone(), preflight_program, tracer_config)
-        });
-
-    info_span!("[ceno] emulator.init_mem").in_scope(|| {
-        for record in hints_init {
-            vm.init_memory(record.addr.into(), record.value);
-        }
-    });
-
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let aot_program = precompiled_aot.unwrap_or_else(|| {
         let aot = ceno_emul::aot::AotProgram::load_or_train_preflight_with_config(
@@ -1739,6 +2130,87 @@ pub fn emulate_program<'a>(
             report.reachable_instruction_count
         );
         Arc::new(aot)
+    });
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let tensor_state_annotations = {
+        let prepass_config = PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
+            .with_step_cell_extractor(step_cell_extractor)
+            .with_replay_range_capacity(replay_range_capacity)
+            .pure_aot_prepass();
+        let mut planning_vm = VMState::<PreflightTracer>::new_with_tracer_config(
+            platform.clone(),
+            program.clone(),
+            prepass_config,
+        );
+        for record in hints_init {
+            planning_vm.init_memory(record.addr.into(), record.value);
+        }
+        let report = aot_program
+            .run_to_halt(&mut planning_vm, max_steps)
+            .unwrap_or_else(|err| panic!("PureAotPrepass trapped before annotation: {err}"));
+        let tracer = planning_vm.take_tracer();
+        let (builder, _, _) = tracer.into_shard_plan();
+        let annotations = Arc::new(builder.tensor_state_annotations().to_vec());
+        for annotation in annotations.iter() {
+            tracing::info!(
+                target: "ceno_pipeline",
+                phase = "pure_aot_prepass_annotation",
+                layer = annotation.layer,
+                stage = annotation.stage,
+                head_start = annotation.head_start,
+                head_count = annotation.head_count,
+                start_cycle = annotation.start_cycle,
+                end_cycle = annotation.end_cycle,
+                annotation_steps = annotation.step_count(),
+                descriptor_events = annotation.event_count(),
+                descriptor_triples = annotation.event_count() / 3,
+                required_min_cells = annotation.total_cells,
+                "Pure AOT metadata prepass produced complete atomic annotation"
+            );
+        }
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "pure_aot_prepass",
+            executed_steps = report.executed_steps,
+            tensor_state_segments = annotations.len(),
+            required_min_cells = annotations.iter().map(|annotation| annotation.total_cells).max().unwrap_or(0),
+            "Pure AOT metadata prepass finalized immutable TensorState annotations"
+        );
+        annotations
+    };
+    #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
+    let tensor_state_annotations: Arc<Vec<ceno_emul::TensorStateSegmentAnnotation>> =
+        Arc::new(Vec::new());
+
+    if let Some(annotation) = tensor_state_annotations
+        .iter()
+        .find(|annotation| annotation.total_cells > multi_prover.max_cell_per_shard)
+    {
+        panic!(
+            "production TensorState segment layer={} stage={} heads={}..{} requires minimum max_cell_per_shard={} cells, configured cap={}; refusing before witness/GPU execution",
+            annotation.layer,
+            annotation.stage,
+            annotation.head_start,
+            annotation.head_start.saturating_add(annotation.head_count),
+            annotation.total_cells,
+            multi_prover.max_cell_per_shard
+        );
+    }
+
+    let tracer_config = tracer_config.with_tensor_state_annotations(tensor_state_annotations);
+    let preflight_program = program.clone();
+    let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
+        .in_scope(move || {
+            VMState::new_with_tracer_config(platform.clone(), preflight_program, tracer_config)
+        });
+    if let Some(context) = &tensor_proof_context {
+        vm.set_tensor_witness_provider(context.provider.clone());
+    }
+    info_span!("[ceno] emulator.init_mem").in_scope(|| {
+        for record in hints_init {
+            vm.init_memory(record.addr.into(), record.value);
+        }
     });
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -1955,16 +2427,35 @@ pub fn emulate_program<'a>(
 
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let replay_aot_program = require_fulltracer_aot_program(precompiled_fulltracer_aot);
+    let final_mem_state = FinalMemState {
+        reg: reg_final,
+        io: io_final,
+        mem: mem_final,
+        hints: hints_final,
+        stack: stack_final,
+        heap: heap_final,
+    };
     let tracer = vm.take_tracer();
     let (plan_builder, next_accesses, replay_shard_previews) = tracer.into_shard_plan();
+    if let Some(device_budget_bytes) = multi_prover.shard_ram_device_budget_bytes {
+        validate_shard_ram_cut_capacity(
+            plan_builder.admitted_tensor_segments(),
+            &final_mem_state,
+            multi_prover.max_cell_per_shard,
+            device_budget_bytes,
+        );
+    }
     let full_tracer_config = FullTracerConfig {
         max_step_shard: plan_builder.max_step_shard(),
     };
+    let predicted_shard_costs = Arc::new(plan_builder.predicted_shard_costs().to_vec());
+    let admitted_tensor_segments = Arc::new(plan_builder.admitted_tensor_segments().to_vec());
+    let direct_fallback_spans = Arc::new(plan_builder.direct_fallback_spans().to_vec());
     let (shard_cycle_boundaries, replay_range_descriptors) = plan_builder.into_replay_plan();
     let shard_cycle_boundaries = Arc::new(shard_cycle_boundaries);
     let replay_range_descriptors = Arc::new(replay_range_descriptors);
     let replay_shard_previews = Arc::new(replay_shard_previews);
-    let shard_ctx_builder = ShardContextBuilder::from_plan(
+    let mut shard_ctx_builder = ShardContextBuilder::from_plan(
         multi_prover,
         platform.clone(),
         shard_cycle_boundaries.clone(),
@@ -1972,6 +2463,9 @@ pub fn emulate_program<'a>(
         max_cycle,
         next_accesses,
     );
+    if let Some(context) = tensor_proof_context {
+        shard_ctx_builder.set_tensor_proof_context(context);
+    }
     tracing::info!(
         "num_shards: {}, max_cycle {}, shard_cycle_boundaries {:?}",
         shard_ctx_builder.total_shards(),
@@ -1984,6 +2478,9 @@ pub fn emulate_program<'a>(
         exit_code,
         shard_ctx_builder,
         shard_cycle_boundaries: shard_cycle_boundaries.clone(),
+        predicted_shard_costs,
+        admitted_tensor_segments,
+        direct_fallback_spans,
         replay_range_descriptors,
         replay_shard_previews,
         replay_range_capacity,
@@ -1992,14 +2489,7 @@ pub fn emulate_program<'a>(
         full_tracer_config,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         replay_aot_program,
-        final_mem_state: FinalMemState {
-            reg: reg_final,
-            io: io_final,
-            mem: mem_final,
-            hints: hints_final,
-            stack: stack_final,
-            heap: heap_final,
-        },
+        final_mem_state,
         phantom: PhantomData,
     }
 }
@@ -2199,6 +2689,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             emul_result.full_tracer_config,
             shard_ctx_builder.next_accesses(),
             emul_result.shard_cycle_boundaries.clone(),
+            shard_ctx_builder.tensor_proof_context(),
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             emul_result.replay_aot_program.clone(),
         )
@@ -2212,7 +2703,9 @@ pub fn generate_witness<'a, E: ExtensionField>(
             shard_ctx_builder.next_accesses(),
             emul_result.shard_cycle_boundaries.clone(),
             emul_result.replay_range_descriptors.clone(),
+            emul_result.direct_fallback_spans.clone(),
             emul_result.replay_range_capacity,
+            shard_ctx_builder.tensor_proof_context(),
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             emul_result.replay_aot_program.clone(),
         )
@@ -2226,18 +2719,46 @@ pub fn generate_witness<'a, E: ExtensionField>(
             next_accesses: shard_ctx_builder.next_accesses(),
             shard_cycle_boundaries: emul_result.shard_cycle_boundaries.clone(),
             range_descriptors: emul_result.replay_range_descriptors.clone(),
+            tensor_intervals: emul_result.direct_fallback_spans.clone(),
             chunk_capacity: emul_result.replay_range_capacity,
+            tensor_proof_context: shard_ctx_builder.tensor_proof_context(),
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             aot: emul_result.replay_aot_program.clone(),
         })
     });
     let mut current_compact_shard: Option<CompactReplayShard> = None;
+    #[cfg(feature = "gpu")]
+    let mut deferred_compact_replay_recycle = None;
     std::iter::from_fn(move || {
         info_span!(
             "[ceno] app_prove.generate_witness",
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
+            #[cfg(feature = "gpu")]
+            if let Some((completed_shard_id, recycled, is_last_shard)) =
+                deferred_compact_replay_recycle.take()
+            {
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = completed_shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
+                    phase = "compact_replay_recycle_release",
+                    "releasing compact replay owners after the preceding proof"
+                );
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "compact_replay_recycle_release_shard_{completed_shard_id}"
+                ));
+                recycle_compact_replay_owners(
+                    &compact_pipeline
+                        .as_ref()
+                        .expect("compact replay pipeline missing")
+                        .recycle,
+                    recycled,
+                    is_last_shard,
+                );
+            }
             next_witness_shard_entry(&shard_ctx_builder)?;
             if !{
                 #[cfg(all(
@@ -2261,9 +2782,10 @@ pub fn generate_witness<'a, E: ExtensionField>(
             }
             let (mut shard_ctx, shard_summary) = if use_compact_replay {
                 instrunction_dispatch_ctx.begin_compact_ingest();
-                // Replay and typed arena preparation are CPU-only and may run
-                // one shard ahead. All GPU setup and assignment below remain
-                // on this consumer thread, after the previous proof returned.
+                // Production ECALL replay may invoke its CUDA provider. The
+                // producer is released only when this iterator is advanced
+                // after the preceding proof, so replay, assignment, and proof
+                // never compete across shards.
                 let stream_owned_ranges = false;
                 #[cfg(feature = "gpu")]
                 if stream_owned_ranges
@@ -2379,10 +2901,12 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 let mut compact_shard = info_span!("position_compact_shard").in_scope(|| {
                     #[cfg(feature = "gpu")]
                     {
-                        tracing::info!(
-                            target: "ceno_pipeline",
-                            shard_id = shard_ctx_builder.cur_shard_id,
-                            phase = "gpu_assignment_wait",
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = shard_ctx_builder.cur_shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
+                    phase = "gpu_assignment_wait",
                             "compact replay pipeline event"
                         );
                         recv_compact_replay_shard(
@@ -2403,9 +2927,15 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 tracing::info!(
                     target: "ceno_pipeline",
                     shard_id = shard_ctx_builder.cur_shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
                     phase = "gpu_assignment_start",
                     "compact replay pipeline event"
                 );
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "gpu_assignment_start_shard_{}",
+                    shard_ctx_builder.cur_shard_id
+                ));
                 for range in &compact_shard.arenas.ranges {
                     for (kind, arena) in InsnKind::iter().zip(&range.typed) {
                         if let Some(arena) = arena {
@@ -2416,8 +2946,18 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 for (idx, record) in compact_shard.fallback_steps.iter().enumerate() {
                     instrunction_dispatch_ctx.ingest_step(idx, record);
                 }
+                let assembly_started = std::time::Instant::now();
                 instrunction_dispatch_ctx.finish_compact_ingest();
                 let positioned = shard_ctx_builder.position_compact_shard(compact_shard.summary);
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = shard_ctx_builder.cur_shard_id,
+                    phase = "tensor_witness_assembly",
+                    fallback_steps = compact_shard.fallback_steps.len(),
+                    range_count = compact_shard.arenas.ranges.len(),
+                    elapsed_ms = assembly_started.elapsed().as_millis(),
+                    "compact witness assembly complete"
+                );
                 #[cfg(feature = "gpu")]
                 if !stream_owned_ranges {
                     crate::instructions::gpu::dispatch::install_compact_replay_arenas(
@@ -2445,7 +2985,18 @@ pub fn generate_witness<'a, E: ExtensionField>(
             };
 
             shard_ctx.syscall_witnesses = if let Some(compact_shard) = current_compact_shard.as_mut() {
-                Arc::new(std::mem::take(&mut compact_shard.syscall_witnesses))
+                let syscall_witnesses = std::mem::take(&mut compact_shard.syscall_witnesses);
+                let syscall_codes = compact_syscall_journal_codes(
+                    &compact_shard.fallback_steps,
+                    &syscall_witnesses,
+                );
+                tracing::info!(
+                    shard_id = shard_ctx.shard_id,
+                    syscall_witnesses = syscall_witnesses.len(),
+                    ?syscall_codes,
+                    "compact replay syscall journal transferred to shard context"
+                );
+                Arc::new(syscall_witnesses)
             } else {
                 Arc::new(
                     step_iter
@@ -2499,14 +3050,28 @@ pub fn generate_witness<'a, E: ExtensionField>(
             pi.hint_shard_len = (shard_ctx.shard_hint_addr_range.end
                 - shard_ctx.shard_hint_addr_range.start)
                 / (WORD_SIZE as u32);
+            {
+                let events = crate::tables::events_from_syscalls(
+                    shard_ctx.syscall_witnesses.as_ref(),
+                    &shard_ctx,
+                );
+                crate::tables::verify_atomic_tensor_bus_shard_for_preflight(&events)
+                    .expect("TensorBus shard plan split or malformed a resident section");
+            }
 
 
             if let Some(target_shard_id) = target_shard_id {
-                if shard_ctx.shard_id < target_shard_id {
+                if shard_ctx.shard_id > target_shard_id {
                     tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
-                    return Some((zkvm_witness, shard_ctx, pi, None));
-                } else if shard_ctx.shard_id > target_shard_id {
-                    tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
+                    #[cfg(feature = "gpu")]
+                    if current_compact_shard.is_some() {
+                        let recycled = crate::instructions::gpu::dispatch::clear_compact_replay_arenas()
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>();
+                        drop(recycled);
+                        current_compact_shard.take();
+                    }
                     return None;
                 }
             }
@@ -2526,6 +3091,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 { None::<ShardContext<'static>> }
             };
 
+            let assignment_started = std::time::Instant::now();
             info_span!("assign_opcode_circuits", shard_id = shard_ctx.shard_id)
                 .in_scope(|| {
                     #[cfg(feature = "gpu")]
@@ -2545,6 +3111,20 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         })
                 })
                 .unwrap();
+            tracing::info!(
+                target: "ceno_pipeline",
+                shard_id = shard_ctx.shard_id,
+                thread_id = ?std::thread::current().id(),
+                rss_bytes = process_rss_bytes(),
+                phase = "gpu_assignment_end",
+                elapsed_ms = assignment_started.elapsed().as_millis(),
+                "GPU opcode assignment complete"
+            );
+            #[cfg(feature = "gpu")]
+            crate::scheme::gpu::log_gpu_device_state(&format!(
+                "gpu_assignment_end_shard_{}",
+                shard_ctx.shard_id
+            ));
 
             #[cfg(feature = "gpu")]
             if current_compact_shard.is_some() {
@@ -2552,13 +3132,20 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .in_scope(|| {
                         let recycled =
                             crate::instructions::gpu::dispatch::clear_compact_replay_arenas();
-                        recycle_compact_replay_owners(
-                            &compact_pipeline
-                                .as_ref()
-                                .expect("compact replay pipeline missing")
-                                .recycle,
-                            recycled.into_iter().flatten().collect(),
-                            shard_ctx.is_last_shard(),
+                        let recycled = recycled.into_iter().flatten().collect::<Vec<_>>();
+                        assert!(
+                            deferred_compact_replay_recycle
+                                .replace((shard_ctx.shard_id, recycled, shard_ctx.is_last_shard()))
+                                .is_none(),
+                            "compact replay owners deferred twice"
+                        );
+                        tracing::info!(
+                            target: "ceno_pipeline",
+                            shard_id = shard_ctx.shard_id,
+                            thread_id = ?std::thread::current().id(),
+                            rss_bytes = process_rss_bytes(),
+                            phase = "compact_replay_recycle_deferred",
+                            "deferred compact replay owner release until proof completion"
                         );
                     });
             }
@@ -2838,6 +3425,20 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 });
             }
 
+            tracing::info!(
+                target: "ceno_pipeline",
+                shard_id = shard_ctx.shard_id,
+                thread_id = ?std::thread::current().id(),
+                rss_bytes = process_rss_bytes(),
+                phase = "witness_ready",
+                "all witness and table assignments complete"
+            );
+            #[cfg(feature = "gpu")]
+            crate::scheme::gpu::log_gpu_device_state(&format!(
+                "witness_ready_shard_{}",
+                shard_ctx.shard_id
+            ));
+
             Some((zkvm_witness, shard_ctx, pi, None))
         })
     })
@@ -3031,6 +3632,7 @@ pub fn analyze_shard_ram_light<E: ExtensionField>(
         &program_ctx.platform,
         &program_ctx.multi_prover,
         step_cell_extractor,
+        program_ctx.tensor_proof_context.clone(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         precompiled_aot,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -3052,6 +3654,7 @@ pub fn analyze_shard_ram_light<E: ExtensionField>(
         emul_result.full_tracer_config,
         shard_ctx_builder.next_accesses(),
         emul_result.shard_cycle_boundaries.clone(),
+        shard_ctx_builder.tensor_proof_context(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         emul_result.replay_aot_program.clone(),
     );
@@ -3307,6 +3910,213 @@ fn mark_memcpy_destination_access_later(
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ShardRamCutCapacity {
+    live_records: u64,
+    padded_rows: u64,
+    finalized_record_bytes: u64,
+    leaf_main_bytes: u64,
+    leaf_structural_bytes: u64,
+    ec_main_bytes: u64,
+    ec_structural_bytes: u64,
+    ec_workspace_bytes: u64,
+    assignment_peak_bytes: u64,
+}
+
+fn shard_ram_cut_capacity(live_records: u64) -> ShardRamCutCapacity {
+    let padded_rows = live_records.max(2).next_power_of_two();
+    let finalized_record_bytes = 120u64
+        .checked_mul(live_records)
+        .expect("ShardRAM finalized-record byte count overflow");
+    let leaf_main_bytes = 4u64
+        .checked_mul(371)
+        .and_then(|bytes| bytes.checked_mul(padded_rows))
+        .expect("ShardRAM leaf-main byte count overflow");
+    let leaf_structural_bytes = 4u64
+        .checked_mul(3)
+        .and_then(|bytes| bytes.checked_mul(padded_rows))
+        .expect("ShardRAM leaf-structural byte count overflow");
+    let ec_rows = padded_rows
+        .checked_mul(2)
+        .expect("ShardRAM EC row count overflow");
+    let ec_main_bytes = 4u64
+        .checked_mul(21)
+        .and_then(|bytes| bytes.checked_mul(ec_rows))
+        .expect("ShardRAM EC-main byte count overflow");
+    let ec_structural_bytes = 4u64
+        .checked_mul(7)
+        .and_then(|bytes| bytes.checked_mul(ec_rows))
+        .expect("ShardRAM EC-structural byte count overflow");
+    let ec_workspace_bytes = 2u64
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_mul(7))
+        .and_then(|bytes| bytes.checked_mul(padded_rows))
+        .expect("ShardRAM EC-workspace byte count overflow");
+    let assignment_peak_bytes = finalized_record_bytes
+        .checked_add(
+            4u64.checked_mul(444)
+                .and_then(|bytes| bytes.checked_mul(padded_rows))
+                .expect("ShardRAM witness peak byte count overflow"),
+        )
+        .expect("ShardRAM assignment peak byte count overflow");
+    ShardRamCutCapacity {
+        live_records,
+        padded_rows,
+        finalized_record_bytes,
+        leaf_main_bytes,
+        leaf_structural_bytes,
+        ec_main_bytes,
+        ec_structural_bytes,
+        ec_workspace_bytes,
+        assignment_peak_bytes,
+    }
+}
+
+fn final_mem_live_at_cut(
+    cut_cycle: Cycle,
+    final_mem_state: &FinalMemState,
+) -> (u64, BTreeMap<&'static str, u64>) {
+    let mut by_source = BTreeMap::new();
+    for (name, records) in [
+        ("reg", final_mem_state.reg.as_slice()),
+        ("mem", final_mem_state.mem.as_slice()),
+        ("hints", final_mem_state.hints.as_slice()),
+        ("stack", final_mem_state.stack.as_slice()),
+        ("heap", final_mem_state.heap.as_slice()),
+    ] {
+        let count = records
+            .iter()
+            .filter(|record| record.cycle >= cut_cycle)
+            .count() as u64;
+        if count != 0 {
+            by_source.insert(name, count);
+        }
+    }
+    // Static program memory is present before shard 0 and is materialized by
+    // the host continuation path when its final access lies after this cut.
+    // Registers/stack and dynamically introduced heap/hint records can instead
+    // be emitted by the current shard, so report them but do not double-count
+    // them in this allocation lower bound.
+    let static_continuation = by_source.get("mem").copied().unwrap_or_default();
+    (static_continuation, by_source)
+}
+
+fn validate_shard_ram_cut_capacity(
+    segments: &[ceno_emul::TensorSegmentPlan],
+    final_mem_state: &FinalMemState,
+    max_cell_per_shard: u64,
+    device_budget_bytes: u64,
+) {
+    assert!(
+        !segments.is_empty(),
+        "explicit ShardRAM capacity planning requires atomic TensorBus cuts"
+    );
+    let expected_projection_live_records = std::env::var("CENO_EXPECT_PROJECTION_LIVE_RECORDS")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .expect("CENO_EXPECT_PROJECTION_LIVE_RECORDS must be an integer")
+        });
+    let mut legal_first_cuts = Vec::new();
+    let mut invalid_planned_cuts = Vec::new();
+    for (candidate, segment) in segments.iter().enumerate() {
+        let (static_live_records, mut by_source) =
+            final_mem_live_at_cut(segment.end_cycle, final_mem_state);
+        let groups = ceno_emul::tensor::production_attention::CIRCUITS;
+        let segments_per_layer = groups + 1;
+        let position = candidate % segments_per_layer;
+        let hidden_live = u64::from(candidate + 1 < segments.len())
+            * ceno_emul::tensor::production_attention::HIDDEN_WORDS as u64;
+        let context_live = if position < groups {
+            ((position + 1)
+                * ceno_emul::tensor::production_attention::HEADS_PER_CIRCUIT
+                * ceno_emul::tensor::production_attention::SEQUENCE
+                * ceno_emul::tensor::production_attention::HEAD_DIM) as u64
+        } else {
+            0
+        };
+        let tensor_live_records = hidden_live
+            .checked_add(context_live)
+            .expect("TensorVM continuation record count overflow");
+        if tensor_live_records != 0 {
+            by_source.insert("tensor", tensor_live_records);
+        }
+        let live_records = static_live_records
+            .checked_add(tensor_live_records)
+            .expect("ShardRAM live record count overflow");
+        let capacity = shard_ram_cut_capacity(live_records);
+        let core_legal = segment.prefix_core_cost <= max_cell_per_shard;
+        let capacity_legal = capacity.assignment_peak_bytes <= device_budget_bytes;
+        let is_planned_cut = segments
+            .get(candidate + 1)
+            .is_none_or(|next| next.shard_id != segment.shard_id);
+        if core_legal && capacity_legal {
+            legal_first_cuts.push(candidate);
+        } else if is_planned_cut {
+            invalid_planned_cuts.push((
+                candidate,
+                segment.shard_id,
+                capacity.live_records,
+                capacity.assignment_peak_bytes,
+                segment.prefix_core_cost,
+            ));
+        }
+        tracing::info!(
+            target: "ceno_pipeline",
+            phase = "shard_ram_cut_capacity",
+            candidate,
+            cut_cycle = segment.end_cycle,
+            prefix_core_cells = segment.prefix_core_cost,
+            max_core_cells = max_cell_per_shard,
+            static_continuation_records = capacity.live_records,
+            padded_rows = capacity.padded_rows,
+            finalized_record_bytes = capacity.finalized_record_bytes,
+            leaf_main_bytes = capacity.leaf_main_bytes,
+            leaf_structural_bytes = capacity.leaf_structural_bytes,
+            ec_main_bytes = capacity.ec_main_bytes,
+            ec_structural_bytes = capacity.ec_structural_bytes,
+            ec_workspace_bytes = capacity.ec_workspace_bytes,
+            assignment_peak_bytes = capacity.assignment_peak_bytes,
+            device_budget_bytes,
+            core_legal,
+            capacity_legal,
+            is_planned_cut,
+            live_by_source = ?by_source,
+            "costed atomic EXPORT_END candidate"
+        );
+        if candidate == 0
+            && let Some(expected) = expected_projection_live_records
+        {
+            assert_eq!(
+                live_records, expected,
+                "projection-cut ShardRAM liveness drift"
+            );
+            let measured_leaf_request = 94_976u64 << 20;
+            assert!(
+                capacity.leaf_main_bytes >= measured_leaf_request,
+                "projection-cut leaf request no longer explains measured 94,976 MiB"
+            );
+        }
+    }
+    assert!(
+        invalid_planned_cuts.is_empty(),
+        "planned atomic shard cuts exceed ShardRAM/Core capacity: {invalid_planned_cuts:?}; device_budget_bytes={device_budget_bytes}, max_cell_per_shard={max_cell_per_shard}"
+    );
+    assert!(
+        !legal_first_cuts.is_empty(),
+        "no legal atomic first-shard cut: every EXPORT_END candidate exceeds either the explicit ShardRAM device budget ({device_budget_bytes} bytes) or Core budget ({max_cell_per_shard} cells)"
+    );
+    tracing::info!(
+        target: "ceno_pipeline",
+        phase = "shard_ram_cut_plan",
+        ?legal_first_cuts,
+        device_budget_bytes,
+        max_cell_per_shard,
+        "found legal atomic first-shard cuts"
+    );
+}
+
 fn count_final_mem_access_later(
     shard_ctx: &ShardContext,
     final_mem_state: &FinalMemState,
@@ -3392,7 +4202,8 @@ pub fn prepare_preflight_aot_program(
         multi_prover.max_cell_per_shard,
         multi_prover.max_cycle_per_shard,
     )
-    .with_step_cell_extractor(step_cell_extractor);
+    .with_step_cell_extractor(step_cell_extractor)
+    .with_tensor_segment_inner_repetitions(multi_prover.tensor_segment_inner_repetitions);
     let aot = ceno_emul::aot::AotProgram::load_or_train_preflight_with_config(
         platform,
         program.clone(),
@@ -3462,10 +4273,148 @@ pub struct E2EProgramCtx<E: ExtensionField> {
     pub system_config: ConstraintSystemConfig<E>,
     pub reg_init: Vec<MemInitRecord>,
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
+    pub tensor_proof_context: Option<Arc<TensorProofContext>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub preflight_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
     #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     pub fulltracer_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
+}
+
+/// Stable identity for an in-process proving setup.  A reusable runner must
+/// compare this identity before accepting another witness/provider attempt;
+/// a serialized VK alone is insufficient to reconstruct the proving key,
+/// program context, fixed commitment witnesses, or device-owned state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReusableSetupIdentity {
+    pub digest: [u8; 32],
+    pub max_num_variables: usize,
+    pub security_level: String,
+    pub field_type: &'static str,
+    pub pcs_type: &'static str,
+    pub profile: String,
+    pub circuit_count: usize,
+}
+
+impl<E: ExtensionField> E2EProgramCtx<E> {
+    pub fn reusable_setup_identity<PCS: PolynomialCommitmentScheme<E>>(
+        &self,
+        max_num_variables: usize,
+        security_level: SecurityLevel,
+        profile: impl Into<String>,
+    ) -> ReusableSetupIdentity {
+        let profile = profile.into();
+        let mut hash = Keccak::v256();
+        let mut put = |bytes: &[u8]| hash.update(bytes);
+        put(b"ceno.reusable-setup.v1");
+        put(std::any::type_name::<E>().as_bytes());
+        put(std::any::type_name::<PCS>().as_bytes());
+        put(&max_num_variables.to_le_bytes());
+        let security_level = format!("{security_level:?}");
+        put(security_level.as_bytes());
+        put(profile.as_bytes());
+        put(&bincode::serialize(&self.platform).expect("platform serialization"));
+        put(&self.program.entry.to_le_bytes());
+        put(&self.program.base_address.to_le_bytes());
+        put(&self.program.sheap.to_le_bytes());
+        for instruction in &self.program.instructions {
+            put(&[
+                instruction.kind as u8,
+                instruction.rs1,
+                instruction.rs2,
+                instruction.rd,
+            ]);
+            put(&instruction.imm.to_le_bytes());
+            put(&instruction.raw.to_le_bytes());
+        }
+        for (&address, &value) in &self.program.image {
+            put(&address.to_le_bytes());
+            put(&value.to_le_bytes());
+        }
+        for root in self.program.static_aot_roots.as_deref().unwrap_or_default() {
+            put(&root.to_le_bytes());
+        }
+        for name in self.system_config.zkvm_cs.get_css().keys() {
+            put(&(name.len() as u64).to_le_bytes());
+            put(name.as_bytes());
+        }
+        for (name, trace) in &self.zkvm_fixed_traces.circuit_fixed_traces {
+            put(&(name.len() as u64).to_le_bytes());
+            put(name.as_bytes());
+            match trace {
+                None => put(&[0]),
+                Some(trace) => {
+                    put(&[1]);
+                    put(&trace.height().to_le_bytes());
+                    put(&trace.width().to_le_bytes());
+                    for row in trace.rows() {
+                        for value in row {
+                            put(&value.to_canonical_u64().to_le_bytes());
+                        }
+                    }
+                }
+            }
+        }
+        let mut digest = [0u8; 32];
+        hash.finalize(&mut digest);
+        ReusableSetupIdentity {
+            digest,
+            max_num_variables,
+            security_level,
+            field_type: std::any::type_name::<E>(),
+            pcs_type: std::any::type_name::<PCS>(),
+            profile,
+            circuit_count: self.system_config.zkvm_cs.get_css().len(),
+        }
+    }
+}
+
+/// Owns one constructed/key-generated prover for multiple in-process attempts.
+/// It intentionally has no serde implementation: the proving key embeds the
+/// program context, fixed commitment witnesses, and potentially GPU handles.
+pub struct ReusableE2ERunner<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    PB: ProverBackend<E = E, Pcs = PCS>,
+    PD: ProverDevice<PB>,
+> {
+    pub identity: ReusableSetupIdentity,
+    pub prover: ZKVMProver<E, PCS, PB, PD>,
+    pub vk: ZKVMVerifyingKey<E, PCS>,
+}
+
+impl<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB> + 'static,
+> ReusableE2ERunner<E, PCS, PB, PD>
+{
+    pub fn new(
+        ctx: E2EProgramCtx<E>,
+        device: PD,
+        max_num_variables: usize,
+        security_level: SecurityLevel,
+        profile: impl Into<String>,
+    ) -> Self {
+        let identity =
+            ctx.reusable_setup_identity::<PCS>(max_num_variables, security_level, profile);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        Self {
+            identity,
+            prover,
+            vk,
+        }
+    }
+
+    pub fn assert_identity(&self, expected: &ReusableSetupIdentity) -> Result<(), ZKVMError> {
+        if &self.identity != expected {
+            return Err(ZKVMError::InvalidWitness(
+                "reusable proving setup identity mismatch".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// end-to-end pipeline result, stopping at a certain checkpoint
@@ -3520,6 +4469,7 @@ pub fn setup_program<E: ExtensionField>(
         system_config,
         reg_init,
         zkvm_fixed_traces,
+        tensor_proof_context: None,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         preflight_aot_program,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -3528,6 +4478,9 @@ pub fn setup_program<E: ExtensionField>(
 }
 
 impl<E: ExtensionField> E2EProgramCtx<E> {
+    pub fn set_tensor_proof_context(&mut self, context: Arc<TensorProofContext>) {
+        self.tensor_proof_context = Some(context);
+    }
     pub fn keygen<PCS: PolynomialCommitmentScheme<E> + 'static>(
         self,
         max_num_variables: usize,
@@ -3672,6 +4625,13 @@ pub fn run_e2e_with_checkpoint<
         &prover.pk.program_ctx.as_ref().unwrap().platform,
         &prover.pk.program_ctx.as_ref().unwrap().multi_prover,
         step_cell_extractor,
+        prover
+            .pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .tensor_proof_context
+            .clone(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         prover
             .pk
@@ -3833,9 +4793,13 @@ pub fn run_e2e_proof_with_precompiled_aot<
     precompiled_fulltracer_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
+    let pipeline_timing = std::env::var_os("CENO_PIPELINE_TIMING").is_some();
     // Emulate program
     let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
     let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
+    let preflight_started = std::time::Instant::now();
+    #[cfg(feature = "tensor-cuda")]
+    let resident_before = ceno_emul::tensor::resident::resident_cuda_metrics();
     let emul_result = emulate_program(
         ctx.program.clone(),
         max_steps,
@@ -3844,10 +4808,56 @@ pub fn run_e2e_proof_with_precompiled_aot<
         &ctx.platform,
         &ctx.multi_prover,
         step_cell_extractor,
+        ctx.tensor_proof_context.clone(),
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         precompiled_aot,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         precompiled_fulltracer_aot,
+    );
+    if pipeline_timing {
+        let segment_shards = emul_result
+            .admitted_tensor_segments
+            .iter()
+            .map(|segment| segment.shard_id)
+            .collect::<Vec<_>>();
+        assert!(
+            segment_shards.windows(2).all(|pair| pair[0] <= pair[1]),
+            "TensorBus segment shard plan is not ordered"
+        );
+        eprintln!("pipeline timing phase=preflight_segments segment_shards={segment_shards:?}");
+        #[cfg(feature = "tensor-cuda")]
+        {
+            let resident =
+                ceno_emul::tensor::resident::resident_cuda_metrics().delta_since(resident_before);
+            eprintln!(
+                "pipeline timing phase=preflight elapsed_ms={} resident_sessions={} resident_gpu_ms={:.3} resident_h2d_bytes={} resident_d2h_bytes={} attention_launches={} ffn_launches={} peak_device_bytes={} shard_cells={:?}",
+                preflight_started.elapsed().as_millis(),
+                resident.sessions,
+                resident.inference_gpu_ns as f64 / 1_000_000.0,
+                resident.h2d_bytes,
+                resident.d2h_bytes,
+                resident.attention_launches,
+                resident.ffn_launches,
+                resident.peak_device_bytes,
+                emul_result.predicted_shard_costs,
+            );
+        }
+        #[cfg(not(feature = "tensor-cuda"))]
+        eprintln!(
+            "pipeline timing phase=preflight elapsed_ms={} shard_cells={:?}",
+            preflight_started.elapsed().as_millis(),
+            emul_result.predicted_shard_costs,
+        );
+    }
+    let rss_before_trim = process_rss_bytes();
+    let allocator_released = trim_process_allocator_pages();
+    tracing::info!(
+        target: "ceno_pipeline",
+        rss_before_bytes = rss_before_trim,
+        rss_after_bytes = process_rss_bytes(),
+        allocator_released,
+        phase = "preflight_allocator_trim",
+        "released free host allocator pages before witness generation"
     );
     create_proofs_streaming(
         emul_result,
@@ -3887,6 +4897,8 @@ fn create_proofs_streaming<
         // generation and proving share the same device, so interleaving them
         // would serialize on the GPU while adding thread and queue overhead.
         {
+            let pipeline_timing = std::env::var_os("CENO_PIPELINE_TIMING").is_some();
+            let witness_setup_started = std::time::Instant::now();
             let wit_iter = generate_witness(
                 &ctx.system_config,
                 emulation_result,
@@ -3895,66 +4907,156 @@ fn create_proofs_streaming<
                 init_mem_state,
                 target_shard_id,
             );
+            let witness_setup_elapsed = witness_setup_started.elapsed();
+            if pipeline_timing {
+                eprintln!(
+                    "pipeline timing phase=witness_setup elapsed_ms={}",
+                    witness_setup_elapsed.as_millis(),
+                );
+            }
 
-            let wit_iter: Box<dyn Iterator<Item = _>> =
-                if let Some(target_shard_id) = target_shard_id {
-                    Box::new(wit_iter.skip(target_shard_id))
-                } else {
-                    Box::new(wit_iter)
+            let mut wit_iter = wit_iter;
+
+            let mut proofs = Vec::new();
+            let mut witness_total = witness_setup_elapsed;
+            let mut proof_total = std::time::Duration::ZERO;
+            loop {
+                let witness_started = std::time::Instant::now();
+                #[cfg(feature = "tensor-cuda")]
+                let resident_before = ceno_emul::tensor::resident::resident_cuda_metrics();
+                let Some((zkvm_witness, shard_ctx, pi, _)) = wit_iter.next() else {
+                    break;
                 };
-
-            wit_iter
-                .map(|(zkvm_witness, shard_ctx, pi, _)| {
-                    if is_mock_proving {
-                        MockProver::assert_satisfied_full(
-                            &shard_ctx,
-                            &ctx.system_config.zkvm_cs,
-                            ctx.zkvm_fixed_traces.clone(),
-                            &zkvm_witness,
-                            &pi,
-                            &ctx.program,
-                        );
-                        tracing::info!("Mock proving passed");
-                    }
-
-                    let transcript = Transcript::new(b"riscv");
-                    let start = std::time::Instant::now();
-                    tracing::info!(
-                        target: "ceno_pipeline",
-                        shard_id = shard_ctx.shard_id,
-                        phase = "proof_start",
-                        "compact replay pipeline event"
-                    );
-                    let zkvm_proof =
-                        match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
-                            Ok(proof) => proof,
-                            Err(err) => {
-                                eprintln!(
-                                    "create_proof failed for shard {}: {err:?}",
-                                    shard_ctx.shard_id
-                                );
-                                let _ = std::io::stderr().flush();
-                                std::process::exit(1);
-                            }
-                        };
-                    tracing::info!(
-                        target: "ceno_pipeline",
-                        shard_id = shard_ctx.shard_id,
-                        phase = "proof_end",
-                        elapsed_ms = start.elapsed().as_millis(),
-                        "compact replay pipeline event"
-                    );
-                    tracing::debug!(
-                        "{}th shard proof created in {:?}",
-                        shard_ctx.shard_id,
-                        start.elapsed()
-                    );
+                let witness_elapsed = witness_started.elapsed();
+                witness_total += witness_elapsed;
+                #[cfg(feature = "tensor-cuda")]
+                let resident = ceno_emul::tensor::resident::resident_cuda_metrics()
+                    .delta_since(resident_before);
+                let shard_id = shard_ctx.shard_id;
+                if target_shard_id.is_some_and(|target| shard_id < target) {
+                    // Prefix shards must be assigned in order so replay and
+                    // compact witness ownership advance normally. Skip only
+                    // their proofs, then perform the same per-shard GPU cache
+                    // cleanup used after proving before advancing again.
+                    drop(zkvm_witness);
                     #[cfg(feature = "gpu")]
                     crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                    tracing::info!("e2e proof stat: {}", zkvm_proof);
-                    zkvm_proof
-                })
-                .collect_vec()
+                    continue;
+                }
+                let transcript = Transcript::new(b"riscv");
+                let start = std::time::Instant::now();
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = shard_ctx.shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
+                    phase = "proof_start",
+                    "compact replay pipeline event"
+                );
+                #[cfg(feature = "gpu")]
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "proof_start_shard_{}",
+                    shard_ctx.shard_id
+                ));
+                let zkvm_proof =
+                    match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
+                        Ok(proof) => proof,
+                        Err(ZKVMError::MockProvingComplete) if is_mock_proving => {
+                            tracing::info!(
+                                shard_id = shard_ctx.shard_id,
+                                "exact GPU MLE MockProver completed before proof construction"
+                            );
+                            break;
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "create_proof failed for shard {}: {err:?}",
+                                shard_ctx.shard_id
+                            );
+                            let _ = std::io::stderr().flush();
+                            std::process::exit(1);
+                        }
+                    };
+                let proof_elapsed = start.elapsed();
+                proof_total += proof_elapsed;
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id = shard_ctx.shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_bytes = process_rss_bytes(),
+                    phase = "proof_end",
+                    elapsed_ms = proof_elapsed.as_millis(),
+                    "compact replay pipeline event"
+                );
+                #[cfg(feature = "gpu")]
+                crate::scheme::gpu::log_gpu_device_state(&format!(
+                    "proof_end_shard_{}",
+                    shard_ctx.shard_id
+                ));
+                tracing::debug!(
+                    "{}th shard proof created in {:?}",
+                    shard_ctx.shard_id,
+                    proof_elapsed
+                );
+                #[cfg(feature = "gpu")]
+                crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                let rss_before_trim = process_rss_bytes();
+                let allocator_released = trim_process_allocator_pages();
+                tracing::info!(
+                    target: "ceno_pipeline",
+                    shard_id,
+                    thread_id = ?std::thread::current().id(),
+                    rss_before_bytes = rss_before_trim,
+                    rss_after_bytes = process_rss_bytes(),
+                    allocator_released,
+                    phase = "proof_allocator_trim",
+                    "released free host allocator pages before advancing the witness iterator"
+                );
+                tracing::info!("e2e proof stat: {}", zkvm_proof);
+                if pipeline_timing {
+                    #[cfg(feature = "tensor-cuda")]
+                    eprintln!(
+                        "pipeline timing shard={} witness_ms={} base_prove_ms={} resident_sessions={} resident_gpu_ms={:.3} resident_h2d_bytes={} resident_d2h_bytes={} attention_launches={} ffn_launches={} peak_device_bytes={}",
+                        shard_id,
+                        witness_elapsed.as_millis(),
+                        proof_elapsed.as_millis(),
+                        resident.sessions,
+                        resident.inference_gpu_ns as f64 / 1_000_000.0,
+                        resident.h2d_bytes,
+                        resident.d2h_bytes,
+                        resident.attention_launches,
+                        resident.ffn_launches,
+                        resident.peak_device_bytes,
+                    );
+                    #[cfg(not(feature = "tensor-cuda"))]
+                    eprintln!(
+                        "pipeline timing shard={} witness_ms={} base_prove_ms={}",
+                        shard_id,
+                        witness_elapsed.as_millis(),
+                        proof_elapsed.as_millis(),
+                    );
+                }
+                proofs.push(zkvm_proof);
+                if target_shard_id == Some(shard_id) {
+                    break;
+                }
+            }
+            if pipeline_timing {
+                eprintln!(
+                    "pipeline timing phase=shards witness_ms={} base_prove_ms={} shards={}",
+                    witness_total.as_millis(),
+                    proof_total.as_millis(),
+                    proofs.len(),
+                );
+            }
+            if let Some(target_shard_id) = target_shard_id {
+                assert_eq!(
+                    proofs.len(),
+                    1,
+                    "requested diagnostic shard {target_shard_id} is outside the proof plan"
+                );
+            }
+            proofs
         }
     });
     metrics::gauge!("num_shards").set(proofs.len() as f64);
@@ -4123,6 +5225,450 @@ mod tests {
     use std::sync::Arc;
     use strum::EnumCount;
     use tiny_keccak::{Hasher, Keccak};
+
+    #[test]
+    #[ignore = "single Gate-2 application proof E2E; run explicitly"]
+    fn tensor_matmul_v1_application_proves_and_verifies() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver,
+                run_e2e_full_trace_verify, run_e2e_proof, setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ceno_emul::tensor::{DeterministicTileProvider, TensorWitnessProvider, encode_i32_le};
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+
+        let program = ceno_emul::Program::load_elf(ceno_examples::tensor_matmul_v1, u32::MAX)
+            .expect("load tensor MatMul guest");
+        let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        let provider = Arc::new(
+            DeterministicTileProvider::new(
+                41,
+                vec![encode_i32_le(&[65_536, 0, 0, 65_536, 65_536, 65_536])],
+            )
+            .unwrap(),
+        );
+        ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+
+        let metrics = provider.metrics();
+        assert!(
+            metrics.read_calls >= 3,
+            "preflight, replay and proof assignment read the tile"
+        );
+        assert_eq!(
+            metrics.h2d_bytes, 0,
+            "Gate-2 tensor assignment is CPU fallback"
+        );
+        assert_eq!(
+            metrics.d2h_bytes, 0,
+            "Gate-2 tensor assignment is CPU fallback"
+        );
+    }
+
+    #[test]
+    #[ignore = "Gate-3 reduced static Llama layer proof E2E; run explicitly"]
+    fn llama_layer_reduced_v1_application_proves_and_verifies() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver,
+                run_e2e_full_trace_verify, run_e2e_proof, setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ceno_emul::tensor::{DeterministicTileProvider, TensorWitnessProvider, encode_i32_le};
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+
+        let program = ceno_emul::Program::load_elf(ceno_examples::llama_layer_reduced_v1, u32::MAX)
+            .expect("load reduced static Llama layer guest");
+        let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        let tile = encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]);
+        let provider = Arc::new(
+            DeterministicTileProvider::new(73, (0..7).map(|_| tile.clone()).collect()).unwrap(),
+        );
+        ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
+
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+
+        let metrics = provider.metrics();
+        assert!(
+            metrics.read_calls >= 21,
+            "all seven committed tiles replay across proving phases"
+        );
+        assert_eq!((metrics.h2d_bytes, metrics.d2h_bytes), (0, 0));
+    }
+
+    #[test]
+    #[ignore = "Gate-4 fused reduced Llama layer proof E2E; run explicitly"]
+    fn llama_layer_fused_reduced_v1_application_proves_and_verifies() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver,
+                run_e2e_full_trace_verify, run_e2e_proof, setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ceno_emul::tensor::{DeterministicTileProvider, TensorWitnessProvider, encode_i32_le};
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+        let program =
+            ceno_emul::Program::load_elf(ceno_examples::llama_layer_fused_reduced_v1, u32::MAX)
+                .expect("load fused reduced static Llama layer guest");
+        let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        let tile = encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]);
+        let provider = Arc::new(
+            DeterministicTileProvider::new(73, (0..7).map(|_| tile.clone()).collect()).unwrap(),
+        );
+        ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+        assert!(provider.metrics().read_calls >= 21);
+    }
+
+    #[test]
+    #[ignore = "TensorBus handle ABI proof E2E; run explicitly"]
+    fn tensor_bus_handle_v1_proves_and_verifies() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, ZKVMProver, prepare_fulltracer_aot_program,
+                prepare_preflight_aot_program, run_e2e_full_trace_verify, run_e2e_proof,
+                setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+
+        let program = ceno_emul::Program::load_elf(ceno_examples::tensor_bus_handle_v1, u32::MAX)
+            .expect("load TensorBus handle guest");
+        let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        {
+            let init_mem = ctx.setup_init_mem(&[]);
+            let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+            let step_cell_extractor: Arc<dyn ceno_emul::StepCellExtractor> =
+                raw_step_cell_extractor;
+            let preflight_aot = prepare_preflight_aot_program(
+                Arc::clone(&ctx.program),
+                &ctx.platform,
+                &ctx.multi_prover,
+                step_cell_extractor,
+                &init_mem,
+            );
+            ctx.fulltracer_aot_program =
+                Some(prepare_fulltracer_aot_program(preflight_aot.as_ref()));
+            ctx.preflight_aot_program = Some(preflight_aot);
+        }
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+        let tensor_bus_index = vk
+            .circuit_index_to_name
+            .iter()
+            .find_map(|(index, name)| (name == "TensorBusCircuit").then_some(*index))
+            .expect("TensorBusCircuit is registered under llama-tiny");
+        assert!(
+            proofs
+                .iter()
+                .any(|proof| proof.chip_proofs.contains_key(&tensor_bus_index)),
+            "resident TensorBus E2E must contain the proof-bound Core relation"
+        );
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+    }
+
+    #[test]
+    #[cfg(feature = "llama-tiny")]
+    #[ignore = "Llama-tiny topology proof E2E; run explicitly"]
+    fn llama_tiny_topology_e2e() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver, emulate_program,
+                generate_witness, prepare_fulltracer_aot_program, prepare_preflight_aot_program,
+                run_e2e_full_trace_verify, run_e2e_proof, setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ceno_emul::tensor::{DeterministicTileProvider, TensorWitnessProvider, encode_i32_le};
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+
+        // The normal CLI owns tracing initialization. This direct test harness
+        // needs a subscriber so the external mock monitor can observe the
+        // existing `Mock proving passed` marker before it stops real PCS work.
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_test_writer()
+            .try_init();
+
+        let guest = ceno_examples::llama_10m_topology_v1;
+        let expected_ecalls = 64;
+        let provider: Arc<dyn TensorWitnessProvider> = Arc::new(
+            DeterministicTileProvider::new(
+                73,
+                (0..7)
+                    .map(|_| encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]))
+                    .collect(),
+            )
+            .unwrap(),
+        );
+        tracing::info!(
+            guest = "llama_10m_topology_v1",
+            expected_ecalls,
+            "Llama-tiny tensor guest"
+        );
+
+        let program = ceno_emul::Program::load_elf(guest, u32::MAX).expect("load Llama-tiny guest");
+        let platform = setup_platform(Preset::Ceno, &program, 32 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
+        // `run_e2e_proof` replays the finalized preflight plan with FullTracer.
+        // Prepare both artifacts in the trim harness, as in the K4096 E2E.
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        {
+            let init_mem = ctx.setup_init_mem(&[]);
+            let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+            let step_cell_extractor: Arc<dyn ceno_emul::StepCellExtractor> =
+                raw_step_cell_extractor;
+            let preflight_aot = prepare_preflight_aot_program(
+                Arc::clone(&ctx.program),
+                &ctx.platform,
+                &ctx.multi_prover,
+                step_cell_extractor,
+                &init_mem,
+            );
+            ctx.fulltracer_aot_program =
+                Some(prepare_fulltracer_aot_program(preflight_aot.as_ref()));
+            ctx.preflight_aot_program = Some(preflight_aot);
+        }
+
+        // Replay/assignment isolation deliberately bypasses key generation and
+        // PCS. It is the first Gate-5 rung: it preserves the production
+        // provider, preflight plan, compact GPU replay, and dispatcher, while
+        // making an ownership or empty-trace failure observable in seconds
+        // after the already-required circuit construction.
+        if std::env::var_os("CENO_GATE5_REPLAY_AUDIT_ONLY").is_some() {
+            let init_mem = ctx.setup_init_mem(&[]);
+            let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+            let step_cell_extractor: Arc<dyn ceno_emul::StepCellExtractor> =
+                raw_step_cell_extractor;
+            let emul_result = emulate_program(
+                ctx.program.clone(),
+                1 << 20,
+                &init_mem,
+                KECCAK_EMPTY_WORDS,
+                &ctx.platform,
+                &ctx.multi_prover,
+                step_cell_extractor,
+                ctx.tensor_proof_context.clone(),
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                ctx.preflight_aot_program.clone(),
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                ctx.fulltracer_aot_program.clone(),
+            );
+            let mut witnesses = generate_witness(
+                &ctx.system_config,
+                emul_result,
+                ctx.program.clone(),
+                &ctx.platform,
+                &init_mem,
+                None,
+            );
+            let (_, shard_ctx, _, _) = witnesses
+                .next()
+                .expect("attention trim guest must yield one assigned shard");
+            assert!(
+                witnesses.next().is_none(),
+                "trim guest unexpectedly has more shards"
+            );
+            tracing::info!(
+                shard_id = shard_ctx.shard_id,
+                syscall_witnesses = shard_ctx.syscall_witnesses.len(),
+                "Gate-5 replay-only assignment audit completed"
+            );
+            return;
+        }
+
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let start = std::time::Instant::now();
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 20, false, None);
+        let provider_metrics = provider.metrics();
+        tracing::info!(
+            guest = "llama_10m_topology_v1",
+            elapsed_ms = start.elapsed().as_millis(),
+            provider_reads = provider_metrics.read_calls,
+            provider_h2d_bytes = provider_metrics.h2d_bytes,
+            provider_d2h_bytes = provider_metrics.d2h_bytes,
+            "Llama-tiny tensor guest completed"
+        );
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 20);
+    }
+
+    #[test]
+    fn llama_10m_topology_guest_emits_all_ordered_fused_calls() {
+        use ceno_emul::{
+            FullTracer, VMState,
+            tensor::{DeterministicTileProvider, TensorWitnessProvider, encode_i32_le},
+        };
+
+        let mut vm = VMState::<FullTracer>::new_from_elf_with_tracer(
+            CENO_PLATFORM.clone(),
+            ceno_examples::llama_10m_topology_v1,
+        )
+        .expect("load cargo-ceno miniature topology guest");
+        let tile = encode_i32_le(&[65_536, 0, 0, 65_536, 0, 0]);
+        let provider = Arc::new(
+            DeterministicTileProvider::new(73, (0..7).map(|_| tile.clone()).collect()).unwrap(),
+        );
+        vm.set_tensor_witness_provider(provider.clone());
+        vm.iter_until_halt()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("execute all 32 fused layer pairs");
+        assert_eq!(
+            vm.tracer().syscall_witnesses().len(),
+            64,
+            "32 attention and 32 FFN calls must retain ordered witnesses"
+        );
+        assert_eq!(provider.metrics().read_calls, 32 * 7);
+    }
+
+    #[test]
+    #[ignore = "Gate-5 K4096 tile/finalize application proof E2E; run explicitly"]
+    fn tensor_matmul_hidden_v1_application_proves_and_verifies() {
+        use crate::{
+            e2e::{
+                KECCAK_EMPTY_WORDS, Preset, TensorProofContext, ZKVMProver,
+                prepare_fulltracer_aot_program, prepare_preflight_aot_program,
+                run_e2e_full_trace_verify, run_e2e_proof, setup_platform, setup_program,
+            },
+            scheme::{create_backend, create_prover, hal::ProverDevice, verifier::ZKVMVerifier},
+        };
+        use ceno_emul::tensor::{
+            TensorWitnessProvider,
+            production::{ProductionMatMulSignature, sparse_production_dot_fixture},
+        };
+        use ff_ext::BabyBearExt4;
+        use gkr_iop::cpu::default_backend_config;
+        use mpcs::BasefoldDefault;
+        type E = BabyBearExt4;
+        type Pcs = BasefoldDefault<E>;
+
+        let program =
+            ceno_emul::Program::load_elf(ceno_examples::tensor_matmul_hidden_v1, u32::MAX)
+                .expect("load K4096 guest");
+        let platform = setup_platform(Preset::Ceno, &program, 64 * 1024, 2 * 1024 * 1024);
+        let mut ctx = setup_program::<E>(program, platform, MultiProver::default());
+        assert_eq!(
+            ctx.system_config
+                .zkvm_cs
+                .get_css()
+                .keys()
+                .filter(|name| name.as_str() == "TensorProductionTileK1024")
+                .count(),
+            1,
+            "production K tiles must share one dynamic circuit schema"
+        );
+        let (_, _, provider) =
+            sparse_production_dot_fixture(ProductionMatMulSignature::HiddenK4096, 81, 23).unwrap();
+        let provider = Arc::new(provider);
+        ctx.set_tensor_proof_context(Arc::new(TensorProofContext::new(provider.clone())));
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        {
+            let init_mem = ctx.setup_init_mem(&[]);
+            let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+            let step_cell_extractor: Arc<dyn ceno_emul::StepCellExtractor> =
+                raw_step_cell_extractor;
+            let preflight_aot = prepare_preflight_aot_program(
+                Arc::clone(&ctx.program),
+                &ctx.platform,
+                &ctx.multi_prover,
+                step_cell_extractor,
+                &init_mem,
+            );
+            ctx.fulltracer_aot_program =
+                Some(prepare_fulltracer_aot_program(preflight_aot.as_ref()));
+            ctx.preflight_aot_program = Some(preflight_aot);
+        }
+        let (max_num_variables, security_level) = default_backend_config();
+        let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+        let device = create_prover(backend);
+        let (pk, vk) = ctx.keygen_with_pb(device.get_pb());
+        let prover = ZKVMProver::new(pk.into(), device);
+        let init_mem = prover.setup_init_mem(&[]);
+        let proofs = run_e2e_proof(&prover, &init_mem, KECCAK_EMPTY_WORDS, 1 << 24, false, None);
+        run_e2e_full_trace_verify(&ZKVMVerifier::new(vk), proofs, Some(0), 1 << 24);
+        assert!(provider.metrics().read_calls >= 8);
+    }
+
+    #[cfg(feature = "aot-x86_64")]
+    #[test]
+    fn tensor_matmul_hidden_v1_embeds_static_aot_roots() {
+        let program =
+            ceno_emul::Program::load_elf(ceno_examples::tensor_matmul_hidden_v1, u32::MAX)
+                .expect("load embedded K4096 guest");
+        assert!(
+            program
+                .static_aot_roots
+                .as_ref()
+                .is_some_and(|roots| !roots.is_empty()),
+            "cargo-ceno guest embedded by ceno-examples must contain static AOT roots"
+        );
+    }
 
     #[cfg(feature = "gpu")]
     #[test]

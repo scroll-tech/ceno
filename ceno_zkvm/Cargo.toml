@@ -90,6 +90,14 @@ goldilocks = ["forbid_overflow", "nightly-features", "parallel", "bigint-rug"]
 gpu = ["gkr_iop/gpu", "dep:ceno_gpu", "dep:cudarc", "dep:nvtx"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
+llama-tiny = ["ceno_emul/llama-tiny", "ceno-examples/llama-tiny"]
+production-heads-1 = ["ceno_emul/production-heads-1", "ceno-examples/production-heads-1"]
+production-heads-2 = ["ceno_emul/production-heads-2", "ceno-examples/production-heads-2"]
+resident-block-1 = ["ceno-examples/resident-block-1"]
+resident-block-2 = ["ceno-examples/resident-block-2"]
+resident-block-4 = ["ceno-examples/resident-block-4"]
+resident-segments-2 = ["ceno-examples/resident-segments-2"]
+tensor-cuda = ["ceno_emul/tensor-cuda"]
 nightly-features = [
   "p3/nightly-features",
   "ff_ext/nightly-features",

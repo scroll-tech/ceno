@@ -95,6 +95,45 @@ pub struct MainPreflight {
     pub tower_point_eqs: Vec<MainTowerPointEqRecord>,
     pub frontload_terms: Vec<MainFrontloadTermRecord>,
     pub final_claims: Vec<MainFinalClaimRecord>,
+    pub alpha_tidx: usize,
+    pub alpha_pows: Vec<MainAlphaPowRecord>,
+    pub matrix_corrections: Vec<MainMatrixCorrectionRecord>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainProofValueRecord {
+    pub proof_idx: usize,
+    pub claimed_sum: EF,
+    pub main_out_evals_len: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainAlphaPowRecord {
+    pub proof_idx: usize,
+    pub air_idx: usize,
+    pub alpha_idx: usize,
+    pub num_exprs: usize,
+    pub alpha_tidx: usize,
+    pub alpha: EF,
+    pub value: EF,
+    pub lookup_count: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainMatrixCorrectionRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub air_idx: usize,
+    pub correction_idx: usize,
+    pub alpha_idx: usize,
+    pub eval_idx: usize,
+    pub matrix_kind: usize,
+    pub matrix_idx: usize,
+    pub matrix_tidx: usize,
+    pub claim: EF,
+    pub alpha_pow: EF,
+    pub selector_eval: EF,
+    pub contribution: EF,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -139,9 +178,13 @@ pub struct PcsOpeningClaimRecord {
 #[derive(Clone, Debug, Default)]
 pub struct PcsOpeningPointRecord {
     pub proof_idx: usize,
+    pub pcs_round_idx: usize,
     pub opening_idx: usize,
     pub coord_idx: usize,
     pub global_round_idx: usize,
+    pub has_main_global: bool,
+    pub has_matrix_point: bool,
+    pub is_zero_tail: bool,
     pub value: RecursionField,
 }
 
@@ -164,11 +207,14 @@ impl PcsOpeningCommitKind {
 #[derive(Clone, Debug)]
 pub struct PcsOpeningEvalRecord {
     pub proof_idx: usize,
+    pub pcs_round_idx: usize,
     pub opening_idx: usize,
     pub commit_kind: PcsOpeningCommitKind,
     pub eval_idx: usize,
     pub main_idx: usize,
     pub main_eval_idx: usize,
+    pub has_main_eval: bool,
+    pub has_matrix_eval: bool,
     pub value: RecursionField,
     pub raw_value: RecursionField,
 }
@@ -415,6 +461,8 @@ pub struct PcsSuffixProductRecord {
     pub is_first: bool,
     pub is_last: bool,
     pub has_factor: bool,
+    pub has_main_global: bool,
+    pub commit_kind: PcsOpeningCommitKind,
     pub point: RecursionField,
     pub acc_in: RecursionField,
     pub acc_out: RecursionField,
@@ -425,6 +473,7 @@ pub struct PcsJaggedAssistHRecord {
     pub proof_idx: usize,
     pub round_idx: usize,
     pub sumcheck_idx: usize,
+    pub commit_kind: PcsOpeningCommitKind,
     pub step_idx: usize,
     pub robp_idx: usize,
     pub is_first: bool,
@@ -650,6 +699,9 @@ pub enum MainSelectorPointSourceKind {
     EccXY,
     EccSlope,
     EccX3Y3,
+    MatrixA,
+    MatrixW,
+    MatrixOutput,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -687,6 +739,7 @@ pub struct MainSelectorEvalRecord {
     pub ecc_rt_tidxs: Vec<usize>,
     pub ecc_xy_selector_idx: Option<usize>,
     pub ecc_x3y3_selector_idx: Option<usize>,
+    pub matrix_value_tidxs: Vec<usize>,
     pub value: EF,
 }
 
@@ -711,6 +764,9 @@ pub struct MainSelectorPointRecord {
     pub source_round_idx: usize,
     pub source_value: EF,
     pub derive_kind: MainSelectorPointDeriveKind,
+    pub matrix_kind: usize,
+    pub matrix_idx: usize,
+    pub matrix_tidx: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -924,6 +980,7 @@ pub struct TowerChipTranscriptRange {
     pub tower_replay: TowerReplayResult,
     pub rotation_replay: Option<RotationReplayClaims>,
     pub ecc_replay: Option<EccReplayClaims>,
+    pub matrix_reduction_replay: Option<MatrixReductionReplayClaims>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -942,6 +999,36 @@ pub struct RotationReplayClaims {
     pub left_evals: Vec<RecursionField>,
     pub right_evals: Vec<RecursionField>,
     pub target_evals: Vec<RecursionField>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MatrixReductionRoundReplay {
+    pub round_idx: usize,
+    pub eval_tidx: usize,
+    pub challenge_tidx: usize,
+    pub evaluations: [RecursionField; 3],
+    pub challenge: RecursionField,
+    pub claim_in: RecursionField,
+    pub claim_out: RecursionField,
+    pub eq_in: RecursionField,
+    pub eq_out: RecursionField,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MatrixReductionReplayClaims {
+    pub air_idx: usize,
+    pub fork_id: usize,
+    pub log_height: usize,
+    pub final_sample_tidx: usize,
+    pub output_point_tidx: usize,
+    pub output_eval_tidx: usize,
+    pub final_eval_tidx: usize,
+    pub output_point: Vec<RecursionField>,
+    pub output_evals: [RecursionField; 2],
+    pub rounds: Vec<MatrixReductionRoundReplay>,
+    pub final_evals: [RecursionField; 2],
+    pub opening_points: [Vec<RecursionField>; 3],
+    pub witness_offset: usize,
 }
 
 #[derive(Clone, Debug, Default)]

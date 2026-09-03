@@ -579,6 +579,29 @@ impl<const V_LIMBS: usize> LocalFinalRAMTableConfig<V_LIMBS> {
 
         // calculate mem length
         let total_records = mem_lens.iter().sum();
+        if std::env::var_os("CENO_TENSOR_E2E_RW_TRACE").is_some() {
+            let mut physical_row = 0usize;
+            for (source, range, records) in final_mem {
+                for record in records
+                    .iter()
+                    .filter(|record| is_current_shard_mem_record(range.as_ref(), record))
+                {
+                    tracing::info!(
+                        target: "ceno_gpu::tensor_local_final_row",
+                        shard_id = shard_ctx.shard_id,
+                        physical_row,
+                        source,
+                        ram_type = record.ram_type as u32,
+                        addr = record.addr,
+                        value = record.value,
+                        local_clk = shard_ctx.aligned_current_ts(record.cycle),
+                        "Gate-5 LocalRAMFinal ordered endpoint key"
+                    );
+                    physical_row += 1;
+                }
+            }
+            assert_eq!(physical_row, total_records);
+        }
 
         let mut witness =
             RowMajorMatrix::<F>::new(total_records, num_witin, InstancePaddingStrategy::Default);

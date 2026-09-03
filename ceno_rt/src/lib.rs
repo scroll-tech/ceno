@@ -22,6 +22,8 @@ pub use io::info_out;
 mod params;
 pub use params::*;
 
+pub mod tensor;
+
 #[unsafe(no_mangle)]
 #[linkage = "weak"]
 pub extern "C" fn sys_write(_fd: i32, _buf: *const u8, _count: usize) -> isize {

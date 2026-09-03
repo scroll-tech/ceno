@@ -14,6 +14,9 @@ use witness::RowMajorMatrix;
 mod shard_ram;
 pub use shard_ram::*;
 
+mod tensor_bus;
+pub use tensor_bus::*;
+
 mod range;
 pub use range::*;
 
@@ -22,6 +25,9 @@ pub use ops::*;
 
 mod program;
 pub use program::{InsnRecord, ProgramTableCircuit, ProgramTableConfig};
+
+mod llama_tiny;
+pub use llama_tiny::*;
 
 mod ram;
 pub use ram::*;

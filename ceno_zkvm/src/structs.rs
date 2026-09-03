@@ -112,6 +112,11 @@ pub type RAMType = gkr_iop::RAMType;
 pub enum CustomRWTag {
     KeccakState = 0,
     ShardRamEcPoint = 1,
+    /// Boundary state shared by the syscall-facing and arithmetic tensor chips.
+    TensorState = 2,
+    /// Fixed-width TensorBus ABI event, consumed by the TensorBus offline
+    /// relation. This is deliberately distinct from arithmetic tensor state.
+    TensorBusEvent = 3,
 }
 
 impl CustomRWTag {
@@ -180,11 +185,11 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         }
     }
     pub fn num_witin(&self) -> usize {
-        self.zkvm_v1_css.num_witin.into()
+        self.zkvm_v1_css.num_witin as usize
     }
 
     pub fn num_structural_witin(&self) -> usize {
-        self.zkvm_v1_css.num_structural_witin.into()
+        self.zkvm_v1_css.num_structural_witin as usize
     }
 
     pub fn num_fixed(&self) -> usize {
@@ -247,6 +252,13 @@ pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub params: ProgramParams,
 }
 
+/// A circuit built without mutating the registry.  Setup can construct these
+/// independently, then insert them in the existing deterministic order.
+pub struct OpcodeCircuitArtifact<E: ExtensionField, Config> {
+    config: Config,
+    cs: ComposedConstrainSystem<E>,
+}
+
 impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
     fn default() -> Self {
         ZKVMConstraintSystem {
@@ -265,7 +277,9 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         }
     }
 
-    pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
+    pub fn build_opcode_circuit<OC: Instruction<E>>(
+        &self,
+    ) -> OpcodeCircuitArtifact<E, OC::InstructionConfig> {
         let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let (config, gkr_iop_circuit) =
@@ -274,6 +288,16 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             zkvm_v1_css: cs,
             gkr_circuit: Some(gkr_iop_circuit),
         };
+        OpcodeCircuitArtifact { config, cs }
+    }
+
+    /// Keep registration serial even when artifacts were constructed in
+    /// parallel: consumers derive circuit layout and IDs from this order.
+    pub fn register_opcode_circuit_artifact<OC: Instruction<E>>(
+        &mut self,
+        artifact: OpcodeCircuitArtifact<E, OC::InstructionConfig>,
+    ) -> OC::InstructionConfig {
+        let OpcodeCircuitArtifact { config, cs } = artifact;
         tracing::trace!(
             "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
             OC::name(),
@@ -288,6 +312,11 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             OC::name()
         );
         config
+    }
+
+    pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
+        let artifact = self.build_opcode_circuit::<OC>();
+        self.register_opcode_circuit_artifact::<OC>(artifact)
     }
 
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
@@ -462,6 +491,36 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         Ok(())
     }
 
+    /// Insert an opcode assignment derived from a shared, non-step witness
+    /// section. This is the same ownership path as `assign_opcode_circuit`;
+    /// only collection is performed by the caller so sibling Core chips can
+    /// project one immutable oracle section.
+    pub fn insert_opcode_assignment<OC: Instruction<E>>(
+        &mut self,
+        witness: RMMCollections<E::BaseField>,
+        logup_multiplicity: Multiplicity<u64>,
+    ) {
+        assert!(self.combined_lk_mlt.is_none());
+        let witness_instances = witness[0].num_instances();
+        let structural_instances = witness[1].num_instances();
+        if witness_instances > 0 && structural_instances > 0 {
+            assert_eq!(
+                witness_instances,
+                structural_instances,
+                "{}: mismatched num_instances between witness and structural RMMs",
+                OC::name()
+            );
+        }
+        let num_instances = [witness_instances.max(structural_instances), 0];
+        let input = ChipInput::new(OC::name(), witness, num_instances);
+        assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
+        assert!(
+            self.lk_mlts
+                .insert(OC::name(), logup_multiplicity)
+                .is_none()
+        );
+    }
+
     // merge the multiplicities in each opcode circuit into one
     pub fn finalize_lk_multiplicities(&mut self) {
         assert!(self.combined_lk_mlt.is_none());
@@ -471,6 +530,24 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let keys = self.lk_mlts.keys().cloned().collect_vec();
         for name in keys {
             let lk_mlt = self.lk_mlts.get(&name).unwrap();
+
+            if std::env::var_os("CENO_TENSOR_E2E_LOGUP_TRACE").is_some()
+                && matches!(
+                    name.as_str(),
+                    "TensorAttentionBlockReducedCore" | "TensorAttentionBlockReducedEcall"
+                )
+            {
+                let buckets = lk_mlt
+                    .iter()
+                    .enumerate()
+                    .map(|(table, entries)| (table, entries.len(), entries.values().sum::<usize>()))
+                    .collect_vec();
+                tracing::info!(
+                    circuit = %name,
+                    ?buckets,
+                    "Gate-5 attention lookup multiplicity before table assignment"
+                );
+            }
 
             if combined_lk_mlt.is_empty() {
                 combined_lk_mlt = lk_mlt.to_vec();
@@ -484,6 +561,18 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                         }
                     });
             }
+        }
+
+        if std::env::var_os("CENO_TENSOR_E2E_LOGUP_TRACE").is_some() {
+            let buckets = combined_lk_mlt
+                .iter()
+                .enumerate()
+                .map(|(table, entries)| (table, entries.len(), entries.values().sum::<usize>()))
+                .collect_vec();
+            tracing::info!(
+                ?buckets,
+                "Gate-5 combined lookup multiplicity for table assignment"
+            );
         }
 
         self.combined_lk_mlt = Some(combined_lk_mlt);
@@ -666,7 +755,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 })
             })
             .collect::<Vec<_>>();
-
         let global_input = shard_ctx
             .write_records()
             .par_iter()

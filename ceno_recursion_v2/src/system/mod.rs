@@ -5,16 +5,18 @@ mod types;
 pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
     BatchConstraintPreflight, ChipTranscriptRange, EccReplayClaims, ForkTranscriptLog,
-    MainEccRtRecord, MainEvalRecord, MainFinalClaimRecord, MainFrontloadTermRecord,
-    MainGlobalSumcheckRecord, MainGlobalSumcheckRoundRecord, MainPreflight, MainSelectorEvalRecord,
+    MainAlphaPowRecord, MainEccRtRecord, MainEvalRecord, MainFinalClaimRecord,
+    MainFrontloadTermRecord, MainGlobalSumcheckRecord, MainGlobalSumcheckRoundRecord,
+    MainMatrixCorrectionRecord, MainPreflight, MainProofValueRecord, MainSelectorEvalRecord,
     MainSelectorKind, MainSelectorPointDeriveKind, MainSelectorPointRecord,
     MainSelectorPointSourceKind, MainTowerPointEqRecord, MainTranscriptRecord,
-    PcsBaseInputLeafHashRecord, PcsBaseInputMerkleRecord, PcsBasefoldCommitPhaseQueryRecord,
-    PcsBasefoldFinalClaimRecord, PcsBasefoldFinalCodewordRecord, PcsBasefoldFinalExpectedRecord,
-    PcsBasefoldFinalPointRecord, PcsBasefoldInitialClaimRecord, PcsBasefoldQueryIndexRecord,
-    PcsBasefoldQueryOpenRecord, PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord,
-    PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord, PcsEqProductKind, PcsEqProductRecord,
-    PcsEqProductSource, PcsJaggedAssistHRecord, PcsJaggedAssistInputRecord, PcsJaggedAssistQRecord,
+    MatrixReductionReplayClaims, MatrixReductionRoundReplay, PcsBaseInputLeafHashRecord,
+    PcsBaseInputMerkleRecord, PcsBasefoldCommitPhaseQueryRecord, PcsBasefoldFinalClaimRecord,
+    PcsBasefoldFinalCodewordRecord, PcsBasefoldFinalExpectedRecord, PcsBasefoldFinalPointRecord,
+    PcsBasefoldInitialClaimRecord, PcsBasefoldQueryIndexRecord, PcsBasefoldQueryOpenRecord,
+    PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord, PcsCommitPhaseMerkleRecord,
+    PcsCommitmentRootRecord, PcsEqProductKind, PcsEqProductRecord, PcsEqProductSource,
+    PcsJaggedAssistHRecord, PcsJaggedAssistInputRecord, PcsJaggedAssistQRecord,
     PcsJaggedAssistRecord, PcsJaggedClaimRecord, PcsJaggedQEvalRecord, PcsOpeningClaimRecord,
     PcsOpeningCommitKind, PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsPreflight,
     PcsSuffixProductRecord, PcsSumcheckInputRecord, PcsSumcheckRoundRecord,
@@ -993,15 +995,33 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             let tower_tidx = fs.len();
             let tower_replay =
                 crate::tower::record_and_replay_tower_preflight(fs, child_vk, chip_idx, chip_proof);
-            let (rotation_replay, ecc_replay) = crate::main::replay_chip_pre_main_tail_transcript(
-                fs,
-                child_vk,
-                chip_idx,
-                chip_proof,
-                &tower_replay,
-                [alpha_ext, beta_ext],
-            )
-            .unwrap_or_else(|err| panic!("failed to replay pre-main transcript tail: {err}"));
+            let witness_offset = chip_proof_list[..fork_id]
+                .iter()
+                .map(|(prior_idx, _)| {
+                    let prior_name = child_vk
+                        .circuit_index_to_name
+                        .get(prior_idx)
+                        .expect("present circuit index is in vk");
+                    child_vk
+                        .circuit_vks
+                        .get(prior_name)
+                        .expect("present circuit vk exists")
+                        .get_cs()
+                        .num_witin()
+                })
+                .sum();
+            let (rotation_replay, ecc_replay, matrix_reduction_replay) =
+                crate::main::replay_chip_pre_main_tail_transcript(
+                    fs,
+                    child_vk,
+                    chip_idx,
+                    chip_proof,
+                    &tower_replay,
+                    [alpha_ext, beta_ext],
+                    fork_id,
+                    witness_offset,
+                )
+                .unwrap_or_else(|err| panic!("failed to replay pre-main transcript tail: {err}"));
 
             // Record tower entry with fork-local tidx at tower stage start.
             preflight.gkr.chips.push(TowerChipTranscriptRange {
@@ -1011,6 +1031,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 tower_replay,
                 rotation_replay,
                 ecc_replay,
+                matrix_reduction_replay,
             });
         }
 

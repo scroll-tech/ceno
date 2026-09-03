@@ -158,12 +158,42 @@ use super::{
 
 /// Transfer and materialize the lookup counters accumulated across this shard.
 pub fn flush_shared_lk_counters() -> Result<Option<Multiplicity<u64>>, ZKVMError> {
+    let audit = std::env::var_os("CENO_TENSOR_SOFTMAX_LK_AUDIT").is_some();
+    if audit {
+        let sums = super::cache::production_softmax_lookup_counter_sums()?;
+        tracing::info!(
+            ?sums,
+            "production softmax lookup counters before shard flush"
+        );
+    }
     let Some(counters) = take_shared_lk_counters() else {
         return Ok(None);
     };
-    info_span!("gpu_shard_lk_d2h")
-        .in_scope(|| gpu_lk_counters_to_multiplicity(counters))
-        .map(Some)
+    let multiplicity =
+        info_span!("gpu_shard_lk_d2h").in_scope(|| gpu_lk_counters_to_multiplicity(counters))?;
+    if audit {
+        use gkr_iop::tables::LookupTable;
+        let dynamic_20 = multiplicity[LookupTable::Dynamic as usize]
+            .iter()
+            .filter(|(key, _)| **key >= 1 << 20)
+            .map(|(_, count)| *count as u64)
+            .sum::<u64>();
+        let middle = multiplicity[LookupTable::LlamaProductionSoftmaxExpMiddle as usize]
+            .values()
+            .map(|count| *count as u64)
+            .sum::<u64>();
+        let high = multiplicity[LookupTable::LlamaProductionSoftmaxExpHigh as usize]
+            .values()
+            .map(|count| *count as u64)
+            .sum::<u64>();
+        tracing::info!(
+            dynamic_20,
+            middle,
+            high,
+            "production softmax multiplicity after shard D2H"
+        );
+    }
+    Ok(Some(multiplicity))
 }
 
 thread_local! {
@@ -1395,6 +1425,17 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
         .map(|range| range.typed.iter().flatten().count())
         .max()
         .ok_or_else(|| ZKVMError::InvalidWitness("installed fused shard has no ranges".into()))?;
+    // An ordinary trailing shard can have a fused session but no GPU-typed
+    // rows at all.  There is no assignment to launch in that case, and CUDA
+    // correctly rejects a zero-capacity launcher.
+    if stage_capacity == 0 && work_capacity == 0 {
+        // `prepare_fused_assignment` has already placed empty assignments in
+        // FUSED_ASSIGNMENTS for every fused owner.  Keep the ingress active so
+        // the compact-count assignment path consumes those cached empties.
+        state.launched = true;
+        FUSED_INGRESS.with(|slot| *slot.borrow_mut() = Some(state));
+        return Ok(());
+    }
     let mut launcher = FusedRangeLauncher::new(hal.inner.clone(), stage_capacity, work_capacity)
         .map_err(|e| ZKVMError::InvalidWitness(format!("fused launcher init: {e}").into()))?;
     let mut producer_bases = [0usize; InsnKind::COUNT];
@@ -1405,7 +1446,16 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
             let mut work = [FusedRangeWorkItem::default(); InsnKind::COUNT];
             let mut work_count = 0usize;
             let mut cursor = 0usize;
-            for arena in range.typed.iter().flatten() {
+            // A forced shard boundary can leave a zero-row typed arena for a
+            // family that has no registration in this shard.  It contributes
+            // no witness work and must be treated like the provisional path,
+            // which already filters empty arenas before registration lookup.
+            for arena in range
+                .typed
+                .iter()
+                .flatten()
+                .filter(|arena| !arena.is_empty())
+            {
                 let registration =
                     &state.registrations[registration_for_kind[arena.kind() as usize]];
                 let mut offsets = [0u32; 13];

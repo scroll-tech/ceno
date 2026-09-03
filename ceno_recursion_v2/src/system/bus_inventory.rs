@@ -9,16 +9,18 @@ use recursion_circuit::{
 
 use crate::bus::{
     CachedCommitBus as LocalCachedCommitBus, EccRtBus, ForkFinalSampleBus,
-    ForkedTranscriptBus as LocalForkedTranscriptBus, LookupChallengeBus, MainBus,
+    ForkedTranscriptBus as LocalForkedTranscriptBus, LookupChallengeBus, MainAlphaPowBus, MainBus,
     MainContributionBus, MainEccRtChallengeBus, MainEccRtEquationTotalsBus, MainEccRtQuarkFinalBus,
-    MainEccRtSumcheckFinalBus, MainEvalBus, MainExpressionClaimBus, MainGlobalClaimBus,
-    MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
+    MainEccRtSumcheckFinalBus, MainEvalBus, MainExpressionClaimBus, MainExpressionCountBus,
+    MainGlobalClaimBus, MainGlobalPointBus, MainInitialClaimBus, MainMatrixCorrectionShapeBus,
+    MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
     MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
-    PcsBaseInputOpeningBus, PcsBasefoldEvalBus, PcsBasefoldFinalExpectedBus,
-    PcsBasefoldFinalPointBus, PcsBasefoldQueryBus, PcsBatchAlphaBus, PcsBatchCoeffBus,
-    PcsCommitHeightBus, PcsCommitPhaseLeafBus, PcsCommitmentRootBus, PcsEqProductBus,
-    PcsFinalMessageBus, PcsFoldChallengeBus, PcsJaggedAssistHBus, PcsJaggedAssistQBus,
-    PcsJaggedFEvalBus, PcsOpeningEvalBus, PcsQuerySampleBus, PcsSuffixProductBus,
+    MatrixReductionPresenceBus, MatrixReductionValueBus, PcsBaseInputOpeningBus,
+    PcsBasefoldEvalBus, PcsBasefoldFinalExpectedBus, PcsBasefoldFinalPointBus, PcsBasefoldQueryBus,
+    PcsBatchAlphaBus, PcsBatchCoeffBus, PcsCommitHeightBus, PcsCommitPhaseLeafBus,
+    PcsCommitmentRootBus, PcsEqProductBus, PcsFinalMessageBus, PcsFoldChallengeBus,
+    PcsJaggedAssistHBus, PcsJaggedAssistQBus, PcsJaggedFEvalBus, PcsOpeningEvalBus,
+    PcsOpeningPointBus, PcsQuerySampleBus, PcsSemanticOpeningEvalBus, PcsSuffixProductBus,
     PcsSumcheckInputBus, PcsSumcheckOutputBus, PcsTranscriptExtBus,
     PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus, TowerModuleBus,
     TranscriptBus as LocalTranscriptBus,
@@ -43,6 +45,10 @@ pub struct BusInventory {
     pub main_sumcheck_output_bus: MainSumcheckOutputBus,
     pub main_expression_claim_bus: MainExpressionClaimBus,
     pub main_global_claim_bus: MainGlobalClaimBus,
+    pub main_initial_claim_bus: MainInitialClaimBus,
+    pub main_alpha_pow_bus: MainAlphaPowBus,
+    pub main_expression_count_bus: MainExpressionCountBus,
+    pub main_matrix_correction_shape_bus: MainMatrixCorrectionShapeBus,
     pub main_global_point_bus: MainGlobalPointBus,
     pub main_eval_bus: MainEvalBus,
     pub main_contribution_bus: MainContributionBus,
@@ -60,6 +66,8 @@ pub struct BusInventory {
     pub xi_randomness_bus: XiRandomnessBus,
     pub final_state_bus: FinalTranscriptStateBus,
     pub forked_transcript_bus: LocalForkedTranscriptBus,
+    pub matrix_reduction_presence_bus: MatrixReductionPresenceBus,
+    pub matrix_reduction_value_bus: MatrixReductionValueBus,
     pub fork_final_sample_bus: ForkFinalSampleBus,
     pub lookup_challenge_bus: LookupChallengeBus,
     pub pcs_basefold_query_bus: PcsBasefoldQueryBus,
@@ -79,6 +87,8 @@ pub struct BusInventory {
     pub pcs_batch_alpha_bus: PcsBatchAlphaBus,
     pub pcs_jagged_f_eval_bus: PcsJaggedFEvalBus,
     pub pcs_opening_eval_bus: PcsOpeningEvalBus,
+    pub pcs_opening_point_bus: PcsOpeningPointBus,
+    pub pcs_semantic_opening_eval_bus: PcsSemanticOpeningEvalBus,
     pub pcs_eq_product_bus: PcsEqProductBus,
     pub pcs_suffix_product_bus: PcsSuffixProductBus,
     pub pcs_jagged_assist_h_bus: PcsJaggedAssistHBus,
@@ -111,6 +121,10 @@ impl BusInventory {
         let main_sumcheck_output_bus = MainSumcheckOutputBus::new(b.new_bus_idx());
         let main_expression_claim_bus = MainExpressionClaimBus::new(b.new_bus_idx());
         let main_global_claim_bus = MainGlobalClaimBus::new(b.new_bus_idx());
+        let main_initial_claim_bus = MainInitialClaimBus::new(b.new_bus_idx());
+        let main_alpha_pow_bus = MainAlphaPowBus::new(b.new_bus_idx());
+        let main_expression_count_bus = MainExpressionCountBus::new(b.new_bus_idx());
+        let main_matrix_correction_shape_bus = MainMatrixCorrectionShapeBus::new(b.new_bus_idx());
         let main_global_point_bus = MainGlobalPointBus::new(b.new_bus_idx());
         let main_eval_bus = MainEvalBus::new(b.new_bus_idx());
         let main_contribution_bus = MainContributionBus::new(b.new_bus_idx());
@@ -129,6 +143,8 @@ impl BusInventory {
         let cached_commit_bus = LocalCachedCommitBus::new(b.new_bus_idx());
         let final_state_bus = FinalTranscriptStateBus::new(b.new_bus_idx());
         let forked_transcript_bus = LocalForkedTranscriptBus::new(b.new_bus_idx());
+        let matrix_reduction_presence_bus = MatrixReductionPresenceBus::new(b.new_bus_idx());
+        let matrix_reduction_value_bus = MatrixReductionValueBus::new(b.new_bus_idx());
         let fork_final_sample_bus = ForkFinalSampleBus::new(b.new_bus_idx());
         let lookup_challenge_bus = LookupChallengeBus::new(b.new_bus_idx());
         let pcs_basefold_query_bus = PcsBasefoldQueryBus::new(b.new_bus_idx());
@@ -148,6 +164,8 @@ impl BusInventory {
         let pcs_batch_alpha_bus = PcsBatchAlphaBus::new(b.new_bus_idx());
         let pcs_jagged_f_eval_bus = PcsJaggedFEvalBus::new(b.new_bus_idx());
         let pcs_opening_eval_bus = PcsOpeningEvalBus::new(b.new_bus_idx());
+        let pcs_opening_point_bus = PcsOpeningPointBus::new(b.new_bus_idx());
+        let pcs_semantic_opening_eval_bus = PcsSemanticOpeningEvalBus::new(b.new_bus_idx());
         let pcs_eq_product_bus = PcsEqProductBus::new(b.new_bus_idx());
         let pcs_suffix_product_bus = PcsSuffixProductBus::new(b.new_bus_idx());
         let pcs_jagged_assist_h_bus = PcsJaggedAssistHBus::new(b.new_bus_idx());
@@ -172,6 +190,10 @@ impl BusInventory {
             main_sumcheck_output_bus,
             main_expression_claim_bus,
             main_global_claim_bus,
+            main_initial_claim_bus,
+            main_alpha_pow_bus,
+            main_expression_count_bus,
+            main_matrix_correction_shape_bus,
             main_global_point_bus,
             main_eval_bus,
             main_contribution_bus,
@@ -189,6 +211,8 @@ impl BusInventory {
             xi_randomness_bus,
             final_state_bus,
             forked_transcript_bus,
+            matrix_reduction_presence_bus,
+            matrix_reduction_value_bus,
             fork_final_sample_bus,
             lookup_challenge_bus,
             pcs_basefold_query_bus,
@@ -208,6 +232,8 @@ impl BusInventory {
             pcs_batch_alpha_bus,
             pcs_jagged_f_eval_bus,
             pcs_opening_eval_bus,
+            pcs_opening_point_bus,
+            pcs_semantic_opening_eval_bus,
             pcs_eq_product_bus,
             pcs_suffix_product_bus,
             pcs_jagged_assist_h_bus,
