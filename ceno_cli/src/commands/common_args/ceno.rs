@@ -11,6 +11,8 @@ use ceno_recursion_v2::{
 use ceno_zkvm::multi_gpu::{MultiGpuConfig, select_device_ids};
 #[cfg(not(feature = "gpu"))]
 use ceno_zkvm::scheme::create_prover;
+#[cfg(feature = "gpu")]
+use ceno_zkvm::scheme::prover::ZKVMProver;
 use ceno_zkvm::{
     e2e::*,
     scheme::{
@@ -507,6 +509,7 @@ where
             let (pk, vk) = ctx.keygen_with_pb(backend.as_ref());
             let pk = Arc::new(pk);
             let init_full_mem = pk.program_ctx.as_ref().unwrap().setup_init_mem(&hints);
+            let prover = ZKVMProver::new(pk.clone(), device);
             let max_steps = options.max_steps;
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             let preflight_aot = pk
@@ -524,8 +527,7 @@ where
                 .clone();
             let run = move || {
                 run_e2e_multi_gpu_proof_with_precompiled_aot(
-                    pk,
-                    backend,
+                    &prover,
                     &prepared,
                     &config,
                     &init_full_mem,

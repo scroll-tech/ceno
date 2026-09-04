@@ -407,10 +407,16 @@ where
             .zkvm_prover
             .as_ref()
             .expect("ZKVMProver is not initialized");
+        let init_mem_started = std::time::Instant::now();
         let init_full_mem = prover.setup_init_mem(&Vec::from(&hints));
+        tracing::info!(
+            target: "ceno_multi_gpu",
+            elapsed_ms = init_mem_started.elapsed().as_millis(),
+            phase = "sdk_init_memory",
+            "multi-GPU base setup event"
+        );
         let proofs = run_e2e_multi_gpu_proof_with_precompiled_aot(
-            prover.pk.clone(),
-            prover.device().backend.clone(),
+            prover,
             prepared,
             config,
             &init_full_mem,

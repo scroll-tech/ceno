@@ -4092,8 +4092,12 @@ pub fn run_e2e_multi_gpu_proof_with_precompiled_aot<
     E: ExtensionField + LkMultiplicityKey,
     PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
 >(
-    pk: Arc<ZKVMProvingKey<E, PCS>>,
-    backend: Arc<gkr_iop::gpu::GpuBackend<E, PCS>>,
+    sdk_prover: &ZKVMProver<
+        E,
+        PCS,
+        gkr_iop::gpu::GpuBackend<E, PCS>,
+        gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>>,
+    >,
     prepared: &crate::multi_gpu::PreparedMultiGpu,
     config: &crate::multi_gpu::MultiGpuConfig,
     init_full_mem: &InitMemState,
@@ -4111,6 +4115,10 @@ where
     PCS::CommitmentWithWitness: Send + Sync,
     PCS::Proof: Send,
 {
+    let pipeline_started = std::time::Instant::now();
+    let pk = sdk_prover.pk.clone();
+    let backend = sdk_prover.device().backend.clone();
+    let vk_digest = sdk_prover.vk_digest();
     config.validate_shape()?;
     if prepared.workers.len() != config.device_ids.len() {
         return Err("prepared GPU worker count does not match configuration".to_owned());
@@ -4122,6 +4130,7 @@ where
     gkr_iop::gpu::set_thread_cuda_hal(prepared.workers[0].hal.clone());
     let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
     let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
+    let emulation_started = std::time::Instant::now();
     let emulation_result = emulate_program(
         ctx.program.clone(),
         max_steps,
@@ -4135,9 +4144,22 @@ where
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         precompiled_fulltracer_aot,
     );
+    let emulation_elapsed = emulation_started.elapsed();
     let total_shards = emulation_result.shard_ctx_builder.total_shards();
     let exit_code = emulation_result.exit_code;
-    let verifier = Arc::new(ZKVMVerifier::new(pk.get_vk_slow()));
+    let verifier_started = std::time::Instant::now();
+    let verifier = sdk_prover
+        .cached_verifier()
+        .ok_or("initial GPU prover has no cached verifier")?;
+    tracing::info!(
+        target: "ceno_multi_gpu",
+        emulation_ms = emulation_elapsed.as_millis(),
+        vk_materialize_ms = 0,
+        verifier_construct_ms = verifier_started.elapsed().as_millis(),
+        total_ms = pipeline_started.elapsed().as_millis(),
+        phase = "pre_worker_setup",
+        "multi-GPU base setup event"
+    );
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let started = std::time::Instant::now();
 
@@ -4147,6 +4169,7 @@ where
         for (worker_index, worker) in prepared.workers.iter().enumerate() {
             let (tx, rx) = std::sync::mpsc::sync_channel::<BaseWorkerEvent<E, PCS>>(1);
             ready_receivers.push(Some(rx));
+            let worker_inputs_started = std::time::Instant::now();
             let hal = worker.hal.clone();
             let backend = backend.clone();
             let pk = pk.clone();
@@ -4154,16 +4177,40 @@ where
             let init_full_mem = init_full_mem.clone();
             let cancelled = cancelled.clone();
             let device_id = worker.info.logical_ordinal;
+            let existing_prover = (worker_index == 0).then_some(sdk_prover);
+            tracing::info!(
+                target: "ceno_multi_gpu",
+                worker_index,
+                device_id,
+                elapsed_ms = worker_inputs_started.elapsed().as_millis(),
+                phase = "worker_input_clone",
+                "multi-GPU base setup event"
+            );
             handles.push(scope.spawn(move || {
                 let worker_started = std::time::Instant::now();
                 let mut diagnostics = BaseWorkerDiagnostics::new(worker_index, device_id);
                 let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let device = gkr_iop::gpu::GpuProver::new(backend, hal);
+                    let device_started = std::time::Instant::now();
+                    let device = existing_prover
+                        .is_none()
+                        .then(|| gkr_iop::gpu::GpuProver::new(backend, hal.clone()));
+                    let device_elapsed = device_started.elapsed();
+                    if existing_prover.is_some() {
+                        gkr_iop::gpu::set_thread_cuda_hal(hal);
+                    }
                     let memory_start = ceno_gpu::get_cuda_mem_info().unwrap_or((0, 0));
                     diagnostics.observe_memory(memory_start.0, memory_start.1);
                     diagnostics.queue_state = "fifo_empty";
-                    let prover = ZKVMProver::new(pk.clone(), device);
+                    let prover_started = std::time::Instant::now();
+                    let owned_prover = device.map(|device| {
+                        ZKVMProver::new_with_vk_digest(pk.clone(), device, vk_digest)
+                    });
+                    let prover = existing_prover
+                        .or(owned_prover.as_ref())
+                        .expect("worker prover must be borrowed or constructed");
+                    let prover_elapsed = prover_started.elapsed();
                     let ctx = pk.program_ctx.as_ref().unwrap();
+                    let witness_iterator_started = std::time::Instant::now();
                     let witnesses = generate_witness_for_owner(
                         &ctx.system_config,
                         emulation_result,
@@ -4172,6 +4219,17 @@ where
                         &init_full_mem,
                         None,
                         Some((worker_index, prepared.workers.len())),
+                    );
+                    tracing::info!(
+                        target: "ceno_multi_gpu",
+                        worker_index,
+                        device_id,
+                        device_construct_ms = device_elapsed.as_millis(),
+                        prover_construct_ms = prover_elapsed.as_millis(),
+                        reused_prover = existing_prover.is_some(),
+                        witness_iterator_ms = witness_iterator_started.elapsed().as_millis(),
+                        phase = "worker_setup",
+                        "multi-GPU base setup event"
                     );
                     for (zkvm_witness, shard_ctx, pi, _) in witnesses {
                         if cancelled.load(std::sync::atomic::Ordering::Acquire) {
