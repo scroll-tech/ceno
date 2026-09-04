@@ -4058,6 +4058,7 @@ impl BaseProofCollectorState {
         &mut self,
         config: &crate::multi_gpu::MultiGpuConfig,
         shard_id: usize,
+        proof_shard_id: u32,
         device_id: usize,
     ) -> Result<(), String> {
         if shard_id >= self.seen.len() {
@@ -4067,6 +4068,11 @@ impl BaseProofCollectorState {
         if device_id != expected_device {
             return Err(format!(
                 "shard {shard_id} arrived from GPU {device_id}, expected GPU {expected_device}"
+            ));
+        }
+        if proof_shard_id as usize != shard_id {
+            return Err(format!(
+                "base proof envelope shard {shard_id} does not match embedded shard {proof_shard_id}"
             ));
         }
         if std::mem::replace(&mut self.seen[shard_id], true) {
@@ -4355,46 +4361,15 @@ where
                 };
                 let mut diagnostics = ready.diagnostics;
                 diagnostics.queue_state = "collector_dequeued";
-                if let Err(error) = collector.accept(config, ready.shard_id, ready.device_id) {
+                if let Err(error) = collector.accept(
+                    config,
+                    ready.shard_id,
+                    ready.proof.public_values.shard_id,
+                    ready.device_id,
+                ) {
                     collector_error = Some(diagnostics.describe(&error));
                     break;
                 }
-                let verification_started = std::time::Instant::now();
-                let expect_halt = ready.proof.has_halt(&verifier.vk);
-                let verified = verifier
-                    .verify_single_shard_segment_halt(
-                        ready.proof.clone(),
-                        Transcript::new(b"riscv"),
-                        expect_halt,
-                    )
-                    .map_err(|error| {
-                        format!(
-                            "shard {} independent verification failed: {error:?}",
-                            ready.shard_id
-                        )
-                    });
-                let verified = match verified {
-                    Ok(verified) => verified,
-                    Err(error) => {
-                        collector_error = Some(diagnostics.describe(&error));
-                        break;
-                    }
-                };
-                if !verified {
-                    collector_error = Some(diagnostics.describe(&format!(
-                        "shard {} independent verification returned false",
-                        ready.shard_id
-                    )));
-                    break;
-                }
-                tracing::info!(
-                    target: "ceno_multi_gpu",
-                    shard_id = ready.shard_id,
-                    device_id = ready.device_id,
-                    verification_ms = verification_started.elapsed().as_millis(),
-                    phase = "segment_verified",
-                    "multi-GPU collector event"
-                );
                 let shard_id = ready.shard_id;
                 proofs[shard_id] = Some(ready.proof);
                 received += 1;
@@ -4468,7 +4443,9 @@ mod multi_gpu_collector_tests {
         let config = MultiGpuConfig::new(vec![4, 7]).unwrap();
         let mut collector = BaseProofCollectorState::new(4);
         for (shard, device) in [(3, 7), (0, 4), (2, 4), (1, 7)] {
-            collector.accept(&config, shard, device).unwrap();
+            collector
+                .accept(&config, shard, shard as u32, device)
+                .unwrap();
         }
         assert_eq!(collector.missing(), None);
     }
@@ -4479,20 +4456,26 @@ mod multi_gpu_collector_tests {
         let mut collector = BaseProofCollectorState::new(3);
         assert!(
             collector
-                .accept(&config, 3, 7)
+                .accept(&config, 3, 3, 7)
                 .unwrap_err()
                 .contains("out-of-range")
         );
         assert!(
             collector
-                .accept(&config, 1, 4)
+                .accept(&config, 1, 1, 4)
                 .unwrap_err()
                 .contains("expected GPU 7")
         );
-        collector.accept(&config, 0, 4).unwrap();
         assert!(
             collector
-                .accept(&config, 0, 4)
+                .accept(&config, 1, 2, 7)
+                .unwrap_err()
+                .contains("does not match embedded shard")
+        );
+        collector.accept(&config, 0, 0, 4).unwrap();
+        assert!(
+            collector
+                .accept(&config, 0, 0, 4)
                 .unwrap_err()
                 .contains("duplicate")
         );
