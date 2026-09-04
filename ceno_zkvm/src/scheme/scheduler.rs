@@ -19,6 +19,8 @@ use crate::{
     structs::ProvingKey,
 };
 use ff_ext::ExtensionField;
+#[cfg(feature = "gpu")]
+use gkr_iop::gpu::get_cuda_hal;
 use gkr_iop::hal::ProverBackend;
 use mpcs::Point;
 use std::sync::OnceLock;
@@ -767,6 +769,7 @@ impl ChipScheduler {
                 let phase_tx = phase_tx.clone();
                 let execute_fn = &execute_task;
                 let tr = &transcript_ref;
+                let lane_cuda_hal = cuda_hal.clone();
 
                 s.spawn(move || {
                     nvtx::name_thread!("ceno-chip-lane-{}", lane_id);
@@ -816,7 +819,10 @@ impl ChipScheduler {
                         let outcome =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 let _lane_binding = lane_stream.as_ref().map(|stream| {
-                                    gkr_iop::gpu::bind_thread_stream(stream.stream().clone())
+                                    gkr_iop::gpu::bind_thread_stream(
+                                        lane_cuda_hal.clone(),
+                                        stream.stream().clone(),
+                                    )
                                 });
                                 let _phase_release_context = phase_release_enabled.then(|| {
                                     bind_phase_release_context(PhaseReleaseContext {

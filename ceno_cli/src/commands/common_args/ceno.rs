@@ -7,11 +7,17 @@ use ceno_recursion_v2::{
     continuation::prover::{AggProver, AggregationOptions},
     system::{utils::test_system_params_zero_pow, warm_child_vk_digest_cache},
 };
+#[cfg(feature = "gpu")]
+use ceno_zkvm::multi_gpu::{MultiGpuConfig, select_device_ids};
+#[cfg(not(feature = "gpu"))]
+use ceno_zkvm::scheme::create_prover;
+#[cfg(feature = "gpu")]
+use ceno_zkvm::scheme::prover::ZKVMProver;
 use ceno_zkvm::{
     e2e::*,
     scheme::{
-        constants::MAX_NUM_VARIABLES, create_backend, create_prover,
-        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
+        constants::MAX_NUM_VARIABLES, create_backend, mock_prover::LkMultiplicityKey,
+        verifier::ZKVMVerifier,
     },
 };
 use clap::Args;
@@ -100,6 +106,21 @@ pub struct CenoOptions {
     // => 2^30 * 16 / 4 / 2
     #[arg(long, default_value = "2147483648")]
     max_cell_per_shard: u64,
+
+    /// Comma-separated logical CUDA device ordinals. Takes precedence over --gpu-count.
+    #[cfg(feature = "gpu")]
+    #[arg(long, value_delimiter = ',')]
+    gpu_devices: Option<Vec<usize>>,
+
+    /// Select logical CUDA devices 0 through count-1.
+    #[cfg(feature = "gpu")]
+    #[arg(long)]
+    gpu_count: Option<usize>,
+
+    /// Logical CUDA device used by recursion after base proving.
+    #[cfg(feature = "gpu")]
+    #[arg(long)]
+    recursion_gpu_device: Option<usize>,
 
     /// Profiling granularity.
     /// Setting any value restricts logs to profiling information
@@ -396,13 +417,21 @@ fn run_elf_inner<
     compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<E2ECheckpointResult<E, PCS>> {
+) -> anyhow::Result<E2ECheckpointResult<E, PCS>>
+where
+    PCS::ProverParam: Send + Sync,
+    PCS::VerifierParam: Send + Sync,
+    PCS::Commitment: Send + Sync,
+    PCS::CommitmentWithWitness: Send + Sync,
+    PCS::Proof: Send,
+{
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
     let program = Program::load_elf(&elf_bytes, u32::MAX).context("failed to load elf")?;
     print_cargo_message("Loaded", format_args!("{}", elf_path.display()));
-    let multi_prover = MultiProver::new(
+    #[allow(unused_mut)]
+    let mut multi_prover = MultiProver::new(
         options.prover_id as usize,
         options.num_provers as usize,
         options.max_cell_per_shard,
@@ -443,8 +472,90 @@ fn run_elf_inner<
     );
 
     let backend = create_backend(options.max_num_variables, options.security_level);
+    #[cfg(feature = "gpu")]
+    let (device, multi_gpu) = {
+        let available = ceno_zkvm::multi_gpu::discover_cuda_devices()
+            .context("failed to discover CUDA devices")?
+            .len();
+        let device_ids =
+            select_device_ids(options.gpu_devices.as_deref(), options.gpu_count, available)
+                .map_err(anyhow::Error::msg)?;
+        let mut config = MultiGpuConfig::new(device_ids).map_err(anyhow::Error::msg)?;
+        if let Some(recursion_device) = options.recursion_gpu_device {
+            config = config
+                .with_recursion_device(recursion_device)
+                .map_err(anyhow::Error::msg)?;
+        }
+        let prepared = config
+            .prepare(options.max_cell_per_shard)
+            .map_err(anyhow::Error::msg)?;
+        multi_prover.max_cell_per_shard = prepared.max_cell_per_shard;
+        tracing::info!(
+            devices = ?config.device_ids,
+            recursion_device = config.recursion_device,
+            max_cell_per_shard = prepared.max_cell_per_shard,
+            "validated Stage 1 multi-GPU configuration"
+        );
+        let device = gkr_iop::gpu::GpuProver::new(backend.clone(), prepared.workers[0].hal.clone());
+        let multi_gpu = (config.device_ids.len() > 1).then_some((config, prepared));
+        (device, multi_gpu)
+    };
+    #[cfg(not(feature = "gpu"))]
+    let device = create_prover(backend.clone());
+    #[cfg(feature = "gpu")]
+    if let Some((config, prepared)) = multi_gpu {
+        if !matches!(checkpoint, Checkpoint::PrepWitnessGen) {
+            let ctx = setup_program::<E>(program, platform, multi_prover);
+            let (pk, vk) = ctx.keygen_with_pb(backend.as_ref());
+            let pk = Arc::new(pk);
+            let init_full_mem = pk.program_ctx.as_ref().unwrap().setup_init_mem(&hints);
+            let prover = ZKVMProver::new(pk.clone(), device);
+            let max_steps = options.max_steps;
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            let preflight_aot = pk
+                .program_ctx
+                .as_ref()
+                .unwrap()
+                .preflight_aot_program
+                .clone();
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            let fulltracer_aot = pk
+                .program_ctx
+                .as_ref()
+                .unwrap()
+                .fulltracer_aot_program
+                .clone();
+            let run = move || {
+                run_e2e_multi_gpu_proof_with_precompiled_aot(
+                    &prover,
+                    &prepared,
+                    &config,
+                    &init_full_mem,
+                    public_io_digest,
+                    max_steps,
+                    #[cfg(all(
+                        feature = "aot-x86_64",
+                        target_arch = "x86_64",
+                        target_os = "linux"
+                    ))]
+                    preflight_aot,
+                    #[cfg(all(
+                        feature = "aot-x86_64",
+                        target_arch = "x86_64",
+                        target_os = "linux"
+                    ))]
+                    fulltracer_aot,
+                )
+                .unwrap_or_else(|error| panic!("multi-GPU proving failed: {error}"))
+            };
+            if matches!(checkpoint, Checkpoint::PrepE2EProving) {
+                return Ok(E2ECheckpointResult::deferred(vk, move || _ = run()));
+            }
+            return Ok(E2ECheckpointResult::completed(run(), vk));
+        }
+    }
     Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
-        create_prover(backend.clone()),
+        device,
         program,
         platform,
         multi_prover,
@@ -464,7 +575,14 @@ fn keygen_inner<
     args: &CenoOptions,
     compilation_options: &CompilationOptions,
     elf_path: P,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    PCS::ProverParam: Send + Sync,
+    PCS::VerifierParam: Send + Sync,
+    PCS::Commitment: Send + Sync,
+    PCS::CommitmentWithWitness: Send + Sync,
+    PCS::Proof: Send,
+{
     let result = run_elf_inner::<E, PCS, P>(
         args,
         compilation_options,
@@ -491,7 +609,14 @@ fn prove_inner<
     compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    PCS::ProverParam: Send + Sync,
+    PCS::VerifierParam: Send + Sync,
+    PCS::Commitment: Send + Sync,
+    PCS::CommitmentWithWitness: Send + Sync,
+    PCS::Proof: Send,
+{
     let result = run_elf_inner::<E, PCS, P>(args, compilation_options, elf_path, checkpoint)?;
     let zkvm_proofs = result.proofs.expect("PrepSanityCheck should yield proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");

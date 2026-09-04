@@ -401,5 +401,14 @@ pub fn create_backend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 pub fn create_prover<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     backend: Arc<gkr_iop::gpu::GpuBackend<E, PCS>>,
 ) -> gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>> {
-    gkr_iop::gpu::GpuProver::new(backend)
+    create_prover_on_device(backend, 0).expect("failed to initialize CUDA device 0")
+}
+
+#[cfg(feature = "gpu")]
+pub fn create_prover_on_device<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    backend: Arc<gkr_iop::gpu::GpuBackend<E, PCS>>,
+    device_id: usize,
+) -> Result<gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>>, ceno_gpu::HalError> {
+    let cuda_hal = Arc::new(ceno_gpu::bb31::CudaHalBB31::new(device_id)?);
+    Ok(gkr_iop::gpu::GpuProver::new(backend, cuda_hal))
 }
