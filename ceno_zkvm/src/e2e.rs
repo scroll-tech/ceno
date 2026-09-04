@@ -4172,6 +4172,7 @@ where
     std::thread::scope(|scope| -> Result<Vec<ZKVMProof<E, PCS>>, String> {
         let mut handles = Vec::with_capacity(prepared.workers.len());
         let mut ready_receivers = Vec::with_capacity(prepared.workers.len());
+        let mut emulation_result = Some(emulation_result);
         for (worker_index, worker) in prepared.workers.iter().enumerate() {
             let (tx, rx) = std::sync::mpsc::sync_channel::<BaseWorkerEvent<E, PCS>>(1);
             ready_receivers.push(Some(rx));
@@ -4179,8 +4180,16 @@ where
             let hal = worker.hal.clone();
             let backend = backend.clone();
             let pk = pk.clone();
-            let emulation_result = emulation_result.clone();
-            let init_full_mem = init_full_mem.clone();
+            let emulation_result = if worker_index + 1 == prepared.workers.len() {
+                emulation_result
+                    .take()
+                    .expect("last worker must own the original emulation result")
+            } else {
+                emulation_result
+                    .as_ref()
+                    .expect("original emulation result must remain until the last worker")
+                    .clone()
+            };
             let cancelled = cancelled.clone();
             let device_id = worker.info.logical_ordinal;
             let existing_prover = (worker_index == 0).then_some(sdk_prover);
@@ -4222,7 +4231,7 @@ where
                         emulation_result,
                         ctx.program.clone(),
                         &ctx.platform,
-                        &init_full_mem,
+                        init_full_mem,
                         None,
                         Some((worker_index, prepared.workers.len())),
                     );
@@ -4418,12 +4427,27 @@ where
                 proof.ok_or_else(|| format!("missing base proof shard {shard_id}"))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let base_proofs_ready_elapsed = pipeline_started.elapsed();
+        tracing::info!(
+            target: "ceno_multi_gpu",
+            devices = ?config.device_ids,
+            shards = total_shards,
+            base_proofs_ready_ms = base_proofs_ready_elapsed.as_millis(),
+            phase = "base_proofs_ready",
+            "Stage 1 canonical base proofs ready"
+        );
+        let base_verification_started = std::time::Instant::now();
         run_e2e_full_trace_verify(&verifier, proofs.clone(), exit_code, max_steps);
+        let base_verification_elapsed = base_verification_started.elapsed();
+        let verified_base_elapsed = pipeline_started.elapsed();
         tracing::info!(
             target: "ceno_multi_gpu",
             devices = ?config.device_ids,
             shards = total_shards,
             elapsed_ms = started.elapsed().as_millis(),
+            base_proofs_ready_ms = base_proofs_ready_elapsed.as_millis(),
+            base_verification_ms = base_verification_elapsed.as_millis(),
+            verified_base_ms = verified_base_elapsed.as_millis(),
             recursion_overlap_ratio = 0.0,
             device_local_recursion_ratio = 0.0,
             "Stage 1 multi-GPU base proving complete"
