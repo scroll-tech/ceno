@@ -4449,6 +4449,8 @@ where
                         .as_deref()
                         .map(crate::multi_gpu::pin_current_thread)
                         .transpose()?;
+                    let _worker_cuda_binding =
+                        gkr_iop::gpu::bind_thread_default_stream(hal.clone());
                     let ctx = pk.program_ctx.as_ref().unwrap();
                     let witness_iterator_started = std::time::Instant::now();
                     let witnesses = generate_witness_for_owner(
@@ -4471,9 +4473,6 @@ where
                         .is_none()
                         .then(|| gkr_iop::gpu::GpuProver::new(backend, hal.clone()));
                     let device_elapsed = device_started.elapsed();
-                    if existing_prover.is_some() {
-                        gkr_iop::gpu::set_thread_cuda_hal(hal);
-                    }
                     let memory_start = ceno_gpu::get_cuda_mem_info().unwrap_or((0, 0));
                     diagnostics.observe_memory(memory_start.0, memory_start.1);
                     diagnostics.queue_state = "fifo_empty";

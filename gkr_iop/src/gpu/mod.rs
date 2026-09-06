@@ -96,6 +96,12 @@ pub fn bind_thread_stream(
     }
 }
 
+/// Bind a worker-owned HAL and its default stream to the current thread.
+pub fn bind_thread_default_stream(cuda_hal: Arc<CudaHalBB31>) -> ThreadCudaBindingGuard {
+    let stream = cuda_hal.inner.default_stream().clone();
+    bind_thread_stream(cuda_hal, stream)
+}
+
 /// RAII guard that clears the thread-local CUDA stream on drop.
 pub struct ThreadCudaBindingGuard {
     previous_hal: Option<Arc<CudaHalBB31>>,
@@ -640,5 +646,50 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             })
             .map(Arc::new)
             .collect_vec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CudaHalBB31, bind_thread_default_stream, forbid_default_stream_fallback, get_thread_stream,
+    };
+    use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn bound_parent_stream_survives_another_scheduler_guard() {
+        let hal = Arc::new(CudaHalBB31::new(0).unwrap());
+        let expected_stream = hal.inner.default_stream().clone();
+        {
+            let _binding = bind_thread_default_stream(hal);
+            let barrier = Arc::new(Barrier::new(2));
+
+            std::thread::scope(|scope| {
+                let worker_barrier = barrier.clone();
+                scope.spawn(move || {
+                    let _fallback_guard = forbid_default_stream_fallback();
+                    worker_barrier.wait();
+                    worker_barrier.wait();
+                });
+
+                barrier.wait();
+                let bound_stream = get_thread_stream().expect("parent stream must remain bound");
+                assert!(Arc::ptr_eq(&bound_stream, &expected_stream));
+                barrier.wait();
+            });
+        }
+
+        let barrier = Arc::new(Barrier::new(2));
+        std::thread::scope(|scope| {
+            let worker_barrier = barrier.clone();
+            scope.spawn(move || {
+                let _fallback_guard = forbid_default_stream_fallback();
+                worker_barrier.wait();
+                worker_barrier.wait();
+            });
+            barrier.wait();
+            assert!(std::panic::catch_unwind(get_thread_stream).is_err());
+            barrier.wait();
+        });
     }
 }
