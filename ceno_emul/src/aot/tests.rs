@@ -2233,6 +2233,193 @@ fn gpu_replay_direct_typed_rows_match_interpreter_without_trace_callbacks() {
 
 #[test]
 #[cfg(not(debug_assertions))]
+fn gpu_replay_fast_flight_preserves_state_and_next_compact_shard() {
+    let base = CENO_PLATFORM.heap.start;
+    let program = Arc::new(program(vec![
+        encode_rv32(InsnKind::ADDI, 0, 0, 1, 7),
+        encode_rv32(InsnKind::SW, 20, 1, 0, 0),
+        encode_rv32(InsnKind::LW, 20, 0, 2, 0),
+        encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        encode_rv32(
+            InsnKind::ADDI,
+            0,
+            0,
+            Platform::reg_ecall().into(),
+            Platform::ecall_halt() as i32,
+        ),
+        encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+    ]));
+    let descriptor = |shard_id, first: InsnKind, second: Option<InsnKind>| {
+        let mut family_counts = [0usize; InsnKind::COUNT];
+        family_counts[first as usize] += 1;
+        if let Some(second) = second.filter(|kind| *kind != InsnKind::ECALL) {
+            family_counts[second as usize] += 1;
+        }
+        crate::GpuReplayRangeDescriptor {
+            shard_id,
+            sequence: 0,
+            range_start: 0,
+            range_len: 2,
+            family_counts,
+            fallback_count: usize::from(second == Some(InsnKind::ECALL)),
+            unsupported_count: 0,
+        }
+    };
+    let descriptors = Arc::new(vec![
+        descriptor(0, InsnKind::ADDI, Some(InsnKind::SW)),
+        descriptor(1, InsnKind::LW, Some(InsnKind::ECALL)),
+        descriptor(2, InsnKind::ADDI, Some(InsnKind::ECALL)),
+    ]);
+    let aot = AotProgram::compile_with_extra_roots_and_trace_style(
+        program.clone(),
+        vec![program.base_address + 16],
+        AssemblyTraceStyle::GpuReplayDirect,
+    )
+    .unwrap();
+    let make_vm = || {
+        let mut vm = VMState::<crate::GpuReplayTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            crate::GpuReplayTracerConfig { chunk_capacity: 2 },
+        );
+        vm.tracer_mut()
+            .install_range_descriptors(descriptors.clone());
+        vm.tracer_mut().enable_retained_shard_mode();
+        vm.init_register_unsafe(20, base);
+        vm.init_register_unsafe(Platform::reg_ecall(), crate::syscalls::PHANTOM_LOG_PC_CYCLE);
+        vm.init_memory(ByteAddr(base).waddr(), 0);
+        vm
+    };
+
+    let mut all_compact = make_vm();
+    let mut expected_last = None;
+    for shard in 0..3 {
+        if shard != 0 {
+            all_compact.tracer_mut().start_shard();
+        }
+        assert_eq!(
+            aot.run_to_halt(&mut all_compact, 2).unwrap().executed_steps,
+            2
+        );
+        all_compact.tracer_mut().finish_chunks();
+        let chunk = all_compact.tracer_mut().take_sealed_chunks().remove(0);
+        if shard == 2 {
+            expected_last = Some(chunk);
+        }
+    }
+
+    let mut mixed = make_vm();
+    assert_eq!(aot.run_to_halt(&mut mixed, 2).unwrap().executed_steps, 2);
+    mixed.tracer_mut().finish_chunks();
+    assert_eq!(mixed.tracer_mut().take_sealed_chunks().len(), 1);
+    mixed.tracer_mut().start_shard_with_capture(false);
+    assert_eq!(
+        aot.run_gpu_replay_fast_flight_to_halt(&mut mixed, 2)
+            .unwrap()
+            .executed_steps,
+        2
+    );
+    assert!(mixed.tracer_mut().take_sealed_chunks().is_empty());
+    assert!(mixed.tracer().syscall_witnesses().is_empty());
+    mixed.tracer_mut().finish_fast_flight_ranges(1);
+    mixed.tracer_mut().start_shard();
+    assert_eq!(aot.run_to_halt(&mut mixed, 2).unwrap().executed_steps, 2);
+    mixed.tracer_mut().finish_chunks();
+    let actual_last = mixed.tracer_mut().take_sealed_chunks().remove(0);
+
+    assert_eq!(mixed.peek_register(2), all_compact.peek_register(2));
+    assert_eq!(
+        mixed.peek_memory(ByteAddr(base).waddr()),
+        all_compact.peek_memory(ByteAddr(base).waddr())
+    );
+    assert_eq!(mixed.get_pc(), all_compact.get_pc());
+    assert_eq!(mixed.tracer().cycle(), all_compact.tracer().cycle());
+    let expected_last = expected_last.unwrap();
+    assert_eq!(actual_last.fallback, expected_last.fallback);
+    for (kind, (actual, expected)) in
+        InsnKind::iter().zip(actual_last.typed.iter().zip(&expected_last.typed))
+    {
+        assert_eq!(
+            actual
+                .as_ref()
+                .map_or(&[][..], |arena| arena.payload_bytes()),
+            expected
+                .as_ref()
+                .map_or(&[][..], |arena| arena.payload_bytes()),
+            "next owned shard payload differs for {kind:?}"
+        );
+    }
+
+    // Fast flight may retain empty warmed allocation capacity from a prior
+    // owned shard, but it must not initialize or seal any compact payload.
+    let mut leading_fast = make_vm();
+    leading_fast.tracer_mut().set_first_shard_capture(false);
+    for shard in 0..2 {
+        if shard != 0 {
+            leading_fast.tracer_mut().start_shard_with_capture(false);
+        }
+        assert_eq!(
+            aot.run_gpu_replay_fast_flight_to_halt(&mut leading_fast, 2)
+                .unwrap()
+                .executed_steps,
+            2
+        );
+        assert!(leading_fast.tracer_mut().take_sealed_chunks().is_empty());
+        assert!(leading_fast.tracer().syscall_witnesses().is_empty());
+        leading_fast.tracer_mut().finish_fast_flight_ranges(1);
+    }
+    leading_fast.tracer_mut().start_shard();
+    assert_eq!(
+        aot.run_to_halt(&mut leading_fast, 2)
+            .unwrap()
+            .executed_steps,
+        2
+    );
+    leading_fast.tracer_mut().finish_chunks();
+    let leading_fast_last = leading_fast.tracer_mut().take_sealed_chunks().remove(0);
+    assert_eq!(leading_fast.peek_register(2), all_compact.peek_register(2));
+    assert_eq!(leading_fast.get_pc(), all_compact.get_pc());
+    for (actual, expected) in leading_fast_last.typed.iter().zip(&expected_last.typed) {
+        assert_eq!(
+            actual
+                .as_ref()
+                .map_or(&[][..], |arena| arena.payload_bytes()),
+            expected
+                .as_ref()
+                .map_or(&[][..], |arena| arena.payload_bytes())
+        );
+    }
+
+    let mut trailing_fast = make_vm();
+    for shard in 0..2 {
+        if shard != 0 {
+            trailing_fast.tracer_mut().start_shard();
+        }
+        assert_eq!(
+            aot.run_to_halt(&mut trailing_fast, 2)
+                .unwrap()
+                .executed_steps,
+            2
+        );
+        trailing_fast.tracer_mut().finish_chunks();
+        assert_eq!(trailing_fast.tracer_mut().take_sealed_chunks().len(), 1);
+    }
+    trailing_fast.tracer_mut().start_shard_with_capture(false);
+    assert_eq!(
+        aot.run_gpu_replay_fast_flight_to_halt(&mut trailing_fast, 2)
+            .unwrap()
+            .executed_steps,
+        2
+    );
+    assert!(trailing_fast.tracer_mut().take_sealed_chunks().is_empty());
+    assert!(trailing_fast.tracer().syscall_witnesses().is_empty());
+    trailing_fast.tracer_mut().finish_fast_flight_ranges(1);
+    assert_eq!(trailing_fast.peek_register(2), all_compact.peek_register(2));
+    assert_eq!(trailing_fast.get_pc(), all_compact.get_pc());
+}
+
+#[test]
+#[cfg(not(debug_assertions))]
 fn gpu_replay_direct_preserves_cycles_past_27_bits() {
     let program = Arc::new(program(vec![encode_rv32(InsnKind::OR, 1, 2, 3, 0)]));
     let mut family_counts = [0usize; InsnKind::COUNT];

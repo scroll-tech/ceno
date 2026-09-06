@@ -8,7 +8,7 @@ use ceno_recursion_v2::{
     system::{utils::test_system_params_zero_pow, warm_child_vk_digest_cache},
 };
 #[cfg(feature = "gpu")]
-use ceno_zkvm::multi_gpu::{MultiGpuConfig, select_device_ids};
+use ceno_zkvm::multi_gpu::{MultiGpuConfig, parse_worker_cpu_affinity, select_device_ids};
 #[cfg(not(feature = "gpu"))]
 use ceno_zkvm::scheme::create_prover;
 #[cfg(feature = "gpu")]
@@ -121,6 +121,11 @@ pub struct CenoOptions {
     #[cfg(feature = "gpu")]
     #[arg(long)]
     recursion_gpu_device: Option<usize>,
+
+    /// Exclusive CPU set for one GPU worker. Repeat once per selected GPU.
+    #[cfg(feature = "gpu")]
+    #[arg(long)]
+    gpu_worker_cpus: Vec<String>,
 
     /// Profiling granularity.
     /// Setting any value restricts logs to profiling information
@@ -484,6 +489,13 @@ where
         if let Some(recursion_device) = options.recursion_gpu_device {
             config = config
                 .with_recursion_device(recursion_device)
+                .map_err(anyhow::Error::msg)?;
+        }
+        if let Some(affinity) =
+            parse_worker_cpu_affinity(&options.gpu_worker_cpus).map_err(anyhow::Error::msg)?
+        {
+            config = config
+                .with_worker_cpu_affinity(affinity)
                 .map_err(anyhow::Error::msg)?;
         }
         let prepared = config

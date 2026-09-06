@@ -41,6 +41,8 @@ pub struct MultiGpuConfig {
     pub shard_policy: ShardAssignmentPolicy,
     pub replay_queue_depth: usize,
     pub recursion_device: usize,
+    /// Exclusive logical CPU sets, one per selected GPU worker.
+    pub worker_cpu_affinity: Option<Vec<Vec<usize>>>,
 }
 
 impl MultiGpuConfig {
@@ -53,6 +55,7 @@ impl MultiGpuConfig {
             shard_policy: ShardAssignmentPolicy::RoundRobin,
             replay_queue_depth: 1,
             recursion_device,
+            worker_cpu_affinity: None,
         };
         config.validate_shape()?;
         Ok(config)
@@ -60,6 +63,15 @@ impl MultiGpuConfig {
 
     pub fn with_recursion_device(mut self, device_id: usize) -> Result<Self, String> {
         self.recursion_device = device_id;
+        self.validate_shape()?;
+        Ok(self)
+    }
+
+    pub fn with_worker_cpu_affinity(
+        mut self,
+        worker_cpu_affinity: Vec<Vec<usize>>,
+    ) -> Result<Self, String> {
+        self.worker_cpu_affinity = Some(worker_cpu_affinity);
         self.validate_shape()?;
         Ok(self)
     }
@@ -83,6 +95,28 @@ impl MultiGpuConfig {
                 self.recursion_device
             ));
         }
+        if let Some(affinity) = &self.worker_cpu_affinity {
+            if affinity.len() != self.device_ids.len() {
+                return Err(format!(
+                    "GPU worker CPU affinity has {} entries, expected {}",
+                    affinity.len(),
+                    self.device_ids.len()
+                ));
+            }
+            let mut assigned = HashSet::new();
+            for (worker, cpus) in affinity.iter().enumerate() {
+                if cpus.is_empty() {
+                    return Err(format!("GPU worker {worker} CPU set must not be empty"));
+                }
+                for cpu in cpus {
+                    if !assigned.insert(*cpu) {
+                        return Err(format!(
+                            "logical CPU {cpu} appears in more than one exclusive GPU worker set"
+                        ));
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -94,6 +128,9 @@ impl MultiGpuConfig {
 
     pub fn prepare(&self, requested_max_cells: u64) -> Result<PreparedMultiGpu, String> {
         self.validate_shape()?;
+        if let Some(affinity) = &self.worker_cpu_affinity {
+            validate_worker_cpu_affinity(affinity, &available_logical_cpus()?)?;
+        }
         let discovered = discover_cuda_devices().map_err(|error| error.to_string())?;
         let (selected, max_cell_per_shard) =
             self.validate_device_profiles(&discovered, requested_max_cells)?;
@@ -184,6 +221,86 @@ impl MultiGpuConfig {
         );
         Ok((selected, max_cell_per_shard))
     }
+}
+
+pub fn parse_worker_cpu_affinity(values: &[String]) -> Result<Option<Vec<Vec<usize>>>, String> {
+    if values.is_empty() {
+        return Ok(None);
+    }
+    values
+        .iter()
+        .enumerate()
+        .map(|(worker, value)| {
+            if value.is_empty() {
+                return Err(format!("GPU worker {worker} CPU set must not be empty"));
+            }
+            value
+                .split(',')
+                .map(|cpu| {
+                    cpu.parse::<usize>()
+                        .map_err(|_| format!("invalid logical CPU {cpu:?} for GPU worker {worker}"))
+                })
+                .collect()
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+fn validate_worker_cpu_affinity(
+    affinity: &[Vec<usize>],
+    available: &[usize],
+) -> Result<(), String> {
+    let available = available.iter().copied().collect::<HashSet<_>>();
+    for (worker, cpus) in affinity.iter().enumerate() {
+        for cpu in cpus {
+            if !available.contains(cpu) {
+                return Err(format!(
+                    "logical CPU {cpu} for GPU worker {worker} is unavailable to this process"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn available_logical_cpus() -> Result<Vec<usize>, String> {
+    let mut set = unsafe { std::mem::zeroed::<libc::cpu_set_t>() };
+    if unsafe { libc::sched_getaffinity(0, std::mem::size_of_val(&set), &mut set) } != 0 {
+        return Err(format!(
+            "failed to query logical CPU affinity: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok((0..libc::CPU_SETSIZE as usize)
+        .filter(|cpu| unsafe { libc::CPU_ISSET(*cpu, &set) })
+        .collect())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn available_logical_cpus() -> Result<Vec<usize>, String> {
+    Err("GPU worker CPU affinity is supported only on Linux".to_owned())
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn pin_current_thread(cpus: &[usize]) -> Result<Vec<usize>, String> {
+    let mut set = unsafe { std::mem::zeroed::<libc::cpu_set_t>() };
+    unsafe { libc::CPU_ZERO(&mut set) };
+    for cpu in cpus {
+        unsafe { libc::CPU_SET(*cpu, &mut set) };
+    }
+    if unsafe { libc::sched_setaffinity(0, std::mem::size_of_val(&set), &set) } != 0 {
+        return Err(format!(
+            "failed to pin current thread to CPUs {cpus:?}: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    available_logical_cpus()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn pin_current_thread(_cpus: &[usize]) -> Result<Vec<usize>, String> {
+    Err("GPU worker CPU affinity is supported only on Linux".to_owned())
 }
 
 pub struct PreparedGpu {
@@ -284,6 +401,44 @@ mod tests {
                 .with_recursion_device(2)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn worker_cpu_affinity_is_exclusive_and_matches_workers() {
+        let valid = MultiGpuConfig::new(vec![0, 1])
+            .unwrap()
+            .with_worker_cpu_affinity(vec![vec![2, 3], vec![4]])
+            .unwrap();
+        assert_eq!(valid.worker_cpu_affinity, Some(vec![vec![2, 3], vec![4]]));
+        assert!(
+            MultiGpuConfig::new(vec![0, 1])
+                .unwrap()
+                .with_worker_cpu_affinity(vec![vec![2]])
+                .is_err()
+        );
+        assert!(
+            MultiGpuConfig::new(vec![0, 1])
+                .unwrap()
+                .with_worker_cpu_affinity(vec![vec![2], vec![2]])
+                .is_err()
+        );
+        assert!(
+            MultiGpuConfig::new(vec![0])
+                .unwrap()
+                .with_worker_cpu_affinity(vec![vec![]])
+                .is_err()
+        );
+        assert!(validate_worker_cpu_affinity(&[vec![7]], &[2, 3, 4]).is_err());
+    }
+
+    #[test]
+    fn worker_cpu_affinity_cli_shape_parses_repeated_sets() {
+        assert_eq!(
+            parse_worker_cpu_affinity(&["2,3".to_owned(), "4".to_owned()]).unwrap(),
+            Some(vec![vec![2, 3], vec![4]])
+        );
+        assert!(parse_worker_cpu_affinity(&["2,x".to_owned()]).is_err());
+        assert_eq!(parse_worker_cpu_affinity(&[]).unwrap(), None);
     }
 
     #[test]
