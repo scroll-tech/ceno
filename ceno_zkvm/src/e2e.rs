@@ -29,13 +29,13 @@ use ceno_emul::{
     SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
     host_utils::read_all_messages,
 };
+#[cfg(feature = "gpu")]
+use ceno_gpu::CudaHal;
 use clap::ValueEnum;
 use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
-#[cfg(feature = "gpu")]
-use gkr_iop::gpu::get_cuda_hal;
 use gkr_iop::{RAMType, hal::ProverBackend};
 use itertools::Itertools;
 #[cfg(debug_assertions)]
@@ -4404,7 +4404,7 @@ where
     let replay_start_gate = Arc::new(ReplayStartGate::new(prepared.workers.len()));
     let started = std::time::Instant::now();
 
-    std::thread::scope(|scope| -> Result<Vec<ZKVMProof<E, PCS>>, String> {
+    let proofs = std::thread::scope(|scope| -> Result<Vec<ZKVMProof<E, PCS>>, String> {
         let mut handles = Vec::with_capacity(prepared.workers.len());
         let mut ready_receivers = Vec::with_capacity(prepared.workers.len());
         let mut emulation_result = Some(emulation_result);
@@ -4704,16 +4704,96 @@ where
             "Stage 1 multi-GPU base proving complete"
         );
         Ok(proofs)
-    })
+    })?;
+    let proofs =
+        finish_gpu_base_proving(proofs, || handoff_gpu_pool_to_recursion(prepared, config))?;
+    tracing::info!(
+        target: "ceno_multi_gpu",
+        device_id = config.recursion_device,
+        recursion_ready_ms = pipeline_started.elapsed().as_millis(),
+        phase = "recursion_ready",
+        "Stage 1 base pipeline ready for single-device recursion"
+    );
+    Ok(proofs)
+}
+
+#[cfg(feature = "gpu")]
+fn finish_gpu_base_proving<T>(
+    result: T,
+    handoff: impl FnOnce() -> Result<(), String>,
+) -> Result<T, String> {
+    handoff()?;
+    Ok(result)
+}
+
+#[cfg(feature = "gpu")]
+fn handoff_gpu_pool_to_recursion(
+    prepared: &crate::multi_gpu::PreparedMultiGpu,
+    config: &crate::multi_gpu::MultiGpuConfig,
+) -> Result<(), String> {
+    let worker = prepared
+        .workers
+        .iter()
+        .find(|worker| worker.info.logical_ordinal == config.recursion_device)
+        .ok_or_else(|| {
+            format!(
+                "recursion GPU {} was not prepared for pool handoff",
+                config.recursion_device
+            )
+        })?;
+    let hal = worker.hal.clone();
+    let started = std::time::Instant::now();
+    let (memory_before, memory_after) = {
+        let _binding = gkr_iop::gpu::bind_thread_default_stream(hal.clone());
+        let memory_before = ceno_gpu::get_cuda_mem_info().unwrap_or((0, 0));
+        hal.inner().synchronize().map_err(|error| {
+            format!("failed to synchronize recursion GPU before handoff: {error}")
+        })?;
+        hal.inner().trim_mem_pool().map_err(|error| {
+            format!("failed to trim recursion GPU pool during handoff: {error}")
+        })?;
+        hal.inner().synchronize().map_err(|error| {
+            format!("failed to synchronize recursion GPU after handoff: {error}")
+        })?;
+        (
+            memory_before,
+            ceno_gpu::get_cuda_mem_info().unwrap_or((0, 0)),
+        )
+    };
+    gkr_iop::gpu::set_thread_cuda_hal(hal);
+    tracing::info!(
+        target: "ceno_multi_gpu",
+        device_id = config.recursion_device,
+        elapsed_ms = started.elapsed().as_millis(),
+        memory_before_free_bytes = memory_before.0,
+        memory_after_free_bytes = memory_after.0,
+        memory_total_bytes = memory_after.1,
+        phase = "post_base_pool_handoff",
+        "Stage 1 GPU pool handed off to recursion"
+    );
+    Ok(())
 }
 
 #[cfg(all(test, feature = "gpu"))]
 mod multi_gpu_collector_tests {
     use super::{
         BaseProofCollectorState, BaseWorkerDiagnostics, ReplayStartGate, classify_cuda_error,
+        finish_gpu_base_proving,
     };
     use crate::multi_gpu::MultiGpuConfig;
     use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn post_base_pool_handoff_runs_exactly_once() {
+        let mut handoffs = 0;
+        let result = finish_gpu_base_proving(7, || {
+            handoffs += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(result, 7);
+        assert_eq!(handoffs, 1);
+    }
 
     #[test]
     fn replay_start_gate_releases_concurrent_producers() {
@@ -4955,21 +5035,6 @@ fn create_proofs_streaming<
         }
     });
     metrics::gauge!("num_shards").set(proofs.len() as f64);
-
-    // Currently, due to mixed usage with other GPU backends,
-    // we need to trim ceno-gpu's memory pool while still retaining 424MB.
-    // Once the GPU backend is unified, skipping this trim
-    // could improve performance by a few seconds.
-    #[cfg(feature = "gpu")]
-    {
-        use gkr_iop::gpu::gpu_prover::*;
-
-        info_span!("[ceno] trim_gpu_mem_pool").in_scope(|| {
-            let cuda_hal = get_cuda_hal().unwrap();
-            cuda_hal.inner().trim_mem_pool().unwrap();
-            cuda_hal.inner().synchronize().unwrap();
-        });
-    };
 
     #[cfg(feature = "gpu")]
     if crate::instructions::gpu::config::is_debug_compare_enabled() {

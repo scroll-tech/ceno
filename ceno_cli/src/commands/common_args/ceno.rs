@@ -478,7 +478,7 @@ where
 
     let backend = create_backend(options.max_num_variables, options.security_level);
     #[cfg(feature = "gpu")]
-    let (device, multi_gpu) = {
+    let (device, multi_gpu_config, prepared_multi_gpu) = {
         let available = ceno_zkvm::multi_gpu::discover_cuda_devices()
             .context("failed to discover CUDA devices")?
             .len();
@@ -509,62 +509,51 @@ where
             "validated Stage 1 multi-GPU configuration"
         );
         let device = gkr_iop::gpu::GpuProver::new(backend.clone(), prepared.workers[0].hal.clone());
-        let multi_gpu = (config.device_ids.len() > 1).then_some((config, prepared));
-        (device, multi_gpu)
+        (device, config, prepared)
     };
     #[cfg(not(feature = "gpu"))]
     let device = create_prover(backend.clone());
     #[cfg(feature = "gpu")]
-    if let Some((config, prepared)) = multi_gpu {
-        if !matches!(checkpoint, Checkpoint::PrepWitnessGen) {
-            let ctx = setup_program::<E>(program, platform, multi_prover);
-            let (pk, vk) = ctx.keygen_with_pb(backend.as_ref());
-            let pk = Arc::new(pk);
-            let init_full_mem = pk.program_ctx.as_ref().unwrap().setup_init_mem(&hints);
-            let prover = ZKVMProver::new(pk.clone(), device);
-            let max_steps = options.max_steps;
-            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-            let preflight_aot = pk
-                .program_ctx
-                .as_ref()
-                .unwrap()
-                .preflight_aot_program
-                .clone();
-            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-            let fulltracer_aot = pk
-                .program_ctx
-                .as_ref()
-                .unwrap()
-                .fulltracer_aot_program
-                .clone();
-            let run = move || {
-                run_e2e_multi_gpu_proof_with_precompiled_aot(
-                    &prover,
-                    &prepared,
-                    &config,
-                    &init_full_mem,
-                    public_io_digest,
-                    max_steps,
-                    #[cfg(all(
-                        feature = "aot-x86_64",
-                        target_arch = "x86_64",
-                        target_os = "linux"
-                    ))]
-                    preflight_aot,
-                    #[cfg(all(
-                        feature = "aot-x86_64",
-                        target_arch = "x86_64",
-                        target_os = "linux"
-                    ))]
-                    fulltracer_aot,
-                )
-                .unwrap_or_else(|error| panic!("multi-GPU proving failed: {error}"))
-            };
-            if matches!(checkpoint, Checkpoint::PrepE2EProving) {
-                return Ok(E2ECheckpointResult::deferred(vk, move || _ = run()));
-            }
-            return Ok(E2ECheckpointResult::completed(run(), vk));
+    if !matches!(checkpoint, Checkpoint::PrepWitnessGen) {
+        let ctx = setup_program::<E>(program, platform, multi_prover);
+        let (pk, vk) = ctx.keygen_with_pb(backend.as_ref());
+        let pk = Arc::new(pk);
+        let init_full_mem = pk.program_ctx.as_ref().unwrap().setup_init_mem(&hints);
+        let prover = ZKVMProver::new(pk.clone(), device);
+        let max_steps = options.max_steps;
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        let preflight_aot = pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .preflight_aot_program
+            .clone();
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        let fulltracer_aot = pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .fulltracer_aot_program
+            .clone();
+        let run = move || {
+            run_e2e_multi_gpu_proof_with_precompiled_aot(
+                &prover,
+                &prepared_multi_gpu,
+                &multi_gpu_config,
+                &init_full_mem,
+                public_io_digest,
+                max_steps,
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                preflight_aot,
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                fulltracer_aot,
+            )
+            .unwrap_or_else(|error| panic!("multi-GPU proving failed: {error}"))
+        };
+        if matches!(checkpoint, Checkpoint::PrepE2EProving) {
+            return Ok(E2ECheckpointResult::deferred(vk, move || _ = run()));
         }
+        return Ok(E2ECheckpointResult::completed(run(), vk));
     }
     Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
         device,

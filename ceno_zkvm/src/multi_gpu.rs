@@ -373,7 +373,14 @@ mod tests {
             vec![2, 0]
         );
         assert_eq!(select_device_ids(None, Some(2), 3).unwrap(), vec![0, 1]);
-        assert_eq!(select_device_ids(None, None, 3).unwrap(), vec![0]);
+        let default = select_device_ids(None, None, 3).unwrap();
+        let explicit = select_device_ids(Some(&[0]), None, 3).unwrap();
+        assert_eq!(default, vec![0]);
+        assert_eq!(default, explicit);
+        assert_eq!(
+            MultiGpuConfig::new(default).unwrap(),
+            MultiGpuConfig::new(explicit).unwrap()
+        );
     }
 
     #[test]

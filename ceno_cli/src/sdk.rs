@@ -14,6 +14,8 @@ use ceno_recursion_v2::{
 };
 #[cfg(feature = "gpu")]
 use ceno_zkvm::e2e::run_e2e_multi_gpu_proof_with_precompiled_aot;
+#[cfg(not(feature = "gpu"))]
+use ceno_zkvm::e2e::run_e2e_proof_with_precompiled_aot;
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 use ceno_zkvm::e2e::{prepare_fulltracer_aot_program, prepare_preflight_aot_program};
 #[cfg(feature = "gpu")]
@@ -21,7 +23,7 @@ use ceno_zkvm::multi_gpu::{MultiGpuConfig, PreparedMultiGpu};
 #[cfg(not(feature = "gpu"))]
 use ceno_zkvm::scheme::create_prover;
 use ceno_zkvm::{
-    e2e::{MultiProver, run_e2e_proof_with_precompiled_aot, setup_program},
+    e2e::{MultiProver, setup_program},
     scheme::{
         ZKVMProof, create_backend, hal::ProverDevice, mock_prover::LkMultiplicityKey,
         prover::ZKVMProver, verifier::ZKVMVerifier,
@@ -231,12 +233,13 @@ where
         self.preflight_aot_program = Some(preflight_aot_program);
     }
 
+    #[cfg(not(feature = "gpu"))]
     pub fn generate_base_proof(
         &self,
         hints: CenoStdin,
         public_io_digest: [u32; 8],
         max_steps: usize,
-        shard_id: Option<usize>,
+        _shard_id: Option<usize>,
     ) -> Vec<ZKVMProof<E, PCS>> {
         if let Some(zkvm_prover) = self.zkvm_prover.as_ref() {
             let init_full_mem = zkvm_prover.setup_init_mem(&Vec::from(&hints));
@@ -246,7 +249,7 @@ where
                 public_io_digest,
                 max_steps,
                 false,
-                shard_id,
+                _shard_id,
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
                 self.preflight_aot_program.clone(),
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -396,9 +399,10 @@ where
             .multi_gpu_config
             .as_ref()
             .expect("multi-GPU configuration was not initialized");
-        if shard_id.is_some() {
-            return self.generate_base_proof(hints, public_io_digest, max_steps, shard_id);
-        }
+        assert!(
+            shard_id.is_none(),
+            "GPU debug shard proving is unsupported by the canonical Stage 1 coordinator"
+        );
         let prepared = self
             .prepared_multi_gpu
             .as_ref()
@@ -415,7 +419,7 @@ where
             phase = "sdk_init_memory",
             "multi-GPU base setup event"
         );
-        let proofs = run_e2e_multi_gpu_proof_with_precompiled_aot(
+        run_e2e_multi_gpu_proof_with_precompiled_aot(
             prover,
             prepared,
             config,
@@ -427,18 +431,7 @@ where
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             self.fulltracer_aot_program.clone(),
         )
-        .unwrap_or_else(|error| panic!("multi-GPU base proving failed: {error}"));
-        let recursion_worker = prepared
-            .workers
-            .iter()
-            .find(|worker| worker.info.logical_ordinal == config.recursion_device)
-            .expect("recursion GPU was not prepared");
-        gkr_iop::gpu::set_thread_cuda_hal(recursion_worker.hal.clone());
-        tracing::info!(
-            recursion_device = config.recursion_device,
-            "bound Stage 1 recursion GPU after base workers"
-        );
-        proofs
+        .unwrap_or_else(|error| panic!("multi-GPU base proving failed: {error}"))
     }
 }
 
