@@ -40,31 +40,20 @@ pub struct MultiGpuConfig {
     pub device_ids: Vec<usize>,
     pub shard_policy: ShardAssignmentPolicy,
     pub replay_queue_depth: usize,
-    pub recursion_device: usize,
     /// Exclusive logical CPU sets, one per selected GPU worker.
     pub worker_cpu_affinity: Option<Vec<Vec<usize>>>,
 }
 
 impl MultiGpuConfig {
     pub fn new(device_ids: Vec<usize>) -> Result<Self, String> {
-        let recursion_device = *device_ids
-            .first()
-            .ok_or("GPU device list must not be empty")?;
         let config = Self {
             device_ids,
             shard_policy: ShardAssignmentPolicy::RoundRobin,
             replay_queue_depth: 1,
-            recursion_device,
             worker_cpu_affinity: None,
         };
         config.validate_shape()?;
         Ok(config)
-    }
-
-    pub fn with_recursion_device(mut self, device_id: usize) -> Result<Self, String> {
-        self.recursion_device = device_id;
-        self.validate_shape()?;
-        Ok(self)
     }
 
     pub fn with_worker_cpu_affinity(
@@ -88,12 +77,6 @@ impl MultiGpuConfig {
             if !unique.insert(*device_id) {
                 return Err(format!("duplicate GPU device {device_id}"));
             }
-        }
-        if !unique.contains(&self.recursion_device) {
-            return Err(format!(
-                "recursion GPU {} is not in the selected device list",
-                self.recursion_device
-            ));
         }
         if let Some(affinity) = &self.worker_cpu_affinity {
             if affinity.len() != self.device_ids.len() {
@@ -397,16 +380,6 @@ mod tests {
         assert_eq!(
             (0..6).map(|id| config.owner_index(id)).collect::<Vec<_>>(),
             vec![0, 1, 0, 1, 0, 1]
-        );
-    }
-
-    #[test]
-    fn recursion_device_must_be_selected() {
-        assert!(
-            MultiGpuConfig::new(vec![0, 1])
-                .unwrap()
-                .with_recursion_device(2)
-                .is_err()
         );
     }
 

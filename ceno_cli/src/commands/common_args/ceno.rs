@@ -1,18 +1,26 @@
 use super::CompilationOptions;
 use crate::utils::*;
 use anyhow::{Context, bail};
+#[cfg(feature = "gpu")]
+use cargo_ceno::sdk::StreamingRecursionOrchestrator;
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
+#[cfg(not(feature = "gpu"))]
+use ceno_recursion_v2::continuation::prover::AggProver;
+#[cfg(not(feature = "gpu"))]
+use ceno_recursion_v2::system::warm_child_vk_digest_cache;
 use ceno_recursion_v2::{
-    continuation::prover::{AggProver, AggregationOptions},
-    system::{utils::test_system_params_zero_pow, warm_child_vk_digest_cache},
+    continuation::prover::AggregationOptions, system::utils::test_system_params_zero_pow,
 };
-#[cfg(feature = "gpu")]
-use ceno_zkvm::multi_gpu::{MultiGpuConfig, parse_worker_cpu_affinity, select_device_ids};
 #[cfg(not(feature = "gpu"))]
 use ceno_zkvm::scheme::create_prover;
 #[cfg(feature = "gpu")]
 use ceno_zkvm::scheme::prover::ZKVMProver;
+#[cfg(feature = "gpu")]
+use ceno_zkvm::{
+    e2e::BaseProvingEventSink,
+    multi_gpu::{MultiGpuConfig, parse_worker_cpu_affinity, select_device_ids},
+};
 use ceno_zkvm::{
     e2e::*,
     scheme::{
@@ -116,11 +124,6 @@ pub struct CenoOptions {
     #[cfg(feature = "gpu")]
     #[arg(long)]
     gpu_count: Option<usize>,
-
-    /// Logical CUDA device used by recursion after base proving.
-    #[cfg(feature = "gpu")]
-    #[arg(long)]
-    recursion_gpu_device: Option<usize>,
 
     /// Exclusive CPU set for one GPU worker. Repeat once per selected GPU.
     #[cfg(feature = "gpu")]
@@ -430,6 +433,34 @@ where
     PCS::CommitmentWithWitness: Send + Sync,
     PCS::Proof: Send,
 {
+    run_elf_inner_with_base_sink(
+        options,
+        compilation_options,
+        elf_path,
+        checkpoint,
+        #[cfg(feature = "gpu")]
+        None,
+    )
+}
+
+fn run_elf_inner_with_base_sink<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    P: AsRef<Path>,
+>(
+    options: &CenoOptions,
+    compilation_options: &CompilationOptions,
+    elf_path: P,
+    checkpoint: Checkpoint,
+    #[cfg(feature = "gpu")] base_event_sink: Option<Arc<dyn BaseProvingEventSink<E, PCS>>>,
+) -> anyhow::Result<E2ECheckpointResult<E, PCS>>
+where
+    PCS::ProverParam: Send + Sync,
+    PCS::VerifierParam: Send + Sync,
+    PCS::Commitment: Send + Sync,
+    PCS::CommitmentWithWitness: Send + Sync,
+    PCS::Proof: Send,
+{
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
@@ -486,11 +517,6 @@ where
             select_device_ids(options.gpu_devices.as_deref(), options.gpu_count, available)
                 .map_err(anyhow::Error::msg)?;
         let mut config = MultiGpuConfig::new(device_ids).map_err(anyhow::Error::msg)?;
-        if let Some(recursion_device) = options.recursion_gpu_device {
-            config = config
-                .with_recursion_device(recursion_device)
-                .map_err(anyhow::Error::msg)?;
-        }
         if let Some(affinity) =
             parse_worker_cpu_affinity(&options.gpu_worker_cpus).map_err(anyhow::Error::msg)?
         {
@@ -504,7 +530,6 @@ where
         multi_prover.max_cell_per_shard = prepared.max_cell_per_shard;
         tracing::info!(
             devices = ?config.device_ids,
-            recursion_device = config.recursion_device,
             max_cell_per_shard = prepared.max_cell_per_shard,
             "validated Stage 1 multi-GPU configuration"
         );
@@ -536,13 +561,14 @@ where
             .fulltracer_aot_program
             .clone();
         let run = move || {
-            run_e2e_multi_gpu_proof_with_precompiled_aot(
-                &prover,
+            ceno_zkvm::e2e::run_e2e_multi_gpu_proof_with_precompiled_aot_and_sink(
+                prover,
                 &prepared_multi_gpu,
                 &multi_gpu_config,
                 &init_full_mem,
                 public_io_digest,
                 max_steps,
+                base_event_sink,
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
                 preflight_aot,
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -657,17 +683,38 @@ fn prove_recursion_inner<P: AsRef<Path>>(
     elf_path: P,
     checkpoint: Checkpoint,
 ) -> anyhow::Result<()> {
-    let result = run_elf_inner::<BabyBearExt4, Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>, P>(
+    let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
+    #[cfg(feature = "gpu")]
+    let recursion = args
+        .out_root_proof
+        .as_ref()
+        .map(|_| Arc::new(StreamingRecursionOrchestrator::new(options.clone())));
+    #[cfg(feature = "gpu")]
+    let event_sink = recursion
+        .as_ref()
+        .map(|sink| sink.clone() as Arc<dyn BaseProvingEventSink<_, _>>);
+    let result = run_elf_inner_with_base_sink::<
+        BabyBearExt4,
+        Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>,
+        P,
+    >(
         args,
         compilation_options,
         elf_path,
         checkpoint,
+        #[cfg(feature = "gpu")]
+        event_sink,
     )?;
+    #[cfg(feature = "gpu")]
+    if let Some(recursion) = &recursion {
+        recursion.mark_base_verified();
+    }
     let zkvm_proofs = result.proofs.expect("PrepSanityCheck should yield proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let start = std::time::Instant::now();
     let verifier = ZKVMVerifier::new(vk.clone());
+    #[cfg(not(feature = "gpu"))]
     if let Err(e) = verify(zkvm_proofs.clone(), &verifier) {
         bail!("Verification failed: {e:?}");
     }
@@ -693,17 +740,26 @@ fn prove_recursion_inner<P: AsRef<Path>>(
             .context("failed to serialize vk")?;
     }
     if let Some(out_root_proof) = args.out_root_proof.as_ref() {
-        let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
-        let vk = Arc::new(vk);
-        warm_child_vk_digest_cache(&vk);
         let start = std::time::Instant::now();
-        let prover = AggProver::<2, 2>::new(vk, options);
-        let root_output = prover
-            .prove_with_root_vk(&zkvm_proofs)
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        prover
-            .verify_root_proof(&root_output.root_vk, &root_output.root_proof)
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        #[cfg(feature = "gpu")]
+        let root_output = recursion
+            .expect("root output requested without recursion orchestrator")
+            .finish()
+            .map_err(anyhow::Error::msg)?
+            .root_output;
+        #[cfg(not(feature = "gpu"))]
+        let root_output = {
+            let vk = Arc::new(vk);
+            warm_child_vk_digest_cache(&vk);
+            let prover = AggProver::<2, 2>::new(vk, options);
+            let root_output = prover
+                .prove_with_root_vk(&zkvm_proofs)
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+            prover
+                .verify_root_proof(&root_output.root_vk, &root_output.root_proof)
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+            root_output
+        };
         print_cargo_message(
             "Aggregated",
             format_args!("root proof in {:.2}s", start.elapsed().as_secs_f32()),

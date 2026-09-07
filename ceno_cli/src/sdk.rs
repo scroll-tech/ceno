@@ -1,10 +1,16 @@
 use std::{marker::PhantomData, sync::Arc};
+#[cfg(feature = "gpu")]
+use std::{sync::Mutex, time::Instant};
 
 use anyhow::{Context, Result};
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 use ceno_emul::StepCellExtractor;
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
+#[cfg(feature = "gpu")]
+use ceno_recursion_v2::continuation::prover::{
+    GpuRecursionBatchOutput, GpuRecursionSession, RecursionWorkerMetrics, RootProvingOutput,
+};
 use ceno_recursion_v2::{
     continuation::prover::{AggProver, AggregationOptions, LeafVk, RootProof, SystemParams},
     system::{
@@ -12,10 +18,13 @@ use ceno_recursion_v2::{
         warm_child_vk_digest_cache,
     },
 };
-#[cfg(feature = "gpu")]
-use ceno_zkvm::e2e::run_e2e_multi_gpu_proof_with_precompiled_aot;
 #[cfg(not(feature = "gpu"))]
 use ceno_zkvm::e2e::run_e2e_proof_with_precompiled_aot;
+#[cfg(feature = "gpu")]
+use ceno_zkvm::e2e::{
+    BaseDeviceReleased, BaseProofReady, BaseProvingEventSink,
+    run_e2e_multi_gpu_proof_with_precompiled_aot_and_sink,
+};
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 use ceno_zkvm::e2e::{prepare_fulltracer_aot_program, prepare_preflight_aot_program};
 #[cfg(feature = "gpu")]
@@ -48,6 +57,258 @@ pub const DEFAULT_RECURSION_K_WHIR: usize = 3;
 pub type CenoRecursionV2Prover = AggProver<DEFAULT_LEAF_FANIN, DEFAULT_INTERNAL_FANIN>;
 pub type CenoRecursionV2RootProof = RootProof;
 pub type CenoRecursionV2LeafVk = LeafVk;
+
+#[cfg(feature = "gpu")]
+#[derive(Clone, Debug, Default)]
+pub struct StreamingRecursionTimings {
+    pub base_proving: std::time::Duration,
+    pub recursion_streaming: std::time::Duration,
+    pub root_verification: std::time::Duration,
+    pub total: std::time::Duration,
+}
+
+#[cfg(feature = "gpu")]
+pub struct StreamingRecursionOutput {
+    pub base_proofs: Vec<RecursionProof>,
+    pub root_output: RootProvingOutput,
+    pub worker_metrics: Vec<RecursionWorkerMetrics>,
+    pub timings: StreamingRecursionTimings,
+}
+
+#[cfg(feature = "gpu")]
+struct RecursionOrchestrationState<S> {
+    session: Option<S>,
+    first_error: Option<String>,
+    proof_count: usize,
+    released_devices: usize,
+    base_verified: bool,
+}
+
+#[cfg(feature = "gpu")]
+impl<S> RecursionOrchestrationState<S> {
+    fn new() -> Self {
+        Self {
+            session: None,
+            first_error: None,
+            proof_count: 0,
+            released_devices: 0,
+            base_verified: false,
+        }
+    }
+
+    fn start(&mut self, session: S) -> Result<(), String> {
+        if self.session.is_some() {
+            return Err("base proving initialized recursion twice".to_owned());
+        }
+        self.session = Some(session);
+        Ok(())
+    }
+
+    fn accept_proof(
+        &mut self,
+        accept: impl FnOnce(&mut S) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if let Some(error) = &self.first_error {
+            return Err(error.clone());
+        }
+        accept(
+            self.session
+                .as_mut()
+                .ok_or("base proof arrived before recursion initialization")?,
+        )?;
+        self.proof_count += 1;
+        Ok(())
+    }
+
+    fn release_device(
+        &mut self,
+        release: impl FnOnce(&mut S) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if let Some(error) = &self.first_error {
+            return Err(error.clone());
+        }
+        release(
+            self.session
+                .as_mut()
+                .ok_or("GPU was released before recursion initialization")?,
+        )?;
+        self.released_devices += 1;
+        Ok(())
+    }
+
+    fn fail(&mut self, error: &str, cancel: impl FnOnce(&mut S)) {
+        if self.first_error.is_some() {
+            return;
+        }
+        if let Some(session) = &mut self.session {
+            cancel(session);
+        }
+        self.first_error = Some(error.to_owned());
+    }
+
+    fn mark_base_verified(&mut self) {
+        self.base_verified = true;
+    }
+
+    fn take_verified_session(&mut self) -> Result<S, String> {
+        if let Some(error) = &self.first_error {
+            return Err(error.clone());
+        }
+        if !self.base_verified {
+            return Err("canonical base verification has not completed".to_owned());
+        }
+        self.session
+            .take()
+            .ok_or("base proving never initialized recursion".to_owned())
+    }
+}
+
+#[cfg(feature = "gpu")]
+pub struct StreamingRecursionOrchestrator {
+    options: AggregationOptions,
+    state: Mutex<RecursionOrchestrationState<GpuRecursionSession<2, 2>>>,
+    started: Instant,
+}
+
+#[cfg(feature = "gpu")]
+impl StreamingRecursionOrchestrator {
+    pub fn new(options: AggregationOptions) -> Self {
+        Self {
+            options,
+            state: Mutex::new(RecursionOrchestrationState::new()),
+            started: Instant::now(),
+        }
+    }
+
+    pub fn mark_base_verified(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .mark_base_verified();
+    }
+
+    pub fn finish(&self) -> Result<GpuRecursionBatchOutput, String> {
+        let (session, proof_count, released_devices) = {
+            let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+            (
+                state.take_verified_session()?,
+                state.proof_count,
+                state.released_devices,
+            )
+        };
+        let output = session.finish().map_err(|error| error.to_string())?;
+        log_recursion_completion(
+            &output,
+            proof_count,
+            released_devices,
+            self.started.elapsed(),
+        );
+        Ok(output)
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl Drop for StreamingRecursionOrchestrator {
+    fn drop(&mut self) {
+        let state = self.state.get_mut().unwrap_or_else(|err| err.into_inner());
+        if let Some(session) = state.session.take() {
+            session.cancel("streaming recursion orchestration ended before root publication");
+            let _ = session.finish();
+        }
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl BaseProvingEventSink<RecursionField, RecursionPcs> for StreamingRecursionOrchestrator {
+    fn on_started(
+        &self,
+        total_shards: usize,
+        app_vk: ceno_zkvm::structs::ZKVMVerifyingKey<RecursionField, RecursionPcs>,
+    ) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
+        let app_vk = Arc::new(app_vk);
+        warm_child_vk_digest_cache(&app_vk);
+        state.start(
+            GpuRecursionSession::new(app_vk, total_shards, self.options.clone())
+                .map_err(|error| error.to_string())?,
+        )?;
+        tracing::info!(
+            target: "ceno_multi_gpu",
+            total_shards,
+            phase = "recursion_session_started",
+            "streaming recursion scheduler initialized"
+        );
+        Ok(())
+    }
+
+    fn on_proof_ready(
+        &self,
+        ready: BaseProofReady<RecursionField, RecursionPcs>,
+    ) -> Result<(), String> {
+        self.state
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .accept_proof(|session| {
+                session
+                    .accept_base_proof(ready.shard_id, ready.proof)
+                    .map_err(|error| error.to_string())
+            })
+    }
+
+    fn on_device_released(&self, released: BaseDeviceReleased) -> Result<(), String> {
+        self.state
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .release_device(|session| {
+                session
+                    .release_device(released.device_id)
+                    .map_err(|error| error.to_string())
+            })
+    }
+
+    fn on_failure(&self, error: &str) {
+        self.state
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .fail(error, |session| session.cancel(error.to_owned()));
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn log_recursion_completion(
+    output: &GpuRecursionBatchOutput,
+    proof_count: usize,
+    released_devices: usize,
+    elapsed: std::time::Duration,
+) {
+    for metrics in &output.worker_metrics {
+        tracing::info!(
+            target: "ceno_multi_gpu",
+            device_id = metrics.device_id,
+            task_count = metrics.task_count,
+            leaf_tasks = metrics.leaf_tasks,
+            leaf_bridge_tasks = metrics.leaf_bridge_tasks,
+            recursive_tasks = metrics.recursive_tasks,
+            root_tasks = metrics.root_tasks,
+            asset_hydrations = metrics.asset_hydrations,
+            asset_switches = metrics.asset_switches,
+            hydration_ms = metrics.hydration_time.as_millis(),
+            proving_ms = metrics.proving_time.as_millis(),
+            total_ms = metrics.total_time.as_millis(),
+            phase = "recursion_worker_metrics",
+            "streaming recursion worker complete"
+        );
+    }
+    tracing::info!(
+        target: "ceno_multi_gpu",
+        proof_count,
+        released_devices,
+        elapsed_ms = elapsed.as_millis(),
+        root_verification_ms = output.root_verification_time.as_millis(),
+        phase = "root_publication_gate",
+        "canonical base verification succeeded; recursion root may be published"
+    );
+}
 
 pub fn recursion_system_params(l_skip: usize, n_stack: usize, k_whir: usize) -> SystemParams {
     test_system_params_zero_pow(l_skip, n_stack, k_whir)
@@ -389,28 +650,46 @@ where
     }
 
     pub fn generate_multi_gpu_base_proof(
-        &self,
+        &mut self,
         hints: CenoStdin,
         public_io_digest: [u32; 8],
         max_steps: usize,
         shard_id: Option<usize>,
     ) -> Vec<ZKVMProof<E, PCS>> {
+        self.generate_multi_gpu_base_proof_with_sink(
+            hints,
+            public_io_digest,
+            max_steps,
+            shard_id,
+            None,
+        )
+        .unwrap_or_else(|error| panic!("multi-GPU base proving failed: {error}"))
+    }
+
+    fn generate_multi_gpu_base_proof_with_sink(
+        &mut self,
+        hints: CenoStdin,
+        public_io_digest: [u32; 8],
+        max_steps: usize,
+        shard_id: Option<usize>,
+        event_sink: Option<Arc<dyn BaseProvingEventSink<E, PCS>>>,
+    ) -> Result<Vec<ZKVMProof<E, PCS>>> {
         let config = self
             .multi_gpu_config
             .as_ref()
-            .expect("multi-GPU configuration was not initialized");
-        assert!(
+            .context("multi-GPU configuration was not initialized")?;
+        anyhow::ensure!(
             shard_id.is_none(),
             "GPU debug shard proving is unsupported by the canonical Stage 1 coordinator"
         );
         let prepared = self
             .prepared_multi_gpu
             .as_ref()
-            .expect("multi-GPU devices were not prepared");
+            .context("multi-GPU devices were not prepared")?;
         let prover = self
             .zkvm_prover
             .as_ref()
-            .expect("ZKVMProver is not initialized");
+            .context("ZKVMProver is not initialized")?;
         let init_mem_started = std::time::Instant::now();
         let init_full_mem = prover.setup_init_mem(&Vec::from(&hints));
         tracing::info!(
@@ -419,19 +698,120 @@ where
             phase = "sdk_init_memory",
             "multi-GPU base setup event"
         );
-        run_e2e_multi_gpu_proof_with_precompiled_aot(
+        let prover = self
+            .zkvm_prover
+            .take()
+            .context("ZKVMProver is not initialized")?;
+        run_e2e_multi_gpu_proof_with_precompiled_aot_and_sink(
             prover,
             prepared,
             config,
             &init_full_mem,
             public_io_digest,
             max_steps,
+            event_sink,
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             self.preflight_aot_program.clone(),
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             self.fulltracer_aot_program.clone(),
         )
-        .unwrap_or_else(|error| panic!("multi-GPU base proving failed: {error}"))
+        .map_err(anyhow::Error::msg)
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl<SC, VC> CenoSDK<RecursionField, RecursionPcs, SC, VC> {
+    pub fn generate_streaming_recursion_proof(
+        &mut self,
+        hints: CenoStdin,
+        public_io_digest: [u32; 8],
+        max_steps: usize,
+    ) -> Result<StreamingRecursionOutput> {
+        let total_started = Instant::now();
+        let recursion = Arc::new(StreamingRecursionOrchestrator::new(
+            self.aggregation_options(),
+        ));
+        let event_sink = recursion.clone() as Arc<dyn BaseProvingEventSink<_, _>>;
+        let base_started = Instant::now();
+        let base_proofs = self.generate_multi_gpu_base_proof_with_sink(
+            hints,
+            public_io_digest,
+            max_steps,
+            None,
+            Some(event_sink),
+        )?;
+        let base_proving = base_started.elapsed();
+
+        // The base call above owns the sole canonical full-trace verifier. Only its
+        // successful return opens the root-publication gate.
+        recursion.mark_base_verified();
+        let GpuRecursionBatchOutput {
+            root_output,
+            worker_metrics,
+            root_verification_time,
+        } = recursion.finish().map_err(anyhow::Error::msg)?;
+        let recursion_streaming = recursion.started.elapsed();
+
+        Ok(StreamingRecursionOutput {
+            base_proofs,
+            root_output,
+            worker_metrics,
+            timings: StreamingRecursionTimings {
+                base_proving,
+                recursion_streaming,
+                root_verification: root_verification_time,
+                total: total_started.elapsed(),
+            },
+        })
+    }
+}
+
+#[cfg(all(test, feature = "gpu"))]
+mod streaming_recursion_tests {
+    use super::RecursionOrchestrationState;
+
+    #[derive(Debug, Default)]
+    struct FakeSession {
+        events: Vec<&'static str>,
+        cancel_count: usize,
+    }
+
+    #[test]
+    fn fake_sink_routes_events_and_enforces_root_gate() {
+        let mut state = RecursionOrchestrationState::<FakeSession>::new();
+        assert!(state.accept_proof(|_| Ok(())).is_err());
+        assert!(state.release_device(|_| Ok(())).is_err());
+
+        state.start(FakeSession::default()).unwrap();
+        state
+            .accept_proof(|session| {
+                session.events.push("proof_ready");
+                Ok(())
+            })
+            .unwrap();
+        state
+            .release_device(|session| {
+                session.events.push("device_released");
+                Ok(())
+            })
+            .unwrap();
+        assert!(state.take_verified_session().is_err());
+        state.mark_base_verified();
+        let session = state.take_verified_session().unwrap();
+        assert_eq!(session.events, vec!["proof_ready", "device_released"]);
+        assert_eq!(state.proof_count, 1);
+        assert_eq!(state.released_devices, 1);
+    }
+
+    #[test]
+    fn fake_sink_preserves_first_failure_and_cancels_once() {
+        let mut state = RecursionOrchestrationState::new();
+        state.start(FakeSession::default()).unwrap();
+        state.fail("first", |session| session.cancel_count += 1);
+        state.fail("second", |session| session.cancel_count += 1);
+        assert_eq!(state.first_error.as_deref(), Some("first"));
+        assert_eq!(state.session.as_ref().unwrap().cancel_count, 1);
+        assert_eq!(state.take_verified_session().unwrap_err(), "first");
     }
 }
 

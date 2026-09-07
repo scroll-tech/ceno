@@ -33,15 +33,27 @@ use crate::{
     system::{RecursionProof, RecursionVk, VerifierSubCircuit, VerifierTraceGen},
 };
 
+mod assets;
+#[cfg(feature = "cuda")]
+mod gpu_workers;
 mod inner;
+mod scheduler;
 
+pub use assets::*;
+#[cfg(feature = "cuda")]
+pub use gpu_workers::*;
 pub use inner::*;
+pub use scheduler::*;
 
 pub type InnerCpuProver<const MAX_NUM_PROOFS: usize> = InnerAggregationProver<
     CpuBackend<BabyBearPoseidon2Config>,
     VerifierSubCircuit<MAX_NUM_PROOFS>,
     InnerTraceGenImpl,
 >;
+
+#[cfg(feature = "cuda")]
+pub type InnerGpuProver<const MAX_NUM_PROOFS: usize> =
+    InnerAggregationProver<GpuBackend, VerifierSubCircuit<MAX_NUM_PROOFS>, InnerTraceGenImpl>;
 
 #[cfg(not(feature = "cuda"))]
 type DefaultInnerBackend = CpuBackend<BabyBearPoseidon2Config>;

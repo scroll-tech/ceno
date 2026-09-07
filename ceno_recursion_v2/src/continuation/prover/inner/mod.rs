@@ -338,6 +338,10 @@ where
         self.vk.clone()
     }
 
+    pub fn get_pk(&self) -> Arc<MultiStarkProvingKey<SC>> {
+        self.pk.clone()
+    }
+
     pub fn child_vk_air_count(&self) -> usize {
         self.child_vk.circuit_vks.len()
     }
