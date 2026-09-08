@@ -20,7 +20,8 @@ use crate::{
 };
 
 use super::{
-    AggregationOptions, InnerCpuProver, RecursionNodeKind, RootSC, internal_aggregation_chunk_plan,
+    AggregationOptions, InnerCpuProver, RecursionNodeKind, RootSC, SystemParams,
+    internal_aggregation_chunk_plan,
 };
 
 type RecursivePk = MultiStarkProvingKey<BabyBearPoseidon2Config>;
@@ -42,6 +43,22 @@ pub struct RecursionHostAssets<const LEAF_FANIN: usize, const INTERNAL_FANIN: us
     recursive_vks: Vec<Arc<RecursiveVk>>,
     root_pk: Arc<RootPk>,
     root_vk: Arc<MultiStarkVerifyingKey<RootSC>>,
+}
+
+/// Shard-independent host proving material that can be prepared before replay determines the
+/// exact shard count. It is bound to one child VK, aggregation configuration, and fan-in pair.
+pub struct RecursionHostAssetsTemplate<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> {
+    child_vk: Arc<RecursionVk>,
+    leaf_pk: Arc<RecursivePk>,
+    leaf_vk: Arc<RecursiveVk>,
+    leaf_bridge_pk: Arc<RecursivePk>,
+    leaf_bridge_vk: Arc<RecursiveVk>,
+    initial_recursive_pk: Arc<RecursivePk>,
+    initial_recursive_vk: Arc<RecursiveVk>,
+    initial_root_pk: Arc<RootPk>,
+    initial_root_vk: Arc<MultiStarkVerifyingKey<RootSC>>,
+    internal_params: SystemParams,
+    root_params: SystemParams,
 }
 
 pub enum CpuRecursionProver<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> {
@@ -67,12 +84,17 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
         total_shards: usize,
         options: &AggregationOptions,
     ) -> Result<Self> {
+        RecursionHostAssetsTemplate::new(child_vk, options)?.bind(total_shards)
+    }
+}
+
+impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
+    RecursionHostAssetsTemplate<LEAF_FANIN, INTERNAL_FANIN>
+{
+    pub fn new(child_vk: Arc<RecursionVk>, options: &AggregationOptions) -> Result<Self> {
         if LEAF_FANIN == 0 {
             return Err(eyre!("leaf aggregation fanin must be non-zero"));
         }
-        let leaf_count = total_shards.div_ceil(LEAF_FANIN);
-        let plan = internal_aggregation_chunk_plan(leaf_count, INTERNAL_FANIN)?;
-
         let leaf = InnerCpuProver::<LEAF_FANIN>::new::<CpuEngine>(
             child_vk.clone(),
             options.leaf_system_params.clone(),
@@ -90,42 +112,75 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
         let leaf_bridge_pk = leaf_bridge.get_pk();
         let leaf_bridge_vk = leaf_bridge.get_vk();
 
-        let mut recursive_pks = Vec::with_capacity(1 + plan.internal_recursive_self_layers.len());
-        let mut recursive_vks = Vec::with_capacity(recursive_pks.capacity());
-        let mut recursive = CenoRecursiveCpuProver::<INTERNAL_FANIN>::new(
+        let initial_recursive = CenoRecursiveCpuProver::<INTERNAL_FANIN>::new(
             leaf_bridge_vk.clone(),
             internal_params.clone(),
         );
-        recursive_pks.push(recursive.get_pk());
-        recursive_vks.push(recursive.get_vk());
-        for _ in &plan.internal_recursive_self_layers {
-            recursive = CenoRecursiveCpuProver::<INTERNAL_FANIN>::new(
-                recursive.get_vk(),
-                internal_params.clone(),
-            );
-            recursive_pks.push(recursive.get_pk());
-            recursive_vks.push(recursive.get_vk());
-        }
-
-        let final_vk = recursive_vks
-            .last()
-            .expect("the mandatory initial recursive layer always exists")
-            .clone();
-        let root = CenoRootCpuProver::new(final_vk, options.root_system_params());
-
+        let initial_recursive_pk = initial_recursive.get_pk();
+        let initial_recursive_vk = initial_recursive.get_vk();
+        let root_params = options.root_system_params();
+        let initial_root =
+            CenoRootCpuProver::new(initial_recursive_vk.clone(), root_params.clone());
         Ok(Self {
             child_vk,
             leaf_pk,
             leaf_vk,
             leaf_bridge_pk,
             leaf_bridge_vk,
-            recursive_pks,
-            recursive_vks,
-            root_pk: root.get_pk(),
-            root_vk: root.get_vk(),
+            initial_recursive_pk,
+            initial_recursive_vk,
+            initial_root_pk: initial_root.get_pk(),
+            initial_root_vk: initial_root.get_vk(),
+            internal_params,
+            root_params,
         })
     }
 
+    pub fn bind(
+        &self,
+        total_shards: usize,
+    ) -> Result<RecursionHostAssets<LEAF_FANIN, INTERNAL_FANIN>> {
+        let leaf_count = total_shards.div_ceil(LEAF_FANIN);
+        let plan = internal_aggregation_chunk_plan(leaf_count, INTERNAL_FANIN)?;
+        let mut recursive_pks = Vec::with_capacity(1 + plan.internal_recursive_self_layers.len());
+        let mut recursive_vks = Vec::with_capacity(recursive_pks.capacity());
+        recursive_pks.push(self.initial_recursive_pk.clone());
+        recursive_vks.push(self.initial_recursive_vk.clone());
+        let mut recursive_vk = self.initial_recursive_vk.clone();
+        for _ in &plan.internal_recursive_self_layers {
+            let recursive = CenoRecursiveCpuProver::<INTERNAL_FANIN>::new(
+                recursive_vk,
+                self.internal_params.clone(),
+            );
+            recursive_pks.push(recursive.get_pk());
+            recursive_vk = recursive.get_vk();
+            recursive_vks.push(recursive_vk.clone());
+        }
+
+        let (root_pk, root_vk) = if plan.internal_recursive_self_layers.is_empty() {
+            (self.initial_root_pk.clone(), self.initial_root_vk.clone())
+        } else {
+            let root = CenoRootCpuProver::new(recursive_vk, self.root_params.clone());
+            (root.get_pk(), root.get_vk())
+        };
+
+        Ok(RecursionHostAssets {
+            child_vk: self.child_vk.clone(),
+            leaf_pk: self.leaf_pk.clone(),
+            leaf_vk: self.leaf_vk.clone(),
+            leaf_bridge_pk: self.leaf_bridge_pk.clone(),
+            leaf_bridge_vk: self.leaf_bridge_vk.clone(),
+            recursive_pks,
+            recursive_vks,
+            root_pk,
+            root_vk,
+        })
+    }
+}
+
+impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
+    RecursionHostAssets<LEAF_FANIN, INTERNAL_FANIN>
+{
     pub fn leaf_vk(&self) -> Arc<RecursiveVk> {
         self.leaf_vk.clone()
     }

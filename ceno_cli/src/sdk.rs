@@ -9,7 +9,8 @@ use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 #[cfg(feature = "gpu")]
 use ceno_recursion_v2::continuation::prover::{
-    GpuRecursionBatchOutput, GpuRecursionSession, RecursionWorkerMetrics, RootProvingOutput,
+    GpuRecursionBatchOutput, GpuRecursionSession, RecursionHostAssetsBuilder,
+    RecursionWorkerMetrics, RootProvingOutput,
 };
 use ceno_recursion_v2::{
     continuation::prover::{AggProver, AggregationOptions, LeafVk, RootProof, SystemParams},
@@ -59,6 +60,9 @@ pub type CenoRecursionV2RootProof = RootProof;
 pub type CenoRecursionV2LeafVk = LeafVk;
 #[cfg(feature = "gpu")]
 type DefaultGpuRecursionSession = GpuRecursionSession<DEFAULT_LEAF_FANIN, DEFAULT_INTERNAL_FANIN>;
+#[cfg(feature = "gpu")]
+type DefaultRecursionHostAssetsBuilder =
+    RecursionHostAssetsBuilder<DEFAULT_LEAF_FANIN, DEFAULT_INTERNAL_FANIN>;
 
 #[cfg(feature = "gpu")]
 #[derive(Clone, Debug, Default)]
@@ -169,6 +173,7 @@ impl<S> RecursionOrchestrationState<S> {
 pub struct StreamingRecursionOrchestrator {
     options: AggregationOptions,
     state: Mutex<RecursionOrchestrationState<DefaultGpuRecursionSession>>,
+    assets_builder: Mutex<Option<DefaultRecursionHostAssetsBuilder>>,
     started: Instant,
 }
 
@@ -178,6 +183,19 @@ impl StreamingRecursionOrchestrator {
         Self {
             options,
             state: Mutex::new(RecursionOrchestrationState::new()),
+            assets_builder: Mutex::new(None),
+            started: Instant::now(),
+        }
+    }
+
+    fn with_assets_builder(
+        options: AggregationOptions,
+        assets_builder: DefaultRecursionHostAssetsBuilder,
+    ) -> Self {
+        Self {
+            options,
+            state: Mutex::new(RecursionOrchestrationState::new()),
+            assets_builder: Mutex::new(Some(assets_builder)),
             started: Instant::now(),
         }
     }
@@ -226,12 +244,28 @@ impl BaseProvingEventSink<RecursionField, RecursionPcs> for StreamingRecursionOr
         &self,
         total_shards: usize,
         app_vk: ceno_zkvm::structs::ZKVMVerifyingKey<RecursionField, RecursionPcs>,
+        app_vk_digest: [RecursionField; ceno_zkvm::structs::VK_DIGEST_LEN],
     ) -> Result<(), String> {
         let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
-        let app_vk = Arc::new(app_vk);
-        warm_child_vk_digest_cache(&app_vk);
+        let assets_builder = self
+            .assets_builder
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .take()
+            .map(Ok)
+            .unwrap_or_else(|| {
+                RecursionHostAssetsBuilder::spawn(
+                    Arc::new(app_vk),
+                    app_vk_digest,
+                    self.options.clone(),
+                )
+                .map_err(|error| error.to_string())
+            })?;
+        assets_builder
+            .validate_child_vk_digest(&app_vk_digest)
+            .map_err(|error| error.to_string())?;
         state.start(
-            GpuRecursionSession::new(app_vk, total_shards, self.options.clone())
+            GpuRecursionSession::new_with_assets_builder(total_shards, assets_builder)
                 .map_err(|error| error.to_string())?,
         )?;
         tracing::info!(
@@ -361,6 +395,8 @@ where
     pub fulltracer_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
 
     aggregation_options: Option<AggregationOptions>,
+    #[cfg(feature = "gpu")]
+    recursion_assets_builder: Option<DefaultRecursionHostAssetsBuilder>,
     _phantom: PhantomData<(SC, VC)>,
 }
 
@@ -389,6 +425,8 @@ where
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             fulltracer_aot_program: None,
             aggregation_options: None,
+            #[cfg(feature = "gpu")]
+            recursion_assets_builder: None,
             _phantom: PhantomData,
         }
     }
@@ -415,6 +453,8 @@ where
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             fulltracer_aot_program: None,
             aggregation_options: None,
+            #[cfg(feature = "gpu")]
+            recursion_assets_builder: None,
             _phantom: PhantomData,
         }
     }
@@ -428,6 +468,11 @@ where
     }
 
     pub fn set_aggregation_options(&mut self, options: AggregationOptions) {
+        #[cfg(feature = "gpu")]
+        assert!(
+            self.recursion_assets_builder.is_none(),
+            "aggregation options cannot change after streaming recursion preparation"
+        );
         self.aggregation_options = Some(options);
     }
 
@@ -723,6 +768,35 @@ where
 
 #[cfg(feature = "gpu")]
 impl<SC, VC> CenoSDK<RecursionField, RecursionPcs, SC, VC> {
+    pub fn prepare_streaming_recursion(&mut self) -> Result<()> {
+        anyhow::ensure!(
+            self.recursion_assets_builder.is_none(),
+            "streaming recursion host assets were already prepared"
+        );
+        let prover = self
+            .zkvm_prover
+            .as_ref()
+            .context("ZKVMProver is not initialized")?;
+        let app_vk = Arc::new(
+            prover
+                .cached_verifier()
+                .context("initial GPU prover has no cached verifier")?
+                .vk
+                .clone(),
+        );
+        let app_vk_digest = prover.vk_digest();
+        self.recursion_assets_builder = Some(
+            RecursionHostAssetsBuilder::spawn(app_vk, app_vk_digest, self.aggregation_options())
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+        );
+        tracing::info!(
+            target: "ceno_multi_gpu",
+            phase = "recursion_host_assets_prebuild_started",
+            "recursion host-asset template prebuild started"
+        );
+        Ok(())
+    }
+
     pub fn generate_streaming_recursion_proof(
         &mut self,
         hints: CenoStdin,
@@ -730,8 +804,29 @@ impl<SC, VC> CenoSDK<RecursionField, RecursionPcs, SC, VC> {
         max_steps: usize,
     ) -> Result<StreamingRecursionOutput> {
         let total_started = Instant::now();
-        let recursion = Arc::new(StreamingRecursionOrchestrator::new(
-            self.aggregation_options(),
+        let options = self.aggregation_options();
+        let assets_builder = match self.recursion_assets_builder.take() {
+            Some(builder) => builder,
+            None => {
+                let prover = self
+                    .zkvm_prover
+                    .as_ref()
+                    .context("ZKVMProver is not initialized")?;
+                let app_vk = Arc::new(
+                    prover
+                        .cached_verifier()
+                        .context("initial GPU prover has no cached verifier")?
+                        .vk
+                        .clone(),
+                );
+                let app_vk_digest = prover.vk_digest();
+                RecursionHostAssetsBuilder::spawn(app_vk, app_vk_digest, options.clone())
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?
+            }
+        };
+        let recursion = Arc::new(StreamingRecursionOrchestrator::with_assets_builder(
+            options,
+            assets_builder,
         ));
         let event_sink = recursion.clone() as Arc<dyn BaseProvingEventSink<_, _>>;
         let base_started = Instant::now();

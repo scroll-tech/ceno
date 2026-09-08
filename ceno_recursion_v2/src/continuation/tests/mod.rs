@@ -4,8 +4,8 @@ mod prover_integration {
         circuit::{Circuit, root::CenoRootCircuit},
         continuation::prover::{
             AggProver, AggregationOptions, ChildVkKind, CpuRecursionProver, InnerCpuProver,
-            RecursionHostAssets, RecursionNodeKind, internal_aggregation_chunk_plan,
-            verify_root_proof,
+            RecursionHostAssets, RecursionHostAssetsTemplate, RecursionNodeKind,
+            internal_aggregation_chunk_plan, verify_root_proof,
         },
         system::{
             AggregationSubCircuit, RecursionField, RecursionProof, RecursionVk, VerifierSubCircuit,
@@ -255,7 +255,8 @@ mod prover_integration {
             return Ok(());
         };
         let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
-        let assets = RecursionHostAssets::<2, 2>::new(Arc::new(child_vk), 17, &options)?;
+        let template = RecursionHostAssetsTemplate::<2, 2>::new(Arc::new(child_vk), &options)?;
+        let assets = template.bind(17)?;
         assert_eq!(assets.recursive_depth_count(), 3);
 
         let CpuRecursionProver::Leaf(leaf) = assets.hydrate_cpu(RecursionNodeKind::Leaf)? else {
@@ -301,6 +302,17 @@ mod prover_integration {
                     level: assets.recursive_depth_count(),
                 })
                 .is_err()
+        );
+
+        let shallow_assets = template.bind(1)?;
+        assert_eq!(shallow_assets.recursive_depth_count(), 1);
+        let CpuRecursionProver::Root(root) = shallow_assets.hydrate_cpu(RecursionNodeKind::Root)?
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            serialized(root.get_vk().as_ref()),
+            serialized(shallow_assets.root_vk().as_ref())
         );
         Ok(())
     }

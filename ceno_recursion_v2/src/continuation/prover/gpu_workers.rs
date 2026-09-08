@@ -12,19 +12,108 @@ use openvm_cuda_backend::BabyBearPoseidon2GpuEngine;
 use openvm_stark_backend::proof::Proof;
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 
-use crate::system::{RecursionProof, RecursionVk};
+use crate::system::{RecursionProof, RecursionVk, child_vk_digest, warm_child_vk_digest_cache};
 
 use super::{
-    AggregationOptions, ChildVkKind, GpuRecursionProver, RecursionHostAssets, RecursionNodeKind,
-    RecursionPlan, RecursionScheduler, RecursionTask, RecursionTaskResult, RecursionWorkerError,
-    RecursionWorkerMetrics, RecursionWorkerPhase, RootProof, RootProvingOutput,
-    run_scheduler_worker, verify_root_proof,
+    AggregationOptions, ChildVkKind, GpuRecursionProver, RecursionHostAssets,
+    RecursionHostAssetsTemplate, RecursionNodeKind, RecursionPlan, RecursionScheduler,
+    RecursionTask, RecursionTaskResult, RecursionWorkerError, RecursionWorkerMetrics,
+    RecursionWorkerPhase, RootProof, RootProvingOutput, run_scheduler_worker, verify_root_proof,
 };
 
 type InternalProof = Proof<BabyBearPoseidon2Config>;
 type GpuScheduler = RecursionScheduler<RecursionProof, InternalProof, RootProof>;
 type GpuWorkerHandle =
     thread::JoinHandle<std::result::Result<RecursionWorkerMetrics, RecursionWorkerError>>;
+type HostAssets<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> =
+    RecursionHostAssets<LEAF_FANIN, INTERNAL_FANIN>;
+type HostAssetsTemplate<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> =
+    RecursionHostAssetsTemplate<LEAF_FANIN, INTERNAL_FANIN>;
+type HostAssetsBuilder<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> = thread::JoinHandle<
+    Result<(
+        Arc<HostAssets<LEAF_FANIN, INTERNAL_FANIN>>,
+        HostAssetBuildTimings,
+    )>,
+>;
+
+#[derive(Clone, Copy)]
+struct HostAssetBuildTimings {
+    template: std::time::Duration,
+    template_wait: std::time::Duration,
+    bind: std::time::Duration,
+}
+
+pub struct RecursionHostAssetsBuilder<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> {
+    child_vk_digest: [crate::system::RecursionField; ceno_zkvm::structs::VK_DIGEST_LEN],
+    handle: thread::JoinHandle<
+        Result<(
+            Arc<HostAssetsTemplate<LEAF_FANIN, INTERNAL_FANIN>>,
+            std::time::Duration,
+        )>,
+    >,
+}
+
+impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
+    RecursionHostAssetsBuilder<LEAF_FANIN, INTERNAL_FANIN>
+{
+    pub fn spawn(
+        child_vk: Arc<RecursionVk>,
+        child_vk_digest: [crate::system::RecursionField; ceno_zkvm::structs::VK_DIGEST_LEN],
+        options: AggregationOptions,
+    ) -> Result<Self> {
+        let handle = thread::Builder::new()
+            .name("recursion-host-template".to_owned())
+            .spawn(move || {
+                let started = Instant::now();
+                warm_child_vk_digest_cache(&child_vk);
+                let template = Arc::new(RecursionHostAssetsTemplate::new(child_vk, &options)?);
+                Ok((template, started.elapsed()))
+            })?;
+        Ok(Self {
+            child_vk_digest,
+            handle,
+        })
+    }
+
+    pub fn validate_child_vk_digest(
+        &self,
+        child_vk_digest: &[crate::system::RecursionField; ceno_zkvm::structs::VK_DIGEST_LEN],
+    ) -> Result<()> {
+        if &self.child_vk_digest != child_vk_digest {
+            return Err(eyre!(
+                "prebuilt recursion host assets do not match the proving app VK"
+            ));
+        }
+        Ok(())
+    }
+
+    fn bind(
+        self,
+        total_shards: usize,
+    ) -> Result<(
+        Arc<HostAssets<LEAF_FANIN, INTERNAL_FANIN>>,
+        HostAssetBuildTimings,
+    )> {
+        let wait_started = Instant::now();
+        let (template, template_time) = self.handle.join().map_err(|payload| {
+            eyre!(
+                "recursion host-asset template builder panicked: {}",
+                panic_message(payload)
+            )
+        })??;
+        let template_wait = wait_started.elapsed();
+        let bind_started = Instant::now();
+        let assets = Arc::new(template.bind(total_shards)?);
+        Ok((
+            assets,
+            HostAssetBuildTimings {
+                template: template_time,
+                template_wait,
+                bind: bind_started.elapsed(),
+            },
+        ))
+    }
+}
 
 pub struct GpuRecursionBatchOutput {
     pub root_output: RootProvingOutput,
@@ -34,8 +123,8 @@ pub struct GpuRecursionBatchOutput {
 
 pub struct GpuRecursionSession<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> {
     scheduler: Arc<GpuScheduler>,
-    assets: Arc<RecursionHostAssets<LEAF_FANIN, INTERNAL_FANIN>>,
-    root_vk: super::RootVk,
+    assets: Option<Arc<HostAssets<LEAF_FANIN, INTERNAL_FANIN>>>,
+    assets_builder: Option<HostAssetsBuilder<LEAF_FANIN, INTERNAL_FANIN>>,
     released_devices: HashSet<usize>,
     workers: Vec<GpuWorkerHandle>,
 }
@@ -45,22 +134,63 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
 {
     pub fn new(
         child_vk: Arc<RecursionVk>,
+        child_vk_digest: [crate::system::RecursionField; ceno_zkvm::structs::VK_DIGEST_LEN],
         total_shards: usize,
         options: AggregationOptions,
     ) -> Result<Self> {
-        let assets = Arc::new(RecursionHostAssets::new(child_vk, total_shards, &options)?);
-        let root_vk = assets.root_vk().as_ref().clone();
+        Self::new_with_assets_builder(
+            total_shards,
+            RecursionHostAssetsBuilder::spawn(child_vk, child_vk_digest, options)?,
+        )
+    }
+
+    pub fn new_with_assets_builder(
+        total_shards: usize,
+        assets_template: RecursionHostAssetsBuilder<LEAF_FANIN, INTERNAL_FANIN>,
+    ) -> Result<Self> {
+        let scheduler = Arc::new(GpuScheduler::new(RecursionPlan::new(
+            total_shards,
+            LEAF_FANIN,
+            INTERNAL_FANIN,
+        )?));
+        let assets_builder = thread::Builder::new()
+            .name("recursion-host-assets".to_owned())
+            .spawn(move || assets_template.bind(total_shards))?;
         Ok(Self {
-            scheduler: Arc::new(GpuScheduler::new(RecursionPlan::new(
-                total_shards,
-                LEAF_FANIN,
-                INTERNAL_FANIN,
-            )?)),
-            assets,
-            root_vk,
+            scheduler,
+            assets: None,
+            assets_builder: Some(assets_builder),
             released_devices: HashSet::new(),
             workers: Vec::new(),
         })
+    }
+
+    fn resolve_assets(&mut self) -> Result<Arc<HostAssets<LEAF_FANIN, INTERNAL_FANIN>>> {
+        if let Some(assets) = &self.assets {
+            return Ok(assets.clone());
+        }
+        let wait_started = Instant::now();
+        let builder = self
+            .assets_builder
+            .take()
+            .ok_or_else(|| eyre!("recursion host-asset builder is unavailable"))?;
+        let (assets, timings) = builder.join().map_err(|payload| {
+            eyre!(
+                "recursion host-asset builder panicked: {}",
+                panic_message(payload)
+            )
+        })??;
+        tracing::info!(
+            target: "ceno_multi_gpu",
+            template_build_ms = timings.template.as_millis(),
+            template_wait_ms = timings.template_wait.as_millis(),
+            bind_ms = timings.bind.as_millis(),
+            release_wait_ms = wait_started.elapsed().as_millis(),
+            phase = "recursion_host_assets_ready",
+            "recursion host assets ready"
+        );
+        self.assets = Some(assets.clone());
+        Ok(assets)
     }
 
     pub fn accept_base_proof(&self, shard_id: usize, proof: RecursionProof) -> Result<()> {
@@ -77,7 +207,9 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
     pub fn release_device(&mut self, device_id: usize) -> Result<()> {
         register_released_device(&mut self.released_devices, device_id)?;
         let scheduler = self.scheduler.clone();
-        let assets = self.assets.clone();
+        let assets = self.resolve_assets().inspect_err(|error| {
+            self.scheduler.cancel(error.to_string());
+        })?;
         let worker = thread::Builder::new()
             .name(format!("recursion-gpu-{device_id}"))
             .spawn(move || {
@@ -117,6 +249,7 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
     }
 
     pub fn finish(mut self) -> Result<GpuRecursionBatchOutput> {
+        let assets = self.resolve_assets()?;
         if self.workers.is_empty() {
             return Err(eyre!("no base GPU was released for recursion"));
         }
@@ -142,6 +275,7 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
             .take_root_proof()?
             .ok_or_else(|| eyre!("recursion workers exited without a root proof"))?;
         drop(self.scheduler.take_base_proofs()?);
+        let root_vk = assets.root_vk().as_ref().clone();
         let first_device = *self
             .released_devices
             .iter()
@@ -149,12 +283,12 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
             .expect("at least one released device was checked");
         openvm_cuda_common::common::set_device_by_id(i32::try_from(first_device)?)?;
         let root_verification_started = Instant::now();
-        verify_root_proof(&self.root_vk, &root_proof)?;
+        verify_root_proof(&root_vk, &root_proof)?;
         let root_verification_time = root_verification_started.elapsed();
         worker_metrics.sort_by_key(|metrics| metrics.device_id);
         Ok(GpuRecursionBatchOutput {
             root_output: RootProvingOutput {
-                root_vk: self.root_vk,
+                root_vk,
                 root_proof,
             },
             worker_metrics,
@@ -187,7 +321,8 @@ pub fn prove_batch_with_gpu_workers<const LEAF_FANIN: usize, const INTERNAL_FANI
     }
 
     let mut session = GpuRecursionSession::<LEAF_FANIN, INTERNAL_FANIN>::new(
-        child_vk,
+        child_vk.clone(),
+        child_vk_digest(&child_vk),
         shard_proofs.len(),
         options,
     )?;

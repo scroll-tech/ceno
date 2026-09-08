@@ -4216,6 +4216,7 @@ pub trait BaseProvingEventSink<E: ExtensionField, PCS: PolynomialCommitmentSchem
         &self,
         total_shards: usize,
         app_vk: ZKVMVerifyingKey<E, PCS>,
+        app_vk_digest: [E; crate::structs::VK_DIGEST_LEN],
     ) -> Result<(), String>;
     fn on_proof_ready(&self, ready: BaseProofReady<E, PCS>) -> Result<(), String>;
     fn on_device_released(&self, released: BaseDeviceReleased) -> Result<(), String>;
@@ -4496,14 +4497,18 @@ where
     let verifier = sdk_prover
         .cached_verifier()
         .ok_or("initial GPU prover has no cached verifier")?;
+    let cached_verifier_clone_elapsed = verifier_started.elapsed();
+    let recursion_session_started = std::time::Instant::now();
     if let Some(sink) = &event_sink {
-        sink.on_started(total_shards, verifier.vk.clone())?;
+        sink.on_started(total_shards, verifier.vk.clone(), vk_digest)?;
     }
+    let recursion_session_start_elapsed = recursion_session_started.elapsed();
     tracing::info!(
         target: "ceno_multi_gpu",
         emulation_ms = emulation_elapsed.as_millis(),
         vk_materialize_ms = 0,
-        verifier_construct_ms = verifier_started.elapsed().as_millis(),
+        cached_verifier_clone_ms = cached_verifier_clone_elapsed.as_millis(),
+        recursion_session_start_ms = recursion_session_start_elapsed.as_millis(),
         total_ms = pipeline_started.elapsed().as_millis(),
         phase = "pre_worker_setup",
         "multi-GPU base setup event"

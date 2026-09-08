@@ -350,12 +350,12 @@ impl<
     }
 
     #[cfg(feature = "gpu")]
-    pub(crate) fn vk_digest(&self) -> [E; VK_DIGEST_LEN] {
+    pub fn vk_digest(&self) -> [E; VK_DIGEST_LEN] {
         self.vk_digest
     }
 
     #[cfg(feature = "gpu")]
-    pub(crate) fn cached_verifier(&self) -> Option<Arc<ZKVMVerifier<E, PCS>>> {
+    pub fn cached_verifier(&self) -> Option<Arc<ZKVMVerifier<E, PCS>>> {
         self.cached_verifier.clone()
     }
 
