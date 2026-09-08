@@ -1406,6 +1406,8 @@ fn spawn_compact_replay_pipeline(
                 } else {
                     unowned_shards += 1;
                 }
+                // Every replay advances canonical VM state and contributes the same digest.
+                // Only the owning worker retains compact arenas for witness construction.
                 let shard = replay
                     .next_shard(owned, false, Some)
                     .expect("compact replay ended before its shard plan");
@@ -4212,6 +4214,8 @@ pub struct BaseDeviceReleased {
 pub trait BaseProvingEventSink<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>:
     Send + Sync
 {
+    // Events may start speculative recursion, but they cannot authorize root publication; the
+    // caller opens that gate only after the complete canonical base verification succeeds.
     fn on_started(
         &self,
         total_shards: usize,
@@ -4523,6 +4527,7 @@ where
         let mut emulation_result = Some(emulation_result);
         let mut initial_prover = Some(sdk_prover);
         for (worker_index, worker) in prepared.workers.iter().enumerate() {
+            // A depth-one FIFO bounds the extra full-proof footprint and backpressures its owner.
             let (tx, rx) = std::sync::mpsc::sync_channel::<BaseWorkerEvent<E, PCS>>(1);
             ready_receivers.push(Some(rx));
             let worker_inputs_started = std::time::Instant::now();
@@ -4703,6 +4708,8 @@ where
                     )),
                 };
                 if result.is_ok() {
+                    // All device-backed prover state lived inside `run` and is now dropped. Only
+                    // after synchronization and pool trim may this physical GPU join recursion.
                     let released_started = std::time::Instant::now();
                     let _binding = gkr_iop::gpu::bind_thread_default_stream(hal.clone());
                     let memory_before = ceno_gpu::get_cuda_mem_info().unwrap_or((0, 0));
@@ -4763,6 +4770,8 @@ where
         let mut collector = BaseProofCollectorState::new(total_shards);
         let mut received = 0usize;
         let mut collector_error = None;
+        // Drain each bounded FIFO fairly. The first invalid proof or worker error cancels every
+        // producer, but all scoped workers are still joined before the error is returned.
         while received < total_shards && collector_error.is_none() {
             let mut made_progress = false;
             for receiver in &mut ready_receivers {
@@ -4852,6 +4861,8 @@ where
             phase = "base_proofs_ready",
             "Stage 1 canonical base proofs ready"
         );
+        // Verification runs exactly once, after range/owner/duplicate checks and canonical
+        // shard ordering are complete. Recursion may overlap, but cannot publish its root yet.
         let base_verification_started = std::time::Instant::now();
         let proofs = verify_complete_base_proofs(&collector, proofs, |proofs| {
             run_e2e_full_trace_verify(&verifier, proofs, exit_code, max_steps)

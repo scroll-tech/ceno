@@ -459,6 +459,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Gp
 
 pub struct GpuProver<PB: ProverBackend + 'static> {
     pub backend: Arc<PB>,
+    /// Owned for the prover lifetime; thread bindings only borrow this device identity via `Arc`.
     pub cuda_hal: Arc<CudaHalBB31>,
 }
 

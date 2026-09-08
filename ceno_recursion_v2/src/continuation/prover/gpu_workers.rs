@@ -210,6 +210,8 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
         let assets = self.resolve_assets().inspect_err(|error| {
             self.scheduler.cancel(error.to_string());
         })?;
+        // The base owner has already synchronized, dropped device state, and trimmed this GPU.
+        // Hydration therefore happens on the worker thread after binding the released device.
         let worker = thread::Builder::new()
             .name(format!("recursion-gpu-{device_id}"))
             .spawn(move || {
@@ -402,6 +404,8 @@ fn execute_gpu_task<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>(
     let kind = task.node().kind;
     if active.as_ref().map(|(active_kind, _)| *active_kind) != Some(kind) {
         if active.take().is_some() {
+            // Proving keys are device-local. Finish and release the previous circuit kind before
+            // hydrating the next one so allocations never cross contexts or overlap peak pools.
             openvm_cuda_common::memory_manager::synchronize_and_trim_device(u32::try_from(
                 device_id,
             )?)?;

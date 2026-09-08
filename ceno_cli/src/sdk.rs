@@ -785,6 +785,8 @@ impl<SC, VC> CenoSDK<RecursionField, RecursionPcs, SC, VC> {
                 .clone(),
         );
         let app_vk_digest = prover.vk_digest();
+        // This is the earliest exact-VK point and intentionally precedes AOT/base replay. The
+        // later shard-aware bind is cheap and occurs only after preflight reveals shard count.
         self.recursion_assets_builder = Some(
             RecursionHostAssetsBuilder::spawn(app_vk, app_vk_digest, self.aggregation_options())
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?,

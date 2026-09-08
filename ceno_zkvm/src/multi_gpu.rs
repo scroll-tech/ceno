@@ -134,6 +134,8 @@ impl MultiGpuConfig {
                 fixed_buffer_bytes = FIXED_BUFFER_BYTES,
                 "selected CUDA device profile"
             );
+            // The configured ordinal is authoritative: every worker owns a HAL created and
+            // smoke-tested on that device, rather than consulting process-global selection.
             let hal = Arc::new(CudaHalBB31::new(*device_id).map_err(|error| {
                 format!("failed to construct HAL for GPU device {device_id}: {error}")
             })?);

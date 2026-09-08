@@ -77,18 +77,6 @@ pub enum GpuRecursionProver<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize
 }
 
 impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
-    RecursionHostAssets<LEAF_FANIN, INTERNAL_FANIN>
-{
-    pub fn new(
-        child_vk: Arc<RecursionVk>,
-        total_shards: usize,
-        options: &AggregationOptions,
-    ) -> Result<Self> {
-        RecursionHostAssetsTemplate::new(child_vk, options)?.bind(total_shards)
-    }
-}
-
-impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
     RecursionHostAssetsTemplate<LEAF_FANIN, INTERNAL_FANIN>
 {
     pub fn new(child_vk: Arc<RecursionVk>, options: &AggregationOptions) -> Result<Self> {
@@ -140,6 +128,8 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
         &self,
         total_shards: usize,
     ) -> Result<RecursionHostAssets<LEAF_FANIN, INTERNAL_FANIN>> {
+        // Shard count changes only the required recursive depth. Reuse all exact-VK material
+        // already present in the template and construct keys only for genuinely deeper layers.
         let leaf_count = total_shards.div_ceil(LEAF_FANIN);
         let plan = internal_aggregation_chunk_plan(leaf_count, INTERNAL_FANIN)?;
         let mut recursive_pks = Vec::with_capacity(1 + plan.internal_recursive_self_layers.len());

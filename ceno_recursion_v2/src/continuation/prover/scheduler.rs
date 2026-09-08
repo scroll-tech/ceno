@@ -82,6 +82,8 @@ impl RecursionPlan {
             RecursionNodeKind::LeafBridge,
             1,
         );
+        // Preserve the verifier's mandatory bridge and initial-recursive transcript layers even
+        // when a partial tail means either layer has only one child.
         current = push_parent_layer(
             &mut nodes,
             &current,
@@ -116,10 +118,10 @@ impl RecursionPlan {
         let mut parents = vec![None; nodes.len()];
         for node in &nodes {
             for child in &node.children {
-                if let RecursionNodeInput::Node(child) = child {
-                    if parents[child.0].replace(node.id).is_some() {
-                        return Err(eyre!("recursion node {:?} has multiple parents", child));
-                    }
+                if let RecursionNodeInput::Node(child) = child
+                    && parents[child.0].replace(node.id).is_some()
+                {
+                    return Err(eyre!("recursion node {:?} has multiple parents", child));
                 }
             }
         }
@@ -241,7 +243,6 @@ struct SchedulerState<B, P, R> {
     status: Vec<NodeStatus>,
     ready: Vec<RecursionNodeId>,
     cancelled: Option<String>,
-    shutdown: bool,
 }
 
 pub struct RecursionScheduler<B, P, R> {
@@ -307,15 +308,10 @@ impl<B, P, R> RecursionScheduler<B, P, R> {
                 status: vec![NodeStatus::Pending; node_count],
                 ready: Vec::new(),
                 cancelled: None,
-                shutdown: false,
             }),
             plan,
             changed: Condvar::new(),
         }
-    }
-
-    pub fn plan(&self) -> &RecursionPlan {
-        &self.plan
     }
 
     pub fn accept_base_proof(&self, shard_id: usize, proof: B) -> Result<()> {
@@ -329,7 +325,7 @@ impl<B, P, R> RecursionScheduler<B, P, R> {
             return Err(eyre!("duplicate base proof shard {shard_id}"));
         }
         state.base_proofs[shard_id] = Some(proof);
-        decrement_and_enqueue(&self.plan, &mut state, leaf)?;
+        decrement_and_enqueue(&mut state, leaf)?;
         self.changed.notify_all();
         Ok(())
     }
@@ -343,9 +339,11 @@ impl<B, P, R> RecursionScheduler<B, P, R> {
                 state.status[id.0] = NodeStatus::Running;
                 return materialize_task(&self.plan, &mut state, id).map(Some);
             }
-            if state.shutdown || state.root_proof.is_some() {
+            if state.root_proof.is_some() {
                 return Ok(None);
             }
+            // The mutex closes the notification-before-wait race; completion/cancellation always
+            // mutates state under the same lock before waking every eligible worker.
             state = self.changed.wait(state).unwrap();
         }
     }
@@ -414,13 +412,13 @@ impl<B, P, R> RecursionScheduler<B, P, R> {
                 );
             }
         }
-        if let Some(parent) = self.plan.parent(id) {
-            if state.pending[parent.0] == 0 {
-                return self.fail_completion(
-                    &mut state,
-                    format!("recursion node {} readiness underflow", parent.0),
-                );
-            }
+        if let Some(parent) = self.plan.parent(id)
+            && state.pending[parent.0] == 0
+        {
+            return self.fail_completion(
+                &mut state,
+                format!("recursion node {} readiness underflow", parent.0),
+            );
         }
 
         match result {
@@ -439,7 +437,7 @@ impl<B, P, R> RecursionScheduler<B, P, R> {
         }
         state.status[id.0] = NodeStatus::Complete;
         if let Some(parent) = self.plan.parent(id) {
-            decrement_and_enqueue(&self.plan, &mut state, parent)?;
+            decrement_and_enqueue(&mut state, parent)?;
         }
         self.changed.notify_all();
         Ok(())
@@ -458,12 +456,6 @@ impl<B, P, R> RecursionScheduler<B, P, R> {
         if state.cancelled.is_none() {
             state.cancelled = Some(error.into());
         }
-        self.changed.notify_all();
-    }
-
-    pub fn shutdown(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.shutdown = true;
         self.changed.notify_all();
     }
 
@@ -571,7 +563,6 @@ fn ensure_running<B, P, R>(state: &SchedulerState<B, P, R>) -> Result<()> {
 }
 
 fn decrement_and_enqueue<B, P, R>(
-    plan: &RecursionPlan,
     state: &mut SchedulerState<B, P, R>,
     node: RecursionNodeId,
 ) -> Result<()> {
@@ -587,11 +578,11 @@ fn decrement_and_enqueue<B, P, R>(
         state.status[node.0] = NodeStatus::Ready;
         state.ready.push(node);
     }
-    let _ = plan;
     Ok(())
 }
 
 fn select_ready_node(plan: &RecursionPlan, ready: &[RecursionNodeId]) -> Option<RecursionNodeId> {
+    // Prefer leaves, then a ready root, then the deepest intermediate; node index breaks ties.
     ready.iter().copied().min_by_key(|id| {
         let node = &plan.nodes[id.0];
         let class = match node.kind {
@@ -844,7 +835,7 @@ mod tests {
         for shard_id in 0..5 {
             scheduler.accept_base_proof(shard_id, shard_id).unwrap();
         }
-        let node_count = scheduler.plan().nodes.len();
+        let node_count = scheduler.plan.nodes.len();
         let workers = (0..2)
             .map(|device_id| {
                 let scheduler = scheduler.clone();
@@ -904,7 +895,7 @@ mod tests {
         for shard_id in 0..5 {
             scheduler.accept_base_proof(shard_id, shard_id).unwrap();
         }
-        let node_count = scheduler.plan().nodes.len();
+        let node_count = scheduler.plan.nodes.len();
         let metrics = run_scheduler_worker(0, &scheduler, |task, _| {
             let id = task.node().id;
             Ok(match task {

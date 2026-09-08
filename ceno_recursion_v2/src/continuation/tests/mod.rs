@@ -4,8 +4,7 @@ mod prover_integration {
         circuit::{Circuit, root::CenoRootCircuit},
         continuation::prover::{
             AggProver, AggregationOptions, ChildVkKind, CpuRecursionProver, InnerCpuProver,
-            RecursionHostAssets, RecursionHostAssetsTemplate, RecursionNodeKind,
-            internal_aggregation_chunk_plan, verify_root_proof,
+            RecursionHostAssetsTemplate, RecursionNodeKind, internal_aggregation_chunk_plan,
         },
         system::{
             AggregationSubCircuit, RecursionField, RecursionProof, RecursionVk, VerifierSubCircuit,
@@ -32,6 +31,9 @@ mod prover_integration {
         time::Instant,
     };
     use tracing_subscriber::EnvFilter;
+
+    #[cfg(feature = "cuda")]
+    use crate::continuation::prover::verify_root_proof;
 
     type Engine = BabyBearPoseidon2CpuEngine<DuplexSponge>;
     type E = RecursionField;
@@ -324,7 +326,8 @@ mod prover_integration {
             return Ok(());
         };
         let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
-        let assets = RecursionHostAssets::<2, 2>::new(Arc::new(child_vk), 17, &options)?;
+        let assets =
+            RecursionHostAssetsTemplate::<2, 2>::new(Arc::new(child_vk), &options)?.bind(17)?;
 
         let leaf = assets.hydrate_gpu_on(0, RecursionNodeKind::Leaf)?;
         drop(leaf);
