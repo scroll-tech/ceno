@@ -57,6 +57,8 @@ pub const DEFAULT_RECURSION_K_WHIR: usize = 3;
 pub type CenoRecursionV2Prover = AggProver<DEFAULT_LEAF_FANIN, DEFAULT_INTERNAL_FANIN>;
 pub type CenoRecursionV2RootProof = RootProof;
 pub type CenoRecursionV2LeafVk = LeafVk;
+#[cfg(feature = "gpu")]
+type DefaultGpuRecursionSession = GpuRecursionSession<DEFAULT_LEAF_FANIN, DEFAULT_INTERNAL_FANIN>;
 
 #[cfg(feature = "gpu")]
 #[derive(Clone, Debug, Default)]
@@ -166,7 +168,7 @@ impl<S> RecursionOrchestrationState<S> {
 #[cfg(feature = "gpu")]
 pub struct StreamingRecursionOrchestrator {
     options: AggregationOptions,
-    state: Mutex<RecursionOrchestrationState<GpuRecursionSession<2, 2>>>,
+    state: Mutex<RecursionOrchestrationState<DefaultGpuRecursionSession>>,
     started: Instant,
 }
 
@@ -768,7 +770,9 @@ impl<SC, VC> CenoSDK<RecursionField, RecursionPcs, SC, VC> {
 
 #[cfg(all(test, feature = "gpu"))]
 mod streaming_recursion_tests {
-    use super::RecursionOrchestrationState;
+    use ceno_recursion_v2::continuation::prover::{RecursionNodeKind, RecursionPlan};
+
+    use super::{DEFAULT_INTERNAL_FANIN, DEFAULT_LEAF_FANIN, RecursionOrchestrationState};
 
     #[derive(Debug, Default)]
     struct FakeSession {
@@ -812,6 +816,18 @@ mod streaming_recursion_tests {
         assert_eq!(state.first_error.as_deref(), Some("first"));
         assert_eq!(state.session.as_ref().unwrap().cancel_count, 1);
         assert_eq!(state.take_verified_session().unwrap_err(), "first");
+    }
+
+    #[test]
+    fn streaming_plan_uses_public_default_fanins() {
+        let plan = RecursionPlan::new(11, DEFAULT_LEAF_FANIN, DEFAULT_INTERNAL_FANIN).unwrap();
+        let count = |kind| plan.nodes.iter().filter(|node| node.kind == kind).count();
+
+        assert_eq!(count(RecursionNodeKind::Leaf), 3);
+        assert_eq!(count(RecursionNodeKind::LeafBridge), 1);
+        assert_eq!(count(RecursionNodeKind::Recursive { level: 0 }), 1);
+        assert_eq!(count(RecursionNodeKind::Root), 1);
+        assert_eq!(plan.nodes.len(), 6);
     }
 }
 
