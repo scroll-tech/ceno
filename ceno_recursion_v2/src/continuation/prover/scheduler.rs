@@ -2,8 +2,11 @@ use std::{
     fmt,
     ops::Range,
     sync::{Condvar, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+#[cfg(any(test, feature = "cuda"))]
+use std::time::Instant;
 
 use eyre::{Result, eyre};
 
