@@ -4707,6 +4707,10 @@ where
                             .unwrap_or("unknown panic")
                     )),
                 };
+                // GPU 0 reuses the prover built before the worker scope, whereas the other
+                // workers build theirs inside `run`. Drop the reused prover at the same
+                // lifecycle boundary so its device proving keys do not survive pool trim.
+                drop(existing_prover);
                 if result.is_ok() {
                     // All device-backed prover state lived inside `run` and is now dropped. Only
                     // after synchronization and pool trim may this physical GPU join recursion.

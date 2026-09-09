@@ -2270,6 +2270,29 @@ fn gpu_replay_fast_flight_preserves_state_and_next_compact_shard() {
         descriptor(1, InsnKind::LW, Some(InsnKind::ECALL)),
         descriptor(2, InsnKind::ADDI, Some(InsnKind::ECALL)),
     ]);
+    // Exercise the source-ordered tape on both sides of the fast-flight shard.
+    // A worker that owns alternating shards must consume the skipped shard's
+    // events without losing the cursor needed to annotate its next owned shard.
+    let tape = Arc::new(NextCycleAccess::from_unsorted(vec![
+        NextAccessEvent::new(8, 12, Platform::register_vma(20).into()),
+        NextAccessEvent::new(9, 15, Platform::register_vma(1).into()),
+        NextAccessEvent::new(12, 24, Platform::register_vma(20).into()),
+        NextAccessEvent::new(14, 28, Platform::register_vma(2).into()),
+        NextAccessEvent::new(15, 31, ByteAddr(base).waddr()),
+        NextAccessEvent::new(16, 24, Platform::register_vma(Platform::reg_ecall()).into()),
+        NextAccessEvent::new(18, 26, Platform::register_vma(Platform::reg_arg0()).into()),
+        NextAccessEvent::new(19, 35, ByteAddr(base).waddr()),
+        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 1usize),
+        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 2usize),
+        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 3usize),
+        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 4usize),
+        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 5usize),
+        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 6usize),
+        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 7usize),
+        NextAccessEvent::new(22, 24, Platform::register_vma(Platform::reg_ecall()).into()),
+        NextAccessEvent::new(24, 32, Platform::register_vma(Platform::reg_ecall()).into()),
+        NextAccessEvent::new(25, 33, Platform::register_vma(Platform::reg_arg0()).into()),
+    ]));
     let aot = AotProgram::compile_with_extra_roots_and_trace_style(
         program.clone(),
         vec![program.base_address + 16],
@@ -2277,17 +2300,21 @@ fn gpu_replay_fast_flight_preserves_state_and_next_compact_shard() {
     )
     .unwrap();
     let make_vm = || {
-        let mut vm = VMState::<crate::GpuReplayTracer>::new_with_tracer_config(
+        let mut vm = VMState::<crate::GpuReplayTracer>::new_with_tracer_config_and_next_accesses(
             CENO_PLATFORM.clone(),
             program.clone(),
             crate::GpuReplayTracerConfig { chunk_capacity: 2 },
+            Some(tape.clone()),
         );
         vm.tracer_mut()
             .install_range_descriptors(descriptors.clone());
         vm.tracer_mut().enable_retained_shard_mode();
         vm.init_register_unsafe(20, base);
-        vm.init_register_unsafe(Platform::reg_ecall(), crate::syscalls::PHANTOM_LOG_PC_CYCLE);
-        vm.init_memory(ByteAddr(base).waddr(), 0);
+        vm.init_register_unsafe(Platform::reg_arg0(), base);
+        vm.init_register_unsafe(Platform::reg_ecall(), crate::syscalls::PUB_IO_COMMIT);
+        for offset in 0usize..8 {
+            vm.init_memory(ByteAddr(base).waddr() + offset, offset as u32);
+        }
         vm
     };
 
@@ -2334,6 +2361,17 @@ fn gpu_replay_fast_flight_preserves_state_and_next_compact_shard() {
     );
     assert_eq!(mixed.get_pc(), all_compact.get_pc());
     assert_eq!(mixed.tracer().cycle(), all_compact.tracer().cycle());
+    assert_eq!(
+        mixed.committed_public_io(),
+        all_compact.committed_public_io()
+    );
+    for offset in 0usize..8 {
+        let address = ByteAddr(base).waddr() + offset;
+        assert_eq!(
+            mixed.final_access_cycle(address),
+            all_compact.final_access_cycle(address)
+        );
+    }
     let expected_last = expected_last.unwrap();
     assert_eq!(actual_last.fallback, expected_last.fallback);
     for (kind, (actual, expected)) in
