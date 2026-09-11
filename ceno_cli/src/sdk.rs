@@ -725,10 +725,6 @@ where
             .multi_gpu_config
             .as_ref()
             .context("multi-GPU configuration was not initialized")?;
-        anyhow::ensure!(
-            shard_id.is_none(),
-            "GPU debug shard proving is unsupported by the canonical Stage 1 coordinator"
-        );
         let prepared = self
             .prepared_multi_gpu
             .as_ref()
@@ -756,6 +752,7 @@ where
             &init_full_mem,
             public_io_digest,
             max_steps,
+            shard_id,
             event_sink,
             #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
             self.preflight_aot_program.clone(),

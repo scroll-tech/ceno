@@ -568,6 +568,7 @@ where
                 &init_full_mem,
                 public_io_digest,
                 max_steps,
+                options.shard_id.map(|value| value as usize),
                 base_event_sink,
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
                 preflight_aot,
