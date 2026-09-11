@@ -416,6 +416,24 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         );
     }
 
+    /// Omit empty per-chip lookup maps when a GPU shard owns their counters.
+    ///
+    /// Shard accumulation deliberately returns empty maps from each GPU chip and
+    /// stores their sum under `__gpu_shard_lk`. A CPU mock must infer those chip
+    /// lookups from the materialized traces instead of comparing them with the
+    /// empty placeholders. The final table-versus-opcode comparison remains the
+    /// authoritative check of the shard-wide accumulated counters.
+    #[cfg(feature = "gpu")]
+    pub(crate) fn omit_gpu_lk_placeholders_for_mock(&mut self) {
+        const SHARD_LK_NAME: &str = "__gpu_shard_lk";
+        if !self.lk_mlts.contains_key(SHARD_LK_NAME) {
+            return;
+        }
+        self.lk_mlts.retain(|name, multiplicity| {
+            name == SHARD_LK_NAME || multiplicity.iter().any(|counts| !counts.is_empty())
+        });
+    }
+
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,
@@ -937,6 +955,42 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             record: global_write,
             ec_point,
         })
+    }
+}
+
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_mock_lk_tests {
+    use super::*;
+    use ff_ext::BabyBearExt4;
+
+    #[test]
+    fn shard_gpu_mock_omits_only_empty_per_chip_lookup_maps() {
+        let mut witnesses = ZKVMWitnesses::<BabyBearExt4>::default();
+        witnesses
+            .lk_mlts
+            .insert("ADD".to_owned(), Multiplicity::default());
+        let mut retained = Multiplicity::default();
+        retained[LookupTable::Instruction as usize].insert(4, 1);
+        witnesses.lk_mlts.insert("CPU".to_owned(), retained);
+        witnesses.insert_shard_gpu_lk_multiplicity(Multiplicity::default());
+
+        witnesses.omit_gpu_lk_placeholders_for_mock();
+
+        assert!(!witnesses.lk_mlts.contains_key("ADD"));
+        assert!(witnesses.lk_mlts.contains_key("CPU"));
+        assert!(witnesses.lk_mlts.contains_key("__gpu_shard_lk"));
+    }
+
+    #[test]
+    fn cpu_mock_keeps_empty_per_chip_lookup_maps() {
+        let mut witnesses = ZKVMWitnesses::<BabyBearExt4>::default();
+        witnesses
+            .lk_mlts
+            .insert("ADD".to_owned(), Multiplicity::default());
+
+        witnesses.omit_gpu_lk_placeholders_for_mock();
+
+        assert!(witnesses.lk_mlts.contains_key("ADD"));
     }
 }
 

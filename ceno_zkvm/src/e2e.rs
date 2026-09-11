@@ -4478,6 +4478,9 @@ fn materialize_mock_witness<E: ExtensionField>(
             }
         }
     }
+    // GPU shard accumulation stores one combined lookup map; its empty per-chip
+    // maps are ownership markers, not expectations for the CPU mock comparison.
+    host_witness.omit_gpu_lk_placeholders_for_mock();
     Ok(host_witness)
 }
 
