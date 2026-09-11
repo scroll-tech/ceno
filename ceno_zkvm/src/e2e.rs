@@ -4452,6 +4452,36 @@ fn validate_debug_shard_request(
 }
 
 #[cfg(feature = "gpu")]
+fn materialize_mock_witness<E: ExtensionField>(
+    witness: &ZKVMWitnesses<E>,
+) -> Result<ZKVMWitnesses<E>, ZKVMError> {
+    let mut host_witness = witness.clone();
+    for (name, host_inputs) in &mut host_witness.witnesses {
+        let device_inputs = witness
+            .witnesses
+            .get(name)
+            .expect("cloned witness lost a circuit");
+        if host_inputs.len() != device_inputs.len() {
+            return Err(ZKVMError::InvalidWitness(
+                format!("mock witness input count changed for {name}").into(),
+            ));
+        }
+        for (host_input, device_input) in host_inputs.iter_mut().zip(device_inputs) {
+            for (host_rmm, device_rmm) in host_input
+                .witness_rmms
+                .iter_mut()
+                .zip(&device_input.witness_rmms)
+            {
+                *host_rmm = crate::instructions::gpu::utils::d2h::materialize_device_backed_rmm::<E>(
+                    device_rmm,
+                )?;
+            }
+        }
+    }
+    Ok(host_witness)
+}
+
+#[cfg(feature = "gpu")]
 enum BaseWorkerEvent<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     Ready {
         ready: BaseProofReady<E, PCS>,
@@ -4731,11 +4761,15 @@ where
                             "multi-GPU base worker event"
                         );
                         if debug_mock_proving {
+                            // Normal GPU proving keeps witness matrices device-resident with
+                            // empty host storage. MockProver is CPU-only, so materialize a
+                            // diagnostic clone without disturbing the proof's device backing.
+                            let mock_witness = materialize_mock_witness(&zkvm_witness)?;
                             MockProver::assert_satisfied_full(
                                 &shard_ctx,
                                 &ctx.system_config.zkvm_cs,
                                 ctx.zkvm_fixed_traces.clone(),
-                                &zkvm_witness,
+                                &mock_witness,
                                 &pi,
                                 &ctx.program,
                             );
