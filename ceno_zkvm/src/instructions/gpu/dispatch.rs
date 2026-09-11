@@ -3116,7 +3116,8 @@ mod tests {
             instructions::{
                 Instruction,
                 riscv::{
-                    AddInstruction, JalInstruction, JalrInstruction, LwInstruction, SwInstruction,
+                    AddInstruction, JalInstruction, JalrInstruction, LbInstruction, LbuInstruction,
+                    LhInstruction, LhuInstruction, LwInstruction, SwInstruction,
                     arith_imm::AddiInstruction, branch::BeqInstruction, lui::LuiInstruction,
                 },
             },
@@ -3208,6 +3209,58 @@ mod tests {
                 Change::new(0x33, 0x12000),
                 0,
             ),
+            StepRecord::new_im_instruction(
+                36,
+                ByteAddr(0x1020),
+                with_raw(encode_rv32(InsnKind::LB, 1, 0, 3, 10), 0x00a0_8183),
+                0x0400_0000,
+                Change::new(0x33, 0xffff_ffff),
+                ReadOp {
+                    addr: WordAddr(0x0100_0002),
+                    value: 0x80ff_7f01,
+                    previous_cycle: 0,
+                },
+                0,
+            ),
+            StepRecord::new_im_instruction(
+                40,
+                ByteAddr(0x1024),
+                with_raw(encode_rv32(InsnKind::LBU, 1, 0, 3, 9), 0x0090_c183),
+                0x0400_0000,
+                Change::new(0x33, 0x7f),
+                ReadOp {
+                    addr: WordAddr(0x0100_0002),
+                    value: 0x80ff_7f01,
+                    previous_cycle: 0,
+                },
+                0,
+            ),
+            StepRecord::new_im_instruction(
+                44,
+                ByteAddr(0x1028),
+                with_raw(encode_rv32(InsnKind::LH, 1, 0, 3, 10), 0x00a0_9183),
+                0x0400_0000,
+                Change::new(0x33, 0xffff_80ff),
+                ReadOp {
+                    addr: WordAddr(0x0100_0002),
+                    value: 0x80ff_7f01,
+                    previous_cycle: 0,
+                },
+                0,
+            ),
+            StepRecord::new_im_instruction(
+                48,
+                ByteAddr(0x102c),
+                with_raw(encode_rv32(InsnKind::LHU, 1, 0, 3, 8), 0x0080_d183),
+                0x0400_0000,
+                Change::new(0x33, 0x7f01),
+                ReadOp {
+                    addr: WordAddr(0x0100_0002),
+                    value: 0x80ff_7f01,
+                    previous_cycle: 0,
+                },
+                0,
+            ),
         ];
 
         fn arenas(steps: &[StepRecord], compact: bool) -> GpuReplayShardArenas {
@@ -3279,6 +3332,10 @@ mod tests {
             let jal = cs.register_opcode_circuit::<JalInstruction<E>>();
             let jalr = cs.register_opcode_circuit::<JalrInstruction<E>>();
             let lw = cs.register_opcode_circuit::<LwInstruction<E>>();
+            let lb = cs.register_opcode_circuit::<LbInstruction<E>>();
+            let lbu = cs.register_opcode_circuit::<LbuInstruction<E>>();
+            let lh = cs.register_opcode_circuit::<LhInstruction<E>>();
+            let lhu = cs.register_opcode_circuit::<LhuInstruction<E>>();
             let sw = cs.register_opcode_circuit::<SwInstruction<E>>();
             let lui = cs.register_opcode_circuit::<LuiInstruction<E>>();
 
@@ -3302,11 +3359,43 @@ mod tests {
             prepare!(JalInstruction<E>, &jal, GpuWitgenKind::Jal);
             prepare!(JalrInstruction<E>, &jalr, GpuWitgenKind::Jalr);
             prepare!(LwInstruction<E>, &lw, GpuWitgenKind::Lw);
+            prepare!(
+                LbInstruction<E>,
+                &lb,
+                GpuWitgenKind::LoadSub {
+                    load_width: 8,
+                    is_signed: 1,
+                }
+            );
+            prepare!(
+                LbuInstruction<E>,
+                &lbu,
+                GpuWitgenKind::LoadSub {
+                    load_width: 8,
+                    is_signed: 0,
+                }
+            );
+            prepare!(
+                LhInstruction<E>,
+                &lh,
+                GpuWitgenKind::LoadSub {
+                    load_width: 16,
+                    is_signed: 1,
+                }
+            );
+            prepare!(
+                LhuInstruction<E>,
+                &lhu,
+                GpuWitgenKind::LoadSub {
+                    load_width: 16,
+                    is_signed: 0,
+                }
+            );
             prepare!(SwInstruction<E>, &sw, GpuWitgenKind::Sw);
             prepare!(LuiInstruction<E>, &lui, GpuWitgenKind::Lui);
 
             let mut shard_ctx = ShardContext::default();
-            shard_ctx.cur_shard_cycle_range = 4..36;
+            shard_ctx.cur_shard_cycle_range = 4..52;
             launch_fused_assignments(&shard_ctx).unwrap();
 
             let mut witness = ZKVMWitnesses::<E>::default();
@@ -3329,6 +3418,10 @@ mod tests {
             assign!(JalInstruction<E>, &jal);
             assign!(JalrInstruction<E>, &jalr);
             assign!(LwInstruction<E>, &lw);
+            assign!(LbInstruction<E>, &lb);
+            assign!(LbuInstruction<E>, &lbu);
+            assign!(LhInstruction<E>, &lh);
+            assign!(LhuInstruction<E>, &lhu);
             assign!(SwInstruction<E>, &sw);
             assign!(LuiInstruction<E>, &lui);
             clear_compact_replay_arenas();
