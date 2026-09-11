@@ -525,6 +525,15 @@ impl GpuReplayTracer {
         self.max_hint_addr_access
     }
 
+    /// Replay cursors that affect future compact witness annotation.
+    ///
+    /// Exposed only so the opt-in multi-GPU state audit can distinguish equal
+    /// VM values from a fast-flight worker that consumed a different tape or
+    /// range prefix.
+    pub(crate) fn replay_audit_cursors(&self) -> (usize, usize) {
+        (self.next_range_descriptor, self.next_access_cursor)
+    }
+
     pub fn remaining_chunk_capacity(&self) -> usize {
         self.config
             .chunk_capacity

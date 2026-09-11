@@ -195,6 +195,10 @@ impl PackedMemory {
         self.store.end()
     }
 
+    pub(crate) fn raw_cells(&self) -> &[u64] {
+        &self.store.cells
+    }
+
     #[cfg(any(test, debug_assertions))]
     pub(crate) fn addresses(&self) -> impl Iterator<Item = WordAddr> + '_ {
         self.touched.iter().copied()

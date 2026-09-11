@@ -2273,7 +2273,7 @@ fn gpu_replay_fast_flight_preserves_state_and_next_compact_shard() {
     // Exercise the source-ordered tape on both sides of the fast-flight shard.
     // A worker that owns alternating shards must consume the skipped shard's
     // events without losing the cursor needed to annotate its next owned shard.
-    let tape = Arc::new(NextCycleAccess::from_unsorted(vec![
+    let mut next_access_events = vec![
         NextAccessEvent::new(8, 12, Platform::register_vma(20).into()),
         NextAccessEvent::new(9, 15, Platform::register_vma(1).into()),
         NextAccessEvent::new(12, 24, Platform::register_vma(20).into()),
@@ -2281,18 +2281,14 @@ fn gpu_replay_fast_flight_preserves_state_and_next_compact_shard() {
         NextAccessEvent::new(15, 31, ByteAddr(base).waddr()),
         NextAccessEvent::new(16, 24, Platform::register_vma(Platform::reg_ecall()).into()),
         NextAccessEvent::new(18, 26, Platform::register_vma(Platform::reg_arg0()).into()),
-        NextAccessEvent::new(19, 35, ByteAddr(base).waddr()),
-        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 1usize),
-        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 2usize),
-        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 3usize),
-        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 4usize),
-        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 5usize),
-        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 6usize),
-        NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + 7usize),
         NextAccessEvent::new(22, 24, Platform::register_vma(Platform::reg_ecall()).into()),
         NextAccessEvent::new(24, 32, Platform::register_vma(Platform::reg_ecall()).into()),
         NextAccessEvent::new(25, 33, Platform::register_vma(Platform::reg_arg0()).into()),
-    ]));
+    ];
+    next_access_events.extend(
+        (0usize..50).map(|offset| NextAccessEvent::new(19, 35, ByteAddr(base).waddr() + offset)),
+    );
+    let tape = Arc::new(NextCycleAccess::from_unsorted(next_access_events));
     let aot = AotProgram::compile_with_extra_roots_and_trace_style(
         program.clone(),
         vec![program.base_address + 16],
@@ -2311,8 +2307,10 @@ fn gpu_replay_fast_flight_preserves_state_and_next_compact_shard() {
         vm.tracer_mut().enable_retained_shard_mode();
         vm.init_register_unsafe(20, base);
         vm.init_register_unsafe(Platform::reg_arg0(), base);
-        vm.init_register_unsafe(Platform::reg_ecall(), crate::syscalls::PUB_IO_COMMIT);
-        for offset in 0usize..8 {
+        // Keccak mutates 50 words and exercises the effectful syscall fallback
+        // while shard 1 is skipped by the alternating worker.
+        vm.init_register_unsafe(Platform::reg_ecall(), crate::syscalls::KECCAK_PERMUTE);
+        for offset in 0usize..50 {
             vm.init_memory(ByteAddr(base).waddr() + offset, offset as u32);
         }
         vm
@@ -2365,11 +2363,43 @@ fn gpu_replay_fast_flight_preserves_state_and_next_compact_shard() {
         mixed.committed_public_io(),
         all_compact.committed_public_io()
     );
-    for offset in 0usize..8 {
-        let address = ByteAddr(base).waddr() + offset;
+    assert_eq!(
+        mixed.replay_state_audit_digest(),
+        all_compact.replay_state_audit_digest(),
+        "audit must agree after equivalent compact and fast-flight replay"
+    );
+    let register_addresses = (0..VMState::<crate::GpuReplayTracer>::REG_COUNT)
+        .map(|index| Platform::register_vma(index as u8).into())
+        .collect::<Vec<WordAddr>>();
+    for (index, address) in register_addresses.iter().copied().enumerate() {
+        assert_eq!(
+            mixed.peek_register(index as u8),
+            all_compact.peek_register(index as u8),
+            "register value differs at x{index}"
+        );
         assert_eq!(
             mixed.final_access_cycle(address),
-            all_compact.final_access_cycle(address)
+            all_compact.final_access_cycle(address),
+            "register access cycle differs at x{index}"
+        );
+    }
+    let mut accessed = mixed.final_access_addresses();
+    accessed.extend(all_compact.final_access_addresses());
+    accessed.sort_unstable();
+    accessed.dedup();
+    for address in accessed
+        .into_iter()
+        .filter(|address| !register_addresses.contains(address))
+    {
+        assert_eq!(
+            mixed.peek_memory(address),
+            all_compact.peek_memory(address),
+            "memory value differs at {address:?}"
+        );
+        assert_eq!(
+            mixed.final_access_cycle(address),
+            all_compact.final_access_cycle(address),
+            "memory access cycle differs at {address:?}"
         );
     }
     let expected_last = expected_last.unwrap();
