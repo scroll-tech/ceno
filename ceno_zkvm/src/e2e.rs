@@ -4764,7 +4764,13 @@ where
                             // Normal GPU proving keeps witness matrices device-resident with
                             // empty host storage. MockProver is CPU-only, so materialize a
                             // diagnostic clone without disturbing the proof's device backing.
-                            let mock_witness = materialize_mock_witness(&zkvm_witness)?;
+                            let mock_witness = materialize_mock_witness(&zkvm_witness).map_err(
+                                |error| {
+                                    format!(
+                                        "failed to materialize GPU mock witness for shard {shard_id} on device {device_id}: {error:?}"
+                                    )
+                                },
+                            )?;
                             MockProver::assert_satisfied_full(
                                 &shard_ctx,
                                 &ctx.system_config.zkvm_cs,
