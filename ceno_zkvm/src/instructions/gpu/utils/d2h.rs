@@ -55,21 +55,29 @@ pub(crate) fn materialize_device_backed_rmm<E: ExtensionField>(
 
     let height = rmm.height();
     let width = rmm.width();
-    let expected_len = height
+    let padded_len = height
+        .checked_mul(width)
+        .ok_or_else(|| ZKVMError::InvalidWitness("GPU witness shape overflow".into()))?;
+    let occupied_rows = rmm.occupied_physical_rows();
+    let occupied_len = occupied_rows
         .checked_mul(width)
         .ok_or_else(|| ZKVMError::InvalidWitness("GPU witness shape overflow".into()))?;
     let backing = rmm
         .device_backing_ref::<WitBuf>()
         .ok_or_else(|| ZKVMError::InvalidWitness("unexpected GPU witness backing type".into()))?;
-    if backing.len() != expected_len {
+    let backing_rows = if backing.len() == occupied_len {
+        occupied_rows
+    } else if backing.len() == padded_len {
+        height
+    } else {
         return Err(ZKVMError::InvalidWitness(
             format!(
-                "GPU witness backing length mismatch: got {}, expected {expected_len}",
-                backing.len()
+                "GPU witness backing length mismatch: got {}, expected compact {occupied_len} or padded {padded_len}",
+                backing.len(),
             )
             .into(),
         ));
-    }
+    };
 
     let device_values = backing.to_vec().map_err(|err| {
         ZKVMError::InvalidWitness(format!("GPU witness D2H failed: {err:?}").into())
@@ -85,10 +93,10 @@ pub(crate) fn materialize_device_backed_rmm<E: ExtensionField>(
     let host_values = match rmm.device_backing_layout() {
         Some(DeviceMatrixLayout::RowMajor) => device_values,
         Some(DeviceMatrixLayout::ColMajor) => {
-            let mut row_major = vec![E::BaseField::default(); expected_len];
-            for row in 0..height {
+            let mut row_major = vec![E::BaseField::default(); backing.len()];
+            for row in 0..backing_rows {
                 for col in 0..width {
-                    row_major[row * width + col] = device_values[col * height + row];
+                    row_major[row * width + col] = device_values[col * backing_rows + row];
                 }
             }
             row_major
@@ -122,8 +130,7 @@ pub(crate) fn materialize_device_backed_rmm<E: ExtensionField>(
         width,
         InstancePaddingStrategy::Default,
     );
-    std::ops::DerefMut::deref_mut(&mut host)
-        .values
+    std::ops::DerefMut::deref_mut(&mut host).values[..host_values.len()]
         .copy_from_slice(&host_values);
     Ok(host)
 }
