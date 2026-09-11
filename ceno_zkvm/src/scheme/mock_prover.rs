@@ -49,6 +49,84 @@ const MAX_CONSTRAINT_DEGREE: usize = 3;
 const MOCK_PROGRAM_SIZE: usize = 32;
 pub const MOCK_PC_START: ByteAddr = ByteAddr(0x0800_0000);
 
+struct RamRecordGroup<E> {
+    records: Vec<(E, usize)>,
+    field_columns: Vec<Vec<u64>>,
+    circuit_name: String,
+}
+
+impl<E> RamRecordGroup<E> {
+    fn tuple(&self, record_index: usize) -> Vec<u64> {
+        self.field_columns
+            .iter()
+            .map(|field| field[record_index])
+            .collect()
+    }
+}
+
+type RamRecordDiagnostics<E> = HashMap<String, RamRecordGroup<E>>;
+
+fn ram_columnar_tuple_distance<E>(
+    target: &[u64],
+    candidate: &RamRecordGroup<E>,
+    record_index: usize,
+) -> (usize, u128) {
+    let differing_fields = target
+        .iter()
+        .zip(&candidate.field_columns)
+        .filter(|(target, field)| **target != field[record_index])
+        .count()
+        + target.len().abs_diff(candidate.field_columns.len());
+    let absolute_delta = target
+        .iter()
+        .zip(&candidate.field_columns)
+        .map(|(target, field)| target.abs_diff(field[record_index]) as u128)
+        .sum();
+    (differing_fields, absolute_delta)
+}
+
+fn closest_ram_tuple<'a, E>(
+    target: &[u64],
+    candidates: &'a RamRecordDiagnostics<E>,
+) -> Option<(&'a str, &'a str, usize, Vec<u64>)> {
+    let (annotation, group, record_index) = candidates
+        .iter()
+        .flat_map(|(annotation, group)| {
+            group
+                .records
+                .iter()
+                .enumerate()
+                .map(move |(record_index, _)| (annotation.as_str(), group, record_index))
+        })
+        .min_by(|a, b| {
+            ram_columnar_tuple_distance(target, a.1, a.2)
+                .cmp(&ram_columnar_tuple_distance(target, b.1, b.2))
+                .then_with(|| {
+                    a.1.field_columns
+                        .iter()
+                        .map(|field| field[a.2])
+                        .cmp(b.1.field_columns.iter().map(|field| field[b.2]))
+                })
+                .then_with(|| a.0.cmp(b.0))
+                .then_with(|| a.1.circuit_name.cmp(&b.1.circuit_name))
+                .then_with(|| a.1.records[a.2].1.cmp(&b.1.records[b.2].1))
+        })?;
+    Some((
+        annotation,
+        group.circuit_name.as_str(),
+        group.records[record_index].1,
+        group.tuple(record_index),
+    ))
+}
+
+fn ram_tuple_delta(target: &[u64], candidate: &[u64]) -> Vec<i128> {
+    target
+        .iter()
+        .zip(candidate)
+        .map(|(target, candidate)| *candidate as i128 - *target as i128)
+        .collect()
+}
+
 /// Allow LK Multiplicity's key to be used with `u64` and `GoldilocksExt2`.
 pub trait LkMultiplicityKey: Copy + Clone + Debug + Eq + Hash + Send {
     /// If key is u64, return Some(u64), otherwise None.
@@ -1175,7 +1253,7 @@ Hints:
                             .into()
                         };
 
-                    for ((w_rlc_expr, annotation), (ram_type_expr, _)) in (cs
+                    for ((w_rlc_expr, annotation), (ram_type_expr, w_exprs)) in (cs
                         .w_expressions
                         .iter()
                         .chain(cs.w_table_expressions.iter().map(|expr| &expr.expr)))
@@ -1221,6 +1299,31 @@ Hints:
                             continue;
                         }
 
+                        let write_record_fields = w_exprs
+                            .iter()
+                            .map(|expr| {
+                                let values = wit_infer_by_expr(
+                                    expr,
+                                    cs.num_witin,
+                                    cs.num_fixed as WitnessId,
+                                    0,
+                                    fixed,
+                                    witness,
+                                    structural_witness,
+                                    &circuit_pi_mles,
+                                    &circuit_pub_io_evals,
+                                    &challenges,
+                                );
+                                filter_mle_by_predicate(values, |i, _v| {
+                                    ram_type_vec[i] == E::from_u32($ram_type as u32)
+                                        && w_selector_vec[i] == E::BaseField::ONE
+                                })
+                                .into_iter()
+                                .map(|value| value.to_canonical_u64())
+                                .collect()
+                            })
+                            .collect_vec();
+
                         let mut records = vec![];
                         let mut writes_within_expr_dedup = HashSet::new();
                         for (row, record_rlc) in enumerate(write_rlc_records) {
@@ -1241,8 +1344,14 @@ Hints:
                             );
                             records.push((record_rlc, row));
                         }
-                        writes_grp_by_annotations
-                            .insert(annotation.clone(), (records, circuit_name.clone()));
+                        writes_grp_by_annotations.insert(
+                            annotation.clone(),
+                            RamRecordGroup {
+                                records,
+                                field_columns: write_record_fields,
+                                circuit_name: circuit_name.clone(),
+                            },
+                        );
                     }
                 }
 
@@ -1320,6 +1429,31 @@ Hints:
                             continue;
                         }
 
+                        let read_record_fields = r_exprs
+                            .iter()
+                            .map(|expr| {
+                                let values = wit_infer_by_expr(
+                                    expr,
+                                    cs.num_witin,
+                                    cs.num_fixed as WitnessId,
+                                    0,
+                                    fixed,
+                                    witness,
+                                    structural_witness,
+                                    &circuit_pi_mles,
+                                    &circuit_pub_io_evals,
+                                    &challenges,
+                                );
+                                filter_mle_by_predicate(values, |i, _v| {
+                                    ram_type_vec[i] == E::from_u32($ram_type as u32)
+                                        && r_selector_vec[i] == E::BaseField::ONE
+                                })
+                                .into_iter()
+                                .map(|value| value.to_canonical_u64())
+                                .collect()
+                            })
+                            .collect_vec();
+
                         if $ram_type == RAMType::GlobalState {
                             // r_exprs = [GlobalState, pc, timestamp]
                             assert_eq!(r_exprs.len(), 3);
@@ -1371,8 +1505,14 @@ Hints:
                             );
                             records.push((record, row));
                         }
-                        reads_grp_by_annotations
-                            .insert(annotation.clone(), (records, circuit_name.clone()));
+                        reads_grp_by_annotations.insert(
+                            annotation.clone(),
+                            RamRecordGroup {
+                                records,
+                                field_columns: read_record_fields,
+                                circuit_name: circuit_name.clone(),
+                            },
+                        );
                     }
                 }
 
@@ -1387,9 +1527,10 @@ Hints:
         }
         macro_rules! find_rw_mismatch {
             ($reads:ident,$reads_grp_by_annotations:ident,$writes:ident,$writes_grp_by_annotations:ident,$ram_type:expr,$gs:expr) => {
-                for (annotation, (reads, circuit_name)) in &$reads_grp_by_annotations {
+                for (annotation, group) in &$reads_grp_by_annotations {
+                    let reads = &group.records;
                     // (pc, timestamp)
-                    let gs_of_circuit = $gs.get(circuit_name);
+                    let gs_of_circuit = $gs.get(&group.circuit_name);
                     let num_missing = reads
                         .iter()
                         .filter(|(read, _)| !$writes.contains(read))
@@ -1397,19 +1538,30 @@ Hints:
                     let num_reads = reads.len();
                     reads
                         .iter()
-                        .filter(|(read, _)| !$writes.contains(read))
+                        .enumerate()
+                        .filter(|(_, (read, _))| !$writes.contains(read))
                         .take(10)
-                        .for_each(|(_, row)| {
+                        .for_each(|(record_index, (_, row))| {
+                            let tuple = group.tuple(record_index);
                             let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
                             let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
-                                "{} at row {} (pc={:x},ts={}) not found in {:?} writes",
+                                "{} at row {} (pc={:x},ts={}) tuple={:?} not found in {:?} writes",
                                 annotation,
                                 row,
                                 pc,
                                 ts,
+                                &tuple,
                                 $ram_type,
-                            )
+                            );
+                            if let Some((candidate_annotation, candidate_circuit, candidate_row, candidate)) =
+                                closest_ram_tuple(&tuple, &$writes_grp_by_annotations)
+                            {
+                                tracing::error!(
+                                    "closest write: {candidate_circuit}/{candidate_annotation} row {candidate_row} tuple={candidate:?} delta={:?}",
+                                    ram_tuple_delta(&tuple, &candidate),
+                                );
+                            }
                         });
 
                     if num_missing > 10 {
@@ -1424,8 +1576,9 @@ Hints:
                     }
                     num_rw_mismatch_errors += num_missing;
                 }
-                for (annotation, (writes, circuit_name)) in &$writes_grp_by_annotations {
-                    let gs_of_circuit = $gs.get(circuit_name);
+                for (annotation, group) in &$writes_grp_by_annotations {
+                    let writes = &group.records;
+                    let gs_of_circuit = $gs.get(&group.circuit_name);
                     let num_missing = writes
                         .iter()
                         .filter(|(write, _)| !$reads.contains(write))
@@ -1433,19 +1586,30 @@ Hints:
                     let num_writes = writes.len();
                     writes
                         .iter()
-                        .filter(|(write, _)| !$reads.contains(write))
+                        .enumerate()
+                        .filter(|(_, (write, _))| !$reads.contains(write))
                         .take(10)
-                        .for_each(|(_, row)| {
+                        .for_each(|(record_index, (_, row))| {
+                            let tuple = group.tuple(record_index);
                             let pc = gs_of_circuit.map_or(0, |gs| gs[*row][0].to_canonical_u64());
                             let ts = gs_of_circuit.map_or(0, |gs| gs[*row][1].to_canonical_u64());
                             tracing::error!(
-                                "{} at row {} (pc={:x},ts={}) not found in {:?} reads",
+                                "{} at row {} (pc={:x},ts={}) tuple={:?} not found in {:?} reads",
                                 annotation,
                                 row,
                                 pc,
                                 ts,
+                                &tuple,
                                 $ram_type,
-                            )
+                            );
+                            if let Some((candidate_annotation, candidate_circuit, candidate_row, candidate)) =
+                                closest_ram_tuple(&tuple, &$reads_grp_by_annotations)
+                            {
+                                tracing::error!(
+                                    "closest read: {candidate_circuit}/{candidate_annotation} row {candidate_row} tuple={candidate:?} delta={:?}",
+                                    ram_tuple_delta(&tuple, &candidate),
+                                );
+                            }
                         });
 
                     if num_missing > 10 {
@@ -1605,6 +1769,33 @@ mod tests {
     use multilinear_extensions::{ToExpr, WitIn, mle::IntoMLE};
     use p3::{field::PrimeCharacteristicRing as FieldAlgebra, goldilocks::Goldilocks};
     use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
+
+    #[test]
+    fn closest_ram_tuple_is_deterministic_and_reports_field_delta() {
+        let mut candidates = RamRecordDiagnostics::<u64>::new();
+        candidates.insert(
+            "z_annotation".to_owned(),
+            RamRecordGroup {
+                records: vec![(0, 9)],
+                field_columns: vec![vec![1], vec![4], vec![1]],
+                circuit_name: "z_circuit".to_owned(),
+            },
+        );
+        candidates.insert(
+            "a_annotation".to_owned(),
+            RamRecordGroup {
+                records: vec![(0, 7)],
+                field_columns: vec![vec![1], vec![0], vec![5]],
+                circuit_name: "a_circuit".to_owned(),
+            },
+        );
+
+        let (annotation, circuit, row, tuple) = closest_ram_tuple(&[1, 2, 3], &candidates).unwrap();
+
+        assert_eq!((annotation, circuit, row), ("a_annotation", "a_circuit", 7));
+        assert_eq!(tuple, [1, 0, 5]);
+        assert_eq!(ram_tuple_delta(&[1, 2, 3], &tuple), [0, -2, 2]);
+    }
 
     #[derive(Debug)]
     struct AssertZeroCircuit {
