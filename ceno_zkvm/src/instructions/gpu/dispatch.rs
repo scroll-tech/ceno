@@ -65,8 +65,66 @@ fn checked_producer_base(base: usize, range_rows: usize, count: usize) -> u32 {
     u32::try_from(base).expect("producer base exceeds u32")
 }
 
+// `ShardContext` stores each Rayon bucket in a BTreeMap, so a later
+// `assign_opcode_circuit` call replaces an earlier record for the same
+// address. Device finalization must use that assignment order rather than the
+// enum discriminant; the two orders differ for logic, div/rem, loads, and stores.
+const PRODUCER_ASSIGNMENT_ORDER: &[InsnKind] = &[
+    InsnKind::ADD,
+    InsnKind::SUB,
+    InsnKind::AND,
+    InsnKind::OR,
+    InsnKind::XOR,
+    InsnKind::SLL,
+    InsnKind::SRL,
+    InsnKind::SRA,
+    InsnKind::SLT,
+    InsnKind::SLTU,
+    InsnKind::MUL,
+    InsnKind::MULH,
+    InsnKind::MULHSU,
+    InsnKind::MULHU,
+    InsnKind::DIVU,
+    InsnKind::REMU,
+    InsnKind::DIV,
+    InsnKind::REM,
+    InsnKind::ADDI,
+    InsnKind::ANDI,
+    InsnKind::ORI,
+    InsnKind::XORI,
+    InsnKind::SLLI,
+    InsnKind::SRLI,
+    InsnKind::SRAI,
+    InsnKind::SLTI,
+    InsnKind::SLTIU,
+    #[cfg(feature = "u16limb_circuit")]
+    InsnKind::LUI,
+    #[cfg(feature = "u16limb_circuit")]
+    InsnKind::AUIPC,
+    InsnKind::BEQ,
+    InsnKind::BNE,
+    InsnKind::BLT,
+    InsnKind::BLTU,
+    InsnKind::BGE,
+    InsnKind::BGEU,
+    InsnKind::JAL,
+    InsnKind::JALR,
+    InsnKind::LW,
+    InsnKind::LB,
+    InsnKind::LBU,
+    InsnKind::LH,
+    InsnKind::LHU,
+    InsnKind::SW,
+    InsnKind::SH,
+    InsnKind::SB,
+];
+
 fn producer_order(kind: InsnKind) -> u32 {
-    let order = kind as u32;
+    let order = PRODUCER_ASSIGNMENT_ORDER
+        .iter()
+        .position(|candidate| *candidate == kind)
+        .unwrap_or_else(|| panic!("non-fused instruction kind {kind:?} has no producer order"))
+        as u32;
     let max_priority =
         (u64::from(order) << 30) | (u64::try_from(MAX_PRODUCER_ROWS - 1).unwrap() << 2) | 3;
     assert_eq!(
@@ -2870,11 +2928,16 @@ mod tests {
     }
 
     #[test]
-    fn producer_metadata_preserves_count_and_kind_priority() {
+    fn producer_metadata_preserves_count_and_assignment_priority() {
         assert_eq!(producer_count(123), 123);
-        assert_eq!(producer_order(InsnKind::ADD), InsnKind::ADD as u32);
-        assert_eq!(producer_order(InsnKind::SUB), InsnKind::SUB as u32);
-        assert_ne!(producer_order(InsnKind::ADD), producer_order(InsnKind::SUB));
+        assert_eq!(
+            PRODUCER_ASSIGNMENT_ORDER
+                .iter()
+                .copied()
+                .map(producer_order)
+                .collect::<Vec<_>>(),
+            (0..PRODUCER_ASSIGNMENT_ORDER.len() as u32).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -3039,6 +3102,9 @@ mod tests {
     #[cfg(feature = "u16limb_circuit")]
     #[test]
     fn compact_and_field_soa_fused_assignments_match_every_layout() {
+        let hal = std::sync::Arc::new(CudaHalBB31::new(0).unwrap());
+        let _binding = gkr_iop::gpu::bind_thread_default_stream(hal);
+
         use ceno_emul::{
             ByteAddr, Change, GpuReplayTypedRange, ReadOp, WordAddr, WriteOp, encode_rv32,
         };
