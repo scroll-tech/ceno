@@ -1217,6 +1217,7 @@ struct CompactReplayPipelineInput {
     range_descriptors: Arc<Vec<ceno_emul::GpuReplayRangeDescriptor>>,
     chunk_capacity: usize,
     ownership: Option<(usize, usize)>,
+    target_shard_id: Option<usize>,
     device_id: usize,
     cpu_affinity: Option<Vec<usize>>,
     start_gate: Option<Arc<ReplayStartGate>>,
@@ -1283,6 +1284,15 @@ impl ReplayStartGate {
 
 fn worker_owns_shard(ownership: Option<(usize, usize)>, shard_id: usize) -> bool {
     ownership.is_none_or(|(worker_index, worker_count)| shard_id % worker_count == worker_index)
+}
+
+fn worker_captures_shard(
+    ownership: Option<(usize, usize)>,
+    target_shard_id: Option<usize>,
+    shard_id: usize,
+) -> bool {
+    worker_owns_shard(ownership, shard_id)
+        && target_shard_id.is_none_or(|target| target == shard_id)
 }
 
 #[cfg(any(feature = "gpu", test))]
@@ -1420,7 +1430,10 @@ fn spawn_compact_replay_pipeline(
                     phase = "cpu_replay_start",
                     "compact replay pipeline event"
                 );
-                let owned = worker_owns_shard(input.ownership, shard_id);
+                // Targeted proving still executes every predecessor to preserve VM state,
+                // but retaining its compact arenas would perform the expensive GPU work
+                // that the diagnostic selector exists to avoid.
+                let owned = worker_captures_shard(input.ownership, input.target_shard_id, shard_id);
                 if owned {
                     owned_shards += 1;
                 } else {
@@ -2555,6 +2568,7 @@ fn generate_witness_for_owner<'a, E: ExtensionField>(
             range_descriptors: emul_result.replay_range_descriptors.clone(),
             chunk_capacity: emul_result.replay_range_capacity,
             ownership,
+            target_shard_id,
             device_id,
             cpu_affinity,
             start_gate,
@@ -2594,7 +2608,7 @@ fn generate_witness_for_owner<'a, E: ExtensionField>(
             }
             let (mut shard_ctx, shard_summary) = if use_compact_replay {
                 let shard_id = shard_ctx_builder.cur_shard_id;
-                let owned = worker_owns_shard(ownership, shard_id);
+                let owned = worker_captures_shard(ownership, target_shard_id, shard_id);
                 if owned {
                     instrunction_dispatch_ctx.begin_compact_ingest();
                 }
@@ -2839,7 +2853,12 @@ fn generate_witness_for_owner<'a, E: ExtensionField>(
                 - shard_ctx.shard_hint_addr_range.start)
                 / (WORD_SIZE as u32);
 
-            if !worker_owns_shard(ownership, shard_ctx.shard_id) {
+            if target_shard_id.is_some_and(|target| shard_ctx.shard_id > target) {
+                tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
+                return None;
+            }
+
+            if !worker_captures_shard(ownership, target_shard_id, shard_ctx.shard_id) {
                 tracing::info!(
                     target: "ceno_multi_gpu",
                     worker_index = ownership.map(|value| value.0),
@@ -2855,9 +2874,6 @@ fn generate_witness_for_owner<'a, E: ExtensionField>(
                 if shard_ctx.shard_id < target_shard_id {
                     tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
                     return Some((zkvm_witness, shard_ctx, pi, None));
-                } else if shard_ctx.shard_id > target_shard_id {
-                    tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
-                    return None;
                 }
             }
 
@@ -5543,6 +5559,15 @@ mod tests {
         assert!(super::compact_replay_selected(false, false));
         assert!(!super::compact_replay_selected(true, false));
         assert!(!super::compact_replay_selected(false, true));
+    }
+
+    #[test]
+    fn targeted_replay_captures_only_the_selected_owned_shard() {
+        assert!(!super::worker_captures_shard(Some((0, 1)), Some(10), 0));
+        assert!(super::worker_captures_shard(Some((0, 1)), Some(10), 10));
+        assert!(super::worker_captures_shard(Some((1, 2)), None, 3));
+        assert!(!super::worker_captures_shard(Some((1, 2)), None, 2));
+        assert!(!super::worker_captures_shard(Some((0, 2)), Some(3), 3));
     }
 
     #[test]
