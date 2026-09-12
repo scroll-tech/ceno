@@ -1175,26 +1175,6 @@ struct CompactReplayShard {
     fallback_steps: Vec<StepRecord>,
     syscall_witnesses: Vec<SyscallWitness>,
     summary: ShardStepSummary,
-    // Read by the multi-GPU pipeline; single-device replay consumes the other fields directly.
-    #[cfg_attr(not(feature = "gpu"), allow(dead_code))]
-    state_audit_before_digest: Option<[u8; 32]>,
-    #[cfg_attr(not(feature = "gpu"), allow(dead_code))]
-    state_audit_digest: Option<[u8; 32]>,
-}
-
-fn replay_state_audit_selected(shard_id: usize) -> bool {
-    let selected = std::env::var("CENO_MULTI_GPU_REPLAY_AUDIT_SHARD")
-        .ok()
-        .map(|value| {
-            value
-                .parse::<usize>()
-                .unwrap_or_else(|_| panic!("CENO_MULTI_GPU_REPLAY_AUDIT_SHARD must be a shard ID"))
-        });
-    selected == Some(shard_id)
-}
-
-fn replay_state_audit_digest(vm: &VMState<GpuReplayTracer>, shard_id: usize) -> Option<[u8; 32]> {
-    replay_state_audit_selected(shard_id).then(|| vm.replay_state_audit_digest())
 }
 
 struct CompactStepReplay {
@@ -1451,8 +1431,6 @@ fn spawn_compact_replay_pipeline(
                     worker_index = input.ownership.map(|value| value.0),
                     replay_mode = if owned { "compact" } else { "fast_flight" },
                     replay_digest = ?replay_digest,
-                    state_audit_before_digest = ?shard.state_audit_before_digest,
-                    state_audit_digest = ?shard.state_audit_digest,
                     phase = "cpu_replay_ready",
                     "compact replay pipeline event"
                 );
@@ -1580,8 +1558,6 @@ impl CompactStepReplay {
         ) -> Option<ceno_emul::GpuReplayTypedRange>,
     ) -> Option<CompactReplayShard> {
         let expected_steps = *self.shard_step_counts.get(self.shard_id)?;
-        let state_audit_before_digest =
-            replay_state_audit_selected(self.shard_id).then(|| self.vm.replay_state_audit_digest());
         let expected_range_count = self.range_descriptors[self.next_range_descriptor..]
             .iter()
             .take_while(|descriptor| descriptor.shard_id as usize == self.shard_id)
@@ -1653,7 +1629,6 @@ impl CompactStepReplay {
                 first_hint_before,
                 last_hint_after: self.vm.tracer().max_hint_addr_access().0,
             };
-            let state_audit_digest = replay_state_audit_digest(&self.vm, self.shard_id);
             tracing::info!(
                 target: "ceno_multi_gpu",
                 shard_id = self.shard_id,
@@ -1666,7 +1641,6 @@ impl CompactStepReplay {
                 avoided_rows,
                 avoided_bytes,
                 avoided_fallback,
-                ?state_audit_digest,
                 "fast-flight replay complete"
             );
             self.shard_id += 1;
@@ -1675,8 +1649,6 @@ impl CompactStepReplay {
                 fallback_steps: Vec::new(),
                 syscall_witnesses: Vec::new(),
                 summary,
-                state_audit_before_digest,
-                state_audit_digest,
             });
         }
         let mut executed = 0usize;
@@ -1858,15 +1830,12 @@ impl CompactStepReplay {
             last_hint_after: self.vm.tracer().max_hint_addr_access().0,
         };
         let syscall_witnesses = self.vm.tracer_mut().take_syscall_witnesses();
-        let state_audit_digest = replay_state_audit_digest(&self.vm, self.shard_id);
         self.shard_id += 1;
         Some(CompactReplayShard {
             arenas,
             fallback_steps,
             syscall_witnesses,
             summary,
-            state_audit_before_digest,
-            state_audit_digest,
         })
     }
 }
@@ -2870,11 +2839,11 @@ fn generate_witness_for_owner<'a, E: ExtensionField>(
             }
 
 
-            if let Some(target_shard_id) = target_shard_id {
-                if shard_ctx.shard_id < target_shard_id {
-                    tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
-                    return Some((zkvm_witness, shard_ctx, pi, None));
-                }
+            if let Some(target_shard_id) = target_shard_id
+                && shard_ctx.shard_id < target_shard_id
+            {
+                tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
+                return Some((zkvm_witness, shard_ctx, pi, None));
             }
 
             #[allow(unused_variables)]
@@ -4586,7 +4555,6 @@ where
     gkr_iop::gpu::set_thread_cuda_hal(prepared.workers[0].hal.clone());
     let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
     let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
-    let emulation_started = std::time::Instant::now();
     let emulation_result = emulate_program(
         ctx.program.clone(),
         max_steps,
@@ -4600,7 +4568,6 @@ where
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         precompiled_fulltracer_aot,
     );
-    let emulation_elapsed = emulation_started.elapsed();
     let total_shards = emulation_result.shard_ctx_builder.total_shards();
     if let Some(target_shard_id) = target_shard_id
         && target_shard_id >= total_shards
@@ -4610,26 +4577,12 @@ where
         ));
     }
     let exit_code = emulation_result.exit_code;
-    let verifier_started = std::time::Instant::now();
     let verifier = sdk_prover
         .cached_verifier()
         .ok_or("initial GPU prover has no cached verifier")?;
-    let cached_verifier_clone_elapsed = verifier_started.elapsed();
-    let recursion_session_started = std::time::Instant::now();
     if let Some(sink) = &event_sink {
         sink.on_started(total_shards, verifier.vk.clone(), vk_digest)?;
     }
-    let recursion_session_start_elapsed = recursion_session_started.elapsed();
-    tracing::info!(
-        target: "ceno_multi_gpu",
-        emulation_ms = emulation_elapsed.as_millis(),
-        vk_materialize_ms = 0,
-        cached_verifier_clone_ms = cached_verifier_clone_elapsed.as_millis(),
-        recursion_session_start_ms = recursion_session_start_elapsed.as_millis(),
-        total_ms = pipeline_started.elapsed().as_millis(),
-        phase = "pre_worker_setup",
-        "multi-GPU base setup event"
-    );
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let replay_start_gate = Arc::new(ReplayStartGate::new(prepared.workers.len()));
     let started = std::time::Instant::now();
@@ -4650,7 +4603,6 @@ where
             // A depth-one FIFO bounds the extra full-proof footprint and backpressures its owner.
             let (tx, rx) = std::sync::mpsc::sync_channel::<BaseWorkerEvent<E, PCS>>(1);
             ready_receivers.push(Some(rx));
-            let worker_inputs_started = std::time::Instant::now();
             let hal = worker.hal.clone();
             let backend = backend.clone();
             let pk = pk.clone();
@@ -4677,14 +4629,6 @@ where
                     .expect("GPU0 prover must be available")
             });
             let event_sink = event_sink.clone();
-            tracing::info!(
-                target: "ceno_multi_gpu",
-                worker_index,
-                device_id,
-                elapsed_ms = worker_inputs_started.elapsed().as_millis(),
-                phase = "worker_input_clone",
-                "multi-GPU base setup event"
-            );
             handles.push(scope.spawn(move || {
                 let worker_started = std::time::Instant::now();
                 let mut diagnostics = BaseWorkerDiagnostics::new(worker_index, device_id);
@@ -4696,7 +4640,6 @@ where
                     let _worker_cuda_binding =
                         gkr_iop::gpu::bind_thread_default_stream(hal.clone());
                     let ctx = pk.program_ctx.as_ref().unwrap();
-                    let witness_iterator_started = std::time::Instant::now();
                     let witnesses = generate_witness_for_owner(
                         &ctx.system_config,
                         emulation_result,
@@ -4712,15 +4655,12 @@ where
                             cancelled: cancelled.clone(),
                         }),
                     );
-                    let device_started = std::time::Instant::now();
                     let device = existing_prover
                         .is_none()
                         .then(|| gkr_iop::gpu::GpuProver::new(backend, hal.clone()));
-                    let device_elapsed = device_started.elapsed();
                     let memory_start = ceno_gpu::get_cuda_mem_info().unwrap_or((0, 0));
                     diagnostics.observe_memory(memory_start.0, memory_start.1);
                     diagnostics.queue_state = "fifo_empty";
-                    let prover_started = std::time::Instant::now();
                     let owned_prover = device.map(|device| {
                         ZKVMProver::new_with_vk_digest(pk.clone(), device, vk_digest)
                     });
@@ -4728,16 +4668,12 @@ where
                         .as_ref()
                         .or(owned_prover.as_ref())
                         .expect("worker prover must be owned or constructed");
-                    let prover_elapsed = prover_started.elapsed();
                     tracing::info!(
                         target: "ceno_multi_gpu",
                         worker_index,
                         device_id,
-                        device_construct_ms = device_elapsed.as_millis(),
-                        prover_construct_ms = prover_elapsed.as_millis(),
                         reused_prover = existing_prover.is_some(),
                         cpu_affinity = ?effective_affinity,
-                        witness_iterator_ms = witness_iterator_started.elapsed().as_millis(),
                         phase = "worker_setup",
                         "multi-GPU base setup event"
                     );
@@ -5047,8 +4983,6 @@ where
             base_proofs_ready_ms = base_proofs_ready_elapsed.as_millis(),
             base_verification_ms = base_verification_elapsed.as_millis(),
             verified_base_ms = verified_base_elapsed.as_millis(),
-            recursion_overlap_ratio = 0.0,
-            device_local_recursion_ratio = 0.0,
             "Stage 1 multi-GPU base proving complete"
         );
         Ok(proofs)

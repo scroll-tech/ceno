@@ -29,17 +29,9 @@ fn conservative_shard_cap(
         .ok_or_else(|| "GPU device list must not be empty".to_owned())
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ShardAssignmentPolicy {
-    #[default]
-    RoundRobin,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MultiGpuConfig {
     pub device_ids: Vec<usize>,
-    pub shard_policy: ShardAssignmentPolicy,
-    pub replay_queue_depth: usize,
     /// Exclusive logical CPU sets, one per selected GPU worker.
     pub worker_cpu_affinity: Option<Vec<Vec<usize>>>,
 }
@@ -48,8 +40,6 @@ impl MultiGpuConfig {
     pub fn new(device_ids: Vec<usize>) -> Result<Self, String> {
         let config = Self {
             device_ids,
-            shard_policy: ShardAssignmentPolicy::RoundRobin,
-            replay_queue_depth: 1,
             worker_cpu_affinity: None,
         };
         config.validate_shape()?;
@@ -68,9 +58,6 @@ impl MultiGpuConfig {
     pub fn validate_shape(&self) -> Result<(), String> {
         if self.device_ids.is_empty() {
             return Err("GPU device list must not be empty".to_owned());
-        }
-        if self.replay_queue_depth != 1 {
-            return Err("Stage 1 requires replay_queue_depth=1".to_owned());
         }
         let mut unique = HashSet::with_capacity(self.device_ids.len());
         for device_id in &self.device_ids {
@@ -104,9 +91,7 @@ impl MultiGpuConfig {
     }
 
     pub fn owner_index(&self, shard_id: usize) -> usize {
-        match self.shard_policy {
-            ShardAssignmentPolicy::RoundRobin => shard_id % self.device_ids.len(),
-        }
+        shard_id % self.device_ids.len()
     }
 
     pub fn prepare(&self, requested_max_cells: u64) -> Result<PreparedMultiGpu, String> {

@@ -12,7 +12,7 @@ use openvm_cuda_backend::BabyBearPoseidon2GpuEngine;
 use openvm_stark_backend::proof::Proof;
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 
-use crate::system::{RecursionProof, RecursionVk, child_vk_digest, warm_child_vk_digest_cache};
+use crate::system::{RecursionProof, RecursionVk, warm_child_vk_digest_cache};
 
 use super::{
     AggregationOptions, ChildVkKind, GpuRecursionProver, RecursionHostAssets,
@@ -132,18 +132,6 @@ pub struct GpuRecursionSession<const LEAF_FANIN: usize, const INTERNAL_FANIN: us
 impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
     GpuRecursionSession<LEAF_FANIN, INTERNAL_FANIN>
 {
-    pub fn new(
-        child_vk: Arc<RecursionVk>,
-        child_vk_digest: [crate::system::RecursionField; ceno_zkvm::structs::VK_DIGEST_LEN],
-        total_shards: usize,
-        options: AggregationOptions,
-    ) -> Result<Self> {
-        Self::new_with_assets_builder(
-            total_shards,
-            RecursionHostAssetsBuilder::spawn(child_vk, child_vk_digest, options)?,
-        )
-    }
-
     pub fn new_with_assets_builder(
         total_shards: usize,
         assets_template: RecursionHostAssetsBuilder<LEAF_FANIN, INTERNAL_FANIN>,
@@ -306,6 +294,7 @@ fn register_released_device(released_devices: &mut HashSet<usize>, device_id: us
     Ok(())
 }
 
+#[cfg(test)]
 pub fn prove_batch_with_gpu_workers<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>(
     child_vk: Arc<RecursionVk>,
     shard_proofs: Vec<RecursionProof>,
@@ -322,11 +311,13 @@ pub fn prove_batch_with_gpu_workers<const LEAF_FANIN: usize, const INTERNAL_FANI
         return Err(eyre!("recursion GPU device IDs must be unique"));
     }
 
-    let mut session = GpuRecursionSession::<LEAF_FANIN, INTERNAL_FANIN>::new(
-        child_vk.clone(),
-        child_vk_digest(&child_vk),
+    let mut session = GpuRecursionSession::<LEAF_FANIN, INTERNAL_FANIN>::new_with_assets_builder(
         shard_proofs.len(),
-        options,
+        RecursionHostAssetsBuilder::spawn(
+            child_vk.clone(),
+            crate::system::child_vk_digest(&child_vk),
+            options,
+        )?,
     )?;
     for (shard_id, proof) in shard_proofs.into_iter().enumerate() {
         session.accept_base_proof(shard_id, proof)?;

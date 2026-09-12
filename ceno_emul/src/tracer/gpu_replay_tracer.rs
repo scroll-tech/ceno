@@ -527,9 +527,8 @@ impl GpuReplayTracer {
 
     /// Replay cursors that affect future compact witness annotation.
     ///
-    /// Exposed only so the opt-in multi-GPU state audit can distinguish equal
-    /// VM values from a fast-flight worker that consumed a different tape or
-    /// range prefix.
+    /// Distinguish equal VM values from different tape or range prefixes in tests.
+    #[cfg(all(test, feature = "aot-x86_64", not(debug_assertions)))]
     pub(crate) fn replay_audit_cursors(&self) -> (usize, usize) {
         (self.next_range_descriptor, self.next_access_cursor)
     }

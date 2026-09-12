@@ -12,10 +12,7 @@ use crate::circuit::{recursive::prover::CenoRecursiveGpuProver, root::prover::Ce
 use openvm_cuda_backend::BabyBearPoseidon2GpuEngine;
 
 use crate::{
-    circuit::{
-        recursive::prover::{CenoRecursiveCpuProver, CenoRecursiveProver},
-        root::prover::{CenoRootCpuProver, CenoRootProver},
-    },
+    circuit::{recursive::prover::CenoRecursiveCpuProver, root::prover::CenoRootCpuProver},
     system::RecursionVk,
 };
 
@@ -61,6 +58,7 @@ pub struct RecursionHostAssetsTemplate<const LEAF_FANIN: usize, const INTERNAL_F
     root_params: SystemParams,
 }
 
+#[cfg(test)]
 pub enum CpuRecursionProver<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> {
     Leaf(InnerCpuProver<LEAF_FANIN>),
     LeafBridge(CenoRecursiveCpuProver<INTERNAL_FANIN>),
@@ -171,14 +169,17 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
 impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
     RecursionHostAssets<LEAF_FANIN, INTERNAL_FANIN>
 {
+    #[cfg(test)]
     pub fn leaf_vk(&self) -> Arc<RecursiveVk> {
         self.leaf_vk.clone()
     }
 
+    #[cfg(test)]
     pub fn leaf_bridge_vk(&self) -> Arc<RecursiveVk> {
         self.leaf_bridge_vk.clone()
     }
 
+    #[cfg(test)]
     pub fn recursive_vk(&self, level: usize) -> Option<Arc<RecursiveVk>> {
         self.recursive_vks.get(level).cloned()
     }
@@ -187,14 +188,20 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
         self.root_vk.clone()
     }
 
+    #[cfg(test)]
     pub fn recursive_depth_count(&self) -> usize {
         self.recursive_pks.len()
     }
 
+    #[cfg(test)]
     pub fn hydrate_cpu(
         &self,
         kind: RecursionNodeKind,
     ) -> Result<CpuRecursionProver<LEAF_FANIN, INTERNAL_FANIN>> {
+        use crate::circuit::{
+            recursive::prover::CenoRecursiveProver, root::prover::CenoRootProver,
+        };
+
         Ok(match kind {
             RecursionNodeKind::Leaf => {
                 CpuRecursionProver::Leaf(InnerCpuProver::from_pk::<CpuEngine>(

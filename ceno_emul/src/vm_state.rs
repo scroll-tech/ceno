@@ -6,11 +6,10 @@ use crate::{
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
-    tracer::{Change, FullTracer, GpuReplayTracer, NativeTraceStep, PreflightTracer, Tracer},
+    tracer::{Change, FullTracer, NativeTraceStep, PreflightTracer, Tracer},
 };
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
-use tiny_keccak::{Hasher, Keccak};
 
 pub struct HaltState {
     pub exit_code: u32,
@@ -347,13 +346,12 @@ impl<T: Tracer> VMState<T> {
     }
 }
 
-impl VMState<GpuReplayTracer> {
+#[cfg(all(test, feature = "aot-x86_64", not(debug_assertions)))]
+impl VMState<crate::GpuReplayTracer> {
     /// Hash the complete replay-visible VM and witness-annotation cursor state.
-    ///
-    /// This scans dense memory and is intended only for an explicitly selected
-    /// multi-GPU replay audit shard, never for the normal hot path.
-    #[doc(hidden)]
-    pub fn replay_state_audit_digest(&self) -> [u8; 32] {
+    pub(crate) fn replay_state_audit_digest(&self) -> [u8; 32] {
+        use tiny_keccak::{Hasher, Keccak};
+
         let mut keccak = Keccak::v256();
         keccak.update(b"ceno-replay-vm-state-audit-v2");
         keccak.update(&self.pc.to_le_bytes());

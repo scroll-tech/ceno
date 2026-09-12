@@ -274,14 +274,7 @@ where
     M: Clone + Default + serde::Serialize + serde::de::DeserializeOwned,
 {
     pub fn new(vk: ZKVMVerifyingKey<E, PCS, M>) -> Self {
-        let digest_started = std::time::Instant::now();
         let vk_digest = vk.compute_digest();
-        tracing::info!(
-            target: "ceno_multi_gpu",
-            elapsed_ms = digest_started.elapsed().as_millis(),
-            phase = "verifier_vk_digest",
-            "multi-GPU base setup event"
-        );
         ZKVMVerifier { vk, vk_digest }
     }
 
@@ -290,13 +283,6 @@ where
         vk: ZKVMVerifyingKey<E, PCS, M>,
         vk_digest: [E; VK_DIGEST_LEN],
     ) -> Self {
-        tracing::info!(
-            target: "ceno_multi_gpu",
-            elapsed_ms = 0,
-            reused_vk_digest = true,
-            phase = "verifier_vk_digest",
-            "multi-GPU base setup event"
-        );
         ZKVMVerifier { vk, vk_digest }
     }
 

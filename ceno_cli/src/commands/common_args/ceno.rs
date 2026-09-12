@@ -546,6 +546,7 @@ where
         let init_full_mem = pk.program_ctx.as_ref().unwrap().setup_init_mem(&hints);
         let prover = ZKVMProver::new(pk.clone(), device);
         let max_steps = options.max_steps;
+        let shard_id = options.shard_id.map(|value| value as usize);
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
         let preflight_aot = pk
             .program_ctx
@@ -568,7 +569,7 @@ where
                 &init_full_mem,
                 public_io_digest,
                 max_steps,
-                options.shard_id.map(|value| value as usize),
+                shard_id,
                 base_event_sink,
                 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
                 preflight_aot,

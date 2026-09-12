@@ -733,14 +733,7 @@ where
             .zkvm_prover
             .as_ref()
             .context("ZKVMProver is not initialized")?;
-        let init_mem_started = std::time::Instant::now();
         let init_full_mem = prover.setup_init_mem(&Vec::from(&hints));
-        tracing::info!(
-            target: "ceno_multi_gpu",
-            elapsed_ms = init_mem_started.elapsed().as_millis(),
-            phase = "sdk_init_memory",
-            "multi-GPU base setup event"
-        );
         let prover = self
             .zkvm_prover
             .take()
@@ -804,25 +797,13 @@ impl<SC, VC> CenoSDK<RecursionField, RecursionPcs, SC, VC> {
     ) -> Result<StreamingRecursionOutput> {
         let total_started = Instant::now();
         let options = self.aggregation_options();
-        let assets_builder = match self.recursion_assets_builder.take() {
-            Some(builder) => builder,
-            None => {
-                let prover = self
-                    .zkvm_prover
-                    .as_ref()
-                    .context("ZKVMProver is not initialized")?;
-                let app_vk = Arc::new(
-                    prover
-                        .cached_verifier()
-                        .context("initial GPU prover has no cached verifier")?
-                        .vk
-                        .clone(),
-                );
-                let app_vk_digest = prover.vk_digest();
-                RecursionHostAssetsBuilder::spawn(app_vk, app_vk_digest, options.clone())
-                    .map_err(|error| anyhow::anyhow!(error.to_string()))?
-            }
-        };
+        if self.recursion_assets_builder.is_none() {
+            self.prepare_streaming_recursion()?;
+        }
+        let assets_builder = self
+            .recursion_assets_builder
+            .take()
+            .expect("recursion host assets were just prepared");
         let recursion = Arc::new(StreamingRecursionOrchestrator::with_assets_builder(
             options,
             assets_builder,

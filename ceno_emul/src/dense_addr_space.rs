@@ -195,6 +195,7 @@ impl PackedMemory {
         self.store.end()
     }
 
+    #[cfg(all(test, feature = "aot-x86_64", not(debug_assertions)))]
     pub(crate) fn raw_cells(&self) -> &[u64] {
         &self.store.cells
     }

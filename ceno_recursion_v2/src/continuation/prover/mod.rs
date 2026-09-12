@@ -33,16 +33,20 @@ use crate::{
     system::{RecursionProof, RecursionVk, VerifierSubCircuit, VerifierTraceGen},
 };
 
+#[cfg(any(test, feature = "cuda"))]
 mod assets;
 #[cfg(feature = "cuda")]
 mod gpu_workers;
 mod inner;
+#[cfg(any(test, feature = "cuda"))]
 mod scheduler;
 
+#[cfg(any(test, feature = "cuda"))]
 pub use assets::*;
 #[cfg(feature = "cuda")]
 pub use gpu_workers::*;
 pub use inner::*;
+#[cfg(any(test, feature = "cuda"))]
 pub use scheduler::*;
 
 pub type InnerCpuProver<const MAX_NUM_PROOFS: usize> = InnerAggregationProver<
