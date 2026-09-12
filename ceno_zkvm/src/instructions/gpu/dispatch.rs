@@ -65,66 +65,7 @@ fn checked_producer_base(base: usize, range_rows: usize, count: usize) -> u32 {
     u32::try_from(base).expect("producer base exceeds u32")
 }
 
-// `ShardContext` stores each Rayon bucket in a BTreeMap, so a later
-// `assign_opcode_circuit` call replaces an earlier record for the same
-// address. Device finalization must use that assignment order rather than the
-// enum discriminant; the two orders differ for logic, div/rem, loads, and stores.
-const PRODUCER_ASSIGNMENT_ORDER: &[InsnKind] = &[
-    InsnKind::ADD,
-    InsnKind::SUB,
-    InsnKind::AND,
-    InsnKind::OR,
-    InsnKind::XOR,
-    InsnKind::SLL,
-    InsnKind::SRL,
-    InsnKind::SRA,
-    InsnKind::SLT,
-    InsnKind::SLTU,
-    InsnKind::MUL,
-    InsnKind::MULH,
-    InsnKind::MULHSU,
-    InsnKind::MULHU,
-    InsnKind::DIVU,
-    InsnKind::REMU,
-    InsnKind::DIV,
-    InsnKind::REM,
-    InsnKind::ADDI,
-    InsnKind::ANDI,
-    InsnKind::ORI,
-    InsnKind::XORI,
-    InsnKind::SLLI,
-    InsnKind::SRLI,
-    InsnKind::SRAI,
-    InsnKind::SLTI,
-    InsnKind::SLTIU,
-    #[cfg(feature = "u16limb_circuit")]
-    InsnKind::LUI,
-    #[cfg(feature = "u16limb_circuit")]
-    InsnKind::AUIPC,
-    InsnKind::BEQ,
-    InsnKind::BNE,
-    InsnKind::BLT,
-    InsnKind::BLTU,
-    InsnKind::BGE,
-    InsnKind::BGEU,
-    InsnKind::JAL,
-    InsnKind::JALR,
-    InsnKind::LW,
-    InsnKind::LB,
-    InsnKind::LBU,
-    InsnKind::LH,
-    InsnKind::LHU,
-    InsnKind::SW,
-    InsnKind::SH,
-    InsnKind::SB,
-];
-
-fn producer_order(kind: InsnKind) -> u32 {
-    let order = PRODUCER_ASSIGNMENT_ORDER
-        .iter()
-        .position(|candidate| *candidate == kind)
-        .unwrap_or_else(|| panic!("non-fused instruction kind {kind:?} has no producer order"))
-        as u32;
+fn check_producer_order(order: u32) {
     let max_priority =
         (u64::from(order) << 30) | (u64::try_from(MAX_PRODUCER_ROWS - 1).unwrap() << 2) | 3;
     assert_eq!(
@@ -132,7 +73,6 @@ fn producer_order(kind: InsnKind) -> u32 {
         0,
         "producer order overlaps continuation class"
     );
-    order
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -275,6 +215,7 @@ type Bb = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
 struct FusedRegistration {
     owner: TypeId,
     kind: InsnKind,
+    producer_order: u32,
     tag: u32,
     arg0: u32,
     arg1: u32,
@@ -833,7 +774,7 @@ pub(crate) fn submit_provisional_fused_range(
                 row_count: u32::try_from(arena.len()).unwrap(),
                 producer_base: checked_producer_base(producer_base, arena.len(), registration.rows),
                 producer_count: producer_count(registration.rows),
-                producer_order: producer_order(arena.kind()),
+                producer_order: registration.producer_order,
                 num_cols: u32::try_from(registration.num_cols).unwrap(),
                 arg0: registration.arg0,
                 arg1: registration.arg1,
@@ -1098,6 +1039,7 @@ pub(crate) fn prepare_fused_assignment<
     num_structural_witin: usize,
     expected_rows: usize,
     kind: GpuWitgenKind,
+    producer_order: u32,
 ) -> Result<(), ZKVMError> {
     if !FUSED_INGRESS.with(|slot| slot.borrow().is_some()) {
         return Ok(());
@@ -1162,6 +1104,8 @@ pub(crate) fn prepare_fused_assignment<
         });
         return Ok(());
     }
+
+    check_producer_order(producer_order);
 
     macro_rules! map_config {
         ($ty:ty, $extract:path) => {{
@@ -1338,6 +1282,7 @@ pub(crate) fn prepare_fused_assignment<
             .push(FusedRegistration {
                 owner: TypeId::of::<I>(),
                 kind: insn_kind,
+                producer_order,
                 tag,
                 arg0,
                 arg1,
@@ -1507,7 +1452,7 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                         registration.rows,
                     ),
                     producer_count: producer_count(registration.rows),
-                    producer_order: producer_order(arena.kind()),
+                    producer_order: registration.producer_order,
                     num_cols: u32::try_from(registration.num_cols)
                         .expect("column count exceeds u32"),
                     arg0: registration.arg0,
@@ -2928,16 +2873,63 @@ mod tests {
     }
 
     #[test]
-    fn producer_metadata_preserves_count_and_assignment_priority() {
-        assert_eq!(producer_count(123), 123);
-        assert_eq!(
-            PRODUCER_ASSIGNMENT_ORDER
+    fn producer_order_is_stable_for_sparse_registration_paths() {
+        use crate::{
+            instructions::riscv::{LEGACY_PRODUCER_ORDER, Rv32imConfig},
+            structs::{ProgramParams, ZKVMConstraintSystem},
+        };
+        let hal = std::sync::Arc::new(CudaHalBB31::new(0).unwrap());
+        let _binding = gkr_iop::gpu::bind_thread_default_stream(hal);
+        let mut cs = ZKVMConstraintSystem::<ff_ext::BabyBearExt4>::new_with_platform(
+            ProgramParams::default(),
+        );
+        let (config, builder) = Rv32imConfig::construct_circuits(&mut cs);
+        for active in [
+            &[InsnKind::SB][..],
+            &[InsnKind::OR, InsnKind::REMU, InsnKind::LW, InsnKind::SB][..],
+        ] {
+            let mut counts = [0; InsnKind::COUNT];
+            let mut dispatch = builder.to_dispatch_ctx();
+            dispatch.begin_compact_ingest();
+            for &kind in active {
+                counts[kind as usize] = 1;
+                dispatch.ingest_compact_count(kind, 1);
+            }
+            let expected: Vec<_> = LEGACY_PRODUCER_ORDER
                 .iter()
                 .copied()
-                .map(producer_order)
-                .collect::<Vec<_>>(),
-            (0..PRODUCER_ASSIGNMENT_ORDER.len() as u32).collect::<Vec<_>>()
-        );
+                .enumerate()
+                .filter(|(_, kind)| active.contains(kind))
+                .map(|(order, kind)| (kind, order as u32))
+                .collect();
+            for provisional in [false, true] {
+                install_compact_replay_arenas(GpuReplayShardArenas::provisional(counts));
+                if provisional {
+                    config
+                        .prepare_provisional_fused_assignments(&cs, &counts)
+                        .unwrap();
+                } else {
+                    config.prepare_fused_assignments(&cs, &dispatch).unwrap();
+                }
+                let actual = FUSED_INGRESS.with(|slot| {
+                    slot.borrow()
+                        .as_ref()
+                        .unwrap()
+                        .registrations
+                        .iter()
+                        .map(|r| (r.kind, r.producer_order))
+                        .collect::<Vec<_>>()
+                });
+                assert_eq!(actual, expected, "provisional={provisional}");
+                abort_fused_session();
+            }
+        }
+    }
+
+    #[test]
+    fn producer_order_accepts_full_u32_domain() {
+        check_producer_order(0);
+        check_producer_order(u32::MAX);
     }
 
     #[test]
@@ -3349,6 +3341,10 @@ mod tests {
                         chip.zkvm_v1_css.num_structural_witin as usize,
                         1,
                         $kind,
+                        crate::instructions::riscv::LEGACY_PRODUCER_ORDER
+                            .iter()
+                            .position(|kind| *kind == <$instruction>::inst_kinds()[0])
+                            .unwrap() as u32,
                     )
                     .unwrap();
                 }};
