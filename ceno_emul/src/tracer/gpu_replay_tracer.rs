@@ -140,6 +140,7 @@ pub struct GpuReplayTracer {
     sealed: Vec<GpuReplayChunk>,
     pub(super) recyclable: Option<GpuReplayChunk>,
     retain_complete_shard: bool,
+    capture_compact: bool,
     range_descriptors: Arc<Vec<crate::GpuReplayRangeDescriptor>>,
     pub(super) next_range_descriptor: usize,
     ordinal: usize,
@@ -175,6 +176,7 @@ impl GpuReplayTracer {
             sealed: Vec::new(),
             recyclable: None,
             retain_complete_shard: false,
+            capture_compact: true,
             range_descriptors: Arc::new(Vec::new()),
             next_range_descriptor: 0,
             ordinal: 0,
@@ -202,10 +204,14 @@ impl GpuReplayTracer {
             "GPU replay native range exceeds 262144 rows"
         );
         self.native_error = 0;
-        for (index, slot) in self.native_kinds.iter_mut().enumerate() {
-            *slot = self.current.typed[index]
-                .as_mut()
-                .map_or_else(Default::default, crate::GpuTypedSoaArena::native_state);
+        if self.capture_compact {
+            for (index, slot) in self.native_kinds.iter_mut().enumerate() {
+                *slot = self.current.typed[index]
+                    .as_mut()
+                    .map_or_else(Default::default, crate::GpuTypedSoaArena::native_state);
+            }
+        } else {
+            self.native_kinds.fill(Default::default());
         }
         let events = self.next_accesses.events();
         GpuReplayNativeTraceState {
@@ -395,10 +401,19 @@ impl GpuReplayTracer {
     /// Seal the previous shard and start a new ordinal domain while retaining
     /// predecessor state and the next-access cursor.
     pub fn start_shard(&mut self) {
+        self.start_shard_with_capture(true);
+    }
+
+    pub fn start_shard_with_capture(&mut self, capture_compact: bool) {
         self.finish_chunks();
         self.shard_start_cycle = self.pending.cycle;
         self.ordinal = 0;
         self.syscall_witnesses.clear();
+        self.capture_compact = capture_compact;
+        if !capture_compact {
+            self.current.reset_empty(self.shard_start_cycle);
+            return;
+        }
         let descriptor = &self.range_descriptors[self.next_range_descriptor];
         assert_eq!(descriptor.sequence, 0);
         if self.current.typed.len() != InsnKind::COUNT {
@@ -420,6 +435,33 @@ impl GpuReplayTracer {
         }
         self.current
             .reset_from_descriptor(descriptor, self.shard_start_cycle);
+    }
+
+    pub fn set_first_shard_capture(&mut self, capture_compact: bool) {
+        assert_eq!(
+            self.ordinal, 0,
+            "first shard capture changed after replay started"
+        );
+        self.capture_compact = capture_compact;
+        if !capture_compact {
+            self.current.reset_empty(self.shard_start_cycle);
+        }
+    }
+
+    pub fn finish_fast_flight_ranges(&mut self, range_count: usize) {
+        assert!(
+            !self.capture_compact,
+            "compact shard cannot skip replay ranges"
+        );
+        assert!(
+            self.current.is_empty(),
+            "fast-flight shard produced compact payload"
+        );
+        self.next_range_descriptor = self
+            .next_range_descriptor
+            .checked_add(range_count)
+            .expect("GPU replay descriptor index overflow");
+        assert!(self.next_range_descriptor <= self.range_descriptors.len());
     }
 
     pub fn take_sealed_chunks(&mut self) -> Vec<GpuReplayChunk> {
@@ -483,6 +525,14 @@ impl GpuReplayTracer {
         self.max_hint_addr_access
     }
 
+    /// Replay cursors that affect future compact witness annotation.
+    ///
+    /// Distinguish equal VM values from different tape or range prefixes in tests.
+    #[cfg(all(test, feature = "aot-x86_64", not(debug_assertions)))]
+    pub(crate) fn replay_audit_cursors(&self) -> (usize, usize) {
+        (self.next_range_descriptor, self.next_access_cursor)
+    }
+
     pub fn remaining_chunk_capacity(&self) -> usize {
         self.config
             .chunk_capacity
@@ -539,6 +589,21 @@ impl GpuReplayTracer {
                 _ => panic!("GPU replay access/tape mismatch"),
             };
             self.pending.future_access_mask |= bit;
+            self.next_access_cursor += 1;
+        }
+    }
+
+    fn consume_fast_flight_next_accesses(&mut self) {
+        let start = self.pending.cycle;
+        let end = start + FullTracer::SUBCYCLES_PER_INSN;
+        while let Some(event) = self.next_accesses.events().get(self.next_access_cursor) {
+            assert!(
+                event.source_cycle >= start,
+                "GPU fast-flight skipped next-access event"
+            );
+            if event.source_cycle >= end {
+                break;
+            }
             self.next_access_cursor += 1;
         }
     }
@@ -703,7 +768,11 @@ impl Tracer for GpuReplayTracer {
 
     #[inline(always)]
     fn advance(&mut self) -> Self::Record {
-        self.annotate_pending();
+        if self.capture_compact {
+            self.annotate_pending();
+        } else {
+            self.consume_fast_flight_next_accesses();
+        }
         let busy_loop = self.pending.is_busy_loop();
         let ordinal = u32::try_from(self.ordinal).expect("GPU replay ordinal exceeds u32");
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
@@ -738,6 +807,16 @@ impl Tracer for GpuReplayTracer {
                     !self.range_descriptors.is_empty(),
                 ),
             );
+        }
+        if !self.capture_compact {
+            self.ordinal += 1;
+            let cycle =
+                self.shard_start_cycle + self.ordinal as Cycle * FullTracer::SUBCYCLES_PER_INSN;
+            self.pending = StepRecord {
+                cycle,
+                ..StepRecord::default()
+            };
+            return GpuReplayStep { ordinal, busy_loop };
         }
         if self.pending.insn.kind == InsnKind::ECALL {
             self.current.fallback.push(GpuReplayFallbackRecord {
@@ -844,6 +923,9 @@ impl Tracer for GpuReplayTracer {
     fn track_syscall(&mut self, effects: SyscallEffects) {
         let witness = effects.finalize(self);
         assert!(!self.pending.has_syscall(), "Only one syscall per step");
+        if !self.capture_compact {
+            return;
+        }
         self.pending.syscall_index = u32::try_from(self.syscall_witnesses.len())
             .expect("GPU replay syscall witness index exceeds u32");
         self.syscall_witnesses.push(witness);

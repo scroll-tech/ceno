@@ -5,6 +5,8 @@
 
 pub mod error;
 pub mod instructions;
+#[cfg(feature = "gpu")]
+pub mod multi_gpu;
 pub mod scheme;
 pub mod tables;
 pub use utils::u64vec;

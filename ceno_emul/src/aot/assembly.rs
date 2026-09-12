@@ -835,6 +835,9 @@ ceno_aot_gpu_replay_emit_step:
     movl $0, 12(%rsp)
     movl $0, 16(%rsp)
 
+    cmpl ${AOT_TRACE_MODE_GPU_REPLAY_FAST_FLIGHT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)
+    je .L_gpu_replay_fast_flight_state
+
     movl {AOT_CTX_TRACE_KIND_OFFSET}(%r12), %eax
     cmpq {AOT_CTX_GPU_REPLAY_KIND_COUNT_OFFSET}(%r12), %rax
     jae .L_gpu_replay_bad_kind
@@ -852,6 +855,7 @@ ceno_aot_gpu_replay_emit_step:
     cmpl $7, 112(%r10)
     ja .L_gpu_replay_bad_layout
 
+.L_gpu_replay_fast_flight_state:
     movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %r8
     movq (%r8), %rax
     movl {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12), %edi
@@ -955,6 +959,9 @@ ceno_aot_gpu_replay_emit_step:
 .L_gpu_replay_events_done:
     movq {AOT_CTX_GPU_REPLAY_EVENT_CURSOR_OFFSET}(%r12), %r8
     movq %rsi, (%r8)
+
+    cmpl ${AOT_TRACE_MODE_GPU_REPLAY_FAST_FLIGHT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)
+    je .L_gpu_replay_fast_flight_done
 
     cmpl ${gpu_compact_sentinel}, 116(%r10)
     je .L_gpu_replay_compact
@@ -1113,6 +1120,15 @@ ceno_aot_gpu_replay_emit_step:
     movl %edi, (%r8,%rcx,4)
     incl %ecx
     movl %ecx, 108(%r10)
+    movq {AOT_CTX_GPU_REPLAY_ORDINAL_OFFSET}(%r12), %r8
+    incq (%r8)
+    movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %r8
+    addq $4, (%r8)
+    movl ${AOT_STATUS_CONTINUE}, %eax
+    addq $48, %rsp
+    ret
+
+.L_gpu_replay_fast_flight_done:
     movq {AOT_CTX_GPU_REPLAY_ORDINAL_OFFSET}(%r12), %r8
     incq (%r8)
     movq {AOT_CTX_GPU_REPLAY_PENDING_CYCLE_OFFSET}(%r12), %r8
@@ -1497,6 +1513,11 @@ pub(super) fn emit_after_native_step(
             writeln!(
                 file,
                 "    cmpl ${AOT_TRACE_MODE_GPU_REPLAY_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
+            )?;
+            writeln!(file, "    je {gpu_replay_label}")?;
+            writeln!(
+                file,
+                "    cmpl ${AOT_TRACE_MODE_GPU_REPLAY_FAST_FLIGHT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
             )?;
             writeln!(file, "    je {gpu_replay_label}")?;
         }

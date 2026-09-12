@@ -3,8 +3,8 @@ mod prover_integration {
     use crate::{
         circuit::{Circuit, root::CenoRootCircuit},
         continuation::prover::{
-            AggProver, AggregationOptions, ChildVkKind, InnerCpuProver,
-            internal_aggregation_chunk_plan,
+            AggProver, AggregationOptions, ChildVkKind, CpuRecursionProver, InnerCpuProver,
+            RecursionHostAssetsTemplate, RecursionNodeKind, internal_aggregation_chunk_plan,
         },
         system::{
             AggregationSubCircuit, RecursionField, RecursionProof, RecursionVk, VerifierSubCircuit,
@@ -31,6 +31,9 @@ mod prover_integration {
         time::Instant,
     };
     use tracing_subscriber::EnvFilter;
+
+    #[cfg(feature = "cuda")]
+    use crate::continuation::prover::verify_root_proof;
 
     type Engine = BabyBearPoseidon2CpuEngine<DuplexSponge>;
     type E = RecursionField;
@@ -240,6 +243,183 @@ mod prover_integration {
         let elapsed = start.elapsed();
         println!(
             "agg prover ({shard_count} shards): elapsed={elapsed:?}, produced and verified root proof",
+        );
+        Ok(())
+    }
+
+    fn serialized<T: serde::Serialize>(value: &T) -> Vec<u8> {
+        bincode::serialize(value).expect("VK serialization should succeed")
+    }
+
+    #[test]
+    fn host_assets_hydrate_identical_cpu_vks_for_every_planned_kind() -> Result<()> {
+        let Some((_, child_vk)) = load_fixtures()? else {
+            return Ok(());
+        };
+        let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
+        let template = RecursionHostAssetsTemplate::<2, 2>::new(Arc::new(child_vk), &options)?;
+        let assets = template.bind(17)?;
+        assert_eq!(assets.recursive_depth_count(), 3);
+
+        let CpuRecursionProver::Leaf(leaf) = assets.hydrate_cpu(RecursionNodeKind::Leaf)? else {
+            unreachable!()
+        };
+        assert_eq!(
+            serialized(leaf.get_vk().as_ref()),
+            serialized(assets.leaf_vk().as_ref())
+        );
+
+        let CpuRecursionProver::LeafBridge(bridge) =
+            assets.hydrate_cpu(RecursionNodeKind::LeafBridge)?
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            serialized(bridge.get_vk().as_ref()),
+            serialized(assets.leaf_bridge_vk().as_ref())
+        );
+
+        for level in 0..assets.recursive_depth_count() {
+            let CpuRecursionProver::Recursive(recursive) =
+                assets.hydrate_cpu(RecursionNodeKind::Recursive { level })?
+            else {
+                unreachable!()
+            };
+            assert_eq!(
+                serialized(recursive.get_vk().as_ref()),
+                serialized(assets.recursive_vk(level).unwrap().as_ref())
+            );
+        }
+
+        let CpuRecursionProver::Root(root) = assets.hydrate_cpu(RecursionNodeKind::Root)? else {
+            unreachable!()
+        };
+        assert_eq!(
+            serialized(root.get_vk().as_ref()),
+            serialized(assets.root_vk().as_ref())
+        );
+        assert!(
+            assets
+                .hydrate_cpu(RecursionNodeKind::Recursive {
+                    level: assets.recursive_depth_count(),
+                })
+                .is_err()
+        );
+
+        let shallow_assets = template.bind(1)?;
+        assert_eq!(shallow_assets.recursive_depth_count(), 1);
+        let CpuRecursionProver::Root(root) = shallow_assets.hydrate_cpu(RecursionNodeKind::Root)?
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            serialized(root.get_vk().as_ref()),
+            serialized(shallow_assets.root_vk().as_ref())
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn host_assets_switch_gpu_kind_after_drop_and_trim() -> Result<()> {
+        let Some((_, child_vk)) = load_fixtures()? else {
+            return Ok(());
+        };
+        let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
+        let assets =
+            RecursionHostAssetsTemplate::<2, 2>::new(Arc::new(child_vk), &options)?.bind(17)?;
+
+        let leaf = assets.hydrate_gpu_on(0, RecursionNodeKind::Leaf)?;
+        drop(leaf);
+        openvm_cuda_common::memory_manager::synchronize_and_trim_device(0)?;
+
+        let leaf_bridge = assets.hydrate_gpu_on(0, RecursionNodeKind::LeafBridge)?;
+        drop(leaf_bridge);
+        openvm_cuda_common::memory_manager::synchronize_and_trim_device(0)?;
+        Ok(())
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn gpu_worker_batch_matches_sequential_single_shard() -> Result<()> {
+        let Some((loaded_proofs, child_vk)) = load_fixtures()? else {
+            return Ok(());
+        };
+        let shard_proofs = select_proofs(&loaded_proofs, 1)?;
+        let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
+        openvm_cuda_common::common::set_device_by_id(0)?;
+        let sequential = {
+            let prover = AggProver::<2, 2>::new(Arc::new(child_vk.clone()), options.clone());
+            prover.prove_with_root_vk(&shard_proofs)?
+        };
+        openvm_cuda_common::memory_manager::synchronize_and_trim_device(0)?;
+
+        let batch = crate::continuation::prover::prove_batch_with_gpu_workers::<2, 2>(
+            Arc::new(child_vk),
+            shard_proofs,
+            options,
+            &[0],
+        )?;
+        assert_eq!(
+            serialized(&batch.root_output.root_vk),
+            serialized(&sequential.root_vk)
+        );
+        verify_root_proof(&sequential.root_vk, &sequential.root_proof)?;
+        verify_root_proof(&batch.root_output.root_vk, &batch.root_output.root_proof)?;
+        verify_root_proof(&batch.root_output.root_vk, &sequential.root_proof)?;
+        verify_root_proof(&sequential.root_vk, &batch.root_output.root_proof)?;
+        // Valid GPU proofs are not byte-deterministic, including repeated legacy sequential runs.
+        // Compare the public statement and proof shape, then require cryptographic verification.
+        assert!(
+            batch.root_output.root_proof.proof.public_values
+                == sequential.root_proof.proof.public_values,
+            "worker and sequential root proofs have different public values"
+        );
+        assert!(
+            batch.root_output.root_proof.proof.trace_vdata
+                == sequential.root_proof.proof.trace_vdata,
+            "worker and sequential root proofs have different trace metadata"
+        );
+        let [metrics] = batch.worker_metrics.as_slice() else {
+            panic!("one-device batch must report exactly one worker")
+        };
+        assert_eq!(metrics.device_id, 0);
+        assert_eq!(metrics.task_count, 4);
+        assert_eq!(metrics.leaf_tasks, 1);
+        assert_eq!(metrics.leaf_bridge_tasks, 1);
+        assert_eq!(metrics.recursive_tasks, 1);
+        assert_eq!(metrics.root_tasks, 1);
+        assert_eq!(metrics.asset_hydrations, 4);
+        assert_eq!(metrics.asset_switches, 3);
+        Ok(())
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn gpu_worker_batch_two_device_gate() -> Result<()> {
+        if std::env::var_os("OPENVM_RUN_MULTI_GPU_TESTS").as_deref() != Some("1".as_ref()) {
+            println!("skipping physical multi-GPU recursion test");
+            return Ok(());
+        }
+        let Some((loaded_proofs, child_vk)) = load_fixtures()? else {
+            return Ok(());
+        };
+        let shard_proofs = select_proofs(&loaded_proofs, 2)?;
+        let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
+        let output = crate::continuation::prover::prove_batch_with_gpu_workers::<2, 2>(
+            Arc::new(child_vk),
+            shard_proofs,
+            options,
+            &[0, 1],
+        )?;
+        assert_eq!(output.worker_metrics.len(), 2);
+        assert_eq!(
+            output
+                .worker_metrics
+                .iter()
+                .map(|metrics| metrics.task_count)
+                .sum::<usize>(),
+            4
         );
         Ok(())
     }

@@ -292,7 +292,7 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
         bb31::CudaHalBB31,
         common::{transpose::matrix_transpose, witgen::types::GpuShardRamRecord},
     };
-    use gkr_iop::gpu::gpu_prover::get_cuda_hal;
+    use gkr_iop::gpu::get_cuda_hal;
     use p3::field::PrimeField32;
     use witness::{DeviceMatrixLayout, InstancePaddingStrategy, next_pow2_instance_padding};
 
@@ -542,7 +542,7 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
     num_local_writes: usize,
 ) -> Result<Option<crate::tables::RMMCollections<E::BaseField>>, ZKVMError> {
     use ceno_gpu::{Buffer, bb31::CudaHalBB31, common::transpose::matrix_transpose};
-    use gkr_iop::gpu::gpu_prover::get_cuda_hal;
+    use gkr_iop::gpu::get_cuda_hal;
     use witness::{DeviceMatrixLayout, InstancePaddingStrategy, next_pow2_instance_padding};
 
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
@@ -736,7 +736,7 @@ pub(crate) fn try_gpu_assign_shard_ram_ec_tree_from_device<E: ExtensionField>(
     num_write_records: usize,
 ) -> Result<Option<crate::tables::RMMCollections<E::BaseField>>, ZKVMError> {
     use ceno_gpu::{Buffer, CudaHal, bb31::CudaHalBB31, common::transpose::matrix_transpose};
-    use gkr_iop::gpu::gpu_prover::get_cuda_hal;
+    use gkr_iop::gpu::get_cuda_hal;
     use witness::{DeviceMatrixLayout, InstancePaddingStrategy, next_pow2_instance_padding};
 
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;

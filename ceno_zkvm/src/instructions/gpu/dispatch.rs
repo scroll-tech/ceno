@@ -65,8 +65,7 @@ fn checked_producer_base(base: usize, range_rows: usize, count: usize) -> u32 {
     u32::try_from(base).expect("producer base exceeds u32")
 }
 
-fn producer_order(kind: InsnKind) -> u32 {
-    let order = kind as u32;
+fn check_producer_order(order: u32) {
     let max_priority =
         (u64::from(order) << 30) | (u64::try_from(MAX_PRODUCER_ROWS - 1).unwrap() << 2) | 3;
     assert_eq!(
@@ -74,7 +73,6 @@ fn producer_order(kind: InsnKind) -> u32 {
         0,
         "producer order overlaps continuation class"
     );
-    order
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -217,6 +215,7 @@ type Bb = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
 struct FusedRegistration {
     owner: TypeId,
     kind: InsnKind,
+    producer_order: u32,
     tag: u32,
     arg0: u32,
     arg1: u32,
@@ -775,7 +774,7 @@ pub(crate) fn submit_provisional_fused_range(
                 row_count: u32::try_from(arena.len()).unwrap(),
                 producer_base: checked_producer_base(producer_base, arena.len(), registration.rows),
                 producer_count: producer_count(registration.rows),
-                producer_order: producer_order(arena.kind()),
+                producer_order: registration.producer_order,
                 num_cols: u32::try_from(registration.num_cols).unwrap(),
                 arg0: registration.arg0,
                 arg1: registration.arg1,
@@ -1040,6 +1039,7 @@ pub(crate) fn prepare_fused_assignment<
     num_structural_witin: usize,
     expected_rows: usize,
     kind: GpuWitgenKind,
+    producer_order: u32,
 ) -> Result<(), ZKVMError> {
     if !FUSED_INGRESS.with(|slot| slot.borrow().is_some()) {
         return Ok(());
@@ -1104,6 +1104,8 @@ pub(crate) fn prepare_fused_assignment<
         });
         return Ok(());
     }
+
+    check_producer_order(producer_order);
 
     macro_rules! map_config {
         ($ty:ty, $extract:path) => {{
@@ -1280,6 +1282,7 @@ pub(crate) fn prepare_fused_assignment<
             .push(FusedRegistration {
                 owner: TypeId::of::<I>(),
                 kind: insn_kind,
+                producer_order,
                 tag,
                 arg0,
                 arg1,
@@ -1449,7 +1452,7 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                         registration.rows,
                     ),
                     producer_count: producer_count(registration.rows),
-                    producer_order: producer_order(arena.kind()),
+                    producer_order: registration.producer_order,
                     num_cols: u32::try_from(registration.num_cols)
                         .expect("column count exceeds u32"),
                     arg0: registration.arg0,
@@ -2870,11 +2873,63 @@ mod tests {
     }
 
     #[test]
-    fn producer_metadata_preserves_count_and_kind_priority() {
-        assert_eq!(producer_count(123), 123);
-        assert_eq!(producer_order(InsnKind::ADD), InsnKind::ADD as u32);
-        assert_eq!(producer_order(InsnKind::SUB), InsnKind::SUB as u32);
-        assert_ne!(producer_order(InsnKind::ADD), producer_order(InsnKind::SUB));
+    fn producer_order_is_stable_for_sparse_registration_paths() {
+        use crate::{
+            instructions::riscv::{LEGACY_PRODUCER_ORDER, Rv32imConfig},
+            structs::{ProgramParams, ZKVMConstraintSystem},
+        };
+        let hal = std::sync::Arc::new(CudaHalBB31::new(0).unwrap());
+        let _binding = gkr_iop::gpu::bind_thread_default_stream(hal);
+        let mut cs = ZKVMConstraintSystem::<ff_ext::BabyBearExt4>::new_with_platform(
+            ProgramParams::default(),
+        );
+        let (config, builder) = Rv32imConfig::construct_circuits(&mut cs);
+        for active in [
+            &[InsnKind::SB][..],
+            &[InsnKind::OR, InsnKind::REMU, InsnKind::LW, InsnKind::SB][..],
+        ] {
+            let mut counts = [0; InsnKind::COUNT];
+            let mut dispatch = builder.to_dispatch_ctx();
+            dispatch.begin_compact_ingest();
+            for &kind in active {
+                counts[kind as usize] = 1;
+                dispatch.ingest_compact_count(kind, 1);
+            }
+            let expected: Vec<_> = LEGACY_PRODUCER_ORDER
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(_, kind)| active.contains(kind))
+                .map(|(order, kind)| (kind, order as u32))
+                .collect();
+            for provisional in [false, true] {
+                install_compact_replay_arenas(GpuReplayShardArenas::provisional(counts));
+                if provisional {
+                    config
+                        .prepare_provisional_fused_assignments(&cs, &counts)
+                        .unwrap();
+                } else {
+                    config.prepare_fused_assignments(&cs, &dispatch).unwrap();
+                }
+                let actual = FUSED_INGRESS.with(|slot| {
+                    slot.borrow()
+                        .as_ref()
+                        .unwrap()
+                        .registrations
+                        .iter()
+                        .map(|r| (r.kind, r.producer_order))
+                        .collect::<Vec<_>>()
+                });
+                assert_eq!(actual, expected, "provisional={provisional}");
+                abort_fused_session();
+            }
+        }
+    }
+
+    #[test]
+    fn producer_order_accepts_full_u32_domain() {
+        check_producer_order(0);
+        check_producer_order(u32::MAX);
     }
 
     #[test]
@@ -3039,6 +3094,9 @@ mod tests {
     #[cfg(feature = "u16limb_circuit")]
     #[test]
     fn compact_and_field_soa_fused_assignments_match_every_layout() {
+        let hal = std::sync::Arc::new(CudaHalBB31::new(0).unwrap());
+        let _binding = gkr_iop::gpu::bind_thread_default_stream(hal);
+
         use ceno_emul::{
             ByteAddr, Change, GpuReplayTypedRange, ReadOp, WordAddr, WriteOp, encode_rv32,
         };
@@ -3050,7 +3108,8 @@ mod tests {
             instructions::{
                 Instruction,
                 riscv::{
-                    AddInstruction, JalInstruction, JalrInstruction, LwInstruction, SwInstruction,
+                    AddInstruction, JalInstruction, JalrInstruction, LbInstruction, LbuInstruction,
+                    LhInstruction, LhuInstruction, LwInstruction, SwInstruction,
                     arith_imm::AddiInstruction, branch::BeqInstruction, lui::LuiInstruction,
                 },
             },
@@ -3142,6 +3201,58 @@ mod tests {
                 Change::new(0x33, 0x12000),
                 0,
             ),
+            StepRecord::new_im_instruction(
+                36,
+                ByteAddr(0x1020),
+                with_raw(encode_rv32(InsnKind::LB, 1, 0, 3, 10), 0x00a0_8183),
+                0x0400_0000,
+                Change::new(0x33, 0xffff_ffff),
+                ReadOp {
+                    addr: WordAddr(0x0100_0002),
+                    value: 0x80ff_7f01,
+                    previous_cycle: 0,
+                },
+                0,
+            ),
+            StepRecord::new_im_instruction(
+                40,
+                ByteAddr(0x1024),
+                with_raw(encode_rv32(InsnKind::LBU, 1, 0, 3, 9), 0x0090_c183),
+                0x0400_0000,
+                Change::new(0x33, 0x7f),
+                ReadOp {
+                    addr: WordAddr(0x0100_0002),
+                    value: 0x80ff_7f01,
+                    previous_cycle: 0,
+                },
+                0,
+            ),
+            StepRecord::new_im_instruction(
+                44,
+                ByteAddr(0x1028),
+                with_raw(encode_rv32(InsnKind::LH, 1, 0, 3, 10), 0x00a0_9183),
+                0x0400_0000,
+                Change::new(0x33, 0xffff_80ff),
+                ReadOp {
+                    addr: WordAddr(0x0100_0002),
+                    value: 0x80ff_7f01,
+                    previous_cycle: 0,
+                },
+                0,
+            ),
+            StepRecord::new_im_instruction(
+                48,
+                ByteAddr(0x102c),
+                with_raw(encode_rv32(InsnKind::LHU, 1, 0, 3, 8), 0x0080_d183),
+                0x0400_0000,
+                Change::new(0x33, 0x7f01),
+                ReadOp {
+                    addr: WordAddr(0x0100_0002),
+                    value: 0x80ff_7f01,
+                    previous_cycle: 0,
+                },
+                0,
+            ),
         ];
 
         fn arenas(steps: &[StepRecord], compact: bool) -> GpuReplayShardArenas {
@@ -3213,6 +3324,10 @@ mod tests {
             let jal = cs.register_opcode_circuit::<JalInstruction<E>>();
             let jalr = cs.register_opcode_circuit::<JalrInstruction<E>>();
             let lw = cs.register_opcode_circuit::<LwInstruction<E>>();
+            let lb = cs.register_opcode_circuit::<LbInstruction<E>>();
+            let lbu = cs.register_opcode_circuit::<LbuInstruction<E>>();
+            let lh = cs.register_opcode_circuit::<LhInstruction<E>>();
+            let lhu = cs.register_opcode_circuit::<LhuInstruction<E>>();
             let sw = cs.register_opcode_circuit::<SwInstruction<E>>();
             let lui = cs.register_opcode_circuit::<LuiInstruction<E>>();
 
@@ -3226,6 +3341,10 @@ mod tests {
                         chip.zkvm_v1_css.num_structural_witin as usize,
                         1,
                         $kind,
+                        crate::instructions::riscv::LEGACY_PRODUCER_ORDER
+                            .iter()
+                            .position(|kind| *kind == <$instruction>::inst_kinds()[0])
+                            .unwrap() as u32,
                     )
                     .unwrap();
                 }};
@@ -3236,11 +3355,43 @@ mod tests {
             prepare!(JalInstruction<E>, &jal, GpuWitgenKind::Jal);
             prepare!(JalrInstruction<E>, &jalr, GpuWitgenKind::Jalr);
             prepare!(LwInstruction<E>, &lw, GpuWitgenKind::Lw);
+            prepare!(
+                LbInstruction<E>,
+                &lb,
+                GpuWitgenKind::LoadSub {
+                    load_width: 8,
+                    is_signed: 1,
+                }
+            );
+            prepare!(
+                LbuInstruction<E>,
+                &lbu,
+                GpuWitgenKind::LoadSub {
+                    load_width: 8,
+                    is_signed: 0,
+                }
+            );
+            prepare!(
+                LhInstruction<E>,
+                &lh,
+                GpuWitgenKind::LoadSub {
+                    load_width: 16,
+                    is_signed: 1,
+                }
+            );
+            prepare!(
+                LhuInstruction<E>,
+                &lhu,
+                GpuWitgenKind::LoadSub {
+                    load_width: 16,
+                    is_signed: 0,
+                }
+            );
             prepare!(SwInstruction<E>, &sw, GpuWitgenKind::Sw);
             prepare!(LuiInstruction<E>, &lui, GpuWitgenKind::Lui);
 
             let mut shard_ctx = ShardContext::default();
-            shard_ctx.cur_shard_cycle_range = 4..36;
+            shard_ctx.cur_shard_cycle_range = 4..52;
             launch_fused_assignments(&shard_ctx).unwrap();
 
             let mut witness = ZKVMWitnesses::<E>::default();
@@ -3263,6 +3414,10 @@ mod tests {
             assign!(JalInstruction<E>, &jal);
             assign!(JalrInstruction<E>, &jalr);
             assign!(LwInstruction<E>, &lw);
+            assign!(LbInstruction<E>, &lb);
+            assign!(LbuInstruction<E>, &lbu);
+            assign!(LhInstruction<E>, &lh);
+            assign!(LhuInstruction<E>, &lhu);
             assign!(SwInstruction<E>, &sw);
             assign!(LuiInstruction<E>, &lui);
             clear_compact_replay_arenas();

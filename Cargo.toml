@@ -121,6 +121,15 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 
+[patch."https://github.com/openvm-org/stark-backend.git"]
+openvm-codec-derive = { git = "https://github.com/hero78119/stark-backend.git", rev = "4abbf1d4987f1861a825dc87c2023da0acd15341" }
+openvm-cpu-backend = { git = "https://github.com/hero78119/stark-backend.git", rev = "4abbf1d4987f1861a825dc87c2023da0acd15341" }
+openvm-cuda-backend = { git = "https://github.com/hero78119/stark-backend.git", rev = "4abbf1d4987f1861a825dc87c2023da0acd15341" }
+openvm-cuda-builder = { git = "https://github.com/hero78119/stark-backend.git", rev = "4abbf1d4987f1861a825dc87c2023da0acd15341" }
+openvm-cuda-common = { git = "https://github.com/hero78119/stark-backend.git", rev = "4abbf1d4987f1861a825dc87c2023da0acd15341" }
+openvm-stark-backend = { git = "https://github.com/hero78119/stark-backend.git", rev = "4abbf1d4987f1861a825dc87c2023da0acd15341" }
+openvm-stark-sdk = { git = "https://github.com/hero78119/stark-backend.git", rev = "4abbf1d4987f1861a825dc87c2023da0acd15341" }
+
 #[patch."https://github.com/scroll-tech/elliptic-curves"]
 #k256 = { path = "../elliptic-curves/k256", default-features = false, features = ["std", "ecdsa"] }
 #
