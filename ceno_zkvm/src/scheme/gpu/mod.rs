@@ -2993,7 +2993,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             }
         }
 
-        common_groups.sort_by(|lhs, rhs| rhs.num_vars.cmp(&lhs.num_vars));
+        let adaptive_eligible = |group: &HostCommonGroup| {
+            (2..=3).contains(&group.common_mle_indices.len())
+                && group
+                    .term_terms
+                    .iter()
+                    .all(|&term_idx| mle_indices_per_term[term_idx as usize].len() <= 1)
+        };
+        // Preserve the height partition while keeping each evaluator kind
+        // contiguous. Otherwise alternating eligible groups turn one height
+        // range into hundreds of tiny kernel launches.
+        common_groups.sort_by(|lhs, rhs| {
+            rhs.num_vars
+                .cmp(&lhs.num_vars)
+                .then_with(|| adaptive_eligible(rhs).cmp(&adaptive_eligible(lhs)))
+        });
 
         let mut common_term_offsets = Vec::with_capacity(common_groups.len() + 1);
         let mut common_term_terms = Vec::new();
