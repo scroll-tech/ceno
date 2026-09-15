@@ -2993,12 +2993,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             }
         }
 
-        let adaptive_eligible = |group: &HostCommonGroup| {
-            (2..=3).contains(&group.common_mle_indices.len())
-                && group
+        let adaptive_width = |group: &HostCommonGroup| {
+            let (constants, residuals, unsupported) =
+                group
                     .term_terms
                     .iter()
-                    .all(|&term_idx| mle_indices_per_term[term_idx as usize].len() <= 1)
+                    .fold(
+                        (0usize, 0usize, false),
+                        |counts, &term_idx| match mle_indices_per_term[term_idx as usize].len() {
+                            0 => (counts.0 + 1, counts.1, counts.2),
+                            1 => (counts.0, counts.1 + 1, counts.2),
+                            _ => (counts.0, counts.1, true),
+                        },
+                    );
+            if (2..=3).contains(&group.common_mle_indices.len())
+                && constants == 1
+                && (1..=2).contains(&residuals)
+                && !unsupported
+            {
+                residuals
+            } else {
+                0
+            }
         };
         // Preserve the height partition while keeping each evaluator kind
         // contiguous. Otherwise alternating eligible groups turn one height
@@ -3006,7 +3022,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         common_groups.sort_by(|lhs, rhs| {
             rhs.num_vars
                 .cmp(&lhs.num_vars)
-                .then_with(|| adaptive_eligible(rhs).cmp(&adaptive_eligible(lhs)))
+                .then_with(|| adaptive_width(rhs).cmp(&adaptive_width(lhs)))
         });
 
         let mut common_term_offsets = Vec::with_capacity(common_groups.len() + 1);
