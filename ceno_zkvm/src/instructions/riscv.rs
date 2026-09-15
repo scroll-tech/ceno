@@ -1,6 +1,8 @@
 use ceno_emul::InsnKind;
 
 mod rv32im;
+#[cfg(all(test, feature = "gpu"))]
+pub(crate) use rv32im::LEGACY_PRODUCER_ORDER;
 pub use rv32im::{
     DummyExtraConfig, InstructionDispatchBuilder, InstructionDispatchCtx, Rv32imConfig,
     mmu::{MemPadder, MmuConfig},

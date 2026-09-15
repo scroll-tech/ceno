@@ -7,7 +7,7 @@ use crate::{
             zerocheck_layer::RotationPoints,
         },
     },
-    gpu::{GpuBackend, GpuProver},
+    gpu::{GpuBackend, GpuProver, get_cuda_hal},
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -408,6 +408,7 @@ pub fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     // Capture parent thread's CUDA stream so Rayon workers can reuse it.
     // TODO: GPU batch evaluation and its batch version
     let parent_stream = crate::gpu::get_thread_stream();
+    let parent_hal = crate::gpu::get_cuda_hal().ok();
     let evals = evals_gpu_e
         .par_chunks_exact(2)
         .zip_eq(raw_rotation_exprs.par_iter())
@@ -415,7 +416,8 @@ pub fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             // Propagate parent thread's CUDA stream to Rayon worker
             let _guard = parent_stream
                 .as_ref()
-                .map(|s| crate::gpu::bind_thread_stream(s.clone()));
+                .zip(parent_hal.as_ref())
+                .map(|(stream, hal)| crate::gpu::bind_thread_stream(hal.clone(), stream.clone()));
             let [rotated_eval, target_eval] = evals else {
                 unreachable!()
             };

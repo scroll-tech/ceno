@@ -35,6 +35,106 @@ pub(crate) type WitResult = ceno_gpu::common::witgen::types::GpuWitnessResult<Wi
 pub(crate) type LkResult = ceno_gpu::common::witgen::types::GpuLookupCountersResult<LkBuf>;
 pub(crate) type CompactEcBuf = ceno_gpu::common::witgen::types::CompactEcResult<RamBuf>;
 
+/// Materialize a host-only copy of a GPU witness matrix for CPU diagnostics.
+///
+/// Production proving intentionally elides these host values. Callers must keep this
+/// transfer behind an explicit diagnostic gate rather than adding it to the GPU path.
+pub(crate) fn materialize_device_backed_rmm<E: ExtensionField>(
+    rmm: &RowMajorMatrix<E::BaseField>,
+) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
+
+    if !rmm.has_device_backing() {
+        return Ok(rmm.clone());
+    }
+    if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>() {
+        return Err(ZKVMError::InvalidWitness(
+            "GPU witness materialization only supports BabyBear".into(),
+        ));
+    }
+
+    let height = rmm.height();
+    let width = rmm.width();
+    let padded_len = height
+        .checked_mul(width)
+        .ok_or_else(|| ZKVMError::InvalidWitness("GPU witness shape overflow".into()))?;
+    let occupied_rows = rmm.occupied_physical_rows();
+    let occupied_len = occupied_rows
+        .checked_mul(width)
+        .ok_or_else(|| ZKVMError::InvalidWitness("GPU witness shape overflow".into()))?;
+    let backing = rmm
+        .device_backing_ref::<WitBuf>()
+        .ok_or_else(|| ZKVMError::InvalidWitness("unexpected GPU witness backing type".into()))?;
+    let backing_rows = if backing.len() == occupied_len {
+        occupied_rows
+    } else if backing.len() == padded_len {
+        height
+    } else {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "GPU witness backing length mismatch: got {}, expected compact {occupied_len} or padded {padded_len}",
+                backing.len(),
+            )
+            .into(),
+        ));
+    };
+
+    let device_values = backing.to_vec().map_err(|err| {
+        ZKVMError::InvalidWitness(format!("GPU witness D2H failed: {err:?}").into())
+    })?;
+    let device_values: Vec<E::BaseField> = unsafe {
+        let mut values = std::mem::ManuallyDrop::new(device_values);
+        Vec::from_raw_parts(
+            values.as_mut_ptr() as *mut E::BaseField,
+            values.len(),
+            values.capacity(),
+        )
+    };
+    let host_values = match rmm.device_backing_layout() {
+        Some(DeviceMatrixLayout::RowMajor) => device_values,
+        Some(DeviceMatrixLayout::ColMajor) => {
+            let mut row_major = vec![E::BaseField::default(); backing.len()];
+            for row in 0..backing_rows {
+                for col in 0..width {
+                    row_major[row * width + col] = device_values[col * backing_rows + row];
+                }
+            }
+            row_major
+        }
+        None => {
+            return Err(ZKVMError::InvalidWitness(
+                "GPU witness backing has no layout".into(),
+            ));
+        }
+    };
+
+    let padded_logical_rows = rmm.num_instances().next_power_of_two();
+    if padded_logical_rows == 0
+        || height % padded_logical_rows != 0
+        || !(height / padded_logical_rows).is_power_of_two()
+    {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "GPU witness rotation shape mismatch: logical_rows={}, height={height}",
+                rmm.num_instances()
+            )
+            .into(),
+        ));
+    }
+    let log2_num_rotation = (height / padded_logical_rows).ilog2() as usize;
+    // All GPU-backed witness producers use default padding. Reconstructing from logical
+    // rows plus rotation retains their exact physical shape while clearing device backing.
+    let mut host = RowMajorMatrix::new_by_rotation(
+        rmm.num_instances(),
+        log2_num_rotation,
+        width,
+        InstancePaddingStrategy::Default,
+    );
+    std::ops::DerefMut::deref_mut(&mut host).values[..host_values.len()]
+        .copy_from_slice(&host_values);
+    Ok(host)
+}
+
 /// Read selected cells from one logical row of a GPU-backed witness matrix.
 ///
 /// Normal GPU witgen deliberately keeps a zero-filled host placeholder and the

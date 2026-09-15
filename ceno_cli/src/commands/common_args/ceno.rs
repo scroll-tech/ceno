@@ -1,17 +1,31 @@
 use super::CompilationOptions;
 use crate::utils::*;
 use anyhow::{Context, bail};
+#[cfg(feature = "gpu")]
+use cargo_ceno::sdk::StreamingRecursionOrchestrator;
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
+#[cfg(not(feature = "gpu"))]
+use ceno_recursion_v2::continuation::prover::AggProver;
+#[cfg(not(feature = "gpu"))]
+use ceno_recursion_v2::system::warm_child_vk_digest_cache;
 use ceno_recursion_v2::{
-    continuation::prover::{AggProver, AggregationOptions},
-    system::{utils::test_system_params_zero_pow, warm_child_vk_digest_cache},
+    continuation::prover::AggregationOptions, system::utils::test_system_params_zero_pow,
+};
+#[cfg(not(feature = "gpu"))]
+use ceno_zkvm::scheme::create_prover;
+#[cfg(feature = "gpu")]
+use ceno_zkvm::scheme::prover::ZKVMProver;
+#[cfg(feature = "gpu")]
+use ceno_zkvm::{
+    e2e::BaseProvingEventSink,
+    multi_gpu::{MultiGpuConfig, parse_worker_cpu_affinity, select_device_ids},
 };
 use ceno_zkvm::{
     e2e::*,
     scheme::{
-        constants::MAX_NUM_VARIABLES, create_backend, create_prover,
-        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
+        constants::MAX_NUM_VARIABLES, create_backend, mock_prover::LkMultiplicityKey,
+        verifier::ZKVMVerifier,
     },
 };
 use clap::Args;
@@ -100,6 +114,21 @@ pub struct CenoOptions {
     // => 2^30 * 16 / 4 / 2
     #[arg(long, default_value = "2147483648")]
     max_cell_per_shard: u64,
+
+    /// Comma-separated logical CUDA device ordinals. Takes precedence over --gpu-count.
+    #[cfg(feature = "gpu")]
+    #[arg(long, value_delimiter = ',')]
+    gpu_devices: Option<Vec<usize>>,
+
+    /// Select logical CUDA devices 0 through count-1.
+    #[cfg(feature = "gpu")]
+    #[arg(long)]
+    gpu_count: Option<usize>,
+
+    /// Exclusive CPU set for one GPU worker. Repeat once per selected GPU.
+    #[cfg(feature = "gpu")]
+    #[arg(long)]
+    gpu_worker_cpus: Vec<String>,
 
     /// Profiling granularity.
     /// Setting any value restricts logs to profiling information
@@ -396,13 +425,49 @@ fn run_elf_inner<
     compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<E2ECheckpointResult<E, PCS>> {
+) -> anyhow::Result<E2ECheckpointResult<E, PCS>>
+where
+    PCS::ProverParam: Send + Sync,
+    PCS::VerifierParam: Send + Sync,
+    PCS::Commitment: Send + Sync,
+    PCS::CommitmentWithWitness: Send + Sync,
+    PCS::Proof: Send,
+{
+    run_elf_inner_with_base_sink(
+        options,
+        compilation_options,
+        elf_path,
+        checkpoint,
+        #[cfg(feature = "gpu")]
+        None,
+    )
+}
+
+fn run_elf_inner_with_base_sink<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    P: AsRef<Path>,
+>(
+    options: &CenoOptions,
+    compilation_options: &CompilationOptions,
+    elf_path: P,
+    checkpoint: Checkpoint,
+    #[cfg(feature = "gpu")] base_event_sink: Option<Arc<dyn BaseProvingEventSink<E, PCS>>>,
+) -> anyhow::Result<E2ECheckpointResult<E, PCS>>
+where
+    PCS::ProverParam: Send + Sync,
+    PCS::VerifierParam: Send + Sync,
+    PCS::Commitment: Send + Sync,
+    PCS::CommitmentWithWitness: Send + Sync,
+    PCS::Proof: Send,
+{
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
     let program = Program::load_elf(&elf_bytes, u32::MAX).context("failed to load elf")?;
     print_cargo_message("Loaded", format_args!("{}", elf_path.display()));
-    let multi_prover = MultiProver::new(
+    #[allow(unused_mut)]
+    let mut multi_prover = MultiProver::new(
         options.prover_id as usize,
         options.num_provers as usize,
         options.max_cell_per_shard,
@@ -443,8 +508,83 @@ fn run_elf_inner<
     );
 
     let backend = create_backend(options.max_num_variables, options.security_level);
+    #[cfg(feature = "gpu")]
+    let (device, multi_gpu_config, prepared_multi_gpu) = {
+        let available = ceno_zkvm::multi_gpu::discover_cuda_devices()
+            .context("failed to discover CUDA devices")?
+            .len();
+        let device_ids =
+            select_device_ids(options.gpu_devices.as_deref(), options.gpu_count, available)
+                .map_err(anyhow::Error::msg)?;
+        let mut config = MultiGpuConfig::new(device_ids).map_err(anyhow::Error::msg)?;
+        if let Some(affinity) =
+            parse_worker_cpu_affinity(&options.gpu_worker_cpus).map_err(anyhow::Error::msg)?
+        {
+            config = config
+                .with_worker_cpu_affinity(affinity)
+                .map_err(anyhow::Error::msg)?;
+        }
+        let prepared = config
+            .prepare(options.max_cell_per_shard)
+            .map_err(anyhow::Error::msg)?;
+        multi_prover.max_cell_per_shard = prepared.max_cell_per_shard;
+        tracing::info!(
+            devices = ?config.device_ids,
+            max_cell_per_shard = prepared.max_cell_per_shard,
+            "validated Stage 1 multi-GPU configuration"
+        );
+        let device = gkr_iop::gpu::GpuProver::new(backend.clone(), prepared.workers[0].hal.clone());
+        (device, config, prepared)
+    };
+    #[cfg(not(feature = "gpu"))]
+    let device = create_prover(backend.clone());
+    #[cfg(feature = "gpu")]
+    if !matches!(checkpoint, Checkpoint::PrepWitnessGen) {
+        let ctx = setup_program::<E>(program, platform, multi_prover);
+        let (pk, vk) = ctx.keygen_with_pb(backend.as_ref());
+        let pk = Arc::new(pk);
+        let init_full_mem = pk.program_ctx.as_ref().unwrap().setup_init_mem(&hints);
+        let prover = ZKVMProver::new(pk.clone(), device);
+        let max_steps = options.max_steps;
+        let shard_id = options.shard_id.map(|value| value as usize);
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        let preflight_aot = pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .preflight_aot_program
+            .clone();
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        let fulltracer_aot = pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .fulltracer_aot_program
+            .clone();
+        let run = move || {
+            ceno_zkvm::e2e::run_e2e_multi_gpu_proof_with_precompiled_aot_and_sink(
+                prover,
+                &prepared_multi_gpu,
+                &multi_gpu_config,
+                &init_full_mem,
+                public_io_digest,
+                max_steps,
+                shard_id,
+                base_event_sink,
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                preflight_aot,
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                fulltracer_aot,
+            )
+            .unwrap_or_else(|error| panic!("multi-GPU proving failed: {error}"))
+        };
+        if matches!(checkpoint, Checkpoint::PrepE2EProving) {
+            return Ok(E2ECheckpointResult::deferred(vk, move || _ = run()));
+        }
+        return Ok(E2ECheckpointResult::completed(run(), vk));
+    }
     Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
-        create_prover(backend.clone()),
+        device,
         program,
         platform,
         multi_prover,
@@ -464,7 +604,14 @@ fn keygen_inner<
     args: &CenoOptions,
     compilation_options: &CompilationOptions,
     elf_path: P,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    PCS::ProverParam: Send + Sync,
+    PCS::VerifierParam: Send + Sync,
+    PCS::Commitment: Send + Sync,
+    PCS::CommitmentWithWitness: Send + Sync,
+    PCS::Proof: Send,
+{
     let result = run_elf_inner::<E, PCS, P>(
         args,
         compilation_options,
@@ -491,7 +638,14 @@ fn prove_inner<
     compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    PCS::ProverParam: Send + Sync,
+    PCS::VerifierParam: Send + Sync,
+    PCS::Commitment: Send + Sync,
+    PCS::CommitmentWithWitness: Send + Sync,
+    PCS::Proof: Send,
+{
     let result = run_elf_inner::<E, PCS, P>(args, compilation_options, elf_path, checkpoint)?;
     let zkvm_proofs = result.proofs.expect("PrepSanityCheck should yield proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
@@ -531,17 +685,38 @@ fn prove_recursion_inner<P: AsRef<Path>>(
     elf_path: P,
     checkpoint: Checkpoint,
 ) -> anyhow::Result<()> {
-    let result = run_elf_inner::<BabyBearExt4, Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>, P>(
+    let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
+    #[cfg(feature = "gpu")]
+    let recursion = args
+        .out_root_proof
+        .as_ref()
+        .map(|_| Arc::new(StreamingRecursionOrchestrator::new(options.clone())));
+    #[cfg(feature = "gpu")]
+    let event_sink = recursion
+        .as_ref()
+        .map(|sink| sink.clone() as Arc<dyn BaseProvingEventSink<_, _>>);
+    let result = run_elf_inner_with_base_sink::<
+        BabyBearExt4,
+        Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>,
+        P,
+    >(
         args,
         compilation_options,
         elf_path,
         checkpoint,
+        #[cfg(feature = "gpu")]
+        event_sink,
     )?;
+    #[cfg(feature = "gpu")]
+    if let Some(recursion) = &recursion {
+        recursion.mark_base_verified();
+    }
     let zkvm_proofs = result.proofs.expect("PrepSanityCheck should yield proof.");
     let vk = result.vk.expect("PrepSanityCheck should yield vk.");
 
     let start = std::time::Instant::now();
     let verifier = ZKVMVerifier::new(vk.clone());
+    #[cfg(not(feature = "gpu"))]
     if let Err(e) = verify(zkvm_proofs.clone(), &verifier) {
         bail!("Verification failed: {e:?}");
     }
@@ -567,17 +742,26 @@ fn prove_recursion_inner<P: AsRef<Path>>(
             .context("failed to serialize vk")?;
     }
     if let Some(out_root_proof) = args.out_root_proof.as_ref() {
-        let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
-        let vk = Arc::new(vk);
-        warm_child_vk_digest_cache(&vk);
         let start = std::time::Instant::now();
-        let prover = AggProver::<2, 2>::new(vk, options);
-        let root_output = prover
-            .prove_with_root_vk(&zkvm_proofs)
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        prover
-            .verify_root_proof(&root_output.root_vk, &root_output.root_proof)
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        #[cfg(feature = "gpu")]
+        let root_output = recursion
+            .expect("root output requested without recursion orchestrator")
+            .finish()
+            .map_err(anyhow::Error::msg)?
+            .root_output;
+        #[cfg(not(feature = "gpu"))]
+        let root_output = {
+            let vk = Arc::new(vk);
+            warm_child_vk_digest_cache(&vk);
+            let prover = AggProver::<2, 2>::new(vk, options);
+            let root_output = prover
+                .prove_with_root_vk(&zkvm_proofs)
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+            prover
+                .verify_root_proof(&root_output.root_vk, &root_output.root_proof)
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+            root_output
+        };
         print_cargo_message(
             "Aggregated",
             format_args!("root proof in {:.2}s", start.elapsed().as_secs_f32()),

@@ -278,6 +278,14 @@ where
         ZKVMVerifier { vk, vk_digest }
     }
 
+    #[cfg(feature = "gpu")]
+    pub(crate) fn new_with_vk_digest(
+        vk: ZKVMVerifyingKey<E, PCS, M>,
+        vk_digest: [E; VK_DIGEST_LEN],
+    ) -> Self {
+        ZKVMVerifier { vk, vk_digest }
+    }
+
     pub fn into_inner(self) -> ZKVMVerifyingKey<E, PCS, M> {
         self.vk
     }

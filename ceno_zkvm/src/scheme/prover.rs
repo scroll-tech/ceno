@@ -14,6 +14,8 @@ use std::collections::HashMap;
 use crate::scheme::gpu::{
     estimate_chip_proof_memory, estimate_chip_proof_reservations, is_babybear_jagged_pcs,
 };
+#[cfg(feature = "gpu")]
+use crate::scheme::verifier::ZKVMVerifier;
 use crate::scheme::{
     hal::{MainConstraintJob, MainConstraintResult, MainSumcheckEvals},
     scheduler::{ChipScheduler, ChipTask, ChipTaskResult},
@@ -242,6 +244,8 @@ pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB:
 {
     pub pk: Arc<ZKVMProvingKey<E, PCS>>,
     vk_digest: [E; VK_DIGEST_LEN],
+    #[cfg(feature = "gpu")]
+    cached_verifier: Option<Arc<ZKVMVerifier<E, PCS>>>,
     device: PD,
     // device_pk might be none if there is no fixed commitment
     device_first_shard_pk: Option<DeviceProvingKey<'static, PB>>,
@@ -268,6 +272,8 @@ impl<
         ZKVMProver {
             pk,
             vk_digest,
+            #[cfg(feature = "gpu")]
+            cached_verifier: None,
             device,
             device_first_shard_pk,
             device_non_first_shard_pk: None,
@@ -277,6 +283,35 @@ impl<
 
     pub fn new(pk: Arc<ZKVMProvingKey<E, PCS>>, device: PD) -> Self {
         let vk_digest = pk.compute_vk_digest::<RV32imMemStateConfig>();
+        #[cfg(feature = "gpu")]
+        let cached_verifier = Arc::new(ZKVMVerifier::new_with_vk_digest(
+            pk.get_vk_slow(),
+            vk_digest,
+        ));
+        Self::new_with_vk_digest_inner(
+            pk,
+            device,
+            vk_digest,
+            #[cfg(feature = "gpu")]
+            Some(cached_verifier),
+        )
+    }
+
+    #[cfg(feature = "gpu")]
+    pub(crate) fn new_with_vk_digest(
+        pk: Arc<ZKVMProvingKey<E, PCS>>,
+        device: PD,
+        vk_digest: [E; VK_DIGEST_LEN],
+    ) -> Self {
+        Self::new_with_vk_digest_inner(pk, device, vk_digest, None)
+    }
+
+    fn new_with_vk_digest_inner(
+        pk: Arc<ZKVMProvingKey<E, PCS>>,
+        device: PD,
+        vk_digest: [E; VK_DIGEST_LEN],
+        #[cfg(feature = "gpu")] cached_verifier: Option<Arc<ZKVMVerifier<E, PCS>>>,
+    ) -> Self {
         let (device_first_shard_pk, device_non_first_shard_pk) =
             if pk.as_ref().has_fixed_commitment() {
                 (
@@ -290,11 +325,23 @@ impl<
         ZKVMProver {
             pk,
             vk_digest,
+            #[cfg(feature = "gpu")]
+            cached_verifier,
             device,
             device_first_shard_pk,
             device_non_first_shard_pk,
             _marker: PhantomData,
         }
+    }
+
+    #[cfg(feature = "gpu")]
+    pub fn vk_digest(&self) -> [E; VK_DIGEST_LEN] {
+        self.vk_digest
+    }
+
+    #[cfg(feature = "gpu")]
+    pub fn cached_verifier(&self) -> Option<Arc<ZKVMVerifier<E, PCS>>> {
+        self.cached_verifier.clone()
     }
 
     pub fn get_device_proving_key(
@@ -313,6 +360,10 @@ impl<
             panic!("empty program ctx")
         };
         ctx.setup_init_mem(hints)
+    }
+
+    pub fn device(&self) -> &PD {
+        &self.device
     }
 }
 

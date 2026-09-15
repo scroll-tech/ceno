@@ -343,6 +343,7 @@ const AOT_TRACE_MODE_CALLBACK: u32 = 1;
 const AOT_TRACE_MODE_PREFLIGHT_DIRECT: u32 = 2;
 const AOT_TRACE_MODE_FULLTRACER_DIRECT: u32 = 3;
 const AOT_TRACE_MODE_GPU_REPLAY_DIRECT: u32 = 4;
+const AOT_TRACE_MODE_GPU_REPLAY_FAST_FLIGHT: u32 = 5;
 
 const AOT_PREFLIGHT_HELPER_SYNC: u32 = 1;
 const AOT_PREFLIGHT_HELPER_BUSY_LOOP: u32 = 2;
@@ -1396,7 +1397,15 @@ impl AotProgram {
         vm: &mut VMState<T>,
         max_steps: usize,
     ) -> Result<AotRunReport> {
-        self.run_to_halt_with_trace(vm, max_steps, true)
+        self.run_to_halt_with_trace(vm, max_steps, true, false)
+    }
+
+    pub fn run_gpu_replay_fast_flight_to_halt(
+        &self,
+        vm: &mut VMState<crate::GpuReplayTracer>,
+        max_steps: usize,
+    ) -> Result<AotRunReport> {
+        self.run_to_halt_with_trace(vm, max_steps, true, true)
     }
 
     pub fn run_pure_to_halt<T: Tracer + 'static>(
@@ -1404,7 +1413,7 @@ impl AotProgram {
         vm: &mut VMState<T>,
         max_steps: usize,
     ) -> Result<AotRunReport> {
-        self.run_to_halt_with_trace(vm, max_steps, false)
+        self.run_to_halt_with_trace(vm, max_steps, false, false)
     }
 
     fn run_to_halt_with_trace<T: Tracer + 'static>(
@@ -1412,6 +1421,7 @@ impl AotProgram {
         vm: &mut VMState<T>,
         max_steps: usize,
         trace_native_steps: bool,
+        gpu_replay_fast_flight: bool,
     ) -> Result<AotRunReport> {
         let diagnostic_role = self.trace_style.cache_name();
         let diagnostic_path = self
@@ -1735,7 +1745,11 @@ impl AotProgram {
         {
             let replay_vm = unsafe { &mut *(vm_ptr as *mut VMState<crate::GpuReplayTracer>) };
             let state = replay_vm.tracer_mut().prepare_native_range();
-            trace_mode = AOT_TRACE_MODE_GPU_REPLAY_DIRECT;
+            trace_mode = if gpu_replay_fast_flight {
+                AOT_TRACE_MODE_GPU_REPLAY_FAST_FLIGHT
+            } else {
+                AOT_TRACE_MODE_GPU_REPLAY_DIRECT
+            };
             gpu_replay_kinds = state.kinds;
             gpu_replay_kind_count = state.kind_count;
             gpu_replay_ordinal = state.ordinal;
@@ -1991,7 +2005,9 @@ impl AotProgram {
         );
         let trace_fn = if matches!(
             trace_mode,
-            AOT_TRACE_MODE_FULLTRACER_DIRECT | AOT_TRACE_MODE_GPU_REPLAY_DIRECT
+            AOT_TRACE_MODE_FULLTRACER_DIRECT
+                | AOT_TRACE_MODE_GPU_REPLAY_DIRECT
+                | AOT_TRACE_MODE_GPU_REPLAY_FAST_FLIGHT
         ) {
             std::ptr::null()
         } else if trace_native_steps {
@@ -2141,7 +2157,10 @@ impl AotProgram {
                 .unwrap_or_else(|| anyhow!("AOT native step failed without error detail"));
             return Err(err);
         }
-        if trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT {
+        if matches!(
+            trace_mode,
+            AOT_TRACE_MODE_GPU_REPLAY_DIRECT | AOT_TRACE_MODE_GPU_REPLAY_FAST_FLIGHT
+        ) {
             tracing::info!(
                 "GPU_REPLAY_DIRECT tracer=GpuReplayTracer native_mode=gpu-replay-direct ordinary_callbacks={} fallback_dynamic_pc={} fallback_memory_guard={} fallback_ecall={} fallback_exceptional={}",
                 context.gpu_replay_ordinary_callbacks,

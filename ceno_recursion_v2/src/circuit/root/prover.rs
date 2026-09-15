@@ -117,6 +117,38 @@ where
         }
     }
 
+    pub fn from_pk(
+        child_vk: Arc<MultiStarkVerifyingKey<BabyBearPoseidon2Config>>,
+        pk: Arc<MultiStarkProvingKey<RootSC>>,
+    ) -> Self {
+        let engine = E::new(pk.params.clone());
+        let device_ctx = DC::from(engine.device().device_ctx().clone());
+        let verifier_circuit = S::new(
+            child_vk.clone(),
+            VerifierConfig {
+                continuations_enabled: true,
+                ..Default::default()
+            },
+        );
+        let child_vk_pcs_data = verifier_circuit.commit_child_vk(&engine, &child_vk);
+        let circuit = Arc::new(CenoRootCircuit {
+            verifier_circuit: Arc::new(verifier_circuit),
+            child_vk_pre_hash: child_vk.pre_hash,
+        });
+        let vk = Arc::new(pk.get_vk());
+        let d_pk = engine.device().transport_pk_to_device(pk.as_ref());
+        Self {
+            pk,
+            d_pk,
+            vk,
+            child_vk,
+            child_vk_pcs_data,
+            circuit,
+            device_ctx,
+            _engine: std::marker::PhantomData,
+        }
+    }
+
     pub fn generate_proving_ctx(
         &self,
         proof: Proof<BabyBearPoseidon2Config>,
@@ -176,6 +208,10 @@ where
 
     pub fn get_vk(&self) -> Arc<MultiStarkVerifyingKey<RootSC>> {
         self.vk.clone()
+    }
+
+    pub fn get_pk(&self) -> Arc<MultiStarkProvingKey<RootSC>> {
+        self.pk.clone()
     }
 
     pub fn get_circuit(&self) -> Arc<CenoRootCircuit<S>> {

@@ -99,6 +99,70 @@ where
         )
     }
 
+    pub fn from_pk(
+        child_vk: Arc<MultiStarkVerifyingKey<BabyBearPoseidon2Config>>,
+        pk: Arc<MultiStarkProvingKey<BabyBearPoseidon2Config>>,
+    ) -> Self {
+        Self::from_pk_with_child_constraint_eval_air_id(
+            child_vk,
+            pk,
+            CENO_RECURSIVE_CONSTRAINT_EVAL_AIR_ID,
+            false,
+        )
+    }
+
+    pub fn from_pk_for_ceno_leaf_child(
+        child_vk: Arc<MultiStarkVerifyingKey<BabyBearPoseidon2Config>>,
+        pk: Arc<MultiStarkProvingKey<BabyBearPoseidon2Config>>,
+    ) -> Self {
+        Self::from_pk_with_child_constraint_eval_air_id(
+            child_vk,
+            pk,
+            CENO_LEAF_CONSTRAINT_EVAL_AIR_ID,
+            true,
+        )
+    }
+
+    fn from_pk_with_child_constraint_eval_air_id(
+        child_vk: Arc<MultiStarkVerifyingKey<BabyBearPoseidon2Config>>,
+        pk: Arc<MultiStarkProvingKey<BabyBearPoseidon2Config>>,
+        child_constraint_eval_air_id: usize,
+        bridge_child_cached_commit: bool,
+    ) -> Self {
+        let engine = E::new(pk.params.clone());
+        let device_ctx = DC::from(engine.device().device_ctx().clone());
+        let verifier_circuit = S::new(
+            child_vk.clone(),
+            VerifierConfig {
+                continuations_enabled: true,
+                ..Default::default()
+            },
+        );
+        let child_vk_pcs_data = verifier_circuit.commit_child_vk(&engine, &child_vk);
+        let child_vk_commit = VkCommit {
+            cached_commit: child_vk_pcs_data.commitment,
+            vk_pre_hash: child_vk.pre_hash,
+        };
+        let circuit = Arc::new(CenoRecursiveCircuit {
+            verifier_circuit: Arc::new(verifier_circuit),
+            child_vk_commit,
+            child_constraint_eval_air_id,
+            bridge_child_cached_commit,
+        });
+        let vk = Arc::new(pk.get_vk());
+        let d_pk = engine.device().transport_pk_to_device(pk.as_ref());
+        Self {
+            pk,
+            d_pk,
+            vk,
+            child_vk,
+            child_vk_pcs_data,
+            circuit,
+            device_ctx,
+            _engine: std::marker::PhantomData,
+        }
+    }
+
     pub fn new_with_child_constraint_eval_air_id(
         child_vk: Arc<MultiStarkVerifyingKey<BabyBearPoseidon2Config>>,
         system_params: SystemParams,
@@ -204,6 +268,10 @@ where
 
     pub fn get_vk(&self) -> Arc<MultiStarkVerifyingKey<BabyBearPoseidon2Config>> {
         self.vk.clone()
+    }
+
+    pub fn get_pk(&self) -> Arc<MultiStarkProvingKey<BabyBearPoseidon2Config>> {
+        self.pk.clone()
     }
 
     fn child_vk_commit(&self) -> VkCommit<F> {

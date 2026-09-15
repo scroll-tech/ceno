@@ -11,9 +11,14 @@ pub(super) unsafe extern "C" fn aot_exec_one<T: Tracer>(
     aot_native_callback_event(&AOT_NATIVE_CALLBACK_FALLBACK, "fallback");
     let fallback_started = Instant::now();
     let context = unsafe { &mut *(context as *mut AotRuntimeContext) };
-    if context.trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT {
+    if matches!(
+        context.trace_mode,
+        AOT_TRACE_MODE_GPU_REPLAY_DIRECT | AOT_TRACE_MODE_GPU_REPLAY_FAST_FLIGHT
+    ) {
         let replay_vm = unsafe { &mut *(context.vm as *mut VMState<crate::GpuReplayTracer>) };
-        if let Err(message) = replay_vm.tracer_mut().sync_native_range() {
+        if context.trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT
+            && let Err(message) = replay_vm.tracer_mut().sync_native_range()
+        {
             LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(anyhow!(message)));
             return AOT_STATUS_ERROR;
         }
@@ -122,7 +127,11 @@ pub(super) unsafe extern "C" fn aot_exec_one<T: Tracer>(
             AOT_STATUS_ERROR
         }
     };
-    if context.trace_mode == AOT_TRACE_MODE_GPU_REPLAY_DIRECT && status != AOT_STATUS_ERROR {
+    if matches!(
+        context.trace_mode,
+        AOT_TRACE_MODE_GPU_REPLAY_DIRECT | AOT_TRACE_MODE_GPU_REPLAY_FAST_FLIGHT
+    ) && status != AOT_STATUS_ERROR
+    {
         let replay_vm = unsafe { &mut *(context.vm as *mut VMState<crate::GpuReplayTracer>) };
         let state = replay_vm.tracer_mut().prepare_native_range();
         context.gpu_replay_kinds = state.kinds;

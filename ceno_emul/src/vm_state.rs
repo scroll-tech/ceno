@@ -346,6 +346,41 @@ impl<T: Tracer> VMState<T> {
     }
 }
 
+#[cfg(all(test, feature = "aot-x86_64", not(debug_assertions)))]
+impl VMState<crate::GpuReplayTracer> {
+    /// Hash the complete replay-visible VM and witness-annotation cursor state.
+    pub(crate) fn replay_state_audit_digest(&self) -> [u8; 32] {
+        use tiny_keccak::{Hasher, Keccak};
+
+        let mut keccak = Keccak::v256();
+        keccak.update(b"ceno-replay-vm-state-audit-v2");
+        keccak.update(&self.pc.to_le_bytes());
+        for (index, value) in self.registers.iter().enumerate() {
+            keccak.update(&value.to_le_bytes());
+            let address: WordAddr = Platform::register_vma(index as RegIdx).into();
+            keccak.update(&self.final_access_cycle(address).to_le_bytes());
+        }
+        let (range_cursor, access_cursor) = self.tracer.replay_audit_cursors();
+        keccak.update(&range_cursor.to_le_bytes());
+        keccak.update(&access_cursor.to_le_bytes());
+        // Both replay workers run on one host. Hashing packed cells as bytes
+        // retains every memory value and access stamp without a per-cell copy.
+        let cells = self.memory.raw_cells();
+        let bytes = unsafe {
+            std::slice::from_raw_parts(cells.as_ptr().cast::<u8>(), std::mem::size_of_val(cells))
+        };
+        keccak.update(bytes);
+        if let Some(public_io) = self.committed_public_io {
+            for value in public_io {
+                keccak.update(&value.to_le_bytes());
+            }
+        }
+        let mut digest = [0; 32];
+        keccak.finalize(&mut digest);
+        digest
+    }
+}
+
 impl<T: Tracer> EmuContext for VMState<T> {
     // Expect an ecall to terminate the program: function HALT with argument exit_code.
     fn ecall(&mut self) -> Result<bool> {

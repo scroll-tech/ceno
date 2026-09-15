@@ -76,50 +76,59 @@ use std::{
 use strum::{EnumCount, IntoEnumIterator};
 use tracing::info_span;
 
-#[cfg(feature = "gpu")]
-macro_rules! for_each_fused_opcode {
-    ($m:ident) => {
-        $m!(AddInstruction<E>, add_config, K::Add);
-        $m!(SubInstruction<E>, sub_config, K::Sub);
-        $m!(AndInstruction<E>, and_config, K::LogicR(0));
-        $m!(OrInstruction<E>, or_config, K::LogicR(1));
-        $m!(XorInstruction<E>, xor_config, K::LogicR(2));
-        $m!(SllInstruction<E>, sll_config, K::ShiftR(0));
-        $m!(SrlInstruction<E>, srl_config, K::ShiftR(1));
-        $m!(SraInstruction<E>, sra_config, K::ShiftR(2));
-        $m!(SltInstruction<E>, slt_config, K::Slt(1));
-        $m!(SltuInstruction<E>, sltu_config, K::Slt(0));
-        $m!(MulInstruction<E>, mul_config, K::Mul(0));
-        $m!(MulhInstruction<E>, mulh_config, K::Mul(1));
-        $m!(MulhsuInstruction<E>, mulhsu_config, K::Mul(3));
-        $m!(MulhuInstruction<E>, mulhu_config, K::Mul(2));
-        $m!(DivuInstruction<E>, divu_config, K::Div(1));
-        $m!(RemuInstruction<E>, remu_config, K::Div(3));
-        $m!(DivInstruction<E>, div_config, K::Div(0));
-        $m!(RemInstruction<E>, rem_config, K::Div(2));
-        $m!(AddiInstruction<E>, addi_config, K::Addi);
-        $m!(AndiInstruction<E>, andi_config, K::LogicI(0));
-        $m!(OriInstruction<E>, ori_config, K::LogicI(1));
-        $m!(XoriInstruction<E>, xori_config, K::LogicI(2));
-        $m!(SlliInstruction<E>, slli_config, K::ShiftI(0));
-        $m!(SrliInstruction<E>, srli_config, K::ShiftI(1));
-        $m!(SraiInstruction<E>, srai_config, K::ShiftI(2));
-        $m!(SltiInstruction<E>, slti_config, K::Slti(1));
-        $m!(SltiuInstruction<E>, sltiu_config, K::Slti(0));
+// ShardContext replaces records for the same address in assignment order.
+// Keep CPU assignment and GPU producer priority in this ISA-owned traversal.
+macro_rules! for_each_opcode {
+    ($m:ident) => {{
+        let mut next_order = 0u32;
+        macro_rules! visit_opcode {
+            ($instruction:ty, $config:ident, $kind:expr) => {{
+                let order = next_order;
+                next_order += 1;
+                $m!($instruction, $config, $kind, order);
+            }};
+        }
+        visit_opcode!(AddInstruction<E>, add_config, K::Add);
+        visit_opcode!(SubInstruction<E>, sub_config, K::Sub);
+        visit_opcode!(AndInstruction<E>, and_config, K::LogicR(0));
+        visit_opcode!(OrInstruction<E>, or_config, K::LogicR(1));
+        visit_opcode!(XorInstruction<E>, xor_config, K::LogicR(2));
+        visit_opcode!(SllInstruction<E>, sll_config, K::ShiftR(0));
+        visit_opcode!(SrlInstruction<E>, srl_config, K::ShiftR(1));
+        visit_opcode!(SraInstruction<E>, sra_config, K::ShiftR(2));
+        visit_opcode!(SltInstruction<E>, slt_config, K::Slt(1));
+        visit_opcode!(SltuInstruction<E>, sltu_config, K::Slt(0));
+        visit_opcode!(MulInstruction<E>, mul_config, K::Mul(0));
+        visit_opcode!(MulhInstruction<E>, mulh_config, K::Mul(1));
+        visit_opcode!(MulhsuInstruction<E>, mulhsu_config, K::Mul(3));
+        visit_opcode!(MulhuInstruction<E>, mulhu_config, K::Mul(2));
+        visit_opcode!(DivuInstruction<E>, divu_config, K::Div(1));
+        visit_opcode!(RemuInstruction<E>, remu_config, K::Div(3));
+        visit_opcode!(DivInstruction<E>, div_config, K::Div(0));
+        visit_opcode!(RemInstruction<E>, rem_config, K::Div(2));
+        visit_opcode!(AddiInstruction<E>, addi_config, K::Addi);
+        visit_opcode!(AndiInstruction<E>, andi_config, K::LogicI(0));
+        visit_opcode!(OriInstruction<E>, ori_config, K::LogicI(1));
+        visit_opcode!(XoriInstruction<E>, xori_config, K::LogicI(2));
+        visit_opcode!(SlliInstruction<E>, slli_config, K::ShiftI(0));
+        visit_opcode!(SrliInstruction<E>, srli_config, K::ShiftI(1));
+        visit_opcode!(SraiInstruction<E>, srai_config, K::ShiftI(2));
+        visit_opcode!(SltiInstruction<E>, slti_config, K::Slti(1));
+        visit_opcode!(SltiuInstruction<E>, sltiu_config, K::Slti(0));
         #[cfg(feature = "u16limb_circuit")]
-        $m!(LuiInstruction<E>, lui_config, K::Lui);
+        visit_opcode!(LuiInstruction<E>, lui_config, K::Lui);
         #[cfg(feature = "u16limb_circuit")]
-        $m!(AuipcInstruction<E>, auipc_config, K::Auipc);
-        $m!(BeqInstruction<E>, beq_config, K::BranchEq(1));
-        $m!(BneInstruction<E>, bne_config, K::BranchEq(0));
-        $m!(BltInstruction<E>, blt_config, K::BranchCmp(1));
-        $m!(BltuInstruction<E>, bltu_config, K::BranchCmp(0));
-        $m!(BgeInstruction<E>, bge_config, K::BranchCmp(1));
-        $m!(BgeuInstruction<E>, bgeu_config, K::BranchCmp(0));
-        $m!(JalInstruction<E>, jal_config, K::Jal);
-        $m!(JalrInstruction<E>, jalr_config, K::Jalr);
-        $m!(LwInstruction<E>, lw_config, K::Lw);
-        $m!(
+        visit_opcode!(AuipcInstruction<E>, auipc_config, K::Auipc);
+        visit_opcode!(BeqInstruction<E>, beq_config, K::BranchEq(1));
+        visit_opcode!(BneInstruction<E>, bne_config, K::BranchEq(0));
+        visit_opcode!(BltInstruction<E>, blt_config, K::BranchCmp(1));
+        visit_opcode!(BltuInstruction<E>, bltu_config, K::BranchCmp(0));
+        visit_opcode!(BgeInstruction<E>, bge_config, K::BranchCmp(1));
+        visit_opcode!(BgeuInstruction<E>, bgeu_config, K::BranchCmp(0));
+        visit_opcode!(JalInstruction<E>, jal_config, K::Jal);
+        visit_opcode!(JalrInstruction<E>, jalr_config, K::Jalr);
+        visit_opcode!(LwInstruction<E>, lw_config, K::Lw);
+        visit_opcode!(
             LbInstruction<E>,
             lb_config,
             K::LoadSub {
@@ -127,7 +136,7 @@ macro_rules! for_each_fused_opcode {
                 is_signed: 1
             }
         );
-        $m!(
+        visit_opcode!(
             LbuInstruction<E>,
             lbu_config,
             K::LoadSub {
@@ -135,7 +144,7 @@ macro_rules! for_each_fused_opcode {
                 is_signed: 0
             }
         );
-        $m!(
+        visit_opcode!(
             LhInstruction<E>,
             lh_config,
             K::LoadSub {
@@ -143,7 +152,7 @@ macro_rules! for_each_fused_opcode {
                 is_signed: 1
             }
         );
-        $m!(
+        visit_opcode!(
             LhuInstruction<E>,
             lhu_config,
             K::LoadSub {
@@ -151,10 +160,11 @@ macro_rules! for_each_fused_opcode {
                 is_signed: 0
             }
         );
-        $m!(SwInstruction<E>, sw_config, K::Sw);
-        $m!(ShInstruction<E>, sh_config, K::Sh);
-        $m!(SbInstruction<E>, sb_config, K::Sb);
-    };
+        visit_opcode!(SwInstruction<E>, sw_config, K::Sw);
+        visit_opcode!(ShInstruction<E>, sh_config, K::Sh);
+        visit_opcode!(SbInstruction<E>, sb_config, K::Sb);
+        let _ = next_order;
+    }};
 }
 
 pub mod mmu;
@@ -900,7 +910,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
     ) -> Result<(), ZKVMError> {
         use crate::instructions::gpu::dispatch::{self, GpuWitgenKind as K};
         macro_rules! prepare_opcode {
-            ($instruction:ty, $config:ident, $kind:expr) => {{
+            ($instruction:ty, $config:ident, $kind:expr, $order:expr) => {{
                 let chip_cs = cs.get_cs(&<$instruction>::name()).unwrap();
                 let kind = <$instruction>::inst_kinds()[0];
                 dispatch::prepare_fused_assignment::<E, $instruction>(
@@ -909,10 +919,37 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     chip_cs.zkvm_v1_css.num_structural_witin as usize,
                     family_counts[kind as usize],
                     $kind,
+                    $order,
                 )?;
             }};
         }
-        for_each_fused_opcode!(prepare_opcode);
+        for_each_opcode!(prepare_opcode);
+        Ok(())
+    }
+
+    #[cfg(feature = "gpu")]
+    pub(crate) fn prepare_fused_assignments(
+        &self,
+        cs: &ZKVMConstraintSystem<E>,
+        instrunction_dispatch_ctx: &InstructionDispatchCtx,
+    ) -> Result<(), ZKVMError> {
+        use crate::instructions::gpu::dispatch::{self, GpuWitgenKind as K};
+        macro_rules! prepare_opcode {
+            ($instruction:ty, $config:ident, $kind:expr, $order:expr) => {{
+                let expected_rows =
+                    instrunction_dispatch_ctx.record_count_for_kinds::<E, $instruction>();
+                let chip_cs = cs.get_cs(&<$instruction>::name()).unwrap();
+                dispatch::prepare_fused_assignment::<E, $instruction>(
+                    &self.$config,
+                    chip_cs.zkvm_v1_css.num_witin as usize,
+                    chip_cs.zkvm_v1_css.num_structural_witin as usize,
+                    expected_rows,
+                    $kind,
+                    $order,
+                )?;
+            }};
+        }
+        for_each_opcode!(prepare_opcode);
         Ok(())
     }
 
@@ -967,7 +1004,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         log_ecall!("sha_extend_records", Sha256ExtendSpec::CODE);
 
         macro_rules! assign_opcode {
-            ($instruction:ty, $config:ident) => {{
+            ($instruction:ty, $config:ident, $kind:expr, $order:expr) => {{
+                let _ = $order;
                 let n = instrunction_dispatch_ctx
                     .record_count_for_kinds::<E, $instruction>();
                 #[cfg(feature = "gpu")]
@@ -1020,77 +1058,11 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         #[cfg(feature = "gpu")]
         {
-            use crate::instructions::gpu::dispatch::{self, GpuWitgenKind as K};
-            macro_rules! prepare_opcode {
-                ($instruction:ty, $config:ident, $kind:expr) => {{
-                    let expected_rows =
-                        instrunction_dispatch_ctx.record_count_for_kinds::<E, $instruction>();
-                    let chip_cs = cs.get_cs(&<$instruction>::name()).unwrap();
-                    dispatch::prepare_fused_assignment::<E, $instruction>(
-                        &self.$config,
-                        chip_cs.zkvm_v1_css.num_witin as usize,
-                        chip_cs.zkvm_v1_css.num_structural_witin as usize,
-                        expected_rows,
-                        $kind,
-                    )?;
-                }};
-            }
-            for_each_fused_opcode!(prepare_opcode);
-            dispatch::launch_fused_assignments(shard_ctx)?;
+            self.prepare_fused_assignments(cs, instrunction_dispatch_ctx)?;
+            crate::instructions::gpu::dispatch::launch_fused_assignments(shard_ctx)?;
         }
 
-        // alu
-        assign_opcode!(AddInstruction<E>, add_config);
-        assign_opcode!(SubInstruction<E>, sub_config);
-        assign_opcode!(AndInstruction<E>, and_config);
-        assign_opcode!(OrInstruction<E>, or_config);
-        assign_opcode!(XorInstruction<E>, xor_config);
-        assign_opcode!(SllInstruction<E>, sll_config);
-        assign_opcode!(SrlInstruction<E>, srl_config);
-        assign_opcode!(SraInstruction<E>, sra_config);
-        assign_opcode!(SltInstruction<E>, slt_config);
-        assign_opcode!(SltuInstruction<E>, sltu_config);
-        assign_opcode!(MulInstruction<E>, mul_config);
-        assign_opcode!(MulhInstruction<E>, mulh_config);
-        assign_opcode!(MulhsuInstruction<E>, mulhsu_config);
-        assign_opcode!(MulhuInstruction<E>, mulhu_config);
-        assign_opcode!(DivuInstruction<E>, divu_config);
-        assign_opcode!(RemuInstruction<E>, remu_config);
-        assign_opcode!(DivInstruction<E>, div_config);
-        assign_opcode!(RemInstruction<E>, rem_config);
-        // alu with imm
-        assign_opcode!(AddiInstruction<E>, addi_config);
-        assign_opcode!(AndiInstruction<E>, andi_config);
-        assign_opcode!(OriInstruction<E>, ori_config);
-        assign_opcode!(XoriInstruction<E>, xori_config);
-        assign_opcode!(SlliInstruction<E>, slli_config);
-        assign_opcode!(SrliInstruction<E>, srli_config);
-        assign_opcode!(SraiInstruction<E>, srai_config);
-        assign_opcode!(SltiInstruction<E>, slti_config);
-        assign_opcode!(SltiuInstruction<E>, sltiu_config);
-        #[cfg(feature = "u16limb_circuit")]
-        assign_opcode!(LuiInstruction<E>, lui_config);
-        #[cfg(feature = "u16limb_circuit")]
-        assign_opcode!(AuipcInstruction<E>, auipc_config);
-        // branching
-        assign_opcode!(BeqInstruction<E>, beq_config);
-        assign_opcode!(BneInstruction<E>, bne_config);
-        assign_opcode!(BltInstruction<E>, blt_config);
-        assign_opcode!(BltuInstruction<E>, bltu_config);
-        assign_opcode!(BgeInstruction<E>, bge_config);
-        assign_opcode!(BgeuInstruction<E>, bgeu_config);
-        // jump
-        assign_opcode!(JalInstruction<E>, jal_config);
-        assign_opcode!(JalrInstruction<E>, jalr_config);
-        // memory
-        assign_opcode!(LwInstruction<E>, lw_config);
-        assign_opcode!(LbInstruction<E>, lb_config);
-        assign_opcode!(LbuInstruction<E>, lbu_config);
-        assign_opcode!(LhInstruction<E>, lh_config);
-        assign_opcode!(LhuInstruction<E>, lhu_config);
-        assign_opcode!(SwInstruction<E>, sw_config);
-        assign_opcode!(ShInstruction<E>, sh_config);
-        assign_opcode!(SbInstruction<E>, sb_config);
+        for_each_opcode!(assign_opcode);
 
         // ecall / halt
         assign_ecall!(HaltInstruction<E>, halt_config, ECALL_HALT);
@@ -1817,5 +1789,81 @@ mod compact_dispatch_tests {
         dispatch.begin_compact_ingest();
         dispatch.compact_record_counts[0] = usize::MAX;
         dispatch.ingest_compact_count(InsnKind::ADD, 1);
+    }
+}
+
+// Captured before unifying the CPU assignment and GPU priority lists.
+#[cfg(test)]
+pub(crate) const LEGACY_PRODUCER_ORDER: &[InsnKind] = &[
+    InsnKind::ADD,
+    InsnKind::SUB,
+    InsnKind::AND,
+    InsnKind::OR,
+    InsnKind::XOR,
+    InsnKind::SLL,
+    InsnKind::SRL,
+    InsnKind::SRA,
+    InsnKind::SLT,
+    InsnKind::SLTU,
+    InsnKind::MUL,
+    InsnKind::MULH,
+    InsnKind::MULHSU,
+    InsnKind::MULHU,
+    InsnKind::DIVU,
+    InsnKind::REMU,
+    InsnKind::DIV,
+    InsnKind::REM,
+    InsnKind::ADDI,
+    InsnKind::ANDI,
+    InsnKind::ORI,
+    InsnKind::XORI,
+    InsnKind::SLLI,
+    InsnKind::SRLI,
+    InsnKind::SRAI,
+    InsnKind::SLTI,
+    InsnKind::SLTIU,
+    #[cfg(feature = "u16limb_circuit")]
+    InsnKind::LUI,
+    #[cfg(feature = "u16limb_circuit")]
+    InsnKind::AUIPC,
+    InsnKind::BEQ,
+    InsnKind::BNE,
+    InsnKind::BLT,
+    InsnKind::BLTU,
+    InsnKind::BGE,
+    InsnKind::BGEU,
+    InsnKind::JAL,
+    InsnKind::JALR,
+    InsnKind::LW,
+    InsnKind::LB,
+    InsnKind::LBU,
+    InsnKind::LH,
+    InsnKind::LHU,
+    InsnKind::SW,
+    InsnKind::SH,
+    InsnKind::SB,
+];
+
+#[cfg(test)]
+mod producer_order_tests {
+    use super::*;
+    type E = ff_ext::BabyBearExt4;
+
+    #[test]
+    fn opcode_ordinals_preserve_legacy_assignment_order() {
+        let mut generated = Vec::new();
+        macro_rules! collect {
+            ($instruction:ty, $config:ident, $kind:expr, $order:expr) => {
+                generated.push((<$instruction>::inst_kinds()[0], $order));
+            };
+        }
+        for_each_opcode!(collect);
+        let expected: Vec<_> = LEGACY_PRODUCER_ORDER
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(order, kind)| (kind, order as u32))
+            .collect();
+        assert_eq!(generated, expected);
     }
 }

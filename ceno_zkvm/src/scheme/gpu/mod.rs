@@ -44,7 +44,7 @@ use gkr_iop::{
     },
     gpu::{
         GpuBackend, GpuBasefoldPcsData, GpuJaggedPcsData, GpuJaggedTraceLayout, GpuPcsData,
-        GpuProver, gpu_prover::BB31Ext,
+        GpuProver, get_cuda_hal, gpu_prover::BB31Ext,
     },
     hal::ProverBackend,
 };

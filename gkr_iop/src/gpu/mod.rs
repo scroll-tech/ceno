@@ -29,7 +29,7 @@ pub mod gpu_prover {
             CacheLevel,
             basefold::utils::convert_ceno_to_gpu_basefold_commitment,
             buffer::BufferImpl,
-            get_ceno_gpu_device_id, get_gpu_cache_level, get_mem_tracking_mode,
+            get_gpu_cache_level, get_mem_tracking_mode,
             jagged::GpuJaggedPreprocessed,
             mem_pool::MemTracker,
             mle::{
@@ -43,27 +43,8 @@ pub mod gpu_prover {
     // Re-export CudaStream for concurrent GPU stream operations
     pub use cudarc::driver::CudaStream;
 
-    use once_cell::sync::Lazy;
-    use std::sync::Arc;
-
     pub type BB31Base = p3::babybear::BabyBear;
     pub type BB31Ext = ff_ext::BabyBearExt4;
-
-    #[allow(clippy::type_complexity)]
-    pub static CUDA_HAL: Lazy<Result<Arc<CudaHalBB31>, Box<dyn std::error::Error + Send + Sync>>> =
-        Lazy::new(|| {
-            let device_id: usize = get_ceno_gpu_device_id(0);
-            CudaHalBB31::new(device_id)
-                .map(Arc::new)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-        });
-
-    pub fn get_cuda_hal() -> Result<Arc<CudaHalBB31>, String> {
-        CUDA_HAL
-            .as_ref()
-            .map(|hal_arc| hal_arc.clone())
-            .map_err(|e| format!("HAL not available: {:?}", e))
-    }
 }
 
 use crate::{evaluation::EvalExpression, gkr::layer::Layer};
@@ -77,34 +58,60 @@ use std::{
 static DEFAULT_STREAM_FALLBACK_FORBIDDEN: AtomicUsize = AtomicUsize::new(0);
 
 thread_local! {
+    static THREAD_CUDA_HAL: RefCell<Option<Arc<CudaHalBB31>>> = const { RefCell::new(None) };
     static THREAD_CUDA_STREAM: RefCell<Option<Arc<CudaStream>>> = const { RefCell::new(None) };
+}
+
+pub fn get_cuda_hal() -> Result<Arc<CudaHalBB31>, String> {
+    THREAD_CUDA_HAL.with(|cell| {
+        cell.borrow()
+            .clone()
+            .ok_or_else(|| "CUDA HAL is not bound to this worker thread".to_owned())
+    })
+}
+
+/// Bind a worker-owned HAL to the current thread until another worker binds one.
+pub fn set_thread_cuda_hal(cuda_hal: Arc<CudaHalBB31>) {
+    cuda_hal.inner.ensure_context();
+    THREAD_CUDA_HAL.with(|cell| *cell.borrow_mut() = Some(cuda_hal));
 }
 
 /// Bind a CUDA stream to the current thread for use by all GPU operations.
 /// Also ensures the CUDA context is active on this thread, which is necessary
 /// for Rayon workers that receive a propagated stream from a parent thread.
 /// Returns a guard that clears the thread-local on drop.
-pub fn bind_thread_stream(stream: Arc<CudaStream>) -> ThreadStreamGuard {
+pub fn bind_thread_stream(
+    cuda_hal: Arc<CudaHalBB31>,
+    stream: Arc<CudaStream>,
+) -> ThreadCudaBindingGuard {
     // Ensure CUDA context is bound to this thread.
     // Without this, threads that receive a propagated stream (e.g. Rayon workers)
     // would have a stream but no active CUDA context, causing CUDA_ERROR_INVALID_CONTEXT.
-    let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
     cuda_hal.inner.ensure_context();
+    let previous_hal = THREAD_CUDA_HAL.with(|cell| cell.replace(Some(cuda_hal)));
+    let previous_stream = THREAD_CUDA_STREAM.with(|cell| cell.replace(Some(stream)));
+    ThreadCudaBindingGuard {
+        previous_hal,
+        previous_stream,
+    }
+}
 
-    THREAD_CUDA_STREAM.with(|cell| {
-        *cell.borrow_mut() = Some(stream);
-    });
-    ThreadStreamGuard
+/// Bind a worker-owned HAL and its default stream to the current thread.
+pub fn bind_thread_default_stream(cuda_hal: Arc<CudaHalBB31>) -> ThreadCudaBindingGuard {
+    let stream = cuda_hal.inner.default_stream().clone();
+    bind_thread_stream(cuda_hal, stream)
 }
 
 /// RAII guard that clears the thread-local CUDA stream on drop.
-pub struct ThreadStreamGuard;
+pub struct ThreadCudaBindingGuard {
+    previous_hal: Option<Arc<CudaHalBB31>>,
+    previous_stream: Option<Arc<CudaStream>>,
+}
 
-impl Drop for ThreadStreamGuard {
+impl Drop for ThreadCudaBindingGuard {
     fn drop(&mut self) {
-        THREAD_CUDA_STREAM.with(|cell| {
-            *cell.borrow_mut() = None;
-        });
+        THREAD_CUDA_HAL.with(|cell| *cell.borrow_mut() = self.previous_hal.take());
+        THREAD_CUDA_STREAM.with(|cell| *cell.borrow_mut() = self.previous_stream.take());
     }
 }
 
@@ -452,11 +459,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Gp
 
 pub struct GpuProver<PB: ProverBackend + 'static> {
     pub backend: Arc<PB>,
+    /// Owned for the prover lifetime; thread bindings only borrow this device identity via `Arc`.
+    pub cuda_hal: Arc<CudaHalBB31>,
 }
 
 impl<PB: ProverBackend> GpuProver<PB> {
-    pub fn new(backend: Arc<PB>) -> Self {
-        Self { backend }
+    pub fn new(backend: Arc<PB>, cuda_hal: Arc<CudaHalBB31>) -> Self {
+        set_thread_cuda_hal(cuda_hal.clone());
+        Self { backend, cuda_hal }
     }
 }
 
@@ -637,5 +647,50 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             })
             .map(Arc::new)
             .collect_vec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CudaHalBB31, bind_thread_default_stream, forbid_default_stream_fallback, get_thread_stream,
+    };
+    use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn bound_parent_stream_survives_another_scheduler_guard() {
+        let hal = Arc::new(CudaHalBB31::new(0).unwrap());
+        let expected_stream = hal.inner.default_stream().clone();
+        {
+            let _binding = bind_thread_default_stream(hal);
+            let barrier = Arc::new(Barrier::new(2));
+
+            std::thread::scope(|scope| {
+                let worker_barrier = barrier.clone();
+                scope.spawn(move || {
+                    let _fallback_guard = forbid_default_stream_fallback();
+                    worker_barrier.wait();
+                    worker_barrier.wait();
+                });
+
+                barrier.wait();
+                let bound_stream = get_thread_stream().expect("parent stream must remain bound");
+                assert!(Arc::ptr_eq(&bound_stream, &expected_stream));
+                barrier.wait();
+            });
+        }
+
+        let barrier = Arc::new(Barrier::new(2));
+        std::thread::scope(|scope| {
+            let worker_barrier = barrier.clone();
+            scope.spawn(move || {
+                let _fallback_guard = forbid_default_stream_fallback();
+                worker_barrier.wait();
+                worker_barrier.wait();
+            });
+            barrier.wait();
+            assert!(std::panic::catch_unwind(get_thread_stream).is_err());
+            barrier.wait();
+        });
     }
 }
