@@ -1377,6 +1377,7 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                 .typed
                 .iter()
                 .flatten()
+                .filter(|arena| !arena.is_empty())
                 .try_fold(0usize, |sum, arena| {
                     let bytes = if arena.is_compact() {
                         arena.payload_bytes().len()
@@ -1395,7 +1396,14 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
         .arenas
         .ranges
         .iter()
-        .map(|range| range.typed.iter().flatten().count())
+        .map(|range| {
+            range
+                .typed
+                .iter()
+                .flatten()
+                .filter(|arena| !arena.is_empty())
+                .count()
+        })
         .max()
         .ok_or_else(|| ZKVMError::InvalidWitness("installed fused shard has no ranges".into()))?;
     let mut launcher = FusedRangeLauncher::new(hal.inner.clone(), stage_capacity, work_capacity)
@@ -1408,9 +1416,22 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
             let mut work = [FusedRangeWorkItem::default(); InsnKind::COUNT];
             let mut work_count = 0usize;
             let mut cursor = 0usize;
-            for arena in range.typed.iter().flatten() {
-                let registration =
-                    &state.registrations[registration_for_kind[arena.kind() as usize]];
+            // Replay retains allocated arenas for families absent from this range/shard.
+            // Those empty arenas have no work and may have no registered circuit.
+            for arena in range
+                .typed
+                .iter()
+                .flatten()
+                .filter(|arena| !arena.is_empty())
+            {
+                let registration = state
+                    .registrations
+                    .get(registration_for_kind[arena.kind() as usize])
+                    .ok_or_else(|| {
+                        ZKVMError::InvalidWitness(
+                            format!("missing fused registration for {:?}", arena.kind()).into(),
+                        )
+                    })?;
                 let mut offsets = [0u32; 13];
                 if arena.is_compact() {
                     offsets[0] = u32::try_from(cursor).map_err(|_| {
@@ -3455,5 +3476,27 @@ mod tests {
         let typed = run(&steps, arenas(&steps, false));
         let compact = run(&steps, arenas(&steps, true));
         assert_eq!(compact, typed);
+
+        for compact_layout in [false, true] {
+            let mut warmed = arenas(&steps, compact_layout);
+            let range = &mut warmed.ranges[0];
+            let mut empty_families = 0;
+            for kind in <InsnKind as strum::IntoEnumIterator>::iter() {
+                if range.typed[kind as usize].is_none() {
+                    let arena = if compact_layout {
+                        GpuTypedSoaArena::new(kind, 1)
+                    } else {
+                        GpuTypedSoaArena::new_field_soa_oracle(kind, 1)
+                    };
+                    if let Some(arena) = arena {
+                        assert!(arena.is_empty());
+                        range.typed[kind as usize] = Some(arena);
+                        empty_families += 1;
+                    }
+                }
+            }
+            assert!(empty_families > 0);
+            assert_eq!(run(&steps, warmed), typed);
+        }
     }
 }
