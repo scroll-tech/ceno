@@ -1105,6 +1105,7 @@ pub(crate) fn prepare_fused_assignment<
         return Ok(());
     }
 
+    let _registration = nvtx::range!("ceno.witness.register kind={:?}", insn_kind);
     check_producer_order(producer_order);
 
     macro_rules! map_config {
@@ -1244,14 +1245,19 @@ pub(crate) fn prepare_fused_assignment<
     let hal = gkr_iop::gpu::get_cuda_hal().map_err(|e| {
         ZKVMError::InvalidWitness(format!("CUDA unavailable for fused registration: {e}").into())
     })?;
+    let allocation = nvtx::range!("ceno.witness.output-allocation");
     let output = hal
         .witgen
         .alloc_elems_on_device(expected_rows * num_witin, true, None)
         .map_err(|e| ZKVMError::InvalidWitness(format!("fused output alloc: {e}").into()))?;
+    drop(allocation);
+    let columns = nvtx::range!("ceno.witness.columns-upload");
     let cols = hal
         .witgen
         .alloc_u32_from_host(&cols, None)
         .map_err(|e| ZKVMError::InvalidWitness(format!("fused columns upload: {e}").into()))?;
+    drop(columns);
+    let structural_range = nvtx::range!("ceno.witness.structural-columns");
     let mut structural = RowMajorMatrix::<E::BaseField>::new(
         expected_rows,
         num_structural_witin.max(1),
@@ -1261,6 +1267,7 @@ pub(crate) fn prepare_fused_assignment<
         *row.last_mut().unwrap() = E::BaseField::ONE;
     }
     structural.padding_by_strategy();
+    drop(structural_range);
     let finalize = Box::new(move |output: BufferImpl<'static, Bb>| {
         let witness = GpuWitnessResult {
             device_buffer: output,
@@ -1300,6 +1307,7 @@ pub(crate) fn prepare_fused_assignment<
 
 pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), ZKVMError> {
     use ceno_gpu::common::witgen::{typed_ingress::FusedRangeLauncher, types::MAX_TS_BITS};
+    let _fused = nvtx::range!("ceno.witness.fused shard={}", shard_ctx.shard_id);
     if FUSED_INGRESS.with(|slot| {
         slot.borrow()
             .as_ref()
@@ -1360,6 +1368,7 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
     let logical_steps = (shard_ctx.cur_shard_cycle_range.end
         - shard_ctx.cur_shard_cycle_range.start)
         / FullTracer::SUBCYCLES_PER_INSN as usize;
+    let metadata = nvtx::range!("ceno.witness.shared-metadata");
     ensure_compact_shard_metadata_cached(
         &hal,
         shard_ctx,
@@ -1367,7 +1376,9 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
         state.fetch,
         state.reserved_addresses,
     )?;
+    drop(metadata);
     super::cache::set_reserved_address_capacity(state.reserved_addresses);
+    let preparation = nvtx::range!("ceno.witness.stage-capacity");
     let stage_capacity = state
         .arenas
         .ranges
@@ -1406,11 +1417,15 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
         })
         .max()
         .ok_or_else(|| ZKVMError::InvalidWitness("installed fused shard has no ranges".into()))?;
+    drop(preparation);
+    let allocation = nvtx::range!("ceno.witness.stage-allocation");
     let mut launcher = FusedRangeLauncher::new(hal.inner.clone(), stage_capacity, work_capacity)
         .map_err(|e| ZKVMError::InvalidWitness(format!("fused launcher init: {e}").into()))?;
+    drop(allocation);
     let mut producer_bases = [0usize; InsnKind::COUNT];
     super::cache::with_cached_shard_meta(|shard| -> Result<(), ZKVMError> {
         for range in &state.arenas.ranges {
+            let preparation = nvtx::range!("ceno.witness.descriptors");
             let mut sources = [&[][..]; InsnKind::COUNT * 13];
             let mut source_count = 0usize;
             let mut work = [FusedRangeWorkItem::default(); InsnKind::COUNT];
@@ -1499,6 +1514,8 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
                     "typed direct-source descriptor closure mismatch".into(),
                 ));
             }
+            drop(preparation);
+            let _submission = nvtx::range!("ceno.witness.submit");
             launcher
                 .launch_direct(
                     &sources[..source_count],
@@ -1514,9 +1531,11 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
         }
         Ok(())
     })?;
+    let drain = nvtx::range!("ceno.witness.drain");
     let launch_count = launcher
         .finish()
         .map_err(|e| ZKVMError::InvalidWitness(format!("fused range drain: {e}").into()))?;
+    drop(drain);
     if launch_count as usize != state.arenas.ranges.len() {
         return Err(ZKVMError::InvalidWitness(
             "fused descriptor/launch mismatch".into(),
@@ -1558,6 +1577,7 @@ pub(crate) fn launch_fused_assignments(shard_ctx: &ShardContext) -> Result<(), Z
         abort_fused_session();
         return Err(error);
     }
+    let _assembly = nvtx::range!("ceno.witness.result-assembly");
     let mut finalized_assignments = Vec::with_capacity(state.registrations.len());
     for mut registration in state.registrations.drain(..) {
         let output = registration.output.take().unwrap();
