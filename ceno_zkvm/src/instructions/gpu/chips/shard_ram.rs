@@ -1048,7 +1048,10 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         || shared.reserved_address_capacity as usize > addr_capacity
     {
         return Err(ZKVMError::InvalidWitness(
-            "emission count exceeds allocated capacity".into(),
+            format!(
+                "emission count exceeds allocated capacity: shard_id={}; EC observed={ec_count} expected={expected_ec} capacity={ec_capacity}; address observed={addr_count} reserved={} capacity={addr_capacity}",
+                shard_ctx.shard_id, shared.reserved_address_capacity,
+            ).into(),
         ));
     }
 
