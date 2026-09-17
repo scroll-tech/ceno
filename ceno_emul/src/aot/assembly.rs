@@ -979,6 +979,9 @@ ceno_aot_gpu_replay_emit_step:
     // Retain 40-bit previous cycles in the unused bits of the flags word.
     // Access order matches the typed layout consumed by CUDA.
     movl 48(%rsp), %esi
+    // Before the 32-bit boundary, all layouts produce the same zero high bytes.
+    testl %esi, %esi
+    je .L_gpu_replay_high_packed
     movl 112(%r10), %edx
     cmpl $0, %edx
     je .L_gpu_replay_high_ready
@@ -1017,6 +1020,7 @@ ceno_aot_gpu_replay_emit_step:
     andl $0xffff00, %esi
     shll $4, %esi
     orl %edx, %esi
+.L_gpu_replay_high_packed:
     movl 16(%rsp), %edi
     shll $8, %edi
     orl %esi, %edi
