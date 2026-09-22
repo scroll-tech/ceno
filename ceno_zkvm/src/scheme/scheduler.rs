@@ -799,10 +799,6 @@ impl ChipScheduler {
                             booked_memory as f64 / (1024.0 * 1024.0),
                             phase_releasable_memory as f64 / (1024.0 * 1024.0),
                         );
-                        crate::scheme::gpu::log_gpu_device_state(&format!(
-                            "task_start:{}:{}",
-                            task_id, circuit_name
-                        ));
                         let _chip_range = nvtx::range!(
                             "ceno.chip circuit={} lane={} stream_id={}",
                             circuit_name,
@@ -824,6 +820,10 @@ impl ChipScheduler {
                                         stream.stream().clone(),
                                     )
                                 });
+                                crate::scheme::gpu::log_gpu_device_state(&format!(
+                                    "task_start:{}:{}",
+                                    task_id, circuit_name
+                                ));
                                 let _phase_release_context = phase_release_enabled.then(|| {
                                     bind_phase_release_context(PhaseReleaseContext {
                                         sender: phase_tx.clone(),

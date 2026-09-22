@@ -87,10 +87,10 @@ impl GpuTypedLayout {
 
     pub const fn compact_bytes(self) -> usize {
         match self {
-            Self::R | Self::Load | Self::Store => 33,
-            Self::I | Self::Branch | Self::Jalr => 25,
-            Self::Jal => 17,
-            Self::U => 21,
+            Self::R | Self::Load | Self::Store => 36,
+            Self::I | Self::Branch | Self::Jalr => 28,
+            Self::Jal => 20,
+            Self::U => 24,
         }
     }
 }
@@ -478,7 +478,7 @@ impl GpuTypedSoaArena {
             cycle: u64,
             value: u32,
         ) -> Result<(), &'static str> {
-            let cycle = u32::try_from(cycle).map_err(|_| "compact access cycle exceeds u32")?;
+            let cycle = cycle as u32;
             values.extend([(cycle, GPU_COMPACT_CYCLE_BITS), (value, 32)]);
             Ok(())
         }
@@ -508,12 +508,12 @@ impl GpuTypedSoaArena {
                 append_access(&mut values, memory.previous_cycle, memory.value.before)?;
             }
             GpuTypedLayout::U => {
-                let cycle = u32::try_from(rs1.previous_cycle).map_err(|_| "compact x0 cycle")?;
+                let cycle = rs1.previous_cycle as u32;
                 values.push((cycle, GPU_COMPACT_CYCLE_BITS));
                 append_access(&mut values, rd.previous_cycle, rd.value.before)?;
             }
         }
-        values.push((u32::from(record.future_access_mask()), 4));
+        values.push((packed_access_flags(self.layout, record), 28));
         let stride = self.layout.compact_bytes();
         let destination = &mut self.compact.as_mut().unwrap()[row * stride..(row + 1) * stride];
         destination.fill(MaybeUninit::new(0));
@@ -575,6 +575,29 @@ fn read_compact_bits(source: &[u8], bit: usize, width: usize) -> Result<u32, &'s
     Ok(value)
 }
 
+// The flags word retains each access's high timestamp byte. Storing only
+// low cycles turns same-shard accesses into external reads after 2^32 cycles.
+fn packed_access_flags(layout: GpuTypedLayout, record: &StepRecord) -> u32 {
+    let rs1 = record.rs1().unwrap_or_default().previous_cycle;
+    let rs2 = record.rs2().unwrap_or_default().previous_cycle;
+    let rd = record.rd().unwrap_or_default().previous_cycle;
+    let memory = record.memory_op().unwrap_or_default().previous_cycle;
+    let cycles = match layout {
+        GpuTypedLayout::R => [rs1, rs2, rd],
+        GpuTypedLayout::I | GpuTypedLayout::Jalr | GpuTypedLayout::U => [rs1, rd, 0],
+        GpuTypedLayout::Branch => [rs1, rs2, 0],
+        GpuTypedLayout::Jal => [rd, 0, 0],
+        GpuTypedLayout::Load => [rs1, rd, memory],
+        GpuTypedLayout::Store => [rs1, rs2, memory],
+    };
+    let mut flags = u32::from(record.future_access_mask()) << 8;
+    for (cycle, shift) in cycles.into_iter().zip([0, 12, 20]) {
+        assert!(cycle < 1 << 40, "access cycle exceeds 40-bit replay ABI");
+        flags |= ((cycle >> 32) as u32) << shift;
+    }
+    flags
+}
+
 fn typed_words(layout: GpuTypedLayout, ordinal: u32, record: &StepRecord) -> Vec<u32> {
     let pc = record.pc();
     let insn = record.insn();
@@ -583,15 +606,11 @@ fn typed_words(layout: GpuTypedLayout, ordinal: u32, record: &StepRecord) -> Vec
     let rd = record.rd().unwrap_or_default();
     let memory_op = record.memory_op().unwrap_or_default();
     let common = [ordinal, pc.before.0, insn.raw];
-    let rs1 = [u32::try_from(rs1.previous_cycle).unwrap(), rs1.value];
-    let rs2 = [u32::try_from(rs2.previous_cycle).unwrap(), rs2.value];
-    let rd = [
-        u32::try_from(rd.previous_cycle).unwrap(),
-        rd.value.before,
-        rd.value.after,
-    ];
+    let rs1 = [rs1.previous_cycle as u32, rs1.value];
+    let rs2 = [rs2.previous_cycle as u32, rs2.value];
+    let rd = [rd.previous_cycle as u32, rd.value.before, rd.value.after];
     let memory = [
-        u32::try_from(memory_op.previous_cycle).unwrap(),
+        memory_op.previous_cycle as u32,
         memory_op.addr.0,
         memory_op.value.before,
     ];
@@ -638,7 +657,7 @@ fn typed_words(layout: GpuTypedLayout, ordinal: u32, record: &StepRecord) -> Vec
             words.extend(rd);
         }
     }
-    words.push(u32::from(record.future_access_mask()) << 8);
+    words.push(packed_access_flags(layout, record));
     words
 }
 
@@ -648,9 +667,12 @@ mod tests {
     use crate::{ByteAddr, Change, ReadOp, WordAddr, WriteOp, encode_rv32};
 
     fn record(layout: GpuTypedLayout) -> StepRecord {
+        record_with_previous_cycle(layout, 7)
+    }
+
+    fn record_with_previous_cycle(layout: GpuTypedLayout, previous_cycle: u64) -> StepRecord {
         let cycle = 40;
         let pc = ByteAddr(0x1000);
-        let previous_cycle = 7;
         match layout {
             GpuTypedLayout::R => StepRecord::new_r_instruction(
                 cycle,
@@ -754,14 +776,14 @@ mod tests {
             assert_eq!(layout.words(), words);
             assert_eq!(layout.bytes(), bytes);
         }
-        assert_eq!(GpuTypedLayout::R.compact_bytes(), 33);
-        assert_eq!(GpuTypedLayout::I.compact_bytes(), 25);
-        assert_eq!(GpuTypedLayout::Branch.compact_bytes(), 25);
-        assert_eq!(GpuTypedLayout::Jal.compact_bytes(), 17);
-        assert_eq!(GpuTypedLayout::Jalr.compact_bytes(), 25);
-        assert_eq!(GpuTypedLayout::Load.compact_bytes(), 33);
-        assert_eq!(GpuTypedLayout::Store.compact_bytes(), 33);
-        assert_eq!(GpuTypedLayout::U.compact_bytes(), 21);
+        assert_eq!(GpuTypedLayout::R.compact_bytes(), 36);
+        assert_eq!(GpuTypedLayout::I.compact_bytes(), 28);
+        assert_eq!(GpuTypedLayout::Branch.compact_bytes(), 28);
+        assert_eq!(GpuTypedLayout::Jal.compact_bytes(), 20);
+        assert_eq!(GpuTypedLayout::Jalr.compact_bytes(), 28);
+        assert_eq!(GpuTypedLayout::Load.compact_bytes(), 36);
+        assert_eq!(GpuTypedLayout::Store.compact_bytes(), 36);
+        assert_eq!(GpuTypedLayout::U.compact_bytes(), 24);
 
         for kind in InsnKind::iter() {
             match kind {
@@ -853,19 +875,13 @@ mod tests {
                     check_access(memory.previous_cycle, memory.value.before);
                 }
                 GpuTypedLayout::U => {
-                    assert_eq!(
-                        take(GPU_COMPACT_CYCLE_BITS),
-                        u32::try_from(rs1.previous_cycle).unwrap()
-                    );
-                    assert_eq!(
-                        take(GPU_COMPACT_CYCLE_BITS),
-                        u32::try_from(rd.previous_cycle).unwrap()
-                    );
+                    assert_eq!(take(GPU_COMPACT_CYCLE_BITS), rs1.previous_cycle as u32);
+                    assert_eq!(take(GPU_COMPACT_CYCLE_BITS), rd.previous_cycle as u32);
                     assert_eq!(take(32), rd.value.before);
                 }
             }
-            assert_eq!(take(4), u32::from(step.future_access_mask()));
-            assert_eq!(bit, compact_mask_bit(layout) + 4);
+            assert_eq!(take(28), packed_access_flags(layout, &step));
+            assert_eq!(bit, compact_mask_bit(layout) + 28);
             assert!(source[bit.div_ceil(8)..].iter().all(|byte| *byte == 0));
         }
     }
@@ -900,6 +916,49 @@ mod tests {
             read_compact_bits(source, 191, 32).unwrap(),
             previous_cycle as u32
         );
+    }
+
+    #[test]
+    fn replay_preserves_40_bit_previous_cycles_in_every_layout() {
+        for (layout, kind) in [
+            (GpuTypedLayout::R, InsnKind::ADD),
+            (GpuTypedLayout::I, InsnKind::ADDI),
+            (GpuTypedLayout::Branch, InsnKind::BEQ),
+            (GpuTypedLayout::Jal, InsnKind::JAL),
+            (GpuTypedLayout::Jalr, InsnKind::JALR),
+            (GpuTypedLayout::Load, InsnKind::LW),
+            (GpuTypedLayout::Store, InsnKind::SW),
+            #[cfg(feature = "u16limb_circuit")]
+            (GpuTypedLayout::U, InsnKind::LUI),
+        ] {
+            for previous_cycle in [0, u64::from(u32::MAX), 1 << 32, (0xff << 32) | 7] {
+                let step = record_with_previous_cycle(layout, previous_cycle);
+                let rs1 = step.rs1().unwrap_or_default().previous_cycle;
+                let rs2 = step.rs2().unwrap_or_default().previous_cycle;
+                let rd = step.rd().unwrap_or_default().previous_cycle;
+                let memory = step.memory_op().unwrap_or_default().previous_cycle;
+                let cycles: &[u64] = match layout {
+                    GpuTypedLayout::R => &[rs1, rs2, rd],
+                    GpuTypedLayout::I | GpuTypedLayout::Jalr | GpuTypedLayout::U => &[rs1, rd],
+                    GpuTypedLayout::Branch => &[rs1, rs2],
+                    GpuTypedLayout::Jal => &[rd],
+                    GpuTypedLayout::Load => &[rs1, rd, memory],
+                    GpuTypedLayout::Store => &[rs1, rs2, memory],
+                };
+                let mut arena = GpuTypedSoaArena::new_with_mode(kind, 1, 0, true).unwrap();
+                arena.push_step(0, &step).unwrap();
+                let flags =
+                    read_compact_bits(arena.payload_bytes(), compact_mask_bit(layout), 28).unwrap();
+                assert_eq!((flags >> 8) & 0xf, u32::from(step.future_access_mask()));
+                for (&cycle, shift) in cycles.iter().zip([0, 12, 20]) {
+                    let reconstructed =
+                        u64::from(cycle as u32) | (u64::from((flags >> shift) & 0xff) << 32);
+                    assert_eq!(reconstructed, cycle);
+                }
+                let words = typed_words(layout, 0, &step);
+                assert_eq!(*words.last().unwrap(), flags);
+            }
+        }
     }
 
     #[test]

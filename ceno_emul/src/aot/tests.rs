@@ -2488,7 +2488,7 @@ fn gpu_replay_fast_flight_preserves_state_and_next_compact_shard() {
 
 #[test]
 #[cfg(not(debug_assertions))]
-fn gpu_replay_direct_preserves_cycles_past_27_bits() {
+fn gpu_replay_direct_preserves_cycles_past_32_bits() {
     let program = Arc::new(program(vec![encode_rv32(InsnKind::OR, 1, 2, 3, 0)]));
     let mut family_counts = [0usize; InsnKind::COUNT];
     family_counts[InsnKind::OR as usize] = 1;
@@ -2513,14 +2513,18 @@ fn gpu_replay_direct_preserves_cycles_past_27_bits() {
         crate::GpuReplayTracerConfig { chunk_capacity: 1 },
     );
     vm.tracer_mut().install_range_descriptors(descriptors);
-    let cycle_base = 1u64 << 27;
+    let cycle_base = 3u64 << 32;
     let state = vm.tracer_mut().prepare_native_range();
     unsafe {
         *state.ordinal = 10;
         *state.pending_cycle = cycle_base + 40;
-        for (reg, relative) in [(1u32, 7u64), (2, 8), (3, 9)] {
+        for (reg, previous_cycle) in [
+            (1u32, (1u64 << 32) + 7),
+            (2, (2u64 << 32) + 8),
+            (3, cycle_base + 9),
+        ] {
             let index = ((reg << 6) - state.latest_base.0) as usize;
-            *state.latest_cells.add(index) = cycle_base + relative;
+            *state.latest_cells.add(index) = previous_cycle;
         }
     }
     assert_eq!(aot.run_to_halt(&mut vm, 1).unwrap().executed_steps, 1);
@@ -2537,9 +2541,19 @@ fn gpu_replay_direct_preserves_cycles_past_27_bits() {
         }
         (window >> (bit % 8)) as u32
     };
-    assert_eq!(compact_bits(63), (cycle_base + 7) as u32);
-    assert_eq!(compact_bits(127), (cycle_base + 8) as u32);
-    assert_eq!(compact_bits(191), (cycle_base + 9) as u32);
+    let flags = compact_bits(255) & 0x0fff_ffff;
+    for ((bit, expected), shift) in [
+        (63, (1u64 << 32) + 7),
+        (127, (2u64 << 32) + 8),
+        (191, cycle_base + 9),
+    ]
+    .into_iter()
+    .zip([0, 12, 20])
+    {
+        let previous_cycle =
+            u64::from(compact_bits(bit)) | (u64::from((flags >> shift) & 0xff) << 32);
+        assert_eq!(previous_cycle, expected);
+    }
 }
 
 #[test]
