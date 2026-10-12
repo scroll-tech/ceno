@@ -11,6 +11,7 @@ use sp1_curves::weierstrass::{
     secp256r1::Secp256r1,
 };
 mod alloc;
+mod stack;
 
 criterion_group!(
     benches,
@@ -20,18 +21,12 @@ criterion_group!(
     weierstrass_add_fn_secp256r1
 );
 
-fn real_main() {
-    benches();
-    Criterion::default().configure_from_args().final_summary();
-}
-
 fn main() {
-    std::thread::Builder::new()
-        .stack_size(32 * 1024 * 1024) // 32MB
-        .spawn(real_main)
-        .unwrap()
-        .join()
-        .unwrap();
+    // `criterion_main!` cannot raise the OS stack; honor RUST_MIN_STACK instead.
+    stack::run_with_stack(stack::DEFAULT_BENCH_STACK, || {
+        benches();
+        Criterion::default().configure_from_args().final_summary();
+    });
 }
 
 const NUM_SAMPLES: usize = 10;
